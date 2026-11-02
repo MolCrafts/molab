@@ -91,6 +91,26 @@ class TestScratchClean:
 
         assert newest_mtime(LocalFS(), str(tmp_path / "a")) > time.time() - 60
 
+    def test_newest_mtime_stops_at_the_first_newer_entry(self, tmp_path: Path) -> None:
+        from molab.workspace.fs_local import LocalFS
+
+        class Counting(LocalFS):
+            calls = 0
+
+            def ls(self, path: str, **kw: bool) -> list:  # type: ignore[override]
+                Counting.calls += 1
+                return LocalFS.ls(path, **kw)
+
+        for name in ("x", "y", "z"):
+            (tmp_path / "a" / name / "deep").mkdir(parents=True)
+        cutoff = time.time() - 60
+        assert newest_mtime(Counting(), str(tmp_path / "a"), stop_at=cutoff) >= cutoff
+        assert Counting.calls == 0  # the entry itself is already newer
+
+        _age(tmp_path / "a", 30)
+        assert newest_mtime(Counting(), str(tmp_path / "a"), stop_at=cutoff) < cutoff
+        assert Counting.calls == 7  # a stale entry is still walked in full
+
     def test_plan_selects_old_top_level_entries_and_writes_nothing(self, tmp_path: Path) -> None:
         ws, exp = _experiment(tmp_path)
         scratch = Path(exp.resolve()) / SCRATCH_CONTAINER

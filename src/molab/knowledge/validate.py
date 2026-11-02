@@ -23,6 +23,7 @@ that composes both reports needs no knowledge types.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from molab.fs import FileSystem, LocalFS, PathArg
@@ -121,8 +122,21 @@ def _check_section(
     )
 
 
+def _host_in_scope(rel: str, scope: frozenset[str] | None) -> bool:
+    """The workspace host, a scoped project's own level, or a scoped experiment and its runs."""
+    if scope is None or rel in ("", "."):
+        return True
+    return any(
+        rel == item or ("/experiments/" in item and rel.startswith(item + "/")) for item in scope
+    )
+
+
 def validate_knowledge(
-    root: PathArg | Workspace, *, fs: FileSystem | None = None
+    root: PathArg | Workspace,
+    *,
+    fs: FileSystem | None = None,
+    errors_only: bool = False,
+    scope: Iterable[str] | None = None,
 ) -> list[dict[str, str]]:
     """Check every host's ``knowledges/`` under the workspace at *root*.
 
@@ -130,6 +144,12 @@ def validate_knowledge(
         root: The workspace root directory, or a loaded ``Workspace``.
         fs: Filesystem to read through; the workspace's own (or the local one)
             when omitted.
+        errors_only: Skip ``knowledge.section_drift``, which is always a
+            warning and loads every host's record to compare its ``index:``
+            section.
+        scope: Workspace-relative project / experiment directories, as for
+            :func:`molab.workspace.validate.validate_workspace`; ``None``
+            checks every host.
 
     Returns:
         Issue dicts (``path`` relative to the root, ``rule``, ``detail``,
@@ -150,9 +170,14 @@ def validate_knowledge(
         except FileNotFoundError:
             return []
     base = str(workspace.resolve())
+    wanted = None if scope is None else frozenset(scope)
     issues: list[dict[str, str]] = []
     for host_path in Workspace.list_hosts(base, fs=disk):
         host = str(host_path)
+        prefix = base.rstrip("/") + "/"
+        rel = host[len(prefix) :] if host.startswith(prefix) else ""
+        if not _host_in_scope(rel, wanted):
+            continue
         container = disk.join(host, KNOWLEDGE_CONTAINER)
         try:
             entries = disk.ls(container, A=True, l=True)
@@ -170,6 +195,8 @@ def validate_knowledge(
             problem = class_problem(read_text_or_none(path, fs=disk) or "")
             if problem is not None:
                 issues.append(_issue(base, path, "knowledge.class", problem, "error"))
+        if errors_only:
+            continue
         drift = _check_section(workspace, host, disk, base)
         if drift is not None:
             issues.append(drift)

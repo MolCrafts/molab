@@ -20,6 +20,15 @@ other) and answers three questions:
   persistent baseline. So an agent is held to what it changed, never to a
   workspace's history.
 
+A hook runs on every session start and every stop, so these two must stay
+cheap on a large workspace. Both compare errors only, so neither runs the
+rules that can only warn (``index.drift``, ``scratch.stale``,
+``knowledge.section_drift``): those read every child record, every file under
+every ``scratch/`` and every host record. ``--since`` then checks only the
+experiments and projects whose level changed after the snapshot
+(:func:`changed_scope`, a walk of the record levels by mtime that never
+descends into ``scratch/`` or an attempt's task directories).
+
 Every answer is a :class:`Verdict`, whose JSON is the harness contract::
 
     {
@@ -56,7 +65,7 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from molab.workspace import Workspace
-    from molab.workspace.fs import FileSystem
+    from molab.workspace.fs import DirEntry, FileSystem
     from molab.workspace.validate import ValidationReport, Violation
 
 __all__ = [
@@ -66,6 +75,7 @@ __all__ = [
     "CheckIssue",
     "Verdict",
     "baseline_path",
+    "changed_scope",
     "check_path",
     "check_tree",
     "check_workspace",
@@ -132,12 +142,22 @@ def host_extra() -> Mapping[str, frozenset[str]]:
     return {level: frozenset({KNOWLEDGE_CONTAINER}) for level in HOST_LEVELS}
 
 
-def check_workspace(ws: Workspace, *, now: datetime | None = None) -> ValidationReport:
+def check_workspace(
+    ws: Workspace,
+    *,
+    now: datetime | None = None,
+    errors_only: bool = False,
+    scope: Iterable[str] | None = None,
+) -> ValidationReport:
     """The workspace report with the knowledge issues folded in. Writes nothing.
 
     Args:
         ws: The workspace.
         now: The reference time for age rules; the current time when omitted.
+        errors_only: Skip the rules that can only warn; see
+            :func:`~molab.workspace.validate.validate_workspace`.
+        scope: Workspace-relative project / experiment directories to check;
+            ``None`` checks the whole tree.
 
     Returns:
         A :class:`~molab.workspace.validate.ValidationReport` whose
@@ -146,8 +166,12 @@ def check_workspace(ws: Workspace, *, now: datetime | None = None) -> Validation
     from molab.knowledge.validate import validate_knowledge
     from molab.workspace.validate import ValidationReport, Violation, validate_workspace
 
-    report = validate_workspace(ws.resolve(), fs=ws.fs, extra=host_extra(), now=now)
-    folded = tuple(Violation.model_validate(item) for item in validate_knowledge(ws, fs=ws.fs))
+    wanted = None if scope is None else frozenset(scope)
+    report = validate_workspace(
+        ws.resolve(), fs=ws.fs, extra=host_extra(), now=now, errors_only=errors_only, scope=wanted
+    )
+    knowledge = validate_knowledge(ws, fs=ws.fs, errors_only=errors_only, scope=wanted)
+    folded = tuple(Violation.model_validate(item) for item in knowledge)
     return ValidationReport(root=report.root, violations=(*report.violations, *folded))
 
 
@@ -199,11 +223,28 @@ def _write_keys(path: Path, name: str, report: ValidationReport) -> None:
 
 def read_error_keys(path: Path) -> set[tuple[str, str]] | None:
     """The error keys a snapshot or baseline file holds; ``None`` when unreadable."""
+    read = _read_keys(path)
+    return None if read is None else read[0]
+
+
+def _read_keys(path: Path) -> tuple[set[tuple[str, str]], float] | None:
+    """The error keys of a snapshot or baseline file and when it was taken (epoch seconds).
+
+    ``taken_at`` falls back to the file's mtime when it is missing or unreadable.
+    """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return {(str(row["rule"]), str(row["path"])) for row in data["errors"]}
+        keys = {(str(row["rule"]), str(row["path"])) for row in data["errors"]}
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    try:
+        taken = datetime.fromisoformat(str(data["taken_at"])).timestamp()
+    except (KeyError, ValueError, TypeError):
+        try:
+            taken = path.stat().st_mtime
+        except OSError:
+            taken = 0.0
+    return keys, taken
 
 
 def _drop_old_snapshots(directory: Path, keep: Path) -> None:
@@ -228,7 +269,7 @@ def snapshot(ws: Workspace, name: str, *, report: ValidationReport | None = None
 
 def _take_snapshot(ws: Workspace, name: str, *, report: ValidationReport | None = None) -> Path:
     path = _snapshot_path(ws, name)
-    _write_keys(path, snapshot_name(name), report or check_workspace(ws))
+    _write_keys(path, snapshot_name(name), report or check_workspace(ws, errors_only=True))
     _drop_old_snapshots(path.parent, path)
     return path
 
@@ -236,7 +277,7 @@ def _take_snapshot(ws: Workspace, name: str, *, report: ValidationReport | None 
 def write_baseline(ws: Workspace, *, report: ValidationReport | None = None) -> Path:
     """Record the errors of *ws* right now as its persistent baseline; return its file."""
     path = baseline_path(ws)
-    _write_keys(path, BASELINE_FILENAME, report or check_workspace(ws))
+    _write_keys(path, BASELINE_FILENAME, report or check_workspace(ws, errors_only=True))
     return path
 
 
@@ -259,17 +300,19 @@ def since(ws: Workspace, name: str | None) -> Verdict:
 
 def _since(ws: Workspace, name: str | None) -> Verdict:
     root = _root_id(ws.resolve())
-    keys: set[tuple[str, str]] | None = None
+    read: tuple[set[tuple[str, str]], float] | None = None
     source = ""
     if name is not None:
-        keys = read_error_keys(_snapshot_path(ws, name))
+        read = _read_keys(_snapshot_path(ws, name))
         source = f"snapshot {snapshot_name(name)!r}"
-    if keys is None:
-        keys = read_error_keys(baseline_path(ws))
+    if read is None:
+        read = _read_keys(baseline_path(ws))
         source = "the workspace baseline"
-    if keys is None:
+    if read is None:
         return Verdict(in_workspace=True, allowed=True, reason=_NO_SNAPSHOT, root=root)
-    fresh = new_errors(check_workspace(ws), keys)
+    keys, taken = read
+    scope = changed_scope(ws, taken - MTIME_SLACK)
+    fresh = new_errors(check_workspace(ws, errors_only=True, scope=scope), keys)
     if not fresh:
         return Verdict(
             in_workspace=True,
@@ -286,6 +329,104 @@ def _since(ws: Workspace, name: str | None) -> Verdict:
         root=root,
         issues=_issues(fresh),
     )
+
+
+# ── what changed ─────────────────────────────────────────────────────────────
+
+#: Seconds subtracted from a snapshot's time before comparing mtimes, for a
+#: network filesystem whose clock runs a little behind the client's.
+MTIME_SLACK: Final = 5.0
+
+
+def changed_scope(ws: Workspace, since: float) -> frozenset[str]:
+    """Project and experiment directories whose level changed at or after *since*.
+
+    A level changed when its directory gained or lost an entry (the
+    directory's own mtime) or one of its files was written (``index.md``, a
+    stray, an attempt's ``execution.json``, a knowledge document). An
+    experiment is reported for a change anywhere in it or its runs and
+    attempts; a project for a change at its own level. The workspace level is
+    not reported: :func:`check_workspace` always checks it.
+
+    The walk lists only record levels and their containers; it never descends
+    into ``scratch/`` or an attempt's ``out/``, ``work/``, ``jobs/``, whose
+    contents no error rule reads.
+
+    Returns:
+        Workspace-relative POSIX paths, as ``check_workspace(scope=...)`` takes.
+    """
+    from molab.knowledge.naming import KNOWLEDGE_CONTAINER
+    from molab.workspace.naming import (
+        EXECUTION_CONTAINER,
+        EXPERIMENT_CONTAINER,
+        PROJECT_CONTAINER,
+        RUN_CONTAINER,
+    )
+
+    fs = ws.fs
+    found: set[str] = set()
+
+    def entries(path: str) -> list[DirEntry]:
+        try:
+            return fs.ls(path, A=True, l=True)
+        except OSError:
+            return []
+
+    def child(rows: list[DirEntry], name: str) -> DirEntry | None:
+        return next((row for row in rows if row.name == name and row.is_dir), None)
+
+    def files_fresh(rows: list[DirEntry]) -> bool:
+        return any(row.is_file and row.mtime >= since for row in rows)
+
+    def level_fresh(path: str, own: DirEntry) -> tuple[bool, list[DirEntry]]:
+        """A host level: its own mtime, its files, its knowledge documents."""
+        rows = entries(path)
+        fresh = own.mtime >= since or files_fresh(rows)
+        docs = child(rows, KNOWLEDGE_CONTAINER)
+        if not fresh and docs is not None:
+            fresh = docs.mtime >= since or files_fresh(entries(fs.join(path, docs.name)))
+        return fresh, rows
+
+    def container(path: str, rows: list[DirEntry], name: str) -> list[tuple[str, DirEntry]]:
+        """The child directories of container *name*; a changed container counts as fresh."""
+        box = child(rows, name)
+        if box is None:
+            return []
+        inner = fs.join(path, name)
+        kids = [(fs.join(inner, row.name), row) for row in entries(inner) if row.is_dir]
+        if box.mtime >= since:
+            kids.append(("", box))  # the container itself gained or lost an entry
+        return kids
+
+    def experiment_fresh(path: str, own: DirEntry) -> bool:
+        fresh, rows = level_fresh(path, own)
+        if fresh:
+            return True
+        for run, run_row in container(path, rows, RUN_CONTAINER):
+            if not run:
+                return True
+            fresh, run_rows = level_fresh(run, run_row)
+            if fresh:
+                return True
+            for attempt, attempt_row in container(run, run_rows, EXECUTION_CONTAINER):
+                if not attempt or attempt_row.mtime >= since or files_fresh(entries(attempt)):
+                    return True
+        return False
+
+    root = str(ws.resolve())
+    prefix = root.rstrip("/") + "/"
+    for project, project_row in container(root, entries(root), PROJECT_CONTAINER):
+        if not project:
+            continue  # a new or removed project shows at the workspace level
+        fresh, rows = level_fresh(project, project_row)
+        if fresh:
+            found.add(project[len(prefix) :])
+        for experiment, experiment_row in container(project, rows, EXPERIMENT_CONTAINER):
+            if not experiment:
+                found.add(project[len(prefix) :])
+            elif experiment_fresh(experiment, experiment_row):
+                found.add(experiment[len(prefix) :])
+    return frozenset(found)
 
 
 # ── the tree ─────────────────────────────────────────────────────────────────
@@ -340,7 +481,7 @@ def check_tree(
         return Verdict(in_workspace=False, allowed=True, reason="not inside a molab workspace")
     root = _root_id(ws.resolve())
     if snapshot is not None:
-        report = check_workspace(ws)
+        report = check_workspace(ws, errors_only=True)
         written = _take_snapshot(ws, snapshot, report=report)
         rel = os.path.relpath(written, str(ws.resolve()))
         return Verdict(

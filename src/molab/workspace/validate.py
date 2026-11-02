@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final, Literal
@@ -387,11 +387,16 @@ class _Checker:
         fs: FileSystem,
         extra: Mapping[str, frozenset[str]],
         now: datetime,
+        *,
+        errors_only: bool = False,
+        scope: frozenset[str] | None = None,
     ) -> None:
         self._root = root
         self._fs = fs
         self._extra = extra
         self._now = now
+        self._errors_only = errors_only
+        self._scope = scope
         self._found: list[Violation] = []
 
     # -- helpers ---------------------------------------------------------
@@ -399,6 +404,19 @@ class _Checker:
     def _rel(self, path: str) -> str:
         prefix = self._root.rstrip("/") + "/"
         return path[len(prefix) :] if path.startswith(prefix) else path
+
+    def _visits(self, path: str, *, project: bool) -> bool:
+        """Whether *path* (a project or experiment directory) is in scope.
+
+        A project is visited when the scope names it or anything under it; an
+        experiment only when the scope names it. No scope visits everything.
+        """
+        if self._scope is None:
+            return True
+        rel = self._rel(path)
+        if not project:
+            return rel in self._scope
+        return any(item == rel or item.startswith(rel + "/") for item in self._scope)
 
     def _add(self, path: str, rule: str, detail: str, severity: Severity = "error") -> None:
         self._found.append(
@@ -483,6 +501,8 @@ class _Checker:
                 "index.frontmatter",
                 f"canonical zone fails {model.__name__}: {exc.error_count()} error(s)",
             )
+        if self._errors_only:  # index.drift is always a warning
+            return
         expected = project_index_at(self._fs, path, record.type, canonical=record.canonical)
         found = {k: v for k, v in record.index.items() if k in RESERVED_INDEX_KEYS}
         if found != expected:
@@ -538,8 +558,12 @@ class _Checker:
     def _check_scratch(self, experiment: str) -> None:
         from .scratch import scratch_entries
 
+        if self._errors_only:  # scratch.stale is always a warning
+            return
         cutoff = self._now - SCRATCH_STALE_AFTER
-        for name, path, mtime in scratch_entries(self._fs, experiment):
+        # An entry is only stale if nothing under it is newer than the cutoff,
+        # so each walk stops at the first newer mtime.
+        for name, path, mtime in scratch_entries(self._fs, experiment, stop_at=cutoff.timestamp()):
             modified = datetime.fromtimestamp(mtime, UTC)
             if modified < cutoff:
                 age = (self._now - modified).days
@@ -581,6 +605,8 @@ class _Checker:
             if not entry.is_dir:
                 continue
             edir = self._fs.join(experiments_dir, entry.name)
+            if not self._visits(edir, project=False):
+                continue
             if not _SLUG_RE.match(entry.name):
                 self._add(edir, "experiment.slug", f"{entry.name!r} is not a kebab-case slug")
             self._check_experiment(edir)
@@ -615,6 +641,8 @@ class _Checker:
             if not entry.is_dir:
                 continue
             pdir = self._fs.join(projects_dir, entry.name)
+            if not self._visits(pdir, project=True):
+                continue
             if not _SLUG_RE.match(entry.name):
                 self._add(pdir, "project.slug", f"{entry.name!r} is not a kebab-case slug")
             self._check_project(pdir)
@@ -628,6 +656,8 @@ def validate_workspace(
     fs: FileSystem | None = None,
     extra: Mapping[str, frozenset[str]] | None = None,
     now: datetime | None = None,
+    errors_only: bool = False,
+    scope: Iterable[str] | None = None,
 ) -> ValidationReport:
     """Check *root* against the workspace layout + OKF laws. Writes nothing.
 
@@ -640,6 +670,15 @@ def validate_workspace(
             containers it owns; without it they are ``layout.stray``.
         now: The reference time for ``scratch.stale``; the current time when
             omitted.
+        errors_only: Skip the rules that can only warn (``index.drift``,
+            ``scratch.stale``). They are the expensive ones: the projection
+            reads every child record and the scratch age walks every file
+            under ``scratch/``.
+        scope: Workspace-relative project (``projects/p``) and experiment
+            (``projects/p/experiments/e``) directories to check. A project
+            entry checks that project's own level, an experiment entry the
+            experiment and its runs; the workspace level is always checked.
+            ``None`` checks the whole tree.
 
     Returns:
         A :class:`ValidationReport`. ``report.ok`` is True when no ``error``
@@ -649,10 +688,19 @@ def validate_workspace(
 
     if isinstance(root, Workspace):
         disk = fs or getattr(root, "fs", None)
-        return validate_workspace(root.resolve(), fs=disk, extra=extra, now=now)
+        return validate_workspace(
+            root.resolve(), fs=disk, extra=extra, now=now, errors_only=errors_only, scope=scope
+        )
     filesystem = fs or LocalFS()
     resolved = filesystem.resolve(root)
-    checker = _Checker(resolved, filesystem, extra or _NO_EXTRA, now or datetime.now(UTC))
+    checker = _Checker(
+        resolved,
+        filesystem,
+        extra or _NO_EXTRA,
+        now or datetime.now(UTC),
+        errors_only=errors_only,
+        scope=None if scope is None else frozenset(scope),
+    )
     violations = checker.run()
     return ValidationReport(root=resolved, violations=tuple(violations))
 

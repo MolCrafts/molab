@@ -21,6 +21,7 @@ from molab.services.workspace_check import (
     SNAPSHOT_TTL,
     Verdict,
     baseline_path,
+    changed_scope,
     check_path,
     check_tree,
     check_workspace,
@@ -320,3 +321,70 @@ class TestCheckWorkspace:
             "violations",
             "next_actions",
         } <= set(payload)
+
+
+class TestHookCost:
+    """The session hooks compare errors only and check only what changed."""
+
+    def _age(self, path: Path, seconds: float) -> None:
+        stamp = time.time() - seconds
+        for item in [path, *path.rglob("*")]:
+            os.utime(item, (stamp, stamp), follow_symlinks=False)
+
+    def test_changed_scope_names_only_the_touched_experiment(self, lab: dict[str, Any]) -> None:
+        ws = lab["ws"]
+        ws.project("alpha").add_experiment("quiet")
+        self._age(lab["root"] / "projects", 3600)
+        since = time.time() - 60
+        assert changed_scope(ws, since) == frozenset()
+
+        (lab["attempt"] / "execution.json").touch()
+        assert changed_scope(ws, since) == {"projects/alpha/experiments/sweep"}
+
+    def test_a_new_stray_in_a_project_level_is_scoped_to_the_project(
+        self, lab: dict[str, Any]
+    ) -> None:
+        self._age(lab["root"] / "projects", 3600)
+        (lab["root"] / "projects/alpha/notes.txt").write_text("x")
+        assert changed_scope(lab["ws"], time.time() - 60) == {"projects/alpha"}
+
+    def test_scratch_and_task_output_are_not_changes(self, lab: dict[str, Any]) -> None:
+        (lab["exp"] / "scratch").mkdir()
+        (lab["attempt"] / "out").mkdir(exist_ok=True)
+        self._age(lab["root"] / "projects", 3600)
+        (lab["exp"] / "scratch" / "deep").mkdir()
+        (lab["exp"] / "scratch" / "deep" / "traj.dcd").write_text("x")
+        (lab["attempt"] / "out" / "log.lammps").write_text("x")
+        assert changed_scope(lab["ws"], time.time() - 60) == frozenset()
+
+    def test_since_skips_warnings_and_unchanged_experiments(self, lab: dict[str, Any]) -> None:
+        ws = lab["ws"]
+        ws.project("alpha").add_experiment("quiet")
+        quiet = lab["root"] / "projects/alpha/experiments/quiet"
+        (quiet / "old.txt").write_text("debt")
+        check_tree(lab["root"], snapshot="s")
+        self._age(lab["root"] / "projects", 3600)
+        os.utime(lab["root"] / ".molab/check/s.json")
+
+        assert check_tree(lab["root"], since="s").reason.startswith("no new layout errors")
+        (lab["exp"] / "new.txt").write_text("fresh")
+        verdict = check_tree(lab["root"], since="s")
+        assert [(i.rule, i.path) for i in verdict.issues] == [
+            ("layout.stray", "projects/alpha/experiments/sweep/new.txt")
+        ]
+
+    def test_errors_only_drops_the_warning_rules(self, lab: dict[str, Any]) -> None:
+        scratch = lab["exp"] / "scratch" / "probe"
+        scratch.mkdir(parents=True)
+        self._age(lab["exp"] / "scratch", 30 * 86400)
+        assert any(v.rule == "scratch.stale" for v in check_workspace(lab["ws"]).warnings)
+        assert check_workspace(lab["ws"], errors_only=True).warnings == ()
+
+    def test_scope_limits_the_report(self, lab: dict[str, Any]) -> None:
+        ws = lab["ws"]
+        ws.project("alpha").add_experiment("quiet")
+        (lab["root"] / "projects/alpha/experiments/quiet/old.txt").write_text("debt")
+        (lab["exp"] / "new.txt").write_text("fresh")
+        scoped = check_workspace(ws, scope={"projects/alpha/experiments/sweep"})
+        assert {v.path for v in scoped.errors} == {"projects/alpha/experiments/sweep/new.txt"}
+        assert len(check_workspace(ws).errors) == 2

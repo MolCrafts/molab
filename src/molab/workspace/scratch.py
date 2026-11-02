@@ -74,12 +74,14 @@ class ScratchCleanPlan(BaseModel):
     entries: tuple[ScratchEntry, ...] = ()
 
 
-def newest_mtime(fs: FileSystem, path: PathArg) -> float:
+def newest_mtime(fs: FileSystem, path: PathArg, *, stop_at: float | None = None) -> float:
     """The newest mtime of *path* and, for a directory, everything under it.
 
     One ``ls(A=True, l=True)`` per directory. Symlinks are not followed
     into, so a link loop cannot hang the walk. A path that vanishes mid-walk
-    contributes nothing.
+    contributes nothing. With *stop_at*, the walk returns as soon as it sees
+    an mtime at or after it: the answer is then only known to be
+    ``>= stop_at``, which is all an age test needs.
     """
     try:
         newest = fs.stat(path).mtime
@@ -87,6 +89,8 @@ def newest_mtime(fs: FileSystem, path: PathArg) -> float:
         return 0.0
     pending = [str(path)] if fs.is_dir(path) else []
     while pending:
+        if stop_at is not None and newest >= stop_at:
+            return newest
         current = pending.pop()
         try:
             entries = fs.ls(current, A=True, l=True)
@@ -99,10 +103,14 @@ def newest_mtime(fs: FileSystem, path: PathArg) -> float:
     return newest
 
 
-def scratch_entries(fs: FileSystem, experiment_dir: PathArg) -> list[tuple[str, str, float]]:
+def scratch_entries(
+    fs: FileSystem, experiment_dir: PathArg, *, stop_at: float | None = None
+) -> list[tuple[str, str, float]]:
     """``(name, path, newest mtime)`` of each top-level scratch entry, by name.
 
-    An experiment with no ``scratch/`` has no entries.
+    An experiment with no ``scratch/`` has no entries. *stop_at* is passed to
+    :func:`newest_mtime`: an entry with anything newer reports some mtime
+    ``>= stop_at``, not necessarily its newest.
     """
     scratch = fs.join(experiment_dir, SCRATCH_CONTAINER)
     try:
@@ -112,7 +120,7 @@ def scratch_entries(fs: FileSystem, experiment_dir: PathArg) -> list[tuple[str, 
     found: list[tuple[str, str, float]] = []
     for entry in sorted(entries, key=lambda item: item.name):
         path = fs.join(scratch, entry.name)
-        found.append((entry.name, path, newest_mtime(fs, path)))
+        found.append((entry.name, path, newest_mtime(fs, path, stop_at=stop_at)))
     return found
 
 
