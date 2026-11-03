@@ -10,6 +10,10 @@ beforeEach(() => {
   resetContributionRuntimeForTests();
 });
 
+function SampleFileType(): null {
+  return null;
+}
+
 describe("createPluginAPI", () => {
   it("disposes contributions in LIFO order", () => {
     const order: string[] = [];
@@ -38,7 +42,7 @@ describe("createPluginAPI", () => {
       value: "sample",
       label: "Sample",
       matcher: { patterns: ["*.sample"] },
-      Component: () => null,
+      Component: SampleFileType,
     });
 
     expect(listCommands()[0]?.id).toBe("plugin.sample.reload");

@@ -8,9 +8,27 @@
  * first render, with the workbench's standard loading surface in between.
  */
 
-import { type ComponentType, type JSX, lazy, Suspense } from "react";
+import { type ComponentType, createElement, type JSX, lazy, Suspense } from "react";
 import type { RendererProps } from "@/app/types";
 import { WorkbenchOperationState } from "@/components/workbench";
+
+function LazyFrame({
+  Lazy,
+  title,
+  ...props
+}: RendererProps & { Lazy: ComponentType<RendererProps>; title: string }): JSX.Element {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-full items-center justify-center p-6">
+          <WorkbenchOperationState kind="loading" title={title} />
+        </div>
+      }
+    >
+      <Lazy {...props} />
+    </Suspense>
+  );
+}
 
 /**
  * Wrap a dynamic import as a registry-ready renderer.
@@ -24,18 +42,8 @@ export const lazyRenderer = (
   title = "Loading…",
 ): ComponentType<RendererProps> => {
   const Lazy = lazy(async () => ({ default: await load() }));
-
-  const LazyRenderer = (props: RendererProps): JSX.Element => (
-    <Suspense
-      fallback={
-        <div className="flex h-full items-center justify-center p-6">
-          <WorkbenchOperationState kind="loading" title={title} />
-        </div>
-      }
-    >
-      <Lazy {...props} />
-    </Suspense>
-  );
-  LazyRenderer.displayName = "LazyRenderer";
-  return LazyRenderer;
+  const render: ComponentType<RendererProps> = (props) =>
+    createElement(LazyFrame, { ...props, Lazy, title });
+  render.displayName = "LazyRenderer";
+  return render;
 };

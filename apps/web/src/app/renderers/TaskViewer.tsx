@@ -34,6 +34,30 @@ const Section = ({
   </div>
 );
 
+const TaskChips = ({
+  ids,
+  runId,
+  onInspect,
+}: {
+  ids: string[];
+  runId: string;
+  onInspect: (id: string, runId: string) => void;
+}): JSX.Element =>
+  ids.length === 0 ? (
+    <span className="text-label text-muted-foreground">none</span>
+  ) : (
+    <div className="min-w-0 divide-y divide-border/60">
+      {ids.map((id) => (
+        <div key={id} className="flex min-w-0 items-center gap-2 py-1">
+          <span className="min-w-0 flex-1 truncate font-mono text-label text-foreground">{id}</span>
+          <WorkbenchIconAction label={`Inspect task ${id}`} onClick={() => onInspect(id, runId)}>
+            <ArrowRight className="size-icon-sm" />
+          </WorkbenchIconAction>
+        </div>
+      ))}
+    </div>
+  );
+
 export const TaskViewer = ({
   selection,
   snapshot,
@@ -59,27 +83,6 @@ export const TaskViewer = ({
   const downstream = links.filter((e) => e.from === taskId).map((e) => e.to);
 
   if (!task) return null;
-
-  const TaskChips = ({ ids }: { ids: string[] }): JSX.Element =>
-    ids.length === 0 ? (
-      <span className="text-label text-muted-foreground">none</span>
-    ) : (
-      <div className="min-w-0 divide-y divide-border/60">
-        {ids.map((id) => (
-          <div key={id} className="flex min-w-0 items-center gap-2 py-1">
-            <span className="min-w-0 flex-1 truncate font-mono text-label text-foreground">
-              {id}
-            </span>
-            <WorkbenchIconAction
-              label={`Inspect task ${id}`}
-              onClick={() => inspectTask(id, runId)}
-            >
-              <ArrowRight className="size-icon-sm" />
-            </WorkbenchIconAction>
-          </div>
-        ))}
-      </div>
-    );
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -145,14 +148,14 @@ export const TaskViewer = ({
         <Section title="Upstream">
           <div className="flex items-center gap-2">
             <ArrowUp className="h-3 w-3 flex-none text-muted-foreground" />
-            <TaskChips ids={upstream} />
+            <TaskChips ids={upstream} runId={runId} onInspect={inspectTask} />
           </div>
         </Section>
 
         <Section title="Downstream">
           <div className="flex items-center gap-2">
             <ArrowDown className="h-3 w-3 flex-none text-muted-foreground" />
-            <TaskChips ids={downstream} />
+            <TaskChips ids={downstream} runId={runId} onInspect={inspectTask} />
           </div>
         </Section>
       </div>

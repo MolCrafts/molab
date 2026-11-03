@@ -28,7 +28,7 @@ permissions:
 # superseded runs. The canonical block: actions/check-workflows.
 concurrency:
   group: test-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
 
 # molab is built against its partners (.github/partners.env) at the commits
 # scripts/partners.py resolves, as in lint.yml.
@@ -42,7 +42,7 @@ jobs:
   context:
     permissions:
       contents: read
-    name: test / context
+    name: test
     uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@f5d3606fab87fc162271c94219dbdc5201dd1aab
 
   python:
@@ -75,3 +75,26 @@ jobs:
       - uses: actions/checkout@v7
       - uses: MolCrafts/molcrafts-ci/actions/setup-node@f5d3606fab87fc162271c94219dbdc5201dd1aab
       - run: npm run test:web
+
+  docs:
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
+    uses: ./.github/workflows/docs.yml
+    secrets: inherit
+
+  lint:
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
+    uses: ./.github/workflows/lint.yml
+    secrets: inherit
+
+  result:
+    name: test / result
+    needs: [context, python, web, docs, lint]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job succeeded or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: echo "$RESULTS" | jq -e 'all(.[]; . == "success" or . == "skipped")'

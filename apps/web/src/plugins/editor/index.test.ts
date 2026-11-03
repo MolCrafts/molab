@@ -33,6 +33,8 @@ import {
 import editorPlugin from "@/plugins/editor";
 import type { FilePreviewContentProps } from "@/plugins/types";
 
+const ALT_EDITOR: React.ComponentType<RendererProps> = () => null;
+
 const OBJECT_TYPE: SemanticObjectType = "workspace-file";
 const CONTENT_TYPE: ContentType = "text";
 const EDITOR_FILE_KINDS: FileKind[] = ["yaml", "json", "python", "markdown", "text", "unknown"];
@@ -73,8 +75,6 @@ describe("editor plugin renderer registration", () => {
 });
 
 describe("editor plugin override / extension point", () => {
-  const ALT_EDITOR: React.ComponentType<RendererProps> = () => null;
-
   beforeEach(() => {
     activateEditor();
   });
