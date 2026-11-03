@@ -66,11 +66,17 @@ jobs:
           repository: MolCrafts/molvis
           ref: dev
           path: ../molvis
-      - name: Build the molvis stage the web typecheck imports
+      # setup-node hashes the lockfile with hashFiles, which cannot see a
+      # sibling checkout. Node is installed here; npm install runs in the shell.
+      - name: Set up Node
         uses: MolCrafts/molcrafts-ci/actions/setup-node@f5d3606fab87fc162271c94219dbdc5201dd1aab
         with:
-          working-directory: ../molvis
-      - working-directory: ../molvis
+          install: "false"
+      - name: Install molvis
+        working-directory: ../molvis
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - name: Build the molvis stage the web typecheck imports
+        working-directory: ../molvis
         run: npm run build:stage
       - uses: MolCrafts/molcrafts-ci/actions/setup-node@f5d3606fab87fc162271c94219dbdc5201dd1aab
       - run: npm run lint
