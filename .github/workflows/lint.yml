@@ -61,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Check out molvis
-        uses: actions/checkout@v7
+        uses: MolCrafts/molcrafts-ci/actions/setup-partners@f5d3606fab87fc162271c94219dbdc5201dd1aab
         with:
           repository: MolCrafts/molvis
           ref: dev
