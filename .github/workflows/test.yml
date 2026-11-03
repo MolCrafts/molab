@@ -64,6 +64,16 @@ jobs:
           toolchain-dir: ../molrs
           cache: molrs-python
           workspaces: ../molrs/molrs-python -> ../target
+      # Editable molq looks for src/molq/_bin/molq. uv's editable install does
+      # not run setup.py's go build, and macOS then reports the binary missing.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+      - name: Build the molq serve binary
+        working-directory: ../molq
+        run: |
+          mkdir -p src/molq/_bin
+          CGO_ENABLED=0 go build -o src/molq/_bin/molq ./cmd/molq
       - run: uv run --extra dev pytest tests/ -q
 
   web:

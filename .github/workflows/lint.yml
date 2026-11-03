@@ -60,6 +60,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Check out molvis
+        uses: actions/checkout@v7
+        with:
+          repository: MolCrafts/molvis
+          ref: dev
+          path: ../molvis
+      - name: Build the molvis stage the web typecheck imports
+        uses: MolCrafts/molcrafts-ci/actions/setup-node@f5d3606fab87fc162271c94219dbdc5201dd1aab
+        with:
+          working-directory: ../molvis
+      - working-directory: ../molvis
+        run: npm run build:stage
       - uses: MolCrafts/molcrafts-ci/actions/setup-node@f5d3606fab87fc162271c94219dbdc5201dd1aab
       - run: npm run lint
       - run: npm run typecheck

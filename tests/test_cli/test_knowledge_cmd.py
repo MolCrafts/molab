@@ -156,7 +156,8 @@ class TestSourcesAdd:
         result = CliRunner().invoke(knowledge_app, ["sources", "add", "lab-wiki", str(root)])
 
         assert result.exit_code == 0, result.output
-        assert "holds no knowledge documents yet" in result.stdout
+        # Click wraps the note when the path is wider than the terminal.
+        assert "holds no knowledge documents yet" in " ".join(result.stdout.split())
 
     def test_a_markdown_file_is_a_document(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setattr("molab.knowledge.sources.USER_DIR", tmp_path / "user")

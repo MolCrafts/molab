@@ -73,4 +73,4 @@ molab serve ./lab --port 8000
 
 - [Start from the UI](../getting-started/start-from-ui.md) — browser workflow for end users
 - [Server Lifecycle](../guide/server-lifecycle.md) — auth, `--tunnel`, several workspaces, `ServerManager`
-- [`apps/web/README.md`](../../../apps/web/README.md) — frontend scripts
+- `apps/web/README.md` — frontend scripts

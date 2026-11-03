@@ -70,4 +70,4 @@ molab serve ./lab --port 8000
 
 - [从 UI 开始](../getting-started/start-from-ui.md) — 终端用户的浏览器工作流
 - [服务生命周期](../guide/server-lifecycle.md) — 登录、`--tunnel`、多工作区、`ServerManager`
-- [`apps/web/README.md`](../../../apps/web/README.md) — 前端脚本
+- `apps/web/README.md` — 前端脚本
