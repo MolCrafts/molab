@@ -26,6 +26,7 @@ nav = [
         { "工作流编写" = [
             { "Task 与 Actor" = "guide/task-and-actor.md" },
             { "TaskContext" = "guide/task-context.md" },
+            { "Tracking a Computation" = "guide/tracking.md" },
             { "工作流运行时" = "guide/workflow-runtime.md" },
             { "控制流" = "guide/control-flow.md" },
             { "子工作流" = "guide/subworkflows.md" },
@@ -42,7 +43,8 @@ nav = [
         ]},
         { "运维" = [
             { "服务生命周期" = "guide/server-lifecycle.md" },
-            { "Molq 插件" = "guide/molq.md" }
+            { "Molq 插件" = "guide/molq.md" },
+            { "Coding Agents" = "guide/agents.md" }
         ]}
     ]},
     { "架构" = [
