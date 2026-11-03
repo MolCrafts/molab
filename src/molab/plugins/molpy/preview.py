@@ -87,10 +87,12 @@ def frames_to_extxyz(frames: Sequence[Frame]) -> bytes:
     """Encode *frames* as one extended-XYZ trajectory via molpy's public writer."""
     from molpy.io import write_xyz
 
-    buf = bytearray()
+    parts: list[bytes] = []
     try:
         for frame in frames:
+            buf = bytearray()
             write_xyz(buf, frame)
-        return bytes(buf)
+            parts.append(bytes(buf))
+        return b"".join(parts)
     except Exception as exc:
         raise PreviewReaderError("<frames>", f"XYZ encoding failed: {exc}") from exc

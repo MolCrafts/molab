@@ -92,9 +92,7 @@ export const readLammpsLogThermo = async (text: string): Promise<ThermoTable[]> 
   }
   const log = wasm.readLammpsLog(text);
   return (log.runs ?? []).flatMap((run) =>
-    run.thermo
-      ? [{ runIndex: run.index, columns: run.thermo.columns, rows: run.thermo.rows }]
-      : [],
+    run.thermo ? [{ runIndex: run.index, columns: run.thermo.columns, rows: run.thermo.rows }] : [],
   );
 };
 
