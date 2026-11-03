@@ -1,17 +1,16 @@
 /**
- * The app's single import face for `@molcrafts/molrs` (the molrs WASM build).
+ * The app's single import face for `@molcrafts/molwasm`.
  *
  * Two reasons it exists rather than each plugin importing the package:
  *
  * 1. **One WASM instance.** The module is stateful and multi-megabyte; two
  *    import paths mean two instances in the bundle.
- * 2. **No plugin depends on another.** molvis reaches molrs for structures,
- *    molplot reaches it for solver logs. Routing either through the other's
- *    package would make a chart product depend on a 3D viewer.
+ * 2. **No plugin depends on another.** molvis reaches the binding for
+ *    structures, molplot reaches it for solver logs. Routing either through
+ *    the other's package would make a chart product depend on a 3D viewer.
  *
- * Everything is feature-detected. The installed binding may predate a given
- * export, and a missing one must degrade to "this format is unavailable"
- * rather than crashing the app at import time — so callers ask
+ * Everything is feature-detected. A missing export degrades to "this format
+ * is unavailable" rather than crashing the app at import time — callers ask
  * {@link molrsCapabilities} before offering a format.
  */
 
@@ -25,27 +24,41 @@ export interface ThermoTable {
   rows: number[][];
 }
 
-interface MolrsModule {
-  readLammpsLogThermo?: (text: string) => ThermoTable[];
+interface LammpsThermo {
+  columns: string[];
+  rows: number[][];
+}
+
+interface LammpsRun {
+  index: number;
+  thermo?: LammpsThermo;
+}
+
+interface LammpsLog {
+  runs?: LammpsRun[];
+}
+
+interface MolwasmModule {
+  readLammpsLog?: (text: string) => LammpsLog;
   isLammpsLog?: (text: string) => boolean;
 }
 
-let loading: Promise<MolrsModule | null> | null = null;
+let loading: Promise<MolwasmModule | null> | null = null;
 
 /**
  * Load the WASM binding once. Resolves to `null` when it is unavailable, so a
  * browser without it still renders everything that does not need it.
  */
-export const loadMolrs = (): Promise<MolrsModule | null> => {
+export const loadMolrs = (): Promise<MolwasmModule | null> => {
   if (!loading) {
-    loading = import("@molcrafts/molrs")
-      .then((module) => module as unknown as MolrsModule)
+    loading = import("@molcrafts/molwasm")
+      .then((module) => module as unknown as MolwasmModule)
       .catch(() => null);
   }
   return loading;
 };
 
-/** Which molrs-backed formats this build can actually read. */
+/** Which WASM-backed formats this build can actually read. */
 export interface MolrsCapabilities {
   lammpsLog: boolean;
 }
@@ -53,36 +66,43 @@ export interface MolrsCapabilities {
 /**
  * What the loaded binding supports.
  *
- * An export added to molrs after the installed package was built simply
- * reports `false` here; the format is then not offered, instead of being
- * offered and failing when a user clicks it.
+ * An export added after the installed package was built reports `false`
+ * here; the format is then not offered.
  */
 export const molrsCapabilities = async (): Promise<MolrsCapabilities> => {
-  const molrs = await loadMolrs();
-  return { lammpsLog: typeof molrs?.readLammpsLogThermo === "function" };
+  const wasm = await loadMolrs();
+  return { lammpsLog: typeof wasm?.readLammpsLog === "function" };
 };
 
 /**
  * Parse a LAMMPS log's thermo tables in the browser.
  *
+ * `readLammpsLog` returns one record per run. Tables are the runs that
+ * printed thermo, keyed by that run's index.
+ *
  * @throws When the installed binding has no LAMMPS log reader — check
  *   {@link molrsCapabilities} before offering the format.
  */
 export const readLammpsLogThermo = async (text: string): Promise<ThermoTable[]> => {
-  const molrs = await loadMolrs();
-  if (typeof molrs?.readLammpsLogThermo !== "function") {
+  const wasm = await loadMolrs();
+  if (typeof wasm?.readLammpsLog !== "function") {
     throw new Error(
-      "This @molcrafts/molrs build has no LAMMPS log reader; upgrade the WASM package.",
+      "This @molcrafts/molwasm build has no LAMMPS log reader; upgrade the WASM package.",
     );
   }
-  return molrs.readLammpsLogThermo(text);
+  const log = wasm.readLammpsLog(text);
+  return (log.runs ?? []).flatMap((run) =>
+    run.thermo
+      ? [{ runIndex: run.index, columns: run.thermo.columns, rows: run.thermo.rows }]
+      : [],
+  );
 };
 
 /** Cheap content check for a LAMMPS log, when the binding offers one. */
 export const isLammpsLog = async (text: string): Promise<boolean> => {
-  const molrs = await loadMolrs();
-  if (typeof molrs?.isLammpsLog === "function") {
-    return molrs.isLammpsLog(text);
+  const wasm = await loadMolrs();
+  if (typeof wasm?.isLammpsLog === "function") {
+    return wasm.isLammpsLog(text);
   }
   // The thermo marker is what makes a log plottable — a run that died during
   // setup prints the banner and nothing to draw.

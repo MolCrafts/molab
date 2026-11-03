@@ -56,13 +56,6 @@ dev = [
     "ruff==0.16.10",
     "ty==0.0.85",
     "tox>=4.23",
-    # Build binding only. molrs is molpy's dependency, not molab's API — no
-    # molab module may `import molrs` (Frame/Block come from molpy). It is
-    # named here solely because `[tool.uv.sources]` path overrides apply to a
-    # project's OWN requirements, not to transitive ones: without this line the
-    # local editable molpy resolves against the published molrs instead of the
-    # matching-minor sibling checkout.
-    "molcrafts-molrs",
 ]
 
 [project.scripts]
@@ -81,8 +74,7 @@ docs = [
 molcrafts-mollog = { path = "../mollog" }
 molcrafts-molcfg = { path = "../molcfg" }
 molcrafts-molq = { path = "../molq", editable = true }
-molcrafts-molpy = { path = "../molpy", editable = true }
-molcrafts-molrs = { path = "../molrs/molrs-python" }
+molcrafts-molpy = { path = "../molpy/molpy", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

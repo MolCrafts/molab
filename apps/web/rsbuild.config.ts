@@ -11,16 +11,16 @@ const __dirname = path.dirname(__filename);
 const useRsdoctor = process.env.RSDOCTOR === 'true';
 
 /**
- * Local x86_64 wasm-pack output (`molrs-wasm/.x86_64`) wins when present so
- * a sibling checkout can ship unreleased parsers. CI / publish have no
- * sibling tree, so they resolve the npm package (latest published).
+ * A sibling molpy WASM build (`molwasm/pkg`) wins when present so an
+ * unreleased parser can be tried locally. CI resolves the published
+ * `@molcrafts/molwasm` package.
  */
-const resolveMolrs = (): string => {
-  const local = path.resolve(__dirname, '../../../molrs/molrs-wasm/.x86_64');
+const resolveMolwasm = (): string => {
+  const local = path.resolve(__dirname, '../../../molpy/molwasm/pkg');
   if (existsSync(path.join(local, 'package.json'))) {
     return local;
   }
-  return path.dirname(createRequire(import.meta.url).resolve('@molcrafts/molrs/package.json'));
+  return path.dirname(createRequire(import.meta.url).resolve('@molcrafts/molwasm/package.json'));
 };
 
 // Docs: https://rsbuild.rs/config/
@@ -31,7 +31,7 @@ export default defineConfig(({ command }) => {
     plugins: [pluginReact()],
     resolve: {
       alias: {
-        '@molcrafts/molrs': resolveMolrs(),
+        '@molcrafts/molwasm': resolveMolwasm(),
         // Sibling checkouts win. This tree has no `molcrafts-ui/packages/*`,
         // so the published packages (and the in-repo markdown stand-in) are
         // what the dev server actually resolves.
@@ -90,7 +90,7 @@ export default defineConfig(({ command }) => {
         },
       },
       rspack: {
-        // ``@molcrafts/molrs`` is a wasm-pack *bundler*-target package: its JS
+        // ``@molcrafts/molwasm`` is a wasm-pack *bundler*-target package: its JS
         // does ``import * as wasm from "./molrs_bg.wasm"``. Without WebAssembly
         // module support rspack leaves that import undefined, so molvis-core's
         // ``Frame.frame_new`` is missing and trajectory rendering crashes.
@@ -119,7 +119,7 @@ export default defineConfig(({ command }) => {
           priority: 30,
         },
         molrs: {
-          test: /[\\/](?:node_modules[\\/]@molcrafts[\\/]molrs|molrs[\\/]molrs-wasm)[\\/]/,
+          test: /[\\/](?:node_modules[\\/]@molcrafts[\\/]molwasm|molpy[\\/]molwasm)[\\/]/,
           name: 'lib-molrs',
           chunks: 'async',
           priority: 30,

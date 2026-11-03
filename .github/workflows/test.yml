@@ -58,12 +58,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: MolCrafts/molcrafts-ci/actions/setup-python@f5d3606fab87fc162271c94219dbdc5201dd1aab
       - uses: MolCrafts/molcrafts-ci/actions/setup-partners@f5d3606fab87fc162271c94219dbdc5201dd1aab
-      # molrs/rust-toolchain.toml pins the compiler that builds the molrs wheel.
+      # molpy/rust-toolchain.toml pins the compiler that builds the molpy wheel.
       - uses: MolCrafts/molcrafts-ci/actions/setup-rust@f5d3606fab87fc162271c94219dbdc5201dd1aab
         with:
-          toolchain-dir: ../molrs
-          cache: molrs-python
-          workspaces: ../molrs/molrs-python -> ../target
+          toolchain-dir: ../molpy
+          cache: molpy
+          workspaces: ../molpy/molpy -> ../target
       # Editable molq looks for src/molq/_bin/molq. uv's editable install does
       # not run setup.py's go build, and macOS then reports the binary missing.
       - uses: actions/setup-go@v5

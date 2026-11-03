@@ -23,12 +23,12 @@ describe("intent prefetch", () => {
     expect(register).not.toMatch(/from "@\/app\/renderers\/RunViewer"/);
   });
 
-  it("uses local molrs-wasm/.x86_64 in dev and npm @molcrafts/molrs on publish", () => {
+  it("uses a sibling molwasm build in dev and npm @molcrafts/molwasm on publish", () => {
     const rsbuild = read("../rsbuild.config.ts");
     const pkg = JSON.parse(read("../package.json"));
-    expect(rsbuild).toContain("molrs-wasm/.x86_64");
-    expect(rsbuild).toContain("resolveMolrs");
-    expect(pkg.dependencies["@molcrafts/molrs"]).toBe("^0.18.0");
+    expect(rsbuild).toContain("molpy/molwasm/pkg");
+    expect(rsbuild).toContain("resolveMolwasm");
+    expect(pkg.dependencies["@molcrafts/molwasm"]).toBe("^0.20.0");
   });
 
   it("keeps KaTeX markdown off the initial graph", () => {
