@@ -128,10 +128,17 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
       content: (
         <RunOverview
           run={run}
+          results={
+            selectedExecutionId === latestExecutionId ? (outputs?.results ?? undefined) : undefined
+          }
           onOpenExecution={(executionId) => {
             setSelectedExecutionId(executionId);
             openRunTab("executions");
           }}
+          onOpenLogs={() => openRunTab("logs")}
+          onOpenParameters={() => openRunTab("parameters")}
+          onOpenRun={(runId) => setSelection({ objectType: "run", objectId: runId })}
+          onInspectTask={(taskId) => inspectTask(taskId, run.id)}
         />
       ),
     },

@@ -14,18 +14,27 @@ import {
   Textarea,
 } from "@molcrafts/ui";
 import { Check } from "lucide-react";
-import { type JSX, useEffect, useRef, useState } from "react";
+import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
 import { DocSource } from "@/api/generated/models/DocSource";
 import { WorkbenchAction } from "@/components/workbench";
-import { DOC_SKELETON, type HostRun, isSourcedClass } from "./docTemplates";
-import { KNOWLEDGE_CLASSES, type KnowledgeClass } from "./knowledgeClass";
+import { citesRun, DOC_SKELETON, type HostRun } from "./docTemplates";
+import { KNOWLEDGE_CLASSES, type KnowledgeClass, knowledgeClassOf } from "./knowledgeClass";
+import { PlanningFields } from "./PlanningFields";
+import {
+  buildPlanningRecord,
+  emptyPlanningDraft,
+  isPlanningClass,
+  type PlanningDraft,
+} from "./planningModel";
+import { useKnowledgeListQuery } from "./queries";
 
 export interface CreateDocInput {
   name: string;
   cls: DocCreateRequest.cls;
   body: string;
   sources?: { kind: DocSource.kind; ref: string }[];
+  record?: Record<string, unknown> | null;
   title?: string;
   authors?: string[];
   year?: number;
@@ -49,10 +58,19 @@ export const CreateDocDialog = ({
   onOpenChange: (open: boolean) => void;
   onSubmit: (input: CreateDocInput) => Promise<void>;
 }): JSX.Element => {
+  const listQuery = useKnowledgeListQuery();
+  const plans = useMemo(
+    () => (listQuery.data?.notes ?? []).filter((note) => knowledgeClassOf(note) === "Plan"),
+    [listQuery.data],
+  );
   const [cls, setCls] = useState<KnowledgeClass>("Note");
   const [name, setName] = useState("");
   const [body, setBody] = useState("");
   const [sourceRef, setSourceRef] = useState("");
+  const [planRef, setPlanRef] = useState("");
+  const [draft, setDraft] = useState<PlanningDraft>(emptyPlanningDraft);
+  const [goal, setGoal] = useState("");
+  const [scope, setScope] = useState("");
   const [title, setTitle] = useState("");
   const [authors, setAuthors] = useState("");
   const [year, setYear] = useState("");
@@ -70,6 +88,10 @@ export const CreateDocDialog = ({
     setName("");
     setBody("");
     setSourceRef(list[0]?.ref ?? "");
+    setPlanRef("");
+    setDraft(emptyPlanningDraft());
+    setGoal("");
+    setScope("");
     setTitle("");
     setAuthors("");
     setYear("");
@@ -79,8 +101,16 @@ export const CreateDocDialog = ({
     setLocalError(null);
   }, [open]);
 
-  const sourced = isSourcedClass(cls);
+  useEffect(() => {
+    if (!open || planRef || plans.length === 0) return;
+    setPlanRef(plans[0]?.relPath ?? "");
+  }, [open, planRef, plans]);
+
+  const runSourced = citesRun(cls);
+  const planning = isPlanningClass(cls);
   const message = localError ?? error;
+  const plansLoading = planning && listQuery.isPending;
+  const planMissing = planning && !plansLoading && plans.length === 0;
 
   const submit = async (): Promise<void> => {
     const trimmed = name.trim();
@@ -88,9 +118,31 @@ export const CreateDocDialog = ({
       setLocalError("Name required.");
       return;
     }
-    if (sourced && !sourceRef) {
+    if (runSourced && !sourceRef) {
       setLocalError("Choose a run this document records.");
       return;
+    }
+    if (planning && !planRef) {
+      setLocalError("Choose the Plan this document cites.");
+      return;
+    }
+    let record: Record<string, unknown> | undefined;
+    if (planning) {
+      const built = buildPlanningRecord(cls, draft);
+      if (!built.ok) {
+        setLocalError(built.message);
+        return;
+      }
+      record = built.record;
+    }
+    if (cls === "Delegation") {
+      const goalText = goal.trim();
+      const scopeText = scope.trim();
+      if (!goalText || !scopeText) {
+        setLocalError("A delegation needs a goal and a scope.");
+        return;
+      }
+      record = { goal: goalText, scope: scopeText };
     }
     const yearNumber = year.trim() ? Number(year) : undefined;
     if (year.trim() && !Number.isInteger(yearNumber)) {
@@ -106,7 +158,9 @@ export const CreateDocDialog = ({
       name: trimmed,
       cls: cls as DocCreateRequest.cls,
       body,
-      ...(sourced ? { sources: [{ kind: DocSource.kind.RUN, ref: sourceRef }] } : {}),
+      ...(runSourced ? { sources: [{ kind: DocSource.kind.RUN, ref: sourceRef }] } : {}),
+      ...(planning ? { sources: [{ kind: DocSource.kind.FILE, ref: planRef }] } : {}),
+      ...(record ? { record } : {}),
       ...(cls === "Literature"
         ? {
             title: title.trim() || undefined,
@@ -122,7 +176,7 @@ export const CreateDocDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[min(85vh,48rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>New document</DialogTitle>
         </DialogHeader>
@@ -160,7 +214,7 @@ export const CreateDocDialog = ({
               disabled={busy}
             />
           </div>
-          {sourced && (
+          {runSourced && (
             <div className="grid gap-2">
               <Label htmlFor="doc-source">Source run</Label>
               {runs.length === 0 ? (
@@ -181,6 +235,50 @@ export const CreateDocDialog = ({
                   </SelectContent>
                 </Select>
               )}
+            </div>
+          )}
+          {isPlanningClass(cls) && (
+            <div className="grid gap-2">
+              <Label htmlFor="doc-plan">Plan</Label>
+              {plansLoading ? (
+                <p className="text-label text-muted-foreground">Loading plans…</p>
+              ) : planMissing ? (
+                <p className="text-label text-muted-foreground">
+                  Write a Plan first. A roadmap, todo, or milestone cites one.
+                </p>
+              ) : (
+                <Select value={planRef} onValueChange={setPlanRef}>
+                  <SelectTrigger id="doc-plan">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {plans.map((plan) => (
+                      <SelectItem key={plan.relPath} value={plan.relPath}>
+                        {plan.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <PlanningFields cls={cls} draft={draft} disabled={busy} onChange={setDraft} />
+            </div>
+          )}
+          {cls === "Delegation" && (
+            <div className="grid gap-2">
+              <Label htmlFor="doc-goal">Goal</Label>
+              <Input
+                id="doc-goal"
+                value={goal}
+                disabled={busy}
+                onChange={(event) => setGoal(event.target.value)}
+              />
+              <Label htmlFor="doc-scope">Scope</Label>
+              <Input
+                id="doc-scope"
+                value={scope}
+                disabled={busy}
+                onChange={(event) => setScope(event.target.value)}
+              />
             </div>
           )}
           {cls === "Literature" && (
@@ -235,7 +333,7 @@ export const CreateDocDialog = ({
             aria-busy={busy}
             kind="primary"
             type="button"
-            disabled={busy || (sourced && runs.length === 0)}
+            disabled={busy || (runSourced && runs.length === 0) || planMissing}
             onClick={() => void submit()}
           >
             {busy ? "Creating…" : "Create"}

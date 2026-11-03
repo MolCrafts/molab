@@ -34,6 +34,7 @@ export interface UseKnowledgeDocs {
       body?: string;
       cls?: DocCreateRequest.cls;
       sources?: DocSource[];
+      record?: Record<string, unknown> | null;
       title?: string | null;
       authors?: string[] | null;
       year?: number | null;

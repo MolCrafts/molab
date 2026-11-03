@@ -16,7 +16,6 @@ import { activeNeedsAuth, shouldShowFailure } from "@/api/errors";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
 import {
-  CopyButton,
   DashboardCanvas,
   DashboardCard,
   DataTable,
@@ -26,20 +25,23 @@ import {
   InventoryCanvas,
   OverviewSurface,
   StatusDistribution,
-  StatusLedger,
 } from "@/app/components/entity";
-import { DashboardWidgetBody, rollupExecutions } from "@/app/dashboard/dashboardWidgets";
-import { defaultWidgets, widgetTitle } from "@/app/dashboard/layout";
+import {
+  attentionRuns,
+  NeedsAttention,
+  RunTimeline,
+  rollupExecutions,
+} from "@/app/dashboard/dashboardWidgets";
+import { ExecutionOverview } from "@/app/dashboard/ExecutionOverview";
+import { useScopeRuns } from "@/app/dashboard/useScopeRuns";
 import {
   buildProjectWorkbenchData,
   experimentRunCompleteness,
   projectSnapshotCompleteness,
 } from "@/app/renderers/entityWorkbenchData";
-import { workspaceRunsApi } from "@/app/runs/api";
 import { experimentWorkflowLabel } from "@/app/state/api";
 import { projectAssetsQueryOptions } from "@/app/state/entityQueries";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import { getWorkspaceQueryScope } from "@/app/state/workspaceSwitchEvents";
 import type {
   ApiAssetResponse,
   ExperimentSummary,
@@ -82,13 +84,11 @@ export const ProjectViewer = ({
     ...projectAssetsQueryOptions(projectId),
     enabled: Boolean(projectId) && activeTab === "assets",
   });
-  const overviewRuns = useQuery({
-    queryKey: ["project-activity", getWorkspaceQueryScope(), projectId],
-    queryFn: () => workspaceRunsApi.listRuns({ limit: 1000 }),
-    enabled: Boolean(projectId) && activeTab === "overview",
-    staleTime: 30_000,
-  });
-  const overviewRows = (overviewRuns.data?.runs ?? []).filter((run) => run.projectId === projectId);
+  const { query: overviewRuns, rows: overviewRows } = useScopeRuns(
+    { projectId },
+    Boolean(projectId) &&
+      (activeTab === "overview" || activeTab === "attention" || activeTab === "timeline"),
+  );
   const needsAuth = activeNeedsAuth(snapshot.workspaces);
   const projectAssets = assetsQuery.data ?? [];
   const projectAssetsPending =
@@ -104,7 +104,13 @@ export const ProjectViewer = ({
   const setProjectTab = useCallback(
     (value: string): void => {
       const projectView: ProjectView =
-        value === "experiments" || value === "assets" || value === "settings" ? value : "overview";
+        value === "experiments" ||
+        value === "attention" ||
+        value === "timeline" ||
+        value === "assets" ||
+        value === "settings"
+          ? value
+          : "overview";
       setSelection({ objectType: "project", objectId: projectId, projectView });
     },
     [projectId, setSelection],
@@ -126,7 +132,7 @@ export const ProjectViewer = ({
   );
 
   const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to delete project "${projectId}"?`)) {
+    if (!confirm(`Are you sure you want to delete project "${project?.name ?? "this project"}"?`)) {
       return;
     }
     setIsDeleting(true);
@@ -150,7 +156,7 @@ export const ProjectViewer = ({
   };
 
   const handleDeleteExperiment = async (experiment: ExperimentSummary) => {
-    if (!confirm(`Are you sure you want to delete experiment "${experiment.id}"?`)) {
+    if (!confirm(`Are you sure you want to delete experiment "${experiment.name}"?`)) {
       return;
     }
     setDeletingExperimentId(experiment.id);
@@ -257,7 +263,7 @@ export const ProjectViewer = ({
       key: "name",
       header: "Name",
       cell: (exp) => (
-        <div className="flex min-w-0 items-center gap-2" title={`${exp.name} · ${exp.id}`}>
+        <div className="flex min-w-0 items-center gap-2" title={exp.name}>
           <FlaskConical className="size-icon-sm shrink-0 text-muted-foreground" />
           <span className="truncate text-body font-medium text-foreground">{exp.name}</span>
         </div>
@@ -363,12 +369,7 @@ export const ProjectViewer = ({
       key: "scope",
       header: "Scope",
       width: "w-40",
-      cell: (asset) => (
-        <span className="font-mono text-label text-muted-foreground">
-          {asset.scopeKind}
-          {asset.scopeIds.length > 0 ? ` · ${asset.scopeIds.join("/")}` : ""}
-        </span>
-      ),
+      cell: (asset) => <span className="text-label text-muted-foreground">{asset.scopeKind}</span>,
     },
     {
       key: "size",
@@ -401,15 +402,55 @@ export const ProjectViewer = ({
   const experimentCountValue =
     completeness.experimentCount ??
     (projectExperiments.length > 0 ? `≥${projectExperiments.length}` : "—");
-  const runCountValue =
-    completeness.runCount ?? (projectRuns.length > 0 ? `≥${projectRuns.length}` : "—");
+  const executionCounts = rollupExecutions(overviewRows);
+  const flaggedCount = attentionRuns(overviewRows).length;
+  const activityPartial = Boolean(overviewRuns.data?.truncated);
+  const activityError = shouldShowFailure(overviewRuns.error, {
+    fetching: overviewRuns.isFetching,
+    needsAuth,
+  })
+    ? overviewRuns.error instanceof Error
+      ? overviewRuns.error.message
+      : "Could not load project activity"
+    : null;
+  const activityPending = overviewRuns.isPending || (needsAuth && overviewRuns.data === undefined);
+  const activityState = (body: JSX.Element): JSX.Element =>
+    activityError ? (
+      <WorkbenchOperationState
+        kind="error"
+        density="compact"
+        title="Could not load project activity"
+        detail={activityError}
+        action={<WorkbenchRetryAction onClick={() => void overviewRuns.refetch()} />}
+      />
+    ) : activityPending ? (
+      <WorkbenchOperationState
+        kind="loading"
+        density="compact"
+        title="Loading project activity…"
+        skeletonRows={3}
+      />
+    ) : (
+      body
+    );
 
   return (
     <>
       <EntityPage
         icon={FolderKanban}
         title={project.name}
-        actions={<CopyButton value={project.id} label="project ID" />}
+        meta={
+          <>
+            <span>
+              <span className="text-foreground">{experimentCountValue}</span> experiments
+            </span>
+            {completeness.runCount !== null ? (
+              <span>
+                <span className="text-foreground">{completeness.runCount}</span> runs
+              </span>
+            ) : null}
+          </>
+        }
         activeTab={activeTab}
         onActiveTabChange={setProjectTab}
         tabs={[
@@ -418,60 +459,43 @@ export const ProjectViewer = ({
             label: "Overview",
             content: (
               <OverviewSurface>
-                <DashboardCanvas>
-                  <p className="text-label text-muted-foreground">
-                    <span className="tabular-nums text-foreground">{experimentCountValue}</span>{" "}
-                    experiments
-                    <span className="mx-2" aria-hidden>
-                      ·
-                    </span>
-                    <span className="tabular-nums text-foreground">{runCountValue}</span> runs
-                  </p>
-                  {shouldShowFailure(overviewRuns.error, {
-                    fetching: overviewRuns.isFetching,
-                    needsAuth,
-                  }) ? (
-                    <WorkbenchOperationState
-                      kind="error"
-                      density="compact"
-                      title="Could not load project activity"
-                      detail={
-                        overviewRuns.error instanceof Error
-                          ? overviewRuns.error.message
-                          : "Could not load project activity"
-                      }
-                      action={<WorkbenchRetryAction onClick={() => void overviewRuns.refetch()} />}
-                    />
-                  ) : overviewRuns.isPending || (needsAuth && overviewRuns.data === undefined) ? (
-                    <WorkbenchOperationState
-                      kind="loading"
-                      density="compact"
-                      title="Loading project activity…"
-                      skeletonRows={3}
-                    />
-                  ) : (
-                    <>
-                      <StatusLedger
-                        counts={rollupExecutions(overviewRows)}
-                        unit={["execution", "executions"]}
-                        partial={overviewRuns.data?.truncated}
-                      />
-                      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-                        {defaultWidgets()
-                          .filter((widget) =>
-                            ["run-duration", "needs-attention"].includes(widget.kind),
-                          )
-                          .map((widget) => (
-                            <DashboardCard key={widget.id} title={widgetTitle(widget.kind)}>
-                              <DashboardWidgetBody
-                                widget={widget}
-                                rows={overviewRows}
-                                inventoryBlocked={overviewRuns.data?.truncated}
-                              />
-                            </DashboardCard>
-                          ))}
+                <DashboardCanvas className="px-4 py-6 sm:px-8 sm:py-8">
+                  {activityState(
+                    executionCounts.total === 0 ? (
+                      <div className="max-w-xl">
+                        <p className="text-label text-muted-foreground">No executions yet.</p>
+                        {projectExperiments.length > 0 && (
+                          <ul className="mt-3 divide-y divide-border/70 border-y border-border/70">
+                            {projectExperiments.map((experiment) => (
+                              <li key={experiment.id}>
+                                <WorkbenchAction
+                                  kind="ghost"
+                                  size="content"
+                                  type="button"
+                                  className="flex h-auto w-full items-center justify-start gap-2 rounded-none px-1 py-2 text-left font-normal"
+                                  onClick={() => navigateToExperiment(experiment.id)}
+                                >
+                                  <FlaskConical className="size-icon-sm shrink-0 text-muted-foreground" />
+                                  <span className="min-w-0 truncate text-body font-medium text-foreground">
+                                    {experiment.name}
+                                  </span>
+                                </WorkbenchAction>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
-                    </>
+                    ) : (
+                      <ExecutionOverview
+                        rows={overviewRows}
+                        partial={activityPartial}
+                        inventoryBlocked={activityPartial}
+                        groupBy="experiment"
+                        onGroupSelect={navigateToExperiment}
+                        onOpenAttention={() => setProjectTab("attention")}
+                        onOpenTimeline={() => setProjectTab("timeline")}
+                      />
+                    ),
                   )}
                 </DashboardCanvas>
               </OverviewSurface>
@@ -492,7 +516,9 @@ export const ProjectViewer = ({
                         kind="running"
                         density="compact"
                         title="Deleting experiment…"
-                        detail={deletingExperimentId}
+                        detail={
+                          projectExperiments.find((item) => item.id === deletingExperimentId)?.name
+                        }
                       />
                     )}
                     {experimentDeleteError && (
@@ -543,6 +569,36 @@ export const ProjectViewer = ({
                     )}
                   </div>
                 </InventoryCanvas>
+              </OverviewSurface>
+            ),
+          },
+          {
+            value: "attention",
+            label: flaggedCount > 0 ? `Attention (${flaggedCount})` : "Attention",
+            content: (
+              <OverviewSurface>
+                <DashboardCanvas className="px-4 py-6 sm:px-8 sm:py-8">
+                  {activityState(
+                    <div className="mx-auto w-full max-w-6xl">
+                      <NeedsAttention rows={overviewRows} inventoryBlocked={activityPartial} />
+                    </div>,
+                  )}
+                </DashboardCanvas>
+              </OverviewSurface>
+            ),
+          },
+          {
+            value: "timeline",
+            label: "Timeline",
+            content: (
+              <OverviewSurface>
+                <DashboardCanvas className="px-4 py-6 sm:px-8 sm:py-8">
+                  {activityState(
+                    <div className="mx-auto w-full max-w-6xl">
+                      <RunTimeline rows={overviewRows} inventoryBlocked={activityPartial} />
+                    </div>,
+                  )}
+                </DashboardCanvas>
               </OverviewSurface>
             ),
           },
@@ -604,60 +660,55 @@ export const ProjectViewer = ({
                           </TableCell>
                         </TableRow>
                         <TableRow>
-                          <TableCell className="text-label text-muted-foreground">ID</TableCell>
-                          <TableCell className="font-mono text-label text-foreground">
-                            {project.id}
-                          </TableCell>
-                        </TableRow>
-                        <TableRow>
                           <TableCell className="text-label text-muted-foreground">
                             Contents
                           </TableCell>
-                          <TableCell className="font-mono text-label text-muted-foreground">
-                            {experimentCountValue} experiments · {runCountValue} runs
+                          <TableCell className="text-label text-muted-foreground">
+                            {experimentCountValue} experiments
+                            {completeness.runCount !== null
+                              ? ` · ${completeness.runCount} runs`
+                              : ""}
                           </TableCell>
                         </TableRow>
                       </TableBody>
                     </Table>
                   </DashboardCard>
 
-                  <DashboardCard title="Lifecycle">
-                    <div className="flex flex-wrap items-center justify-between gap-4 rounded-panel border border-border px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="text-body text-foreground">Delete project</p>
-                        <p className="mt-1 text-micro text-muted-foreground">
-                          Removes project, experiments, and runs. Cannot be undone from the UI.
-                        </p>
-                      </div>
-                      <WorkbenchAction
-                        icon={<Trash2 aria-hidden />}
-                        kind="danger"
-                        size="compact"
-                        onClick={handleDelete}
-                        disabled={isDeleting}
-                        aria-busy={isDeleting}
-                      >
-                        {isDeleting ? "Deleting…" : "Delete project"}
-                      </WorkbenchAction>
+                  <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4">
+                    <div className="min-w-0">
+                      <p className="text-body text-foreground">Delete project</p>
+                      <p className="mt-1 text-label text-muted-foreground">
+                        Removes this project, its experiments, and its runs.
+                      </p>
                     </div>
-                    {isDeleting && (
-                      <WorkbenchOperationState
-                        kind="running"
-                        density="compact"
-                        title="Deleting project…"
-                        detail={projectId}
-                      />
-                    )}
-                    {deleteError && (
-                      <WorkbenchOperationState
-                        kind="error"
-                        density="compact"
-                        title="Could not delete project"
-                        detail={deleteError}
-                        action={<WorkbenchRetryAction onClick={() => void handleDelete()} />}
-                      />
-                    )}
-                  </DashboardCard>
+                    <WorkbenchAction
+                      icon={<Trash2 aria-hidden />}
+                      kind="danger"
+                      size="compact"
+                      onClick={handleDelete}
+                      disabled={isDeleting}
+                      aria-busy={isDeleting}
+                    >
+                      {isDeleting ? "Deleting…" : "Delete project"}
+                    </WorkbenchAction>
+                  </div>
+                  {isDeleting && (
+                    <WorkbenchOperationState
+                      kind="running"
+                      density="compact"
+                      title="Deleting project…"
+                      detail={project.name}
+                    />
+                  )}
+                  {deleteError && (
+                    <WorkbenchOperationState
+                      kind="error"
+                      density="compact"
+                      title="Could not delete project"
+                      detail={deleteError}
+                      action={<WorkbenchRetryAction onClick={() => void handleDelete()} />}
+                    />
+                  )}
                 </DashboardCanvas>
               </OverviewSurface>
             ),

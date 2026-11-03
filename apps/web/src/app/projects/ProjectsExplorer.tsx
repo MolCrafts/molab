@@ -444,17 +444,6 @@ export const buildProjectNodes = (
   });
 };
 
-// A small chip describing a served workspace's kind/state in the nav header.
-const workspaceBadge = (ws: ServedWorkspaceSummary): ReactNode => {
-  const tone = ws.unreachable
-    ? "bg-status-failed-soft text-status-failed-foreground"
-    : ws.isRemote
-      ? "bg-status-warning-soft text-status-warning-foreground"
-      : "bg-muted text-muted-foreground";
-  const text = ws.unreachable ? "unreachable" : ws.isRemote ? "remote" : "local";
-  return <span className={`rounded-control px-2 py-1 text-micro font-medium ${tone}`}>{text}</span>;
-};
-
 // Shallow project leaves for a NON-active workspace — clicking one activates
 // that workspace so its full tree loads on the next poll. Kept id-prefixed by
 // workspace key so expansion/keys never collide with the active group, whose
@@ -583,7 +572,6 @@ const buildWorkspaceGroupedNodes = (
         : ws.active
           ? "text-accent"
           : "text-muted-foreground",
-      right: workspaceBadge(ws),
       emptyChildLabel: ws.unreachable ? "Unreachable" : "No projects",
       hoverTitle: ws.label,
       actions: workspaceActions,
@@ -757,10 +745,7 @@ export const ProjectsExplorer = ({
       title: "Delete project?",
       description: (
         <>
-          Project{" "}
-          <InlineCode className="rounded-control bg-muted px-1 py-1 text-label">
-            {projectId}
-          </InlineCode>{" "}
+          {snapshot.projects.find((project) => project.id === projectId)?.name ?? "This project"}{" "}
           and its experiments will be removed from the workspace.
         </>
       ),
@@ -783,15 +768,7 @@ export const ProjectsExplorer = ({
   const deleteExperiment = async (experiment: ExperimentSummary): Promise<void> => {
     const confirmed = await confirm({
       title: "Delete experiment?",
-      description: (
-        <>
-          Experiment{" "}
-          <InlineCode className="rounded-control bg-muted px-1 py-1 text-label">
-            {experiment.id}
-          </InlineCode>{" "}
-          and its runs will be removed.
-        </>
-      ),
+      description: <>{experiment.name} and its runs will be removed.</>,
       confirmLabel: "Delete",
       destructive: true,
     });

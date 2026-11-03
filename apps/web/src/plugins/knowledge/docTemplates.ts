@@ -1,18 +1,36 @@
 import type { KnowledgeClass } from "./knowledgeClass";
+import { isPlanningClass } from "./planningModel";
 
 /** Initial markdown for a new document. Literature and Note start empty. */
 export const DOC_SKELETON: Record<KnowledgeClass, string> = {
   Note: "",
   Literature: "",
   Plan: "## Objective\n\n## Approach\n\n",
+  Roadmap: "## Stages\n\n",
+  Todo: "## Work\n\n",
+  Milestone: "## Checkpoint\n\n",
   Finding: "## Result\n\n## Evidence\n\n",
   Observation: "## Observation\n\n",
   Report: "## Analysis\n\n",
+  Delegation: "## Assignment\n\n",
 };
 
-const SOURCED: ReadonlySet<KnowledgeClass> = new Set(["Report", "Finding", "Plan", "Observation"]);
+const SOURCED: ReadonlySet<KnowledgeClass> = new Set([
+  "Report",
+  "Finding",
+  "Plan",
+  "Roadmap",
+  "Todo",
+  "Milestone",
+  "Observation",
+  "Delegation",
+]);
 
 export const isSourcedClass = (cls: KnowledgeClass): boolean => SOURCED.has(cls);
+
+/** A sourced class whose source is a run. Planning documents cite a Plan instead. */
+export const citesRun = (cls: KnowledgeClass): boolean =>
+  isSourcedClass(cls) && !isPlanningClass(cls);
 
 export interface HostRun {
   id: string;

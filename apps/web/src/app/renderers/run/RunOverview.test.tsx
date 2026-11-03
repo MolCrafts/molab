@@ -62,43 +62,57 @@ const run = (
   errorMessage,
 });
 
-const page = (node: ReactNode): string => renderToStaticMarkup(<MemoryRouter>{node}</MemoryRouter>);
+const story = (node: ReactNode): string =>
+  renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>{node}</MemoryRouter>
+    </QueryClientProvider>,
+  );
 
 describe("RunOverview", () => {
-  it("says a run with no attempts has not been run, and shows the definition", () => {
-    const html = page(<RunOverview run={run([])} />);
+  it("says a run with no attempts has not been run", () => {
+    const html = story(<RunOverview run={run([])} />);
     expect(html).toContain("Not run yet");
-    expect(html).toContain("0");
-    expect(html).toContain("sha256:def");
-    expect(html).not.toContain("Succeeded in");
+    expect(html).toContain("0 attempts");
+    expect(html).not.toContain("sha256:def");
+    expect(html).not.toContain("Definition");
   });
 
-  it("lists attempts in order and keeps the error with the run", () => {
-    const html = page(
+  it("leads with a verdict sentence, not a gauge of one item", () => {
+    const html = story(
       <RunOverview
-        run={run([execution("e01", "failed"), execution("e02", "succeeded")], "boom")}
+        run={run([execution("e01", "failed", "initial"), execution("e02", "succeeded", "resume")])}
+        results={{ rmse: 0.01234567, epochs: 40, notes: { nested: true } }}
       />,
     );
-    expect(html.indexOf("e01")).toBeGreaterThan(-1);
-    expect(html.indexOf("e02")).toBeGreaterThan(html.indexOf("e01"));
-    expect(html).toContain("boom");
-    expect(html).toContain("Definition");
+    expect(html).toContain("Completed in 5m");
+    expect(html).toContain("attempt 2 of 2, a resume");
+    expect(html).not.toContain("success");
+    expect(html).not.toContain(">e01");
+    // Scalar results are the run's science; structured values stay on their tab.
+    expect(html).toContain("0.01235");
+    expect(html).toContain("40");
+    expect(html).not.toContain("nested");
+    expect(html).not.toContain("sha256:def");
   });
 
-  it("prints a failed attempt's error on its row", () => {
-    const html = page(
+  it("puts a failed attempt's own error under the verdict", () => {
+    const html = story(
       <RunOverview
-        run={run([
-          execution("e01", "failed", "initial", {
-            type: "WorkflowError",
-            message: "scheduler died",
-          }),
-          execution("e02", "succeeded"),
-        ])}
+        run={run(
+          [
+            execution("e01", "failed", "initial", {
+              type: "WorkflowError",
+              message: "scheduler died",
+            }),
+          ],
+          "boom",
+        )}
       />,
     );
+    expect(html).toContain("Failed after 5m");
     expect(html).toContain("WorkflowError: scheduler died");
-    expect(html.indexOf("WorkflowError: scheduler died")).toBeLessThan(html.indexOf("e02"));
+    expect(html).not.toContain(">Attempts<");
   });
 });
 

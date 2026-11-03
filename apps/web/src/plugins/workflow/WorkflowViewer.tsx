@@ -1,17 +1,20 @@
 import { Workflow } from "lucide-react";
 import { useState } from "react";
 import {
-  BarInstrument,
-  DashboardCanvas,
-  DashboardCard,
+  type CountBar,
+  CountBars,
   DataTable,
+  DialLegend,
   EmptyState,
   EntityPage,
-  OverviewInstruments,
-  OverviewList,
+  GaugeSection,
+  Instrument,
+  InstrumentStrip,
+  InventoryCanvas,
+  OverviewCanvas,
   OverviewSurface,
   type StatusCountRollup,
-  StatusDistribution,
+  SuccessDial,
 } from "@/app/components/entity";
 import { groupForStatus } from "@/app/runs/statusGroups";
 import type { RendererProps } from "@/app/types";
@@ -48,66 +51,92 @@ const taskTypeCounts = (tasks: readonly TaskNodeJson[]): { type: string; count: 
     .sort((left, right) => right.count - left.count || left.type.localeCompare(right.type));
 };
 
-const WorkflowOverviewBody = ({ selection, snapshot }: RendererProps): JSX.Element | null => {
-  const workflow = snapshot.workflows.find((w) => w.id === selection.objectId);
-  if (!workflow) return null;
+const TaskTable = ({ tasks }: { tasks: readonly TaskNodeJson[] }): JSX.Element => (
+  <OverviewSurface>
+    <InventoryCanvas>
+      <DataTable
+        columns={[
+          {
+            key: "task",
+            header: "Task",
+            cell: (task) => (
+              <span className="text-body text-foreground">{task.label || task.id}</span>
+            ),
+          },
+          {
+            key: "type",
+            header: "Type",
+            cell: (task) => (
+              <span className="font-mono text-label text-muted-foreground">{task.type}</span>
+            ),
+          },
+        ]}
+        data={[...tasks]}
+        getRowKey={(task) => task.id}
+        getRowLabel={(task) => task.label || task.id}
+        empty={<EmptyState title="No tasks yet" />}
+      />
+    </InventoryCanvas>
+  </OverviewSurface>
+);
 
-  const tasks = workflow.graph?.task_configs ?? [];
+const WorkflowOverviewBody = ({
+  tasks,
+  summary,
+  onOpenTasks,
+}: {
+  tasks: readonly TaskNodeJson[];
+  summary: string | null | undefined;
+  onOpenTasks: () => void;
+}): JSX.Element => {
   const statuses = taskStatusCounts(tasks);
   const types = taskTypeCounts(tasks);
+  const bars: CountBar[] = types.map((item) => ({
+    key: item.type,
+    label: item.type,
+    value: item.count,
+    readout: `${item.count} ${item.count === 1 ? "task" : "tasks"}`,
+    tip: `${item.type}: ${item.count} of ${tasks.length} tasks`,
+  }));
+
+  if (tasks.length === 0) {
+    return (
+      <OverviewCanvas>
+        <EmptyState title="No tasks yet" description="This workflow's graph has no tasks." />
+      </OverviewCanvas>
+    );
+  }
 
   return (
-    <OverviewSurface>
-      <DashboardCanvas>
-        {workflow.summary ? (
-          <p className="max-w-2xl text-body text-muted-foreground">{workflow.summary}</p>
+    <OverviewCanvas>
+      {summary ? <p className="max-w-[65ch] text-body text-muted-foreground">{summary}</p> : null}
+      <InstrumentStrip label="Workflow gauges" lead={statuses.total > 0}>
+        {statuses.total > 0 ? (
+          <Instrument title="Task state" inline>
+            <span className="flex min-w-0 items-center gap-4">
+              <SuccessDial counts={statuses} />
+              <DialLegend counts={statuses} unit={["task", "tasks"]} />
+            </span>
+          </Instrument>
         ) : null}
-        <OverviewInstruments>
-          {statuses.total > 0 ? (
-            <DashboardCard title="Task status">
-              <StatusDistribution counts={statuses} unit="tasks" />
-            </DashboardCard>
-          ) : null}
-          {types.length > 0 ? (
-            <DashboardCard title="Task types">
-              <BarInstrument
-                label="Task types"
-                bars={types.map((item) => ({
-                  id: item.type,
-                  value: item.count,
-                  label: item.type,
-                  tooltip: `${item.type}: ${item.count}`,
-                }))}
-              />
-            </DashboardCard>
-          ) : null}
-        </OverviewInstruments>
-        <OverviewList title="Tasks">
-          <DataTable
-            columns={[
-              {
-                key: "task",
-                header: "Task",
-                cell: (task) => (
-                  <span className="text-body text-foreground">{task.label || task.id}</span>
-                ),
-              },
-              {
-                key: "type",
-                header: "Type",
-                cell: (task) => (
-                  <span className="font-mono text-label text-muted-foreground">{task.type}</span>
-                ),
-              },
-            ]}
-            data={tasks}
-            getRowKey={(task) => task.id}
-            getRowLabel={(task) => task.label || task.id}
-            empty={<EmptyState title="No tasks yet" />}
-          />
-        </OverviewList>
-      </DashboardCanvas>
-    </OverviewSurface>
+        <Instrument
+          title="Tasks"
+          figure={tasks.length}
+          caption={`${types.length} ${types.length === 1 ? "type" : "types"}`}
+          onSelect={onOpenTasks}
+          selectHint="Tasks"
+          selectLabel={`${tasks.length} tasks. Open the list`}
+        />
+        <Instrument
+          title="Most common type"
+          figure={types[0]?.type ?? "—"}
+          caption={types[0] ? `${types[0].count} of ${tasks.length} tasks` : undefined}
+        />
+      </InstrumentStrip>
+      <GaugeSection title="Tasks by type" readout="click a type to list the tasks">
+        <CountBars bars={bars} label="Number of tasks of each type" onPick={onOpenTasks} />
+      </GaugeSection>
+    </OverviewCanvas>
   );
 };
 
@@ -119,6 +148,8 @@ export const WorkflowViewer = (props: RendererProps): JSX.Element => {
   if (!workflow) {
     return <div className="p-8 text-muted-foreground">Workflow not found.</div>;
   }
+
+  const tasks = workflow.graph?.task_configs ?? [];
 
   return (
     <EntityPage
@@ -132,7 +163,22 @@ export const WorkflowViewer = (props: RendererProps): JSX.Element => {
           label: "Graph",
           content: activeTab === "graph" ? <WorkflowGraphViewer {...props} /> : null,
         },
-        { value: "overview", label: "Overview", content: <WorkflowOverviewBody {...props} /> },
+        {
+          value: "overview",
+          label: "Overview",
+          content: (
+            <WorkflowOverviewBody
+              tasks={tasks}
+              summary={workflow.summary}
+              onOpenTasks={() => setActiveTab("tasks")}
+            />
+          ),
+        },
+        {
+          value: "tasks",
+          label: tasks.length > 0 ? `Tasks (${tasks.length})` : "Tasks",
+          content: <TaskTable tasks={tasks} />,
+        },
         { value: "source", label: "Source", content: <WorkflowSourceViewer {...props} /> },
       ]}
     />

@@ -80,7 +80,7 @@ export const ExperimentNotebook = ({
         <EmptyState
           icon={<NotebookPen className="h-6 w-6" />}
           title="No documents on this experiment"
-          description="Write a plan, a finding, or a note beside the runs."
+          description="Write a plan, a roadmap, a finding, or a note beside the runs."
         />
       ) : (
         <ul className="divide-y divide-border border-y border-border">

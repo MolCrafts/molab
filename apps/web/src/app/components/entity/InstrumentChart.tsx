@@ -56,7 +56,7 @@ export const useStatusColors = (): Record<StatusGroupId, string> | null => {
 const chartClass = "outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 /** Product color. `--primary` is not set on this page, so the chart theme falls through to a system color. */
-const readCssColor = (name: string, fallback: string): string => {
+export const readCssColor = (name: string, fallback: string): string => {
   if (typeof document === "undefined") return fallback;
   const probe = document.createElement("span");
   probe.style.display = "none";

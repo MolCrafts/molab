@@ -18,6 +18,8 @@ export const assetKeys = {
 
 export const runKeys = {
   all: ["runs"] as const,
+  /** The workspace run inventory the project and experiment Overviews read. */
+  inventory: () => [...runKeys.all, getWorkspaceQueryScope(), "inventory"] as const,
   metrics: (projectId: string, experimentId: string, runId: string, executionId: string) =>
     [
       ...runKeys.all,

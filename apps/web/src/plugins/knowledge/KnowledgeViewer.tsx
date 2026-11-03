@@ -19,7 +19,9 @@ import { resolveMolabRef } from "@/lib/molab-ref";
 import { DocumentControls } from "@/plugins/knowledge/DocumentControls";
 import { EntityRefCard } from "@/plugins/knowledge/EntityRefCard";
 import { KnowledgeDashboard } from "@/plugins/knowledge/KnowledgeDashboard";
+import { knowledgeClassOf } from "@/plugins/knowledge/knowledgeClass";
 import { NoteEditor } from "@/plugins/knowledge/NoteEditor";
+import { PlanningRecord } from "@/plugins/knowledge/PlanningRecord";
 import {
   knowledgeKeys,
   useKnowledgeListQuery,
@@ -147,6 +149,12 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
               <p className="text-body-lg italic text-muted-foreground">Loading…</p>
             ) : (
               <div className="space-y-4">
+                <PlanningRecord
+                  cls={knowledgeClassOf(
+                    data?.notes.find((row) => row.relPath === relPath) ?? { cls: "Note" },
+                  )}
+                  record={note.record}
+                />
                 <NoteEditor
                   note={note}
                   onSaved={handleSaved}

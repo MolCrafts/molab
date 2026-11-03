@@ -52,6 +52,7 @@ export const knowledgeApi = {
       body?: string;
       cls?: DocCreateRequest.cls;
       sources?: DocSource[];
+      record?: Record<string, unknown> | null;
       title?: string | null;
       authors?: string[] | null;
       year?: number | null;
@@ -66,6 +67,7 @@ export const knowledgeApi = {
       body: options.body ?? "",
       cls: options.cls,
       sources: options.sources,
+      record: options.record,
       title: options.title,
       authors: options.authors,
       year: options.year,

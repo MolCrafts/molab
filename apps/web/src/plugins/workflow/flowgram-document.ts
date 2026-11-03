@@ -160,6 +160,8 @@ export const normalizeTaskGraph = (raw: Record<string, unknown>): TaskGraphJson 
       position,
       config: isRecord(item.config) ? item.config : undefined,
       status: typeof item.status === "string" ? item.status : undefined,
+      startedAt: typeof item.started_at === "string" ? item.started_at : undefined,
+      finishedAt: typeof item.finished_at === "string" ? item.finished_at : undefined,
       error: typeof item.error === "string" ? item.error : undefined,
       source: typeof item.source === "string" ? item.source : undefined,
       subworkflow,

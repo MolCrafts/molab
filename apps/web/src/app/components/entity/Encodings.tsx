@@ -315,8 +315,11 @@ export const StatusLegend = ({ className }: { className?: string }): JSX.Element
       <li key={group.id} className="flex items-center gap-2 text-label text-muted-foreground">
         <span
           aria-hidden
-          className="size-1.5 rounded-full"
-          style={{ backgroundColor: group.color }}
+          className={cn(
+            "size-1.5 rounded-full",
+            group.id === "pending" && "border border-status-queued bg-transparent",
+          )}
+          style={group.id === "pending" ? undefined : { backgroundColor: group.color }}
         />
         {group.label}
       </li>
@@ -358,12 +361,17 @@ export const StatusBreakdown = ({
           {caption}
         </p>
       )}
-      <ul aria-labelledby={caption != null ? captionId : undefined} className="space-y-2">
+      <ul
+        aria-labelledby={caption != null ? captionId : undefined}
+        className="grid grid-cols-[fit-content(9rem)_minmax(5rem,1fr)_auto_auto] gap-x-3 gap-y-2"
+      >
         {groups.map((group) => {
           const body = (
             <>
               <span className="min-w-0">
-                <span className="block truncate text-label text-foreground">{group.label}</span>
+                <span className="block truncate text-label text-foreground" title={group.label}>
+                  {group.label}
+                </span>
                 {group.detail != null && (
                   <span className="block truncate text-micro text-muted-foreground">
                     {group.detail}
@@ -371,12 +379,12 @@ export const StatusBreakdown = ({
                 )}
               </span>
               <StatusDistribution counts={group.counts} variant="meter" className="justify-end" />
-              <span className="text-right font-mono text-label tabular-nums text-foreground">
+              <span className="text-right text-label tabular-nums text-foreground">
                 {group.counts.total}
               </span>
               <span
                 className={cn(
-                  "text-right font-mono text-label tabular-nums",
+                  "text-right text-label tabular-nums",
                   group.counts.failed > 0
                     ? "text-status-failed-foreground"
                     : "text-muted-foreground",
@@ -388,10 +396,10 @@ export const StatusBreakdown = ({
               </span>
             </>
           );
-          const layout =
-            "grid grid-cols-[fit-content(10rem)_minmax(6rem,1fr)_2rem_5.5rem] items-center gap-3";
+          // Rows share the list's columns, so every bar starts at the longest label.
+          const layout = "col-span-4 grid grid-cols-subgrid items-center gap-x-3";
           return (
-            <li key={group.id} className="min-w-0">
+            <li key={group.id} className="col-span-4 grid min-w-0 grid-cols-subgrid">
               {group.onSelect ? (
                 <WorkbenchAction
                   kind="ghost"

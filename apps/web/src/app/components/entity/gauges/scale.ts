@@ -41,6 +41,8 @@ export interface SpanScale {
   at: (value: number) => number;
   ticks: number[];
   log: boolean;
+  /** The padded axis extent, in seconds — what a chart's scale domain should be. */
+  domain: [number, number];
 }
 
 /**
@@ -61,7 +63,12 @@ export const spanScale = (values: readonly number[]): SpanScale => {
     const inside = DURATION_STEPS.filter((step) => step >= 10 ** lo && step <= 10 ** hi);
     const stride = Math.max(1, Math.ceil(inside.length / 5));
     const ticks = inside.filter((_, index) => index % stride === 0);
-    return { at, ticks: ticks.length >= 2 ? ticks : [rawMin, rawMax], log };
+    return {
+      at,
+      ticks: ticks.length >= 2 ? ticks : [rawMin, rawMax],
+      log,
+      domain: [10 ** lo, 10 ** hi],
+    };
   }
 
   // Linear: pad the domain so a single value or a tight cluster sits mid-axis
@@ -76,7 +83,7 @@ export const spanScale = (values: readonly number[]): SpanScale => {
   const ticks: number[] = [];
   for (let tick = Math.ceil(lo / step) * step; tick <= hi; tick += step) ticks.push(tick);
   const at = (value: number): number => Math.min(1, Math.max(0, (value - lo) / (hi - lo)));
-  return { at, ticks, log };
+  return { at, ticks, log, domain: [lo, hi] };
 };
 
 /**

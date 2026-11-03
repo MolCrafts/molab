@@ -22,14 +22,10 @@ export const KnowledgeDashboard = ({
   const [of, setOf] = useState<KnowledgeClass | null>(null);
 
   const counts = useMemo(() => {
-    const next: Record<KnowledgeClass, number> = {
-      Note: 0,
-      Literature: 0,
-      Report: 0,
-      Finding: 0,
-      Plan: 0,
-      Observation: 0,
-    };
+    const next = Object.fromEntries(KNOWLEDGE_CLASSES.map((cls) => [cls, 0])) as Record<
+      KnowledgeClass,
+      number
+    >;
     for (const note of notes) {
       if (isTexDocument(note.relPath)) continue;
       next[knowledgeClassOf(note)] += 1;
@@ -57,7 +53,7 @@ export const KnowledgeDashboard = ({
       <EmptyState
         icon={<BookOpen className="h-6 w-6" />}
         title="No knowledge yet"
-        description="Notes, findings, plans, reports, literature, and observations appear here."
+        description="Notes, literature, reports, findings, plans, roadmaps, todos, milestones, observations, and delegations appear here."
       />
     );
   }
@@ -65,7 +61,7 @@ export const KnowledgeDashboard = ({
   return (
     <div className="space-y-6">
       <section>
-        <div className="grid grid-cols-2 gap-px border-y border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-px border-y border-border bg-border sm:grid-cols-5">
           {KNOWLEDGE_CLASSES.map((cls) => {
             const active = of === cls;
             return (

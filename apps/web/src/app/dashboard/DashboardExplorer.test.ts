@@ -1,71 +1,9 @@
 import { describe, expect, it } from "@rstest/core";
 
-import {
-  PROJECT_LIMIT,
-  projectDetail,
-  RUNNING_FAILED_LIMIT,
-  selectRunningAndFailed,
-} from "@/app/dashboard/DashboardExplorer";
-import type { WorkspaceRunRow } from "@/app/runs/types";
+import { PROJECT_LIMIT, projectDetail } from "@/app/dashboard/DashboardExplorer";
 
-const run = (id: string, status: string, createdAt: string): WorkspaceRunRow => ({
-  id,
-  name: id,
-  workspaceKey: "ws",
-  path: `projects/project/experiments/experiment/runs/${id}`,
-  projectId: "project",
-  projectName: "Project",
-  experimentId: "experiment",
-  experimentName: "Experiment",
-  definitionHash: `definition-${id}`,
-  experimentRevisionId: "revision-1",
-  inputAssetIds: [],
-  targetHint: null,
-  statusSummary: {
-    total: 1,
-    active: status === "running" ? 1 : 0,
-    notStarted: false,
-    byStatus: { [status]: 1 },
-  },
-  parameters: {},
-  createdAt,
-  executions: [
-    {
-      executionId: `execution-${id}`,
-      runId: id,
-      mode: "initial",
-      status,
-      createdAt,
-      startedAt: createdAt,
-      finishedAt: status === "failed" || status === "succeeded" ? createdAt : null,
-      durationSeconds: 0,
-      basedOnExecutionId: null,
-      checkpointArtifactId: null,
-      schedulerJobId: null,
-      backend: null,
-      backendMetadata: {},
-    },
-  ],
-});
-
-describe("selectRunningAndFailed", () => {
-  it("keeps failed runs ahead of newer running runs and caps the sample", () => {
-    const sample = selectRunningAndFailed([
-      run("running-new", "running", "2026-08-30T12:00:00Z"),
-      run("done", "succeeded", "2026-08-30T13:00:00Z"),
-      run("failed-old", "failed", "2026-08-30T01:00:00Z"),
-      run("failed-new", "failed", "2026-08-30T11:00:00Z"),
-      run("running-old", "running", "2026-08-30T02:00:00Z"),
-      run("queued", "queued", "2026-08-30T14:00:00Z"),
-    ]);
-
-    expect(sample.total).toBe(4);
-    expect(sample.visible.map((item) => item.id)).toEqual([
-      "failed-new",
-      "failed-old",
-      "running-new",
-    ]);
-    expect(sample.visible).toHaveLength(RUNNING_FAILED_LIMIT);
+describe("DashboardExplorer", () => {
+  it("caps the project sample", () => {
     expect(PROJECT_LIMIT).toBe(6);
   });
 

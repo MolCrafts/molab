@@ -1,23 +1,48 @@
-import { TriangleAlert } from "lucide-react";
-import type { JSX } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  CircleDashed,
+  Equal,
+  FileText,
+  History,
+  ListChecks,
+  LoaderCircle,
+  RotateCcw,
+  SlidersHorizontal,
+  Timer,
+} from "lucide-react";
+import { type JSX, type ReactNode, useMemo } from "react";
 
 import {
-  CopyButton,
-  DashboardCanvas,
+  EmptyState,
   formatSpan,
+  GaugeSection,
   InventoryCanvas,
-  OverviewSheet,
+  OverviewCanvas,
   OverviewSurface,
-  type StatusCounts,
-  StatusLedger,
+  PositionChart,
+  STATUS_INK,
+  StatusIcon,
+  Tally,
+  TimelineChart,
+  type TimelineSpan,
 } from "@/app/components/entity";
-import { formatDuration, formatScalar } from "@/app/renderers/dashboardData";
-import { executionErrorText, isFailureStatus } from "@/app/renderers/run/executionFailure";
-import { groupForStatus } from "@/app/runs/statusGroups";
+import { useScopeRuns } from "@/app/dashboard/useScopeRuns";
+import { formatScalar } from "@/app/renderers/dashboardData";
+import {
+  distinguishingParameters,
+  resultFigures,
+  runVerdict,
+  siblingStanding,
+  taskSpans,
+  unstartedTasks,
+} from "@/app/renderers/run/runStory";
+import { groupForStatus, STATUS_GROUPS } from "@/app/runs/statusGroups";
+import { executionJournalQueryOptions, journalRefetchInterval } from "@/app/state/entityQueries";
 import type { ExecutionRecordSummary, RunSummary } from "@/app/types";
-import { RunStatusBadge } from "@/components/workbench";
-import { formatDateTime } from "@/lib/datetime";
+import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
+import { cn } from "@/lib/utils";
 import { KnowledgeBacklinksCard } from "@/plugins/knowledge/KnowledgeBacklinksCard";
+import { normalizeTaskGraph } from "@/plugins/workflow/flowgram-document";
 
 /** The run's parameter list. Overview does not host it. */
 export const RunParameters = ({ parameters }: { parameters: [string, unknown][] }): JSX.Element => (
@@ -53,175 +78,318 @@ const PropertyGrid = ({ entries }: { entries: [string, unknown][] }): JSX.Elemen
   );
 };
 
-const executionCounts = (history: readonly ExecutionRecordSummary[]): StatusCounts => {
-  const counts: StatusCounts = {
-    total: history.length,
-    running: 0,
-    pending: 0,
-    succeeded: 0,
-    failed: 0,
-    cancelled: 0,
-  };
-  for (const execution of history) {
-    const group = groupForStatus(execution.status);
-    if (group) counts[group] += 1;
-  }
-  return counts;
+const time = (value: string | null | undefined): number | null => {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
-/** Wall time of one attempt. In-flight work counts up to now. */
-const attemptElapsed = (execution: ExecutionRecordSummary): string | null => {
-  const startIso = execution.startedAt ?? execution.createdAt;
-  const start = Date.parse(startIso);
-  if (!Number.isFinite(start)) return null;
-  if (execution.finishedAt) return formatDuration(startIso, execution.finishedAt);
-  return formatSpan((Date.now() - start) / 1000);
+/** "#2 · resume" — attempts are named by order and mode; the id lives on the Executions tab. */
+const attemptName = (execution: ExecutionRecordSummary, index: number): string =>
+  `#${index + 1} · ${execution.mode}`;
+
+const attemptSpans = (history: readonly ExecutionRecordSummary[], now: number): TimelineSpan[] =>
+  history.flatMap((execution, index) => {
+    const start = time(execution.startedAt ?? execution.createdAt);
+    if (start === null) return [];
+    const status = groupForStatus(execution.status) ?? "pending";
+    const active = status === "running" || status === "pending";
+    const seconds = Math.max(0, (time(execution.finishedAt) ?? now) - start) / 1000;
+    const word = STATUS_GROUPS.find((group) => group.id === status)?.label ?? status;
+    return [
+      {
+        key: execution.executionId,
+        label: attemptName(execution, index),
+        start,
+        end: active ? null : time(execution.finishedAt),
+        status,
+        tip: `${attemptName(execution, index)} · ${word} · ${formatSpan(seconds)}`,
+      },
+    ];
+  });
+
+/** The verdict in symbols: status icon, what it is about, how long. The sentence is its name. */
+const Verdict = ({
+  verdict,
+  actions,
+}: {
+  verdict: ReturnType<typeof runVerdict>;
+  actions: ReactNode;
+}): JSX.Element => {
+  const ink = verdict.status === "none" ? "text-foreground" : STATUS_INK[verdict.status];
+  return (
+    <section aria-label={verdict.headline} className="min-w-0 space-y-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2" title={verdict.headline}>
+        {verdict.status !== "none" ? (
+          <StatusIcon
+            status={verdict.status}
+            label={verdict.headline}
+            className="size-7 shrink-0"
+          />
+        ) : null}
+        {verdict.subject ? (
+          <h2 className={cn("min-w-0 truncate text-display font-semibold tracking-tight", ink)}>
+            {verdict.subject}
+          </h2>
+        ) : verdict.status === "none" ? (
+          <h2 className="text-display font-semibold tracking-tight text-foreground">
+            {verdict.headline}
+          </h2>
+        ) : null}
+        {verdict.elapsed ? (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 text-display font-semibold tabular-nums tracking-tight",
+              verdict.subject ? "text-foreground" : ink,
+            )}
+          >
+            <Timer aria-hidden className="size-6 opacity-70" />
+            {verdict.elapsed}
+          </span>
+        ) : null}
+        <span className="ml-auto flex shrink-0 items-center gap-1">{actions}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-label text-muted-foreground">
+        {verdict.tasks.total > 0 ? (
+          <Tally
+            icon={ListChecks}
+            value={`${verdict.tasks.done}/${verdict.tasks.total}`}
+            label={`${verdict.tasks.done} of ${verdict.tasks.total} tasks done`}
+          />
+        ) : null}
+        {verdict.attempt ? (
+          <Tally
+            icon={RotateCcw}
+            value={`#${verdict.attempt.index} ${verdict.attempt.mode}`}
+            label={`Attempt ${verdict.attempt.index} of ${verdict.attempt.total}, a ${verdict.attempt.mode}`}
+          />
+        ) : null}
+      </div>
+      {verdict.error ? (
+        <p
+          className="line-clamp-2 max-w-[100ch] break-words font-mono text-label text-foreground"
+          title={verdict.error}
+        >
+          {verdict.error}
+        </p>
+      ) : null}
+    </section>
+  );
 };
 
-const IdentityLine = ({ label, value }: { label: string; value: string }): JSX.Element => (
-  <div className="min-w-0">
-    <dt className="text-label text-muted-foreground">{label}</dt>
-    <dd className="flex min-w-0 items-center gap-1">
-      <span className="min-w-0 truncate font-mono text-label text-foreground" title={value}>
-        {value}
-      </span>
-      <CopyButton value={value} label={label} />
-    </dd>
-  </div>
+/** Nothing to draw: a dash, its reason on hover. */
+const EmptyMark = ({ label }: { label: string }): JSX.Element => (
+  <span role="img" aria-label={label} title={label} className="text-title text-muted-foreground">
+    —
+  </span>
 );
 
-const AttemptRow = ({
-  execution,
-  index,
+/** One run, told: what happened, inside it and against the runs beside it. */
+export const RunOverview = ({
+  run,
+  results,
   onOpenExecution,
+  onOpenLogs,
+  onOpenParameters,
+  onOpenRun,
+  onInspectTask,
 }: {
-  execution: ExecutionRecordSummary;
-  index: number;
+  run: RunSummary;
+  /** The latest attempt's reported results. */
+  results?: Record<string, unknown>;
   onOpenExecution?: (executionId: string) => void;
+  onOpenLogs?: () => void;
+  onOpenParameters?: () => void;
+  /** Open a sibling run. */
+  onOpenRun?: (runId: string) => void;
+  onInspectTask?: (taskId: string) => void;
 }): JSX.Element => {
-  const duration = attemptElapsed(execution);
-  const errorText = isFailureStatus(execution.status) ? executionErrorText(execution.error) : null;
-  const body = (
-    <span className="flex min-w-0 items-center gap-3">
-      <span className="w-6 shrink-0 font-mono text-label text-muted-foreground">{index + 1}</span>
-      <span className="w-16 shrink-0 truncate font-mono text-label text-foreground">
-        {execution.executionId}
-      </span>
-      <RunStatusBadge status={execution.status} size="sm" />
-      <span className="min-w-0 flex-1 truncate text-label text-muted-foreground">
-        {execution.mode}
-        {" · "}
-        {formatDateTime(execution.startedAt ?? execution.createdAt)}
-      </span>
-      {duration ? (
-        <span className="shrink-0 font-mono text-label tabular-nums text-foreground">
-          {duration}
-        </span>
-      ) : null}
-    </span>
+  const history = run.executionHistory;
+  const latest = history[history.length - 1] ?? null;
+  const journal = useQuery({
+    ...executionJournalQueryOptions(
+      run.projectId,
+      run.experimentId,
+      run.id,
+      latest?.executionId ?? "",
+    ),
+    enabled: latest !== null,
+    refetchInterval: journalRefetchInterval(latest?.status),
+  });
+  const graph = useMemo(
+    () => (journal.data ? normalizeTaskGraph(journal.data) : null),
+    [journal.data],
   );
-  const className =
-    "flex w-full min-w-0 flex-col gap-1 px-1 py-2 text-left hover:bg-interactive/50 focus-visible:bg-interactive/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
-  const row = (
+  const { rows: siblings } = useScopeRuns({ experimentId: run.experimentId }, true);
+  const now = useMemo(() => Date.now(), []);
+
+  const verdict = runVerdict(run, graph, now);
+  const tasks = useMemo(() => taskSpans(graph, now), [graph, now]);
+  const waiting = unstartedTasks(graph);
+  const standing = useMemo(() => siblingStanding(run.id, siblings, now), [run.id, siblings, now]);
+  const coordinates = useMemo(
+    () => distinguishingParameters(run.parameters ?? {}, siblings),
+    [run.parameters, siblings],
+  );
+  const figures = resultFigures(results);
+  const attempts = useMemo(() => attemptSpans(history, now), [history, now]);
+
+  if (!latest) {
+    return (
+      <OverviewCanvas>
+        <EmptyState
+          title="Not run yet"
+          description="0 attempts. Start this run from the toolbar and its story appears here."
+        />
+      </OverviewCanvas>
+    );
+  }
+
+  const actions = (
     <>
-      {body}
-      {errorText ? (
-        <span className="truncate pl-9 font-mono text-label text-foreground" title={errorText}>
-          {errorText}
-        </span>
+      {onOpenLogs ? (
+        <WorkbenchAction
+          kind="ghost"
+          size="compact"
+          icon={<FileText aria-hidden />}
+          onClick={onOpenLogs}
+        >
+          Logs
+        </WorkbenchAction>
+      ) : null}
+      {onOpenExecution ? (
+        <WorkbenchAction
+          kind="ghost"
+          size="compact"
+          icon={<History aria-hidden />}
+          onClick={() => onOpenExecution(latest.executionId)}
+        >
+          Execution
+        </WorkbenchAction>
       ) : null}
     </>
   );
-  return (
-    <li className="border-b border-border last:border-b-0">
-      {onOpenExecution ? (
-        <button
-          type="button"
-          className={className}
-          onClick={() => onOpenExecution(execution.executionId)}
-        >
-          {row}
-        </button>
-      ) : (
-        <div className={className}>{row}</div>
-      )}
-    </li>
-  );
-};
 
-/** How this run's attempts turned out. Parameters stay on their tab. */
-export const RunOverview = ({
-  run,
-  onOpenExecution,
-}: {
-  run: RunSummary;
-  onOpenExecution?: (executionId: string) => void;
-}): JSX.Element => {
-  const history = run.executionHistory;
-  const counts = executionCounts(history);
   return (
-    <OverviewSurface>
-      <DashboardCanvas>
-        <p className="text-label text-muted-foreground">
-          <span className="tabular-nums text-foreground">{history.length}</span>{" "}
-          {history.length === 1 ? "execution" : "executions"}
-        </p>
-        <OverviewSheet
-          lead={
-            history.length > 1 ? (
-              <StatusLedger counts={counts} unit={["execution", "executions"]} />
-            ) : history.length === 0 ? (
-              <p className="text-body text-foreground">Not run yet</p>
+    <OverviewCanvas>
+      <Verdict verdict={verdict} actions={actions} />
+
+      <GaugeSection
+        title="Tasks"
+        readout={
+          waiting > 0 ? (
+            <Tally icon={CircleDashed} value={waiting} label={`${waiting} tasks not started`} />
+          ) : undefined
+        }
+      >
+        {journal.isPending ? (
+          <span role="status" aria-label="Reading the attempt's journal">
+            <LoaderCircle
+              aria-hidden
+              className="mol-motion-progress-spin size-icon text-muted-foreground"
+            />
+          </span>
+        ) : tasks.length > 0 ? (
+          <TimelineChart
+            spans={tasks}
+            label="The latest attempt's tasks, start to finish"
+            onPick={onInspectTask}
+          />
+        ) : (
+          <EmptyMark
+            label={
+              graph && graph.task_configs.length > 0
+                ? "No task has started yet"
+                : "This attempt journalled no tasks"
+            }
+          />
+        )}
+      </GaugeSection>
+
+      <div className="grid min-w-0 gap-x-16 gap-y-12 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <GaugeSection
+          title="Siblings"
+          readout={
+            standing.place ? (
+              <Tally
+                icon={standing.place === "=" ? Equal : Timer}
+                value={standing.place}
+                label={standing.rank ?? ""}
+              />
             ) : undefined
           }
-          main={
-            <>
-              {run.errorMessage ? (
-                <p className="flex items-start gap-2 border border-border px-3 py-2">
-                  <TriangleAlert
-                    className="mt-px size-icon-sm shrink-0 text-status-failed-foreground"
-                    aria-hidden
-                  />
-                  <span className="min-w-0 break-words font-mono text-label text-foreground">
-                    {run.errorMessage}
-                  </span>
-                </p>
+        >
+          {standing.points.length > 1 ? (
+            <PositionChart points={standing.points} onPick={onOpenRun} />
+          ) : (
+            <EmptyMark label="No other finished run in this experiment to compare with" />
+          )}
+          {coordinates.length > 0 ? (
+            <dl className="mt-4 flex flex-wrap gap-x-6 gap-y-2">
+              {coordinates.map(({ key, value }) => (
+                <div key={key} className="flex min-w-0 items-baseline gap-2">
+                  <dt className="font-mono text-label text-muted-foreground">{key}</dt>
+                  <dd className="font-mono text-body text-foreground">{value}</dd>
+                </div>
+              ))}
+              {onOpenParameters ? (
+                <WorkbenchIconAction label="All parameters" onClick={onOpenParameters}>
+                  <SlidersHorizontal aria-hidden />
+                </WorkbenchIconAction>
               ) : null}
-              {history.length > 0 ? (
-                <ul aria-label="Executions">
-                  {history.map((execution, index) => (
-                    <AttemptRow
-                      key={execution.executionId}
-                      execution={execution}
-                      index={index}
-                      onOpenExecution={onOpenExecution}
-                    />
-                  ))}
-                </ul>
-              ) : null}
-              {run.definitionHash || run.experimentRevisionId ? (
-                <section className="min-w-0 space-y-2 border-t border-border pt-3">
-                  <h2 className="text-body-lg font-medium text-foreground">Definition</h2>
-                  <dl className="space-y-3">
-                    {run.definitionHash ? (
-                      <IdentityLine label="Definition hash" value={run.definitionHash} />
-                    ) : null}
-                    {run.experimentRevisionId ? (
-                      <IdentityLine label="Experiment revision" value={run.experimentRevisionId} />
-                    ) : null}
-                  </dl>
-                </section>
-              ) : null}
-              <KnowledgeBacklinksCard
-                kind="run"
-                projectId={run.projectId}
-                experimentId={run.experimentId}
-                runId={run.id}
-              />
-            </>
+            </dl>
+          ) : null}
+        </GaugeSection>
+
+        <GaugeSection title="Results">
+          {figures.length > 0 ? (
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
+              {figures.slice(0, 6).map(({ key, value }) => (
+                <div key={key} className="min-w-0">
+                  <dt className="truncate font-mono text-micro text-muted-foreground" title={key}>
+                    {key}
+                  </dt>
+                  <dd
+                    className="truncate text-title font-semibold tabular-nums text-foreground"
+                    title={value}
+                  >
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <EmptyMark
+              label={
+                verdict.status === "succeeded"
+                  ? "This attempt reported no scalar results"
+                  : "No results yet"
+              }
+            />
+          )}
+        </GaugeSection>
+      </div>
+
+      {history.length > 1 ? (
+        <GaugeSection
+          title="Attempts"
+          readout={
+            <Tally icon={RotateCcw} value={history.length} label={`${history.length} attempts`} />
           }
-        />
-      </DashboardCanvas>
-    </OverviewSurface>
+        >
+          <TimelineChart
+            spans={attempts}
+            label="This run's attempts, start to finish"
+            onPick={onOpenExecution}
+          />
+        </GaugeSection>
+      ) : null}
+
+      <KnowledgeBacklinksCard
+        kind="run"
+        projectId={run.projectId}
+        experimentId={run.experimentId}
+        runId={run.id}
+      />
+    </OverviewCanvas>
   );
 };

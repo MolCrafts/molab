@@ -389,6 +389,16 @@
 .molab-dashboard {
   background-color: var(--color-background);
   background-image: none;
+  /*
+   * The chart viewer (@molcrafts/ui-vega) paints its tooltip and reads its axis
+   * rule from the shadcn-style names; molab spells its palette `--molab-*`.
+   * Bridge them here, on the overview surface only, so every chart tooltip is
+   * an overlay in the product palette rather than bare text.
+   */
+  --popover: var(--molab-surface);
+  --popover-foreground: var(--molab-foreground);
+  --border: var(--molab-border);
+  --shadow-overlay: var(--molab-shadow-overlay);
 }
 
 /*

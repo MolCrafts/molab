@@ -170,7 +170,18 @@ describe("offline showcase contracts", () => {
   it("covers knowledge classes, search, harvest, task registry and notebook export", async () => {
     const knowledge = await json<{ notes: Array<{ cls: string }> }>("/knowledge");
     expect(new Set(knowledge.notes.map((n) => n.cls))).toEqual(
-      new Set(["Note", "Finding", "Observation", "Report", "Plan", "Literature"]),
+      new Set([
+        "Note",
+        "Finding",
+        "Observation",
+        "Report",
+        "Plan",
+        "Roadmap",
+        "Todo",
+        "Milestone",
+        "Literature",
+        "Delegation",
+      ]),
     );
     const search = await json<{ hits: unknown[] }>("/knowledge/search?q=energy");
     expect(search.hits.length).toBeGreaterThan(0);

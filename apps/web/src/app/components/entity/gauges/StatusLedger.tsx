@@ -48,6 +48,12 @@ export const StatusLedger = ({
     (group) => `${counts[group.id]} ${group.label.toLowerCase()}`,
   ).join(", ");
 
+  if (counts.total === 0) {
+    return (
+      <p className={cn("text-label text-muted-foreground", className)}>No {plural(0, unit)} yet.</p>
+    );
+  }
+
   return (
     <div
       className={cn(

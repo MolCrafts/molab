@@ -311,7 +311,13 @@ export type CoreObjectView = "overview" | "executions" | "logs" | "metrics" | "s
 export type ObjectView = CoreObjectView | (string & {});
 
 export type ExperimentView = "overview" | "workflow" | "runs" | "parameters" | "notebook";
-export type ProjectView = "overview" | "experiments" | "assets" | "settings";
+export type ProjectView =
+  | "overview"
+  | "experiments"
+  | "attention"
+  | "timeline"
+  | "assets"
+  | "settings";
 
 export interface ObjectSelection {
   objectType: BaseObjectType;

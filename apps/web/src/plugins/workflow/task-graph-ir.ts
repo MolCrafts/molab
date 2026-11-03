@@ -26,6 +26,10 @@ export interface TaskNodeJson {
   config?: Record<string, unknown>;
   /** Execution status (`pending` / `running` / `completed` / `failed` / `skipped`). */
   status?: string;
+  /** When the engine journalled the task as running (`started_at`). Absent until it starts. */
+  startedAt?: string;
+  /** When it completed, failed or was skipped (`finished_at`). Absent while running. */
+  finishedAt?: string;
   /**
    * The failure message recorded when this node's `status` is `failed` (the
    * exception's `type: message`, persisted to the execution's workflow.json).

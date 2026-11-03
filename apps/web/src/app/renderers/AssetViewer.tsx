@@ -1,13 +1,19 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@molcrafts/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Archive, Download } from "lucide-react";
+import { useState } from "react";
 import { assetsApi, assetVersionOrigin } from "@/api";
 import {
+  BYTES_EXPR,
+  type CountBar,
+  CountBars,
   DashboardCanvas,
-  DashboardCard,
+  EmptyState,
   EntityPage,
-  Histogram,
-  OverviewInstruments,
+  GaugeSection,
+  Instrument,
+  InstrumentStrip,
+  OverviewCanvas,
   OverviewList,
   OverviewSurface,
 } from "@/app/components/entity";
@@ -20,11 +26,13 @@ import {
 } from "@/components/workbench";
 import { formatDateTime } from "@/lib/datetime";
 import { formatBytes } from "@/lib/format-bytes";
+import { formatRelative } from "@/lib/format-time";
 
 export const AssetViewer = ({
   selection,
   snapshot,
 }: ScopedRendererProps<"assets">): JSX.Element => {
+  const [tab, setTab] = useState("overview");
   const summary = snapshot.assets.find((item) => item.id === selection.objectId) ?? null;
   const projectId = summary?.projectId ?? "";
   const assetQuery = useQuery({
@@ -74,9 +82,38 @@ export const AssetViewer = ({
   }
 
   const title = asset?.title ?? summary.name;
-  const versionSizes = versions.flatMap((version) =>
-    typeof version.size === "number" && version.size >= 0 ? [version.size] : [],
+  const ordered = [...versions].sort((left, right) => left.version - right.version);
+  const latest = ordered[ordered.length - 1] ?? null;
+  const previous = ordered[ordered.length - 2] ?? null;
+  const sizeChange =
+    latest &&
+    previous &&
+    typeof latest.size === "number" &&
+    typeof previous.size === "number" &&
+    previous.size > 0
+      ? Math.round(((latest.size - previous.size) / previous.size) * 100)
+      : null;
+  const promoted = ordered.filter((version) => version.originKind === "artifact").length;
+  const imported = ordered.filter((version) => version.originKind === "import").length;
+  const sizeBars: CountBar[] = ordered.flatMap((version) =>
+    typeof version.size === "number" && version.size >= 0
+      ? [
+          {
+            key: version.id,
+            label: `v${version.version}`,
+            value: version.size,
+            readout: formatBytes(version.size),
+            // One fact per line: a narrow chart cannot hold a long origin on one row.
+            tip: [
+              `v${version.version} · ${formatBytes(version.size)}`,
+              assetVersionOrigin(version),
+              formatDateTime(version.createdAt),
+            ].join("\n"),
+          },
+        ]
+      : [],
   );
+  const openVersions = (): void => setTab("versions");
   const versionsTable =
     versions.length === 0 ? (
       <WorkbenchOperationState
@@ -123,25 +160,64 @@ export const AssetViewer = ({
         {
           value: "overview",
           label: "Overview",
-          content: (
-            <OverviewSurface>
-              <DashboardCanvas>
-                <OverviewInstruments>
-                  {versionSizes.length > 0 ? (
-                    <DashboardCard title="Version size">
-                      <Histogram
-                        values={versionSizes}
-                        format={formatBytes}
-                        unit="versions"
-                        ariaLabel="Distribution of asset version sizes"
-                      />
-                    </DashboardCard>
-                  ) : null}
-                </OverviewInstruments>
-                <OverviewList title="Versions">{versionsTable}</OverviewList>
-              </DashboardCanvas>
-            </OverviewSurface>
-          ),
+          content:
+            ordered.length === 0 ? (
+              <OverviewCanvas>
+                <EmptyState
+                  title="No versions yet"
+                  description="Promote an Artifact to create this asset's first version."
+                />
+              </OverviewCanvas>
+            ) : (
+              <OverviewCanvas>
+                <InstrumentStrip label="Asset gauges" lead={false}>
+                  <Instrument
+                    title="Versions"
+                    figure={ordered.length}
+                    caption={
+                      latest
+                        ? `latest v${latest.version} · ${formatRelative(latest.createdAt)}`
+                        : undefined
+                    }
+                    onSelect={openVersions}
+                    selectHint="Versions"
+                    selectLabel={`${ordered.length} versions. Open the list`}
+                  />
+                  <Instrument
+                    title="Latest size"
+                    figure={latest ? formatBytes(latest.size) : "—"}
+                    caption={
+                      sizeChange === null
+                        ? previous
+                          ? "size not recorded on the previous version"
+                          : "the first version"
+                        : `${sizeChange >= 0 ? "+" : ""}${sizeChange}% vs v${previous?.version}`
+                    }
+                  />
+                  <Instrument
+                    title="Origin"
+                    figure={promoted}
+                    caption={`promoted from runs · ${imported} imported`}
+                  />
+                </InstrumentStrip>
+                <GaugeSection
+                  title="Size by version"
+                  readout={sizeBars.length > 0 ? "click a version to open the list" : undefined}
+                >
+                  {sizeBars.length > 0 ? (
+                    <CountBars
+                      bars={sizeBars}
+                      label="Size of each asset version"
+                      orientation="vertical"
+                      valueExpr={BYTES_EXPR}
+                      onPick={openVersions}
+                    />
+                  ) : (
+                    <p className="text-label text-muted-foreground">No version records a size.</p>
+                  )}
+                </GaugeSection>
+              </OverviewCanvas>
+            ),
         },
         {
           value: "versions",
@@ -155,7 +231,8 @@ export const AssetViewer = ({
           ),
         },
       ]}
-      defaultTab="overview"
+      activeTab={tab}
+      onActiveTabChange={setTab}
     />
   );
 };

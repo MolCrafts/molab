@@ -29,6 +29,12 @@ export default defineConfig(({ command }) => {
 
   return {
     plugins: [pluginReact()],
+    dev: {
+      // Compiling dynamic imports on demand rewrites module ids while the
+      // first page is still loading Project Overview and the project tree.
+      // The in-flight require then calls a factory that is no longer there.
+      lazyCompilation: false,
+    },
     resolve: {
       alias: {
         '@molcrafts/molwasm': resolveMolwasm(),

@@ -360,10 +360,14 @@ export const StatusDistribution = ({
             <div
               key={group.id}
               title={`${group.label}: ${counts[group.id]}`}
-              className="h-full min-w-hairline"
+              className={cn(
+                "h-full min-w-hairline",
+                group.id === "pending" &&
+                  "rounded-hairline border border-status-queued bg-background",
+              )}
               style={{
                 width: `${(counts[group.id] / total) * 100}%`,
-                backgroundColor: group.color,
+                backgroundColor: group.id === "pending" ? undefined : group.color,
               }}
             />
           ))}

@@ -42,24 +42,32 @@ describe("workbench layout contract", () => {
 
   it("keeps Dashboard exploratory and Settings rail-only", () => {
     const coreNav = readWebSource("plugins/core/navigation.tsx");
-    const catalog = readWebSource("app/dashboard/layout.ts");
-    const dashboard = readWebSource("app/dashboard/DashboardGrid.tsx");
 
     expect(coreNav).toContain("explorer: DashboardExplorer");
     expect(coreNav).toMatch(/id: "dashboard"[\s\S]*?shellMode: "explorer"/);
     expect(coreNav).toMatch(/id: "settings"[\s\S]*?shellMode: "rail-only"/);
-    // The six panels are a catalog the operator can arrange, not a fixed page.
-    for (const panel of [
-      "Execution status",
-      "Activity",
-      "Backends",
-      "Run duration",
-      "Schedule",
-      "Needs attention",
-    ]) {
-      expect(catalog).toContain(panel);
+  });
+
+  it("gives the workspace and a project one instrument Overview, with lists behind tabs", () => {
+    const dashboard = readWebSource("app/dashboard/DashboardPage.tsx");
+    const project = readWebSource("app/renderers/ProjectViewer.tsx");
+    const overview = readWebSource("app/dashboard/ExecutionOverview.tsx");
+
+    // One composition at both levels — a designed page, not an arrangeable grid.
+    expect(dashboard).toContain('groupBy="project"');
+    expect(project).toContain('groupBy="experiment"');
+    expect(dashboard).not.toMatch(/Arrange|<DashboardGrid|localStorage/);
+    for (const gauge of ["SuccessDial", "UnitMeter", "DurationRange", "ActivityPanel"]) {
+      expect(overview).toContain(gauge);
     }
-    expect(dashboard).toContain("Arrange");
+    // The Overview draws instruments; the run lists live in their own tabs.
+    expect(overview).not.toMatch(/NeedsAttention|RunTimeline/);
+    for (const source of [dashboard, project]) {
+      expect(source).toContain('value: "attention"');
+      expect(source).toContain('value: "timeline"');
+      expect(source).toContain("<NeedsAttention");
+      expect(source).toContain("<RunTimeline");
+    }
   });
 
   it("gives Compare a page frame and a single matrix scrollport", () => {

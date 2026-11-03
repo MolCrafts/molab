@@ -6,7 +6,11 @@ describe("DOC_SKELETON", () => {
     expect(DOC_SKELETON.Note).toBe("");
     expect(DOC_SKELETON.Finding).toContain("## Result");
     expect(DOC_SKELETON.Plan).toContain("## Objective");
+    expect(DOC_SKELETON.Roadmap).not.toMatch(/^(stages|items|criterion):/m);
+    expect(DOC_SKELETON.Todo).not.toMatch(/^(stages|items|criterion):/m);
+    expect(DOC_SKELETON.Milestone).not.toMatch(/^(stages|items|criterion):/m);
     expect(isSourcedClass("Finding")).toBe(true);
+    expect(isSourcedClass("Roadmap")).toBe(true);
     expect(isSourcedClass("Note")).toBe(false);
     expect(isSourcedClass("Literature")).toBe(false);
   });

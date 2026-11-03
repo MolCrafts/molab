@@ -23,45 +23,41 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { experimentsApi } from "@/api";
+import { activeNeedsAuth, shouldShowFailure } from "@/api/errors";
 import { useCompareSet } from "@/app/compare";
 import { activeWorkspace, itemFromRunSummary } from "@/app/compare/entries";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import { CreateSweepDialog } from "@/app/components/CreateSweepDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
 import {
+  ChoiceToggle,
   CopyButton,
-  DashboardCanvas,
   DataTable,
-  DurationStrip,
   EMPTY_COPY,
   EmptyState,
   EntityPage,
-  Figure,
-  formatSpan,
-  Gauge,
   InventoryCanvas,
   MagnitudeBar,
-  OverviewSheet,
+  OverviewCanvas,
   OverviewSurface,
-  quantile,
   StatusIcon,
-  StatusLedger,
   SweepMatrix,
 } from "@/app/components/entity";
-import { runPath } from "@/app/entities/paths";
+import {
+  paramGroup,
+  rollupExecutions,
+  varyingParameterKeys,
+} from "@/app/dashboard/dashboardWidgets";
+import { ExecutionOverview } from "@/app/dashboard/ExecutionOverview";
+import { useScopeRuns } from "@/app/dashboard/useScopeRuns";
 import { buildRunListActions, type RunListHandlers } from "@/app/entities/runListActions";
 import { countRunStatuses, formatDuration, formatScalar } from "@/app/renderers/dashboardData";
 import {
   buildExperimentWorkbenchData,
   experimentRunCompleteness,
 } from "@/app/renderers/entityWorkbenchData";
-import {
-  durationPoints,
-  latestFailure,
-  sweepAxes,
-  unrunValueCount,
-} from "@/app/renderers/overview/gaugeData";
-import { ConstantsNote, ExtremesNote, FailureNote } from "@/app/renderers/overview/MarginNotes";
+import { sweepAxes, unrunValueCount } from "@/app/renderers/overview/gaugeData";
+import { ConstantsNote } from "@/app/renderers/overview/MarginNotes";
 import { useRunMultiSelect } from "@/app/runs/useRunMultiSelect";
 import { experimentWorkflowLabel } from "@/app/state/api";
 import { useNavigationState } from "@/app/state/useNavigationState";
@@ -187,6 +183,12 @@ export const ExperimentViewer = ({
   );
 
   const counts = useMemo(() => countRunStatuses(runs), [runs]);
+  const {
+    query: scopeRuns,
+    rows: scopeRows,
+    truncated: scopeTruncated,
+  } = useScopeRuns({ experimentId }, Boolean(experimentId) && activeTab === "overview");
+  const [groupAxis, setGroupAxis] = useState<string | null>(null);
   // Domain for the in-row duration bars: the slowest run in this experiment.
   const maxRunDurationMs = useMemo(
     () =>
@@ -249,7 +251,7 @@ export const ExperimentViewer = ({
 
   const handleDelete = async () => {
     if (!projectId) return;
-    if (!window.confirm(`Delete “${experimentId}”?`)) {
+    if (!window.confirm(`Delete “${experiment?.name ?? "this experiment"}”?`)) {
       return;
     }
     setIsDeleting(true);
@@ -321,11 +323,7 @@ export const ExperimentViewer = ({
       header: "Run",
       width: "w-44",
       cell: (run) => (
-        <div
-          className="flex min-w-0 items-center gap-1"
-          title={`${run.name || run.id}
-${run.id}`}
-        >
+        <div className="flex min-w-0 items-center gap-1" title={run.name || "Run"}>
           <span className="min-w-0 flex-1 truncate text-body">{run.name || run.id}</span>
           <CopyButton
             value={run.id}
@@ -444,15 +442,8 @@ ${run.id}`}
       title: action.title,
       onSelect: () => action.onSelect(),
     }));
-  const runHref = (run: RunSummary): string => runPath(projectId, experimentId, run.id);
-  const durations = durationPoints(runs, runHref);
-  const medianSeconds = quantile(
-    durations.map((point) => point.seconds).sort((left, right) => left - right),
-    0.5,
-  );
   const sweep = sweepAxes(workbench.axisBreakdowns);
   const unrun = unrunValueCount(sweep);
-  const failure = latestFailure(runs);
   const workflowPluginEnabled = isPluginEnabled("workflow");
   const hasWorkflowData = Boolean(
     workflowPluginEnabled && workflow && workbench.workflowSummary.exists,
@@ -484,51 +475,79 @@ ${run.id}`}
 
   // Always pass full tab bodies (EntityTabContent hides inactive with CSS).
   // Conditional `activeTab === … ? content : null` remounted Flowgram on every switch.
+  // Group the Overview by a swept parameter; the user may pick which one.
+  const axisKeys = varyingParameterKeys(scopeRows);
+  const activeAxis = groupAxis && axisKeys.includes(groupAxis) ? groupAxis : (axisKeys[0] ?? null);
+  const needsAuth = activeNeedsAuth(snapshot.workspaces);
+  const overviewError = shouldShowFailure(scopeRuns.error, {
+    fetching: scopeRuns.isFetching,
+    needsAuth,
+  })
+    ? scopeRuns.error instanceof Error
+      ? scopeRuns.error.message
+      : "Could not load experiment activity"
+    : null;
+  const overviewPending = scopeRuns.isPending || (needsAuth && scopeRuns.data === undefined);
+
+  // Always pass full tab bodies (EntityTabContent hides inactive with CSS).
+  // Conditional `activeTab === … ? content : null` remounted Flowgram on every switch.
   const overviewContent = (
-    <OverviewSurface>
-      <DashboardCanvas>
-        <p className="text-label text-muted-foreground">
-          <span className="tabular-nums text-foreground">
-            {runCountValue === null ? "—" : runCountValue}
-          </span>{" "}
-          runs
-        </p>
-        {counts.total > 0 ? (
-          <OverviewSheet
-            lead={<StatusLedger counts={counts} partial={!runsComplete} />}
-            main={
-              durations.length > 0 ? (
-                <Gauge
-                  title="Run duration"
-                  readout={
-                    <>
-                      median <Figure>{formatSpan(medianSeconds)}</Figure> across{" "}
-                      <Figure>{durations.length}</Figure> finished
-                    </>
-                  }
-                >
-                  <DurationStrip series={[{ id: experiment.id, points: durations }]} />
-                </Gauge>
-              ) : null
-            }
-            margin={
-              failure || durations.length > 1 ? (
-                <>
-                  {failure ? <FailureNote run={failure} href={runHref(failure)} /> : null}
-                  <ExtremesNote points={durations} />
-                </>
-              ) : undefined
-            }
-          />
-        ) : null}
-      </DashboardCanvas>
-    </OverviewSurface>
+    <OverviewCanvas>
+      {overviewError ? (
+        <WorkbenchOperationState
+          kind="error"
+          density="compact"
+          title="Could not load experiment activity"
+          detail={overviewError}
+          action={<WorkbenchRetryAction onClick={() => void scopeRuns.refetch()} />}
+        />
+      ) : overviewPending ? (
+        <WorkbenchOperationState
+          kind="loading"
+          density="compact"
+          title="Loading experiment activity…"
+          skeletonRows={3}
+        />
+      ) : rollupExecutions(scopeRows).total === 0 ? (
+        <EmptyState
+          title="No executions yet"
+          description="Start a run, or a sweep from the More menu, and this page fills in."
+        />
+      ) : (
+        <ExecutionOverview
+          rows={scopeRows}
+          partial={scopeTruncated || !runsComplete}
+          inventoryBlocked={scopeTruncated}
+          groupBy={activeAxis ? paramGroup(activeAxis) : "experiment"}
+          groupControl={
+            axisKeys.length > 1 && activeAxis ? (
+              <ChoiceToggle
+                label="Group by parameter"
+                value={activeAxis}
+                choices={axisKeys.map((key) => ({ value: key, label: key }))}
+                onChange={setGroupAxis}
+              />
+            ) : undefined
+          }
+          onOpenAttention={() => setEntityTab("runs")}
+          onOpenTimeline={() => setEntityTab("runs")}
+          attentionHint="Runs"
+          timelineHint="Runs"
+        />
+      )}
+    </OverviewCanvas>
   );
 
   return (
     <EntityPage
       icon={FlaskConical}
       title={experiment.name}
+      meta={
+        <span>
+          <span className="text-foreground">{runCountValue === null ? "—" : runCountValue}</span>{" "}
+          runs
+        </span>
+      }
       actions={
         <>
           <CreateRunDialog

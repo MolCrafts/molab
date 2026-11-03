@@ -1015,6 +1015,23 @@ outputs:
                     : "running"
                   : "pending",
       }));
+      // Task timings as the engine journals them (persistence.py): a started
+      // task has `started_at`, a finished one `finished_at`; pending and skipped
+      // tasks have neither. The attempt's wall time is split by a fixed share.
+      const attemptStart = Date.parse(execution.startedAt ?? execution.createdAt);
+      const attemptEnd = execution.finishedAt ? Date.parse(execution.finishedAt) : Date.now();
+      const shares = [0.12, 0.58, 0.22, 0.08];
+      let cursor = attemptStart;
+      graph.task_configs = graph.task_configs.map((task: Record<string, unknown>, i: number) => {
+        const span = (attemptEnd - attemptStart) * (shares[i] ?? 0.1);
+        const status = String(task.status);
+        const started = ["completed", "failed", "running", "cancelled"].includes(status);
+        const startedAt = started ? new Date(cursor).toISOString() : null;
+        const finishedAt =
+          started && status !== "running" ? new Date(cursor + span).toISOString() : null;
+        if (started) cursor += span;
+        return { ...task, started_at: startedAt, finished_at: finishedAt };
+      });
       writeFile(`${root}/workflow.json`, JSON.stringify(graph, null, 2));
       if (run.id === "run-001") {
         writeFile(

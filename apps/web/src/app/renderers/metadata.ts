@@ -128,13 +128,18 @@ export const buildMetadataFields = (
       if (!asset) {
         return emptyFields("asset", selection.objectId);
       }
-      return [
+      const fields: MetadataField[] = [
         { label: "Asset", value: asset.name },
+        { label: "Asset ID", value: asset.id },
         { label: "Status", value: asset.status },
         { label: "Summary", value: asset.summary },
         { label: "Updated", value: asset.updatedAt },
         { label: "Size", value: `${asset.sizeBytes} bytes` },
       ];
+      if (asset.projectId) {
+        fields.push({ label: "Project ID", value: asset.projectId });
+      }
+      return fields;
     },
     workflow: () => {
       const workflow = findWorkflow(snapshot, selection.objectId);

@@ -21,6 +21,7 @@ interface ShowcaseNote {
   tags: string[];
   body: string;
   links: string[];
+  record?: Record<string, unknown>;
 }
 
 const documentSlug = (name: string): string => {
@@ -124,6 +125,86 @@ for (const [cls, name, excerpt, hostPath] of [
   };
   notes.set(relPath, note);
 }
+
+const thermostat =
+  "projects/nve-drift/experiments/thermostat-validation/knowledges/thermostat-validation.md";
+for (const note of [
+  {
+    cls: "Roadmap",
+    name: "Thermostat roadmap",
+    excerpt: "Bind the workflow, then compare relaxation times.",
+    record: {
+      stages: [
+        { id: "bind", title: "Bind the workflow", experiment: "thermostat-validation" },
+        {
+          id: "compare",
+          title: "Compare relaxation times",
+          experiment: "thermostat-validation",
+          depends_on: ["bind"],
+        },
+      ],
+    },
+  },
+  {
+    cls: "Todo",
+    name: "Thermostat todo",
+    excerpt: "The comparison stays blocked until the workflow is bound.",
+    record: {
+      items: [
+        { id: "bind-workflow", title: "Bind a workflow", status: "open", stage: "bind" },
+        {
+          id: "compare-times",
+          title: "Compare relaxation times",
+          status: "blocked",
+          stage: "compare",
+        },
+      ],
+    },
+  },
+  {
+    cls: "Milestone",
+    name: "Relaxation times compared",
+    excerpt: "The thermostat examples have been compared.",
+    record: {
+      stage: "compare",
+      criterion: "Relaxation times are compared for the thermostat examples.",
+      status: "open",
+    },
+  },
+  {
+    cls: "Delegation",
+    name: "Thermostat check",
+    excerpt: "Check that the thermostat examples stay near 300 K.",
+    record: {
+      goal: "Check that the thermostat examples stay near 300 K.",
+      scope: "projects/nve-drift",
+      state: "open",
+    },
+  },
+] satisfies Array<{
+  cls: string;
+  name: string;
+  excerpt: string;
+  record: Record<string, unknown>;
+}>) {
+  const relPath = documentRelPath(
+    "projects/nve-drift/experiments/thermostat-validation",
+    note.name,
+  );
+  notes.set(relPath, {
+    cls: note.cls,
+    name: note.name,
+    relPath,
+    hostPath: "projects/nve-drift/experiments/thermostat-validation",
+    excerpt: note.excerpt,
+    status: "active",
+    tags: ["example", note.cls.toLowerCase()],
+    body: `# ${note.name}\n\n${note.excerpt}\n\nCites [${thermostat}](${thermostat}).\n`,
+    links: [thermostat],
+    record: note.record,
+  });
+}
+
 const manuscript = getFile("manuscript/main.tex");
 if (manuscript?.content)
   notes.set("manuscript/main.tex", {
@@ -211,6 +292,7 @@ export const featureShowcaseHandlers = [
       relPath: note.relPath,
       body: note.body,
       links: note.links,
+      record: note.record ?? {},
       cards: [
         { kind: "experiment", id: "exp-001", title: "AlphaFold Baseline", status: "active" },
         { kind: "run", id: "run-001", title: "run-001", status: "succeeded" },
@@ -279,6 +361,7 @@ export const featureShowcaseHandlers = [
       relPath: note.relPath,
       body: note.body,
       links: note.links,
+      record: note.record ?? {},
       cards: [],
     });
   }),
@@ -300,6 +383,7 @@ export const featureShowcaseHandlers = [
       body?: string;
       hostPath?: string | null;
       cls?: string;
+      record?: Record<string, unknown>;
     };
     const name = body.name ?? "note";
     const hostPath = body.hostPath ?? "";
@@ -314,6 +398,7 @@ export const featureShowcaseHandlers = [
       tags: [],
       body: body.body ?? "",
       links: [],
+      record: body.record,
     };
     if (notes.has(relPath))
       return HttpResponse.json({ detail: "Document already exists" }, { status: 409 });

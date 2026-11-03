@@ -1,4 +1,5 @@
 import type { ComponentType, JSX, ReactNode } from "react";
+import { DetailsInspectorButton } from "@/app/layout/detailsInspector";
 import type { SemanticStatus } from "@/app/types";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { EntityTabBar, EntityTabContent, EntityTabs } from "./EntityTabs";
@@ -136,7 +137,12 @@ export const EntityPage = ({
         title={title}
         titleTooltip={titleTooltip}
         afterTitle={afterTitle}
-        actions={actions}
+        actions={
+          <>
+            {actions}
+            <DetailsInspectorButton />
+          </>
+        }
       />
       {meta ? (
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-border px-4 py-2 font-mono text-micro tabular-nums text-muted-foreground">

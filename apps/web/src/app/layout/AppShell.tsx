@@ -12,6 +12,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { activeNeedsAuth, shouldShowFailure } from "@/api/errors";
 import { GlobalCommandPalette } from "@/app/entities/GlobalCommandPalette";
 import { ContextBar } from "@/app/layout/ContextBar";
+import {
+  DetailsInspectorProvider,
+  selectionHasDetails,
+  useDetailsInspectorValue,
+} from "@/app/layout/detailsInspector";
 import { RemoteConnectDialog } from "@/app/layout/RemoteConnectDialog";
 import {
   dismissRemoteAuth,
@@ -101,6 +106,7 @@ export const AppShell = ({
   onActiveRefresh,
 }: AppShellProps): JSX.Element => {
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [inspectedTask, setInspectedTask] = useState<InspectedTask | null>(null);
   const [inspectorSurface, setInspectorSurface] = useState<InspectorSurfaceRegistration | null>(
@@ -166,6 +172,18 @@ export const AppShell = ({
     registeredSelectionInspectorId.current = nextId;
   }, [selection?.objectId, selectionInspectorId]);
 
+  const detailsAvailable = selectionHasDetails(selection);
+  const toggleDetails = useCallback(() => {
+    setDetailsOpen((current) => {
+      if (!current) setInspectorOpen(true);
+      return !current;
+    });
+  }, []);
+  const detailsInspector = useDetailsInspectorValue(
+    detailsOpen && detailsAvailable,
+    detailsAvailable,
+    toggleDetails,
+  );
   const inspectorSelection: Selection | null =
     inspectedTask && pinnedTaskActive
       ? {
@@ -176,11 +194,13 @@ export const AppShell = ({
         }
       : selectionInspectorId
         ? selection
-        : null;
+        : detailsOpen && detailsAvailable
+          ? selection
+          : null;
 
   // The right side is contextual chrome, not a permanent second details page.
-  // It is available only when a feature explicitly registers a task/run surface,
-  // a workflow task has been pinned, or a plugin owns a contextual run inspector.
+  // It opens for a registered task or run surface, a pinned workflow task, or
+  // when Details is opened on the current entity. Ids and hashes stay there.
   const hasInspectorContent = Boolean(inspectorSurface || inspectorSelection);
   const inspectorVisible = inspectorOpen && hasInspectorContent;
   const inspectorPanelIds = useMemo(
@@ -394,46 +414,48 @@ export const AppShell = ({
 
   return (
     <MolabRefIndexContext.Provider value={useMemo(() => buildMolabRefIndex(snapshot), [snapshot])}>
-      <InspectedTaskContext.Provider value={inspectedTaskContext}>
-        <CommandKeymap />
-        <GlobalCommandPalette snapshot={snapshot} />
-        <div className="flex h-screen flex-col bg-background text-foreground">
-          <ContextBar onMenuClick={isMobile ? () => setMobileNavOpen(true) : undefined} />
-          {/* Work surface above a plugin bottom drawer and a 28px status bar. */}
-          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            {workbenchColumns}
-            <PluginBottomPanelHost />
-            <WorkbenchStatusStrip
-              isRefreshing={isRefreshing}
-              onRemoteIndexReady={onWorkspaceRefresh}
-              activeWorkspace={activeWorkspace}
-              onReconnect={handleReconnect}
-              extras={statusBarExtras.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  title={item.tooltip ?? item.text}
-                  className="max-w-40 truncate px-1 font-mono text-micro text-statusbar-foreground/90 hover:text-statusbar-foreground"
-                  onClick={() => {
-                    if (item.command) runCommand(item.command);
-                  }}
-                >
-                  {item.text}
-                </button>
-              ))}
+      <DetailsInspectorProvider value={detailsInspector}>
+        <InspectedTaskContext.Provider value={inspectedTaskContext}>
+          <CommandKeymap />
+          <GlobalCommandPalette snapshot={snapshot} />
+          <div className="flex h-screen flex-col bg-background text-foreground">
+            <ContextBar onMenuClick={isMobile ? () => setMobileNavOpen(true) : undefined} />
+            {/* Work surface above a plugin bottom drawer and a 28px status bar. */}
+            <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {workbenchColumns}
+              <PluginBottomPanelHost />
+              <WorkbenchStatusStrip
+                isRefreshing={isRefreshing}
+                onRemoteIndexReady={onWorkspaceRefresh}
+                activeWorkspace={activeWorkspace}
+                onReconnect={handleReconnect}
+                extras={statusBarExtras.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    title={item.tooltip ?? item.text}
+                    className="max-w-40 truncate px-1 font-mono text-micro text-statusbar-foreground/90 hover:text-statusbar-foreground"
+                    onClick={() => {
+                      if (item.command) runCommand(item.command);
+                    }}
+                  >
+                    {item.text}
+                  </button>
+                ))}
+              />
+            </main>
+            <RemoteConnectDialog
+              workspace={connectWorkspace ?? activeWorkspace}
+              open={connectOpen}
+              onOpenChange={setConnectOpen}
+              onDismiss={() => {
+                if (connectWorkspace) dismissRemoteAuth(connectWorkspace.key);
+              }}
+              onConnected={onWorkspaceRefresh}
             />
-          </main>
-          <RemoteConnectDialog
-            workspace={connectWorkspace ?? activeWorkspace}
-            open={connectOpen}
-            onOpenChange={setConnectOpen}
-            onDismiss={() => {
-              if (connectWorkspace) dismissRemoteAuth(connectWorkspace.key);
-            }}
-            onConnected={onWorkspaceRefresh}
-          />
-        </div>
-      </InspectedTaskContext.Provider>
+          </div>
+        </InspectedTaskContext.Provider>
+      </DetailsInspectorProvider>
     </MolabRefIndexContext.Provider>
   );
 };

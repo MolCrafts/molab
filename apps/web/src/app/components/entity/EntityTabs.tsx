@@ -6,6 +6,8 @@ import {
   type ReactNode,
   startTransition,
   useContext,
+  useEffect,
+  useRef,
   useState,
 } from "react";
 import { cn } from "@/lib/utils";
@@ -67,17 +69,27 @@ export const EntityTabBar = ({
   listClassName,
   triggerClassName,
 }: EntityTabBarProps): JSX.Element => {
+  const strip = useRef<HTMLDivElement>(null);
+  const active = useContext(TabState)?.active;
+  // A strip narrower than its tabs scrolls; keep the selected one in view.
+  useEffect(() => {
+    if (!active) return;
+    const trigger = strip.current?.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
+    trigger?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [active]);
   return (
     <div
+      ref={strip}
       className={cn(
         "flex h-8 w-full min-w-0 shrink-0 items-stretch overflow-x-auto border-b border-border/60 bg-background",
+        "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         className,
       )}
     >
       <TabsList
         variant="line"
         className={cn(
-          "flex h-full w-max min-w-0 gap-0 rounded-none border-0 bg-transparent p-0",
+          "flex h-full w-max min-w-0 shrink-0 justify-start gap-0 rounded-none border-0 bg-transparent p-0",
           "group-data-[orientation=horizontal]/tabs:h-full",
           listClassName,
         )}

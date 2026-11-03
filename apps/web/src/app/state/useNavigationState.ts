@@ -55,7 +55,15 @@ const parseExperimentView = (raw: string | undefined): ExperimentView | undefine
 };
 
 const parseProjectView = (raw: string | undefined): ProjectView | undefined => {
-  if (raw === "experiments" || raw === "assets" || raw === "settings") return raw;
+  if (
+    raw === "experiments" ||
+    raw === "attention" ||
+    raw === "timeline" ||
+    raw === "assets" ||
+    raw === "settings"
+  ) {
+    return raw;
+  }
   return undefined;
 };
 
@@ -164,7 +172,9 @@ export const buildSelectionFromLocation = (
     };
   }
 
-  const projectViewMatch = pathname.match(/^\/projects\/([^/]+)\/(experiments|assets|settings)$/);
+  const projectViewMatch = pathname.match(
+    /^\/projects\/([^/]+)\/(experiments|attention|timeline|assets|settings)$/,
+  );
   if (projectViewMatch) {
     return {
       objectType: "project",
