@@ -304,3 +304,56 @@ class TestDelegationWorkerLinks:
         doc = _write(ws, _record(kind="capability"))
         assert record_of(doc)["kind"] == "capability"
         assert Delegation(doc.path).record().kind == "capability"  # ty: ignore[unresolved-attribute]
+
+
+class TestDelegationApprovals:
+    """``approvals`` keep what a person approved at each human gate."""
+
+    def _approved(self) -> dict[str, object]:
+        return _record(
+            approvals=[
+                {
+                    "gate": "plan",
+                    "target": "projects/p/knowledges/plan.md",
+                    "by": "roykid",
+                    "at": "2026-11-04T10:00:00+00:00",
+                    "note": "Go ahead with the three-rate sweep.",
+                },
+                {
+                    "gate": "dry_run",
+                    "target": "molab:experiment/01HZ",
+                    "by": "roykid",
+                    "at": "2026-11-04T10:05:00+00:00",
+                },
+            ]
+        )
+
+    def test_approvals_round_trip_through_a_document(self, ws: Workspace) -> None:
+        doc = _write(ws, self._approved())
+        record = Delegation(doc.path).record()  # ty: ignore[unresolved-attribute]
+        plan, dry_run = record.approvals
+        assert plan.gate == "plan" and plan.note == "Go ahead with the three-rate sweep."
+        assert dry_run.gate == "dry_run" and dry_run.note is None
+        assert dry_run.target == "molab:experiment/01HZ"
+        stored = record_of(doc)
+        assert stored["approvals"][1] == {
+            "gate": "dry_run",
+            "target": "molab:experiment/01HZ",
+            "by": "roykid",
+            "at": "2026-11-04T10:05:00+00:00",
+        }
+
+    def test_a_record_without_approvals_still_loads(self) -> None:
+        assert parse_delegation(_record()).approvals == ()
+
+    def test_an_approval_is_validated(self) -> None:
+        with pytest.raises(ValueError, match="approvals"):
+            parse_delegation(
+                _record(approvals=[{"gate": "merge", "target": "x", "by": "me", "at": "t"}])
+            )
+        with pytest.raises(ValueError, match="approvals"):
+            parse_delegation(_record(approvals=[{"gate": "plan", "target": "x", "at": "t"}]))
+        with pytest.raises(ValueError, match="approvals"):
+            parse_delegation(
+                _record(approvals=[{"gate": "plan", "target": "", "by": "me", "at": "t"}])
+            )

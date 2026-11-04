@@ -14,9 +14,11 @@ take steps, ``blocked`` waits on a person (its ``questions``), ``paused`` is
 held by a person, ``done`` and ``stopped`` are final. ``amendments`` record
 every change a person made to its terms; ``writes`` key the documents it wrote
 so a retried write is not doubled. ``answers`` keep what a person answered
-when it was blocked, and ``last_decision`` the supervisor's latest decision
-document. An attempt links the brief it was dispatched with and the report it
-came back with (:mod:`molab.knowledge.worker_report`).
+when it was blocked, ``approvals`` what a person approved at each human gate
+(the parameters, the plan, a dry run, the results — each about one document
+or entity), and ``last_decision`` the supervisor's latest decision document.
+An attempt links the brief it was dispatched with and the report it came back
+with (:mod:`molab.knowledge.worker_report`).
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ __all__ = [
     "DELEGATION_FIELDS",
     "DelegationAmendment",
     "DelegationAnswer",
+    "DelegationApproval",
     "DelegationAttempt",
     "DelegationBudget",
     "DelegationDecision",
@@ -46,6 +49,7 @@ __all__ = [
 DelegationKind = Literal["research", "capability"]
 DelegationState = Literal["open", "waiting", "blocked", "paused", "done", "stopped"]
 WaitState = Literal["pending", "resolved", "expired"]
+ApprovalGate = Literal["parameters", "plan", "dry_run", "results"]
 DelegationAction = Literal[
     "read",
     "create_experiment",
@@ -161,6 +165,27 @@ class DelegationAnswer(BaseModel):
     text: str = Field(min_length=1)
 
 
+class DelegationApproval(BaseModel):
+    """What a person approved at one human gate.
+
+    Attributes:
+        gate: Which gate: ``parameters``, ``plan``, ``dry_run`` or ``results``.
+        target: What the approval is about — a workspace-relative knowledge or
+            experiment path, or a ``molab:`` ref.
+        by: Who approved.
+        at: ISO-8601 time of the approval.
+        note: What the person said, if anything.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    gate: ApprovalGate
+    target: str = Field(min_length=1)
+    by: str = Field(min_length=1)
+    at: str = Field(min_length=1)
+    note: str | None = None
+
+
 class DelegationAmendment(BaseModel):
     """One recorded change to a delegation's terms, made by a person.
 
@@ -217,6 +242,7 @@ class DelegationRecord(BaseModel):
     writes: tuple[DelegationWrite, ...] = ()
     last_decision: DelegationDecision | None = None
     answers: tuple[DelegationAnswer, ...] = ()
+    approvals: tuple[DelegationApproval, ...] = ()
 
     @model_validator(mode="after")
     def _ids_unique(self) -> DelegationRecord:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -325,3 +326,100 @@ class TestGetWorkflowDocument:
         with served(ws) as client:
             response = client.get(_workflow_url(exp))
         assert response.status_code == 404
+
+
+def _three_tasks():
+    wf = Workflow(name="pbix")
+
+    @wf.task
+    async def monomers() -> int:
+        return 1
+
+    @wf.task
+    async def pack() -> int:
+        return 1
+
+    @wf.task(depends_on=["monomers", "pack"])
+    async def equilibrate(monomers: int, pack: int) -> int:
+        return monomers + pack
+
+    return (wf).compile()
+
+
+class TestDryRunWorkflow:
+    """``dry_run_workflow_document``: walk the stored IR, import nothing, write nothing."""
+
+    def test_a_code_experiment_is_walked_from_its_stored_graph(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        # The entrypoint names a file that does not exist: the route must not import it.
+        exp.bind_workflow(
+            "code",
+            entrypoint="missing.py:build",
+            document=_three_tasks().to_graph_ir().model_dump(mode="json"),
+        )
+        before = sorted(str(p) for p in Path(str(ws.root)).rglob("*"))
+        with served(ws) as client:
+            response = client.get(f"{_workflow_url(exp)}/dry-run")
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "experiment": {"id": exp.id, "name": "e", "path": "projects/p/experiments/e"},
+            "workflow": {"name": "pbix"},
+            "waves": [["monomers", "pack"], ["equilibrate"]],
+            "branches": [],
+            "runs": [{"params": {"x": 1}}],
+            "tasks": [
+                {"name": "monomers", "dependsOn": []},
+                {"name": "pack", "dependsOn": []},
+                {"name": "equilibrate", "dependsOn": ["monomers", "pack"]},
+            ],
+        }
+        assert run.executions == []
+        assert sorted(str(p) for p in Path(str(ws.root)).rglob("*")) == before
+
+    def test_a_document_experiment_is_walked_through_the_codec(
+        self,
+        served: ServedFactory,
+        fresh_run: RunFixture,
+        echo_document: dict[str, object],
+    ) -> None:
+        ws, exp, _run = fresh_run
+        with served(ws) as client:
+            put = client.put(_workflow_url(exp), json={"document": echo_document})
+            assert put.status_code == 200, put.text
+            response = client.get(f"{_workflow_url(exp)}/dry-run")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["workflow"] == {"name": "ui-doc"}
+        assert body["waves"] == [["echo"]]
+        assert body["tasks"] == [{"name": "echo", "dependsOn": []}]
+
+    def test_without_a_document_it_is_404(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, _run = fresh_run
+        with served(ws) as client:
+            response = client.get(f"{_workflow_url(exp)}/dry-run")
+        assert response.status_code == 404
+
+    def test_a_graph_that_does_not_compile_is_400(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, _run = fresh_run
+        snapshot = _three_tasks().to_graph_ir().model_dump(mode="json")
+        snapshot["tasks"][0]["depends_on"] = ["ghost"]
+        exp.bind_workflow("code", entrypoint="missing.py:build", document=snapshot)
+        with served(ws, raise_server_exceptions=False) as client:
+            response = client.get(f"{_workflow_url(exp)}/dry-run")
+        assert response.status_code == 400, response.text
+        assert "ghost" in response.json()["error"]["message"]
+
+    def test_a_malformed_document_is_400(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, _run = fresh_run
+        exp.bind_workflow("code", entrypoint="missing.py:build", document=GRAPH)
+        with served(ws, raise_server_exceptions=False) as client:
+            response = client.get(f"{_workflow_url(exp)}/dry-run")
+        assert response.status_code == 400, response.text

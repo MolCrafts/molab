@@ -5,7 +5,7 @@ Top-level verbs (``run`` / ``serve`` / ``monitor`` / ``explore`` / ``context`` /
 ``init`` / ``validate``, plus the hidden molq worker entry ``execute``) and
 noun groups (``project`` / ``experiment`` /
 ``runs`` / ``asset`` / ``target`` / ``session`` / ``config`` / ``auth`` /
-``git`` / ``knowledge`` / ``index`` / ``scratch`` / ``agents`` / ``check``)
+``git`` / ``knowledge`` / ``workflow`` / ``index`` / ``scratch`` / ``agents`` / ``check``)
 register directly on the app. Each
 workspace-bound command resolves its execution target via
 :mod:`molab.cli._target`. There is no ``workspace`` god-group.
@@ -87,6 +87,11 @@ app.add_typer(auth_app, name="auth")
 from molab.cli.knowledge_cmd import knowledge_app  # noqa: E402
 
 app.add_typer(knowledge_app, name="knowledge")
+
+# ── workflow previews (dry run of a script, nothing written) ─────────────────
+from molab.cli.workflow_cmd import workflow_app  # noqa: E402
+
+app.add_typer(workflow_app, name="workflow")
 
 # ── Third-party CLI plugin discovery ─────────────────────────────────────────
 _logger = get_logger(__name__)

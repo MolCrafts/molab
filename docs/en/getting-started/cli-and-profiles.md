@@ -92,6 +92,8 @@ Each verb owns a **disjoint** job. Nothing overlaps, nothing falls back silently
 
 | Verb | Domain | What it does |
 |---|---|---|
+| `molab workflow dry-run` | nothing written | Imports the script under a throwaway root and prints each workflow's task waves, branches, dependencies and declared run parameters (`--json` for one object per experiment) |
+| `molab run --dry-run` | `pending` only | Creates missing runs, executes nothing (preview with `molab serve`) |
 | `molab run` | `pending` only | Creates missing runs, executes pending ones |
 | `--resume` | `failed` / `cancelled` | Creates a new Execution and seeds completed tasks |
 | `--rerun` | `failed` / `cancelled` | Opens a fresh execution from the top |

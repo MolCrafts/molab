@@ -79,6 +79,57 @@ class WorkflowDocumentResponse(ApiModel):
     document: dict[str, Any] = Field(..., description="Normalized workflow IR document")
 
 
+class WorkflowDryRunExperiment(ApiModel):
+    """The experiment a dry run is about."""
+
+    id: str = Field(..., description="Experiment id")
+    name: str = Field(..., description="Experiment name")
+    path: str = Field(..., description="Workspace-relative experiment path")
+
+
+class WorkflowDryRunWorkflow(ApiModel):
+    """The workflow a dry run walked."""
+
+    name: str = Field(..., description="Workflow name")
+
+
+class WorkflowDryRunBranch(ApiModel):
+    """One declared branch route. A dry run takes none."""
+
+    source: str
+    label: str
+    target: str
+
+
+class WorkflowDryRunRun(ApiModel):
+    """One run the experiment would dispatch."""
+
+    params: dict[str, Any] = Field(..., description="The run's parameters")
+
+
+class WorkflowDryRunTask(ApiModel):
+    """One task and the dependencies the compiler settled on."""
+
+    name: str
+    depends_on: list[str] = Field(default_factory=list)
+
+
+class WorkflowDryRunResponse(ApiModel):
+    """The walk of an experiment's stored workflow, without running a task.
+
+    The same document ``molab workflow dry-run --json`` prints for a script.
+    """
+
+    experiment: WorkflowDryRunExperiment
+    workflow: WorkflowDryRunWorkflow
+    waves: list[list[str]] = Field(
+        ..., description="Ready tasks per step, earliest first; a wave can run together"
+    )
+    branches: list[WorkflowDryRunBranch] = Field(default_factory=list)
+    runs: list[WorkflowDryRunRun] = Field(default_factory=list)
+    tasks: list[WorkflowDryRunTask] = Field(default_factory=list)
+
+
 # ── Project ─────────────────────────────────────────────────────────────────
 
 

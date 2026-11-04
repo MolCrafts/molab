@@ -49,6 +49,10 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
     ("Create a project", "molab project create NAME"),
     ("Create an experiment", "molab experiment create PROJECT --name NAME"),
     ("Create a run", "molab runs create PROJECT EXPERIMENT --params '{...}'"),
+    (
+        "Preview what a workflow script would run, writing nothing",
+        "molab workflow dry-run workflow.py --json",
+    ),
     ("Execute a workflow", "molab run workflow.py"),
     (
         "Record a job that ran outside molab",

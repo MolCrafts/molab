@@ -16,6 +16,7 @@ The guide tells an agent to start at `./index.md`. Each `index.md` frontmatter i
 | record a job that ran outside molab | `molab runs adopt P E RUN --product TASK=PATH --log FILE --job FILE --source FILE` |
 | read or write a record's narrative | `molab index show` / `molab index write --from FILE` |
 | write a knowledge document | `molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --record JSON --created-by AGENT` |
+| preview what a workflow script would run, writing nothing | `molab workflow dry-run SCRIPT --json` |
 | rebuild the derived index blocks | `molab index sync` |
 | print into the run's record | `from molab import print` ([Tracking a Computation](tracking.md)) |
 | record training data | `ctx.metrics.scalar(...)` ([Tracking a Computation](tracking.md#metrics)) |

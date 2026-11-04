@@ -1185,7 +1185,11 @@ def run(
         bool,
         typer.Option(
             "--dry-run",
-            help="Compile/materialize the workspace and run plan without executing tasks.",
+            help=(
+                "Compile/materialize the workspace and run plan without executing "
+                "tasks (missing runs are created). For a preview that writes nothing, "
+                "use `molab workflow dry-run`."
+            ),
         ),
     ] = False,
     bg: Annotated[

@@ -59,6 +59,7 @@ from .responses import (
     UiPluginListResponse,
     UiPluginResponse,
     WorkflowDocumentResponse,
+    WorkflowDryRunResponse,
     WorkflowSnapshotResponse,
     WorkspaceInfoResponse,
 )
@@ -140,6 +141,7 @@ __all__ = [
     "UiPluginResponse",
     "WorkflowDocumentRequest",
     "WorkflowDocumentResponse",
+    "WorkflowDryRunResponse",
     "WorkflowSnapshotResponse",
     "WorkspaceContextResponse",
     "WorkspaceExecutionRow",

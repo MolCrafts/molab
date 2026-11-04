@@ -1136,6 +1136,39 @@ class TestDelegationRecordRoutes:
             )
         assert response.status_code == 422, response.text
 
+    def test_an_approval_is_recorded_at_a_known_gate(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, exp, _run = lab
+        approval = {
+            "gate": "dry_run",
+            "target": f"molab:experiment/{exp.id}",
+            "by": "roykid",
+            "at": "2026-11-04T10:05:00+00:00",
+            "note": "Waves look right.",
+        }
+        with served(ws) as client:
+            created = self._create(client, exp, _experiment_host(ws, exp))
+            path = created["relPath"]
+            record = client.get("/api/knowledge/doc/record", params={"path": path}).json()
+            approved = client.patch(
+                "/api/knowledge/doc/record",
+                params={"path": path},
+                json={
+                    "record": {**record["record"], "approvals": [approval]},
+                    "ifMatch": record["digest"],
+                },
+            )
+            assert approved.status_code == 200, approved.text
+            assert approved.json()["record"]["approvals"] == [approval]
+            unknown_gate = client.patch(
+                "/api/knowledge/doc/record",
+                params={"path": path},
+                json={"record": {**record["record"], "approvals": [{**approval, "gate": "merge"}]}},
+            )
+        assert unknown_gate.status_code == 422, unknown_gate.text
+        assert "approvals" in unknown_gate.json()["detail"]
+
     def test_create_without_goal_is_422(self, served: ServedFactory, lab: RunFixture) -> None:
         ws, exp, _run = lab
         with served(ws) as client:

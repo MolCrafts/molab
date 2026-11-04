@@ -260,9 +260,12 @@ piece of work. Its frontmatter is validated by
 `molab:` ref), `actions` (a closed set: `read`, `create_experiment`,
 `create_run`, `start_execution`, `cancel_execution`, `write_knowledge`,
 `delegate_worker`), `budget` / `spent`, `acceptance`, `stop_conditions`,
-`state` (`open` / `waiting` / `paused` / `done` / `stopped`), `waits`,
-`attempts`, `supervisor`, and `current_plan`. Its source is the scope it is
-bound to.
+`state` (`open` / `waiting` / `blocked` / `paused` / `done` / `stopped`),
+`waits`, `attempts`, `supervisor`, `current_plan`, `questions`, `amendments`,
+`writes`, `last_decision`, `answers` and `approvals` (what a person approved
+at each human gate — `parameters`, `plan`, `dry_run` or `results` — and the
+knowledge path, experiment path or `molab:` ref it is about). Its source is
+the scope it is bound to.
 
 A document whose class owns a record (Delegation, Roadmap, Todo, Milestone)
 can have that record replaced whole over HTTP:
