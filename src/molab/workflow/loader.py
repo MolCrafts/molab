@@ -22,6 +22,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import cast
 
+from molab.source_loader import spec_from_source
 from molab.workflow.compiled import CompiledWorkflow
 from molab.workflow.compiler import Workflow
 
@@ -96,7 +97,7 @@ def _load_locked(entrypoint: str) -> CompiledWorkflow:
 
 
 def _load_file(path: Path, key: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(key, path)
+    spec = spec_from_source(key, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load workflow file: {path}")
     module = importlib.util.module_from_spec(spec)

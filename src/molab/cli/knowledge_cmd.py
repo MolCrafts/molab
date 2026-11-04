@@ -513,11 +513,15 @@ def _rel_to_workspace(workspace: Workspace, doc_path: object) -> str:
 
 
 def _load_record(raw: str | None) -> dict[str, object] | None:
-    """A ``--record`` JSON object, or the object in a JSON file."""
+    """A ``--record`` JSON object, or the object in a JSON file.
+
+    Inline JSON is told by its leading ``{``; anything else is a path. The
+    inline text is never probed as a path, whose name limit a record of any
+    size would exceed.
+    """
     if raw is None:
         return None
-    path = Path(raw)
-    text = path.read_text(encoding="utf-8") if path.is_file() else raw
+    text = raw if raw.lstrip().startswith("{") else Path(raw).read_text(encoding="utf-8")
     loaded = json.loads(text)
     if not isinstance(loaded, dict):
         raise ValueError("--record must be a JSON object")

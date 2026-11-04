@@ -78,6 +78,44 @@ ws.add_project("p").add_experiment("e").define(wf, params={{"seed": [1]}})
 """
 
 
+# The healing workflow again, but stage_a's value comes from a module-level
+# helper reading a module-level constant — code outside the task's own source.
+_HELPER_SCRIPT = """\
+from pathlib import Path
+
+import molab as me
+from molab.workflow import Workflow
+
+FLAG = Path({flag!r})
+RESULT = Path({result!r})
+OFFSET = {offset}
+
+
+def offset() -> int:
+    return OFFSET{helper_body}
+
+
+wf = Workflow(name="helpers")
+
+
+@wf.task
+def stage_a(seed: int) -> int:
+    return seed + offset()
+
+
+@wf.task(depends_on=["stage_a"])
+def stage_b(stage_a: int) -> str:
+    if not FLAG.exists():
+        raise RuntimeError("FLAG missing")
+    RESULT.write_text(str(stage_a * 100))
+    return str(stage_a * 100)
+
+
+ws = me.Workspace(name="lab")
+ws.add_project("p").add_experiment("e").define(wf, params={{"seed": [1]}})
+"""
+
+
 @pytest.fixture(autouse=True)
 def _isolate_cli_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Reset the process-global state ``molab run`` touches.
@@ -112,6 +150,20 @@ def _write_script(tmp_path: Path) -> Path:
     script = tmp_path / "s.py"
     script.write_text(
         _SCRIPT.format(flag=str(tmp_path / "healed"), result=str(tmp_path / "result.txt")),
+        encoding="utf-8",
+    )
+    return script
+
+
+def _write_helper_script(tmp_path: Path, *, offset: int = 1, helper_body: str = "") -> Path:
+    script = tmp_path / "s.py"
+    script.write_text(
+        _HELPER_SCRIPT.format(
+            flag=str(tmp_path / "healed"),
+            result=str(tmp_path / "result.txt"),
+            offset=offset,
+            helper_body=helper_body,
+        ),
         encoding="utf-8",
     )
     return script
@@ -798,6 +850,56 @@ class TestRun:
         assert third.mode.value == "rerun"
         assert third.based_on_execution_id == "e02"
         assert third.bypass_cache is True
+
+    # Each edit also changes the script's size: ``molab run`` imports the script
+    # through the import system, which validates a ``__pycache__`` entry by
+    # whole-second mtime and size, so a same-size rewrite within one second
+    # would execute the stale bytecode.
+    @pytest.mark.parametrize(
+        ("edit", "expected"),
+        [
+            pytest.param({"offset": 50}, "5100", id="module-constant"),
+            pytest.param({"helper_body": " + 4"}, "600", id="helper-body"),
+        ],
+    )
+    def test_resume_after_editing_a_helper_reruns_the_upstream_node(
+        self, tmp_path: Path, edit: dict[str, object], expected: str
+    ) -> None:
+        """stage_a reaches ``offset()`` / ``OFFSET`` outside its own source.
+
+        Editing either must drop e01's stage_a seed on resume: its persisted
+        output (seed 1 + offset 1 = 2) was computed by code that no longer
+        exists. Pre-fix the seed was kept and stage_b wrote ``"200"``.
+        """
+        script = _write_helper_script(tmp_path)
+        exit_code, output = _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        assert exit_code == 1, output
+        _heal(tmp_path)
+        _write_helper_script(tmp_path, **edit)  # type: ignore[arg-type]
+
+        exit_code, output = _molab("run", str(script), "--resume", "--local", "-ws", str(tmp_path))
+
+        assert exit_code == 0, output
+        run = _only_run(tmp_path)
+        assert [e.mode.value for e in run.executions] == ["initial", "resume"]
+        assert (tmp_path / "result.txt").read_text() == expected
+        journal = json.loads((run.execution_dir("e02") / "workflow.json").read_text())
+        assert "stage_a" not in journal["seeded_from"]
+
+    def test_resume_without_an_edit_still_seeds_the_upstream_node(self, tmp_path: Path) -> None:
+        """The helper walk adds no spurious invalidation: an unchanged file seeds."""
+        script = _write_helper_script(tmp_path)
+        exit_code, output = _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        assert exit_code == 1, output
+        _heal(tmp_path)
+
+        exit_code, output = _molab("run", str(script), "--resume", "--local", "-ws", str(tmp_path))
+
+        assert exit_code == 0, output
+        run = _only_run(tmp_path)
+        assert (tmp_path / "result.txt").read_text() == "200"
+        journal = json.loads((run.execution_dir("e02") / "workflow.json").read_text())
+        assert set(journal["seeded_from"]) == {"stage_a"}
 
     def test_rerun_after_success_opens_a_rerun_execution(self, tmp_path: Path) -> None:
         script = _write_script(tmp_path)

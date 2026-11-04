@@ -97,6 +97,7 @@ def replace_record(
     """
     from .frontmatter import dump_frontmatter
     from .planning import check_planning_record
+    from .worker_report import check_worker_record
 
     klass = type(doc)
     if not has_record(doc):
@@ -111,6 +112,7 @@ def replace_record(
     if check_record is not None:
         check_record(clean, existing={})
     check_planning_record(klass, clean, creating=True)
+    check_worker_record(klass, clean, existing=None)
     common = {key: value for key, value in doc.frontmatter().items() if key in owned_common}
     narrative = doc.read() if body is None else body
     doc.write(

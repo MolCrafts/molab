@@ -78,6 +78,7 @@ def write_knowledge(
     disk = fs if fs is not None else _host_fs(host)
     from .concept import _record_as_dict
     from .planning import check_planning_record
+    from .worker_report import check_worker_record
 
     preview = _record_as_dict(record) if record is not None else None
     sourced = _sourced_class(of)
@@ -87,10 +88,12 @@ def write_knowledge(
         probe = sourced(host, name, sources=list(sources) or [object()], fs=disk)  # ty: ignore[invalid-argument-type]
     else:
         probe = of(host, name, fs=disk)  # ty: ignore[invalid-argument-type]
-    check_planning_record(of, preview, creating=not probe.exists())
+    existing = probe.frontmatter() if probe.exists() else None
+    check_planning_record(of, preview, creating=existing is None)
+    check_worker_record(of, preview, existing=existing)
     check_record = getattr(of, "check_record", None)
     if check_record is not None:
-        check_record(preview, existing=probe.frontmatter() if probe.exists() else None)
+        check_record(preview, existing=existing)
     if sourced is not None and not sources:
         item = sourced(host, name, sources=list(sources), fs=disk)  # ty: ignore[invalid-argument-type]
     else:

@@ -13,7 +13,10 @@ delegation's own lifecycle is ``state``: ``open`` and ``waiting`` (on compute)
 take steps, ``blocked`` waits on a person (its ``questions``), ``paused`` is
 held by a person, ``done`` and ``stopped`` are final. ``amendments`` record
 every change a person made to its terms; ``writes`` key the documents it wrote
-so a retried write is not doubled.
+so a retried write is not doubled. ``answers`` keep what a person answered
+when it was blocked, and ``last_decision`` the supervisor's latest decision
+document. An attempt links the brief it was dispatched with and the report it
+came back with (:mod:`molab.knowledge.worker_report`).
 """
 
 from __future__ import annotations
@@ -23,12 +26,16 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from .worker_report import Digest, TokenUsage
+
 __all__ = [
     "DELEGATION_ACTIONS",
     "DELEGATION_FIELDS",
     "DelegationAmendment",
+    "DelegationAnswer",
     "DelegationAttempt",
     "DelegationBudget",
+    "DelegationDecision",
     "DelegationRecord",
     "DelegationWait",
     "DelegationWrite",
@@ -98,7 +105,16 @@ class DelegationWait(BaseModel):
 
 
 class DelegationAttempt(BaseModel):
-    """One worker attempt and what it cost."""
+    """One worker attempt and what it cost.
+
+    Attributes:
+        brief: Workspace-relative path of the ``brief`` Note it was given.
+        brief_digest: That brief's digest, as dispatched.
+        report: Workspace-relative path of the ``worker_report`` Report it
+            came back with, once linked.
+        tokens: Model tokens it consumed; ``"unavailable"`` when the runtime
+            does not report them; ``None`` until settled.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -113,6 +129,36 @@ class DelegationAttempt(BaseModel):
     check: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
+    brief: str | None = None
+    brief_digest: Digest | None = None
+    report: str | None = None
+    tokens: Literal["unavailable"] | TokenUsage | None = None
+
+
+class DelegationDecision(BaseModel):
+    """The supervisor's latest decision document and what it decided.
+
+    Attributes:
+        path: Workspace-relative path of the decision document.
+        kind: The decision's kind, as the supervisor names it.
+        next: What it decided to do next, if anything.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    next: str | None = None
+
+
+class DelegationAnswer(BaseModel):
+    """What a person answered when the delegation was blocked on a question."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str = Field(min_length=1)
+    by: str = Field(min_length=1)
+    text: str = Field(min_length=1)
 
 
 class DelegationAmendment(BaseModel):
@@ -169,6 +215,8 @@ class DelegationRecord(BaseModel):
     questions: tuple[str, ...] = ()
     amendments: tuple[DelegationAmendment, ...] = ()
     writes: tuple[DelegationWrite, ...] = ()
+    last_decision: DelegationDecision | None = None
+    answers: tuple[DelegationAnswer, ...] = ()
 
     @model_validator(mode="after")
     def _ids_unique(self) -> DelegationRecord:

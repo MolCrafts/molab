@@ -63,6 +63,11 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
         "Write a knowledge document",
         "molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --record JSON --created-by AGENT",
     ),
+    (
+        "Report back as a dispatched worker",
+        "molab knowledge write NAME TEXT --on HOST --class Report --source SOURCE "
+        '--record \'{"kind": "worker_report", ...}\' --created-by WORKER',
+    ),
     ("Import external data", "molab asset import TITLE PATH --project PROJECT"),
     ("Empty old scratch entries", "molab scratch clean --older-than 7d"),
     ("Rebuild every derived index block", "molab index sync"),
@@ -169,6 +174,18 @@ def _knowledge_classes() -> str:
     return "\n".join(lines)
 
 
+def _worker_records() -> str:
+    """The two worker-round records, by class and ``kind``, with their fields."""
+    from molab.knowledge.worker_report import WORKER_RECORD_CLASSES, BriefRecord, WorkerReportRecord
+
+    models = {"worker_report": WorkerReportRecord, "brief": BriefRecord}
+    lines = ["| class | `kind` | record fields |", "|---|---|---|"]
+    for kind, owner in WORKER_RECORD_CLASSES.items():
+        fields = ", ".join(f"`{name}`" for name in models[kind].model_fields if name != "kind")
+        lines.append(f"| `{owner}` | `{kind}` | {fields} |")
+    return "\n".join(lines)
+
+
 def _commands() -> str:
     lines = ["| to | run |", "|---|---|"]
     rows = AGENT_COMMANDS + AGENT_PYTHON + AGENT_CONTEXT
@@ -238,6 +255,18 @@ def render_agent_guide(ws: Workspace) -> str:
         "names one class (`class:`). The table is the set. Write them with `molab knowledge write`.",
         "",
         _knowledge_classes(),
+        "",
+        "#### Worker records",
+        "",
+        "A supervised worker round is two of those documents with a structured record: "
+        "the `Note` you were dispatched with (`kind: brief` — the delegation, the round, "
+        "the digest of its text, the documents it was compiled from, and the protocol you "
+        "are held to) and the `Report` you write back (`kind: worker_report`). Report every "
+        "acceptance check by name with its verdict, every product, every departure from the "
+        "protocol, and every MolCrafts capability you needed and did not find; molab "
+        "refuses a record with an unknown field or on the wrong class.",
+        "",
+        _worker_records(),
         "",
         "### To do this, run that",
         "",

@@ -684,7 +684,6 @@ class Concept:
             extra = {**dumped, **extra}
         extra["class"] = type(self).__name__
         extra.pop("type", None)
-        extra.pop("kind", None)
         extra.pop("id", None)
         sources = list(getattr(self, "_sources", None) or [])
         existing_fm = self.frontmatter()
@@ -879,7 +878,13 @@ def _refresh_sections(fs: FileSystem, *document_paths: str) -> None:
 
 
 def _record_as_dict(record: object) -> dict[str, object]:
-    """Flatten a write() record into frontmatter keys (no type/kind/id)."""
+    """Flatten a write() record into frontmatter keys.
+
+    ``type`` and ``id`` are a concept's identity, never a record's, and are
+    dropped. ``kind`` is a record field — a Delegation's ``research`` /
+    ``capability``, a worker record's ``worker_report`` / ``brief`` — and is
+    kept.
+    """
     from .concept_meta import ConceptMeta
 
     if isinstance(record, ConceptMeta):
@@ -889,7 +894,6 @@ def _record_as_dict(record: object) -> dict[str, object]:
     else:
         payload = {}
     payload.pop("type", None)
-    payload.pop("kind", None)
     payload.pop("id", None)
     return payload
 

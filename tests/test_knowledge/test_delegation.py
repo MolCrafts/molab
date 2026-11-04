@@ -226,3 +226,81 @@ class TestDelegationLifecycleFields:
     def test_an_amendment_needs_a_reason(self) -> None:
         with pytest.raises(ValueError):
             parse_delegation(_record(amendments=[{"at": "t", "by": "me", "reason": ""}]))
+
+
+_DIGEST = "a" * 64
+
+
+class TestDelegationWorkerLinks:
+    """An attempt links its brief and report; the record keeps answers and the last decision."""
+
+    def _linked(self) -> dict[str, object]:
+        return _record(
+            attempts=[
+                {
+                    "id": "a1",
+                    "worker": "claude-code",
+                    "task": "build the trimer",
+                    "status": "done",
+                    "brief": "projects/p/knowledges/brief-r1.md",
+                    "brief_digest": _DIGEST,
+                    "report": "projects/p/knowledges/round-1-report.md",
+                    "tokens": {"input": 1200, "output": 340},
+                },
+                {"id": "a2", "worker": "subagent", "tokens": "unavailable"},
+            ],
+            last_decision={
+                "path": "projects/p/knowledges/decision-1.md",
+                "kind": "continue",
+                "next": "Dispatch round 2 with seed 42.",
+            },
+            answers=[
+                {
+                    "path": "projects/p/knowledges/answer-1.md",
+                    "by": "roykid",
+                    "text": "Mirror pairs: join 6 to 5 at every bridge.",
+                }
+            ],
+        )
+
+    def test_new_fields_round_trip_through_a_document(self, ws: Workspace) -> None:
+        doc = _write(ws, self._linked())
+        record = Delegation(doc.path).record()  # ty: ignore[unresolved-attribute]
+        first, second = record.attempts
+        assert first.brief == "projects/p/knowledges/brief-r1.md"
+        assert first.brief_digest == _DIGEST
+        assert first.report == "projects/p/knowledges/round-1-report.md"
+        assert first.tokens != "unavailable" and first.tokens.input == 1200
+        assert first.tokens.cache_read is None
+        assert second.tokens == "unavailable"
+        assert record.last_decision is not None and record.last_decision.kind == "continue"
+        assert record.answers[0].by == "roykid"
+        stored = record_of(doc)
+        assert stored["last_decision"]["next"] == "Dispatch round 2 with seed 42."
+        assert stored["attempts"][0]["tokens"] == {"input": 1200, "output": 340}
+
+    def test_a_record_without_the_new_fields_still_loads(self) -> None:
+        record = parse_delegation(
+            _record(attempts=[{"id": "a1", "worker": "claude-code", "cost_usd": 0.5}])
+        )
+        attempt = record.attempts[0]
+        assert attempt.brief is None and attempt.brief_digest is None
+        assert attempt.report is None and attempt.tokens is None
+        assert record.last_decision is None and record.answers == ()
+
+    def test_the_new_fields_are_validated(self) -> None:
+        with pytest.raises(ValueError, match="brief_digest"):
+            parse_delegation(
+                _record(attempts=[{"id": "a1", "worker": "w", "brief_digest": "short"}])
+            )
+        with pytest.raises(ValueError, match="tokens"):
+            parse_delegation(_record(attempts=[{"id": "a1", "worker": "w", "tokens": "none"}]))
+        with pytest.raises(ValueError, match="last_decision"):
+            parse_delegation(_record(last_decision={"path": "d.md"}))
+        with pytest.raises(ValueError, match="answers"):
+            parse_delegation(_record(answers=[{"path": "a.md", "by": "me"}]))
+
+    def test_the_delegation_kind_survives_the_write(self, ws: Workspace) -> None:
+        doc = _write(ws, _record(kind="capability"))
+        assert record_of(doc)["kind"] == "capability"
+        assert Delegation(doc.path).record().kind == "capability"  # ty: ignore[unresolved-attribute]

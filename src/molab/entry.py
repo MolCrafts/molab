@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from molab.fs import LocalFS
+from molab.source_loader import spec_from_source
 from molab.workspace.experiment import set_workflow_executor
 
 if TYPE_CHECKING:
@@ -206,7 +207,7 @@ def _import_script(script: Path) -> None:
     imports the same file under a private module name so this guard does
     not re-run.
     """
-    spec = importlib.util.spec_from_file_location("__main__", script)
+    spec = spec_from_source("__main__", script)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Cannot load script: {script}")
     module = importlib.util.module_from_spec(spec)

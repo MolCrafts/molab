@@ -222,7 +222,7 @@ def test_a_fresh_interpreter_imports_molab_knowledge() -> None:
 def test_a_fresh_interpreter_imports_each_new_submodule() -> None:
     result = _run_python(
         "import molab.knowledge.write, molab.knowledge.harvest, "
-        "molab.knowledge.embed, molab.knowledge.search"
+        "molab.knowledge.embed, molab.knowledge.search, molab.knowledge.worker_report"
     )
 
     assert result.returncode == 0, result.stderr

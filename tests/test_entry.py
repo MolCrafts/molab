@@ -276,3 +276,26 @@ class TestExecuteExperiment:
         assert exp.metadata.revision_id != before
         assert "tasks" in document and "edges" in document
         assert "task_configs" not in document
+
+
+class TestScriptIsCompiledFromSource:
+    def test_same_second_same_size_edit_is_not_served_from_a_stale_pyc(self, tmp_path, monkeypatch):
+        """``python`` would trust a ``.pyc`` whose mtime (whole seconds) and size match;
+        an edit like ``= 1`` → ``= 2`` within one second then runs stale bytecode."""
+        import os
+        import sys
+
+        from molab.entry import _import_script
+
+        script = tmp_path / "script.py"
+        script.write_text("VALUE = 1\n")
+        monkeypatch.setattr(sys, "dont_write_bytecode", False)
+        _import_script(script)
+        assert sys.modules["__main__"].VALUE == 1
+        # Force the cache-validation inputs to collide: same length, same mtime.
+        stat = script.stat()
+        script.write_text("VALUE = 2\n")
+        os.utime(script, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        _import_script(script)
+        assert sys.modules["__main__"].VALUE == 2
+        assert not (tmp_path / "__pycache__").exists()

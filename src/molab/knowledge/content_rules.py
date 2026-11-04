@@ -5,7 +5,8 @@ time, but a document written straight to disk never passed that gate. These
 rules read what is on disk and report, for :mod:`molab.knowledge.validate`:
 
 * ``knowledge.record`` (error) — a Roadmap / Todo / Milestone / Delegation
-  whose structured record its class rejects.
+  whose structured record its class rejects, or a Report / Note whose
+  ``worker_report`` / ``brief`` record is invalid or on the wrong class.
 * ``knowledge.campaign`` (error) — a Plan's campaign names a stage its roadmap
   does not have (:func:`~molab.knowledge.planning.check_campaign`).
 * ``knowledge.uncited_planning`` (warning) — a Roadmap, Todo or Milestone that
@@ -81,15 +82,18 @@ def _record(doc: Concept) -> dict[str, object]:
 
 
 def _record_issue(doc: Concept) -> ContentIssue | None:
-    """``knowledge.record`` for a document whose class owns a record."""
+    """``knowledge.record`` for a document whose class, or whose ``kind``, owns a record."""
     from .planning import check_planning_record
+    from .worker_report import WORKER_RECORD_CLASSES, check_worker_record
 
     klass = type(doc)
     role = getattr(klass, "PLANNING_ROLE", None)
     check_record = getattr(klass, "check_record", None)
-    if role not in _PLANNING_RECORD_ROLES and check_record is None:
-        return None
     payload = _record(doc)
+    kind = payload.get("kind")
+    worker = isinstance(kind, str) and kind in WORKER_RECORD_CLASSES
+    if role not in _PLANNING_RECORD_ROLES and check_record is None and not worker:
+        return None
     if role == "milestone":
         # A milestone's lifecycle status is its record's status.
         payload["status"] = doc.frontmatter().get("status", "open")
@@ -97,6 +101,7 @@ def _record_issue(doc: Concept) -> ContentIssue | None:
         if check_record is not None:
             check_record(payload, existing=None)
         check_planning_record(klass, payload, creating=True)
+        check_worker_record(klass, payload, existing=None)
     except (ValueError, TypeError) as exc:
         return ContentIssue(str(doc.path), "knowledge.record", str(exc), "error")
     return None
