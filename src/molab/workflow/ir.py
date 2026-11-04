@@ -1,20 +1,14 @@
 """``WorkflowGraphIR`` — the full compiled-graph intermediate representation.
 
-This is the workflow layer's *own* IR: a frozen, JSON-serializable snapshot
-of everything a compiled :class:`~molab.workflow.spec.Workflow` holds — its
-tasks and dependencies plus the complete control-flow topology (entries,
-control edges, branch routes, loops, parallel fan-outs). It is produced by
-:meth:`CompiledWorkflow.to_ir` after :meth:`WorkflowCompiler.compile`.
+This is the canvas snapshot of a compiled workflow: tasks, dependencies,
+and the control-flow topology (entries, control edges, branch routes, loops,
+parallel fan-outs). :meth:`CompiledWorkflow.to_graph_ir` produces it.
+:meth:`CompiledWorkflow.from_ir` does not read it.
 
-It is deliberately distinct from two neighbours:
-
-- The JSON *wire* IR produced by :meth:`Workflow.to_dict`
-  (``WorkflowCodec.spec_to_ir``'s ``task_configs`` + ``links`` shape) is the
-  server contract and is intentionally DAG-only; it rejects control
-  flow. ``WorkflowGraphIR`` is a superset that *can* represent branches,
-  loops, and parallels, so it is the right surface for diagrams and review.
-- This IR is the *executable-graph* layer (how the compiled workflow is
-  wired).
+The runnable document is the wire IR (``task_configs`` + ``links`` +
+``loops`` + ``parallels``) from :meth:`WorkflowCodec.spec_to_ir`. A code
+experiment stores this graph snapshot beside its entrypoint for the canvas.
+Execution of that experiment loads the entrypoint, not this snapshot.
 
 All models are ``frozen`` pydantic, matching the layer convention that pure
 data types are immutable. Edge collections are tuples so the IR round-trips
@@ -209,7 +203,7 @@ def _node_config(body: object) -> dict[str, JSONValue]:
     """JSON-safe build-time config for a graph-IR node.
 
     Identical to :func:`task_config_of` except for two bodies built around live
-    objects: a :class:`SubWorkflow`'s ``inner`` arg (a live ``WorkflowCompiler``
+    objects: a :class:`SubWorkflow`'s ``inner`` arg (a live ``Workflow``
     / ``CompiledWorkflow``, not JSON-serializable) is dropped — the inner
     topology is carried explicitly in ``GraphTaskIR.subworkflow`` — and a
     promoted callable (``_EntryTask``) serializes its ``fn`` as the importable

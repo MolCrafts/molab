@@ -23,6 +23,7 @@ Module surface:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
@@ -51,6 +52,12 @@ from ..types import (
 )
 from .node_params import _resolve_dependent_params
 from .state import WorkflowDeps, WorkflowState
+
+# Element index of the wf.parallel invocation currently running this task.
+# Unset outside a fan-out, where a subworkflow journal uses index 0.
+SUB_INDEX: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "molab_sub_index", default=None
+)
 
 # Sentinel for ``run_task_body(effective_config=…)``: distinguishes "resolve it
 # here" from an already-resolved effective config that is legitimately ``None``.
@@ -289,7 +296,7 @@ async def run_task_body(
             or name in state.root_inputs
             or bool(registration.depends_on)
         )
-        inputs = _make_sub_runner(deps, root_input=inputs, forward=has_input)
+        inputs = _make_sub_runner(deps, root_input=inputs, forward=has_input, task_name=name)
 
     task_ctx: TaskContext[Any, TaskInput] = TaskContext(
         inputs=inputs,
@@ -777,7 +784,7 @@ def _workdir_for(deps: WorkflowDeps, name: str):  # noqa: ANN202
     return None
 
 
-def _make_sub_runner(deps: WorkflowDeps, *, root_input: TaskInput, forward: bool):  # noqa: ANN202
+def _make_sub_runner(deps: WorkflowDeps, *, root_input: TaskInput, forward: bool, task_name: str):  # noqa: ANN202
     """Build the ``sub_runner`` capability for a :class:`SubWorkflow` body.
 
     Returns an ``async (inner_spec, config=None) -> WorkflowResult`` closure that
@@ -790,28 +797,63 @@ def _make_sub_runner(deps: WorkflowDeps, *, root_input: TaskInput, forward: bool
     the inner spec's single entry task as its ``ctx.inputs``. When false (a bare
     root SubWorkflow with no input), the inner spec runs unchanged.
 
-    Inner runs execute with ``persist=False``: they inherit the OUTER
-    ``run_context`` (same run dir + active execution id), so letting them
-    persist would rewrite ``executions/<exec_id>/workflow.json`` with the
-    INNER spec's document — clobbering the parent's graph/statuses, polluting
-    resume seeds, and racing under ``wf.parallel`` fan-out. The parent
-    execution's document must describe the outer graph only; the SubWorkflow
-    node itself is statused there by the outer run.
+    Inner runs do not write the outer ``workflow.json``. Their journal is
+    ``executions/<id>/nodes/<task>/<index>/workflow.json``, so a failed inner
+    task can seed the next attempt without clobbering the outer graph.
     """
 
     async def _sub_runner(inner: CompiledWorkflow, config: JSONMapping | None = None):  # noqa: ANN202
+        from .persistence import read_attempt_seeds
         from .runtime import WorkflowRuntime
 
         extra = {"root_input": root_input} if forward else {}
+        nested = _nested_journal(deps, task_name)
+        seeds = None
+        if nested is not None:
+            predecessor = _predecessor_nested_journal(deps, task_name)
+            if predecessor is not None:
+                run = getattr(deps.run_context, "run", None)
+                based_on = getattr(deps.run_context, "predecessor", None)
+                if run is not None and based_on:
+                    seeds = read_attempt_seeds(run, based_on, inner, journal_path=predecessor)
         return await WorkflowRuntime().execute(
             inner,
             run_context=deps.run_context,
             config=config if config is not None else deps.config,
             persist=False,
+            nested_journal=nested,
+            attempt_seeds=seeds,
             **extra,
         )
 
     return _sub_runner
+
+
+def _nested_slot(task_name: str) -> tuple[str, str]:
+    index = SUB_INDEX.get()
+    return task_name, "0" if index is None else str(index)
+
+
+def _nested_journal(deps: WorkflowDeps, task_name: str) -> Path | None:
+    """Directory of this subworkflow's journal, or None when the outer run has none."""
+    if deps.journal_dir is None:
+        return None
+    task, slot = _nested_slot(task_name)
+    return Path(deps.journal_dir) / "nodes" / task / slot
+
+
+def _predecessor_nested_journal(deps: WorkflowDeps, task_name: str) -> Path | None:
+    """The predecessor attempt's inner journal file, when that attempt wrote one."""
+    run_context = deps.run_context
+    run = getattr(run_context, "run", None)
+    based_on = getattr(run_context, "predecessor", None)
+    if run is None or not based_on:
+        return None
+    from .persistence import JOURNAL_NAME
+
+    task, slot = _nested_slot(task_name)
+    path = run.execution_dir(based_on) / "nodes" / task / slot / JOURNAL_NAME
+    return path if path.is_file() else None
 
 
 def _collect_upstream_outputs(registration: TaskRegistration, state: WorkflowState) -> TaskInput:

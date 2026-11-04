@@ -197,7 +197,7 @@ print('✓ Valid workflow')
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `workflow_digest` | string | Yes | Must equal the wrapped workflow's `workflow_digest` |
+| `workflow_hash` | string | Yes | Must equal the wrapped workflow's `workflow_hash` |
 | `task_io` | array[TaskIO] | No | Per-task I/O declarations (default `[]`) |
 | `validation_checks` | array[ValidationCheck] | No | Selected static checks; defaults to `default_validation_checks()` when empty |
 

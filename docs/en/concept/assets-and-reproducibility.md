@@ -30,7 +30,7 @@ Beyond outputs, Molab persists the metadata that makes a run interpretable later
 
 | Record | Where | What it captures |
 |---|---|---|
-| Workflow snapshot | `run.json` | The exact graph identity (`workflow_digest`) |
+| Workflow snapshot | `run.json` | The exact graph identity (`workflow_hash`) |
 | Config hash | `run.json` | The resolved profile's `config_hash` |
 | Execution history | `executions/eNN/execution.json` + `alive` | Status, timestamps, attempt; heartbeat is `alive` mtime |
 | Per-task outputs | `executions/<exec_id>/workflow.json` | Each task's return value |

@@ -56,13 +56,38 @@ class SourceCaptureError(RuntimeError):
     """
 
 
-def _local_import_closure(entrypoint: Path) -> list[Path]:
-    """Entrypoint + transitively-imported first-party sibling ``.py`` modules.
+def _relative_import_files(current: Path, node: ast.ImportFrom) -> list[Path]:
+    """Files a relative import in *current* names, when those files exist.
 
-    A module name ``m`` is first-party iff ``<root>/m.py`` exists (``root`` =
-    the entrypoint's directory). Dotted imports contribute their first segment.
-    Stdlib / third-party imports resolve to no sibling file and are skipped.
-    Returns the entrypoint first, then the rest sorted by filename (deterministic).
+    ``from .helper import fit`` in ``pkg/workflow.py`` is ``pkg/helper.py``.
+    ``from ..helper import fit`` walks one package up. A package
+    ``helper/__init__.py`` counts too. Absolute imports stay on the flat
+    sibling rule in :func:`_local_import_closure`.
+    """
+    base = current.parent
+    for _ in range(node.level - 1):
+        base = base.parent
+    modules = [node.module.split(".")[0]] if node.module else []
+    modules.extend(alias.name.split(".")[0] for alias in node.names if not node.module)
+    found: list[Path] = []
+    for name in modules:
+        file = (base / f"{name}.py").resolve()
+        package = (base / name / "__init__.py").resolve()
+        if file.is_file():
+            found.append(file)
+        elif package.is_file():
+            found.append(package)
+    return found
+
+
+def _local_import_closure(entrypoint: Path) -> list[Path]:
+    """Entrypoint + transitively-imported first-party modules.
+
+    An absolute module name ``m`` is first-party iff ``<root>/m.py`` exists
+    (``root`` = the entrypoint's directory). Dotted absolute imports contribute
+    their first segment. A relative import is resolved from the file that
+    wrote it. Stdlib / third-party imports resolve to no file and are skipped.
+    Returns the entrypoint first, then the rest sorted by filename.
     """
     entrypoint = entrypoint.resolve()
     root = entrypoint.parent
@@ -78,13 +103,19 @@ def _local_import_closure(entrypoint: Path) -> list[Path]:
         except (SyntaxError, UnicodeDecodeError, OSError):
             continue
         names: set[str] = set()
+        relative: list[Path] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 names.update(alias.name.split(".")[0] for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 names.add(node.module.split(".")[0])
+            elif isinstance(node, ast.ImportFrom) and node.level > 0:
+                relative.extend(_relative_import_files(current, node))
         for name in names:
             candidate = (root / f"{name}.py").resolve()
+            if candidate.is_file() and candidate not in seen:
+                stack.append(candidate)
+        for candidate in relative:
             if candidate.is_file() and candidate not in seen:
                 stack.append(candidate)
     rest = sorted((p for p in seen if p != entrypoint), key=lambda p: p.name)

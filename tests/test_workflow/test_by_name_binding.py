@@ -12,14 +12,32 @@ from __future__ import annotations
 
 import asyncio
 
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 
 
 def _run(wf: Workflow):
-    return asyncio.run(WorkflowRuntime().execute(WorkflowCompiler().compile(wf)))
+    return asyncio.run(WorkflowRuntime().execute((wf).compile()))
 
 
 class TestByNameBinding:
+    def test_a_parameter_named_after_a_task_is_the_dependency(self) -> None:
+        wf = Workflow(name="inferred")
+
+        @wf.task
+        async def prepare() -> int:
+            return 1
+
+        @wf.task
+        async def analyze(prepare: int) -> int:
+            return prepare * 10
+
+        compiled = (wf).compile()
+        assert compiled.registration_by_name["analyze"].depends_on == ["prepare"]
+        assert wf._tasks[1].depends_on == []
+        result = _run(wf)
+        assert result.status == "succeeded"
+        assert result.outputs["analyze"] == 10
+
     def test_single_upstream_dict_binds_present_keys_by_name(self) -> None:
         wf = Workflow(name="byname")
 

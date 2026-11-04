@@ -21,7 +21,7 @@ The helper targets the schema-v4 journal: ``task_configs[]`` entries keyed by
 ``task_id`` carrying ``status`` / ``output_ref`` / ``snapshot_key``, the refs
 pointing into the run's value store ``<run_dir>/values/``. The sentinel is
 written into that store and the record's ``output_ref`` repointed at it.
-``snapshot_key`` and the header ``workflow_digest`` are left untouched, so the
+``snapshot_key`` and the header ``workflow_hash`` are left untouched, so the
 seed gate still accepts the poisoned value as a valid seed.
 """
 

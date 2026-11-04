@@ -64,7 +64,7 @@ class WorkflowGraphCompiler:
     """Lower a :class:`WorkflowTopology` into an executable :class:`ExecutionPlan`.
 
     Internal helper invoked exactly once by
-    :meth:`molab.workflow.compiler.WorkflowCompiler.compile`. The returned
+    :meth:`molab.workflow.compiler.Workflow.compile`. The returned
     plan carries the validated structural graph; the runtime drives it via
     :func:`.engine.run_plan`.
     """

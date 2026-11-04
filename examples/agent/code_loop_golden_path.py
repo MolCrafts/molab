@@ -11,7 +11,7 @@ Shape:
 
 1. ``Workspace(...).materialize()``
 2. ``add_project`` / ``add_experiment`` (idempotent on slug)
-3. Trivial ``WorkflowCompiler`` workflow (stand-in for feature YY)
+3. Trivial ``Workflow`` (stand-in for feature YY)
 4. ``exp.sweep(wf, params=...).execute()``
 5. ``summary.to_records()`` recovery
 6. Optional ``import molplot`` figure under the workspace

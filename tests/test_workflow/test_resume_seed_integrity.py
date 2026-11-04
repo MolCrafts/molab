@@ -20,7 +20,6 @@ import pytest
 
 from molab.workflow import (
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
     read_attempt_seeds,
     read_journal,
@@ -109,7 +108,7 @@ def _chain(a_body=a_v1, b_body=b_v1):
     wf.add(a_body, name="a")
     wf.add(b_body, name="b", depends_on=["a"])
     wf.add(c, name="c", depends_on=["b"])
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 def _run(tmp_path: Path):
@@ -193,7 +192,7 @@ class TestResumeSeedIntegrity:
         wf = Workflow(name="pickled")
         wf.add(opaque, name="opaque")
         wf.add(after, name="after", depends_on=["opaque"])
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         run = _run(tmp_path)
         _failed_e01(run, compiled)
         doc = read_journal(run, "e01")
@@ -211,7 +210,7 @@ class TestResumeSeedIntegrity:
         wf = Workflow(name="unrecordable")
         wf.add(unpicklable, name="opaque")
         wf.add(after, name="after", depends_on=["opaque"])
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         run = _run(tmp_path)
         _failed_e01(run, compiled)
         doc = read_journal(run, "e01")
@@ -232,7 +231,7 @@ class TestResumeSeedIntegrity:
         _failed_e01(run, compiled)
         path = run.execution_dir("e01") / "workflow.json"
         doc = json.loads(path.read_text())
-        doc.pop("workflow_digest")
+        doc.pop("workflow_hash")
         for task in doc["task_configs"]:
             task.pop("snapshot_key", None)
         path.write_text(json.dumps(doc))
@@ -250,7 +249,7 @@ class TestResumeSeedIntegrity:
         wf.add(step, name="step")
         run = _run(tmp_path)
 
-        result = _attempt(run, WorkflowCompiler().compile(wf), seed_outputs={"step": "from-memory"})
+        result = _attempt(run, (wf).compile(), seed_outputs={"step": "from-memory"})
 
         assert result.status == "succeeded"
         assert result.outputs["step"] == "from-memory"

@@ -17,7 +17,7 @@ An experiment says *what should be repeatable*. A run records *what actually hap
 
 ```python
 import molab as me
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="baseline")
 
@@ -106,7 +106,7 @@ print(best["lr"], best["run_id"])
 Bind the compiled workflow to the experiment so `molab run` can discover it:
 
 ```python
-exp.define(WorkflowCompiler().compile(wf), params={"lr": [1e-3, 5e-4]})
+exp.define(wf, params={"lr": [1e-3, 5e-4]})
 ```
 
 Now `molab run` owns run selection, profiles, resume flags, and scheduler-backed execution over the exact same runs. See [CLI and Profiles](cli-and-profiles.md).

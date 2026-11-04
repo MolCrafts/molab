@@ -23,7 +23,6 @@ from molab.workflow import (
     Task,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 
@@ -66,9 +65,9 @@ def _build_input_consuming_inner() -> Workflow:
 class TestSubWorkflow:
     @pytest.mark.asyncio
     async def test_multi_step_inner_returns_terminal_leaf_output(self) -> None:
-        outer = WorkflowCompiler().compile(
+        outer = (
             Workflow(name="outer-multi").add(SubWorkflow(_build_multi_step_inner()), name="sub")
-        )
+        ).compile()
         result = await WorkflowRuntime().execute(outer)
         assert result.status == "succeeded"
         # load=[2,4,8] → normalize=[0.25,0.5,1.0] → scale=1.75
@@ -76,21 +75,21 @@ class TestSubWorkflow:
 
     @pytest.mark.asyncio
     async def test_accepts_precompiled_inner_workflow(self) -> None:
-        inner_compiled = WorkflowCompiler().compile(_build_multi_step_inner())
-        outer = WorkflowCompiler().compile(
+        inner_compiled = (_build_multi_step_inner()).compile()
+        outer = (
             Workflow(name="outer-compiled").add(SubWorkflow(inner_compiled), name="sub")
-        )
+        ).compile()
         result = await WorkflowRuntime().execute(outer)
         assert result.status == "succeeded"
         assert result.outputs["sub"] == pytest.approx(1.75)
 
     @pytest.mark.asyncio
     async def test_output_arg_selects_inner_task_output(self) -> None:
-        outer = WorkflowCompiler().compile(
+        outer = (
             Workflow(name="outer-explicit").add(
                 SubWorkflow(_build_multi_step_inner(), output="normalize"), name="sub"
             )
-        )
+        ).compile()
         result = await WorkflowRuntime().execute(outer)
         assert result.status == "succeeded"
         assert result.outputs["sub"] == pytest.approx([0.25, 0.5, 1.0])
@@ -129,9 +128,7 @@ class TestSubWorkflow:
             ran.append(True)
             return "ok"
 
-        outer = WorkflowCompiler().compile(
-            Workflow(name="outer-rc").add(SubWorkflow(inner), name="sub")
-        )
+        outer = (Workflow(name="outer-rc").add(SubWorkflow(inner), name="sub")).compile()
         slot = tmp_path / "slot"
         run_context = SimpleNamespace(
             id="e01", execution_dir=slot, predecessor=None, bypass_cache=False
@@ -140,8 +137,11 @@ class TestSubWorkflow:
         assert result.status == "succeeded"
         assert ran == [True]
         assert result.outputs["sub"] == "ok"
-        # The journal describes the outer graph only.
-        assert list(tmp_path.rglob("workflow.json")) == [slot / "workflow.json"]
+        # The outer journal is the outer graph. The inner journal is a sibling
+        # file under nodes/, not a second copy of the outer document.
+        journals = sorted(tmp_path.rglob("workflow.json"))
+        assert slot / "workflow.json" in journals
+        assert any(path.parent.parent.parent.name == "nodes" for path in journals)
 
     @pytest.mark.asyncio
     async def test_as_parallel_body_forwards_element_without_node_growth(self) -> None:
@@ -161,7 +161,7 @@ class TestSubWorkflow:
             return list(values)
 
         wf.parallel(map_over="emit", body="sub", join="collect", max_concurrency=2)
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
 
         # No per-element node growth — exactly the declared outer task set.
         assert {t.name for t in compiled._tasks} == {"emit", "sub", "collect"}
@@ -202,7 +202,7 @@ class TestSubWorkflow:
         wf.parallel(map_over="emit", body="sub", join="collect", max_concurrency=1)
 
         with pytest.raises(ParallelExecutionError) as exc_info:
-            await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+            await WorkflowRuntime().execute((wf).compile())
         assert exc_info.value.body == "sub"
         assert set(exc_info.value.failures.keys()) == {1}
 
@@ -212,11 +212,11 @@ class TestSubWorkflow:
             async def execute(self, ctx: TaskContext) -> int:
                 return 7
 
-        outer = WorkflowCompiler().compile(
+        outer = (
             Workflow(name="outer-chain-forward")
             .add(Source(), name="src")
             .add(SubWorkflow(_build_input_consuming_inner()), name="sub", depends_on=["src"])
-        )
+        ).compile()
         result = await WorkflowRuntime().execute(outer)
         assert result.status == "succeeded"
         assert result.outputs["sub"] == 70  # seed(7) → scale 70
@@ -239,9 +239,7 @@ class TestSubWorkflow:
         async def merge(root_a: int, root_b: int) -> int:
             return root_a + root_b
 
-        outer = WorkflowCompiler().compile(
-            Workflow(name="outer-two-roots").add(SubWorkflow(inner), name="sub")
-        )
+        outer = (Workflow(name="outer-two-roots").add(SubWorkflow(inner), name="sub")).compile()
         result = await WorkflowRuntime().execute(outer)
         assert result.status == "succeeded"
         assert result.outputs["sub"] == 3
@@ -262,7 +260,7 @@ class TestResolveSingleRoot:
             return 2
 
         with pytest.raises(ValueError, match="single entry"):
-            _resolve_single_root(WorkflowCompiler().compile(inner))
+            _resolve_single_root((inner).compile())
 
     def test_honors_explicit_entry(self) -> None:
         from molab.workflow._engine.runtime import _resolve_single_root
@@ -277,4 +275,4 @@ class TestResolveSingleRoot:
         async def tail(x: int) -> int:
             return x + 1
 
-        assert _resolve_single_root(WorkflowCompiler().compile(inner)) == "head"
+        assert _resolve_single_root((inner).compile()) == "head"

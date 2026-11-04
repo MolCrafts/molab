@@ -6,7 +6,7 @@ The workflow has four equivalent surfaces:
   point).
 - **IR** — JSON-serializable ``dict`` in the shape
   ``WorkflowCodec.spec_to_ir`` emits and ``WorkflowCodec.ir_to_spec`` accepts.
-  This is the wire format. The document carries no identity; ``workflow_digest``
+  This is the wire format. The document carries no identity; ``workflow_hash``
   lives on the Execution and the journal header.
 - **Python script** — a runnable molab module that assigns the IR to a
   top-level ``WORKFLOW_IR`` literal followed by
@@ -146,6 +146,13 @@ class WorkflowCodec:
 
             registry = default_registry
 
+        if "task_configs" not in ir and ("tasks" in ir or "edges" in ir):
+            raise ValueError(
+                "this document is a graph snapshot (tasks/edges), not a runnable "
+                "workflow (task_configs/links). Code workflows run from their "
+                "entrypoint; a document workflow is authored as wire IR."
+            )
+
         links_raw = _ir_object_list(ir.get("links"))
         task_configs_raw = _ir_object_list(ir.get("task_configs"))
 
@@ -242,7 +249,7 @@ class WorkflowCodec:
         """Serialize a workflow to the JSON wire IR (the shape ``ir_to_spec`` accepts).
 
         The wire IR is a function of the document alone. It carries no identity
-        key. ``workflow_digest`` folds task code and lives on the Execution and
+        key. ``workflow_hash`` folds task code and lives on the Execution and
         the journal header, so re-saving an unchanged document stays byte-identical.
 
         ``WorkflowCodec.spec_to_ir`` owns this wire-IR shape;

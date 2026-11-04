@@ -8,7 +8,7 @@
 
 ```python
 import molab as me
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 # 1. 定义工作流
 wf = Workflow(name="sum")
@@ -43,7 +43,7 @@ python demo.py
 
 ## 发生了什么
 
-**步骤 1 — 定义。** `Workflow` 持有任务定义。`@wf.task` 将普通函数变为工作流节点。`depends_on=["fetch"]` 告诉引擎 `summarize` 在 `fetch` 之后运行并接收其输出。用 `WorkflowCompiler().compile(wf)` 编译。
+**步骤 1 — 定义。** `Workflow` 持有任务定义。`@wf.task` 将普通函数变为工作流节点。`depends_on=["fetch"]` 告诉引擎 `summarize` 在 `fetch` 之后运行并接收其输出。用 `wf.compile()` 编译。
 
 **步骤 2 — 创建。** `Workspace("./lab")` 在磁盘上创建目录。链式调用 `.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0})` 构建持久化层级：项目分组相关工作，实验命名一个可重复定义，运行记录一次具体执行及其参数。`add_*` 是幂等的「创建或获取」；裸名词拼写（`ws.project(...)` / `project.experiment(...)`）是严格的 getter，节点不存在时会抛错。
 

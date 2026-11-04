@@ -30,7 +30,6 @@ from molab.cli.workspace.run import _submit_to_scheduler
 from molab.profile import ProfileConfig
 from molab.workflow import (
     Workflow,
-    WorkflowCompiler,
     WorkflowRecoveryError,
     default_binding_registry,
 )
@@ -235,7 +234,7 @@ def _bind_healing(tmp_path: Path) -> tuple[Project, Experiment, Run, Path, Path]
         result.write_text(text)
         return text
 
-    default_binding_registry.bind(exp, WorkflowCompiler().compile(wf))
+    default_binding_registry.bind(exp, (wf).compile())
     return project, exp, run, flag, result
 
 
@@ -529,7 +528,7 @@ class TestDispatchRuns:
         def only(seed: int) -> int:
             return seed
 
-        default_binding_registry.bind(exp, WorkflowCompiler().compile(wf))
+        default_binding_registry.bind(exp, (wf).compile())
         monkeypatch.setattr(
             "molab.cli.workspace.run._load_script_workspaces", lambda *_a, **_k: ([ws], None)
         )
@@ -565,7 +564,7 @@ class TestDispatchRuns:
         def only(seed: int) -> int:
             return seed
 
-        default_binding_registry.bind(exp, WorkflowCompiler().compile(wf))
+        default_binding_registry.bind(exp, (wf).compile())
         monkeypatch.setattr(
             "molab.cli.workspace.run._load_script_workspaces", lambda *_a, **_k: ([ws], None)
         )
@@ -1117,7 +1116,7 @@ def scheduler_fixture(
     def only(seed: int) -> int:
         return seed
 
-    compiled = WorkflowCompiler().compile(wf)
+    compiled = (wf).compile()
     default_binding_registry.bind(exp, compiled)
     # A scheduler worker re-imports the workflow, so submission needs a locator.
     exp.bind_workflow(

@@ -24,7 +24,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import molab as me
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent / "_workspace"
 
@@ -61,5 +61,5 @@ async def train(
     me.Workspace(WORKSPACE_ROOT, name="run-profiles-demo")
     .add_project("demo")
     .add_experiment("train")
-    .define(WorkflowCompiler().compile(wf), params={"seed": [0]})
+    .define(wf, params={"seed": [0]})
 )

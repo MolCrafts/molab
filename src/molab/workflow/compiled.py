@@ -1,4 +1,4 @@
-"""CompiledWorkflow — the single rich artifact emitted by ``WorkflowCompiler.compile``.
+"""CompiledWorkflow — the single rich artifact emitted by ``Workflow.compile``.
 
 This dissolves the old ``Workflow`` god-object. It carries everything the
 compiler derives in one pass:
@@ -7,13 +7,13 @@ compiler derives in one pass:
 - the executable ``graph`` (a layer-private ``ExecutionPlan`` lowered by the
   engine compiler; only the workflow runtime reads it),
 - per-task ``snapshots`` (one :class:`TaskSnapshot` each),
-- the content identity ``workflow_digest``,
+- the content identity ``workflow_hash``,
 - the experiment ``binding`` (``WorkflowBinding | None``).
 
 It is a **plain class**, not a ``pydantic.BaseModel``: it holds live task
 callables, which makes this a runtime container by definition (per the
 CLAUDE.md "Pydantic vs plain class" rule). It is immutable by discipline —
-construct it via :meth:`WorkflowCompiler.compile` and do not mutate it.
+construct it via :meth:`Workflow.compile` and do not mutate it.
 
 Execution (``execute`` / ``start`` / ``run_on``) lives on the runtime, not
 here; binding lives in :class:`WorkflowBindingRegistry`, not on a global.
@@ -23,7 +23,7 @@ here; binding lives in :class:`WorkflowBindingRegistry`, not on a global.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from functools import cached_property
 from typing import TYPE_CHECKING, Protocol
 
@@ -33,7 +33,7 @@ from ._graph_decl import (
     TaskRegistration,
     _BoundaryStubTask,
 )
-from .protocols import JSONValue, TaskOutput
+from .protocols import JSONValue
 
 if TYPE_CHECKING:
     from ._engine.compiler import CompiledGraph
@@ -67,7 +67,6 @@ class CompiledWorkflow:
         branch_edges: tuple[tuple[str, str, str], ...] = (),
         loops: tuple[LoopDecl, ...] = (),
         parallels: tuple[ParallelDecl, ...] = (),
-        reducer: tuple[str, Callable[..., TaskOutput]] | None = None,
         binding: WorkflowBinding | None = None,
         executor: str | None = None,
     ) -> None:
@@ -89,7 +88,6 @@ class CompiledWorkflow:
         self._branch_edges = branch_edges
         self._loops = loops
         self._parallels = parallels
-        self._reducer = reducer
 
     # ── Derived topology maps (built once; the artifact is frozen) ─────────
 
@@ -115,7 +113,7 @@ class CompiledWorkflow:
     def dependent_params_hashes(self) -> Mapping[str, str | None]:
         """``task_name → hash of its dependent_params callable`` (``None`` if none).
 
-        The one implementation both :attr:`workflow_digest` and the node
+        The one implementation both :attr:`workflow_hash` and the node
         journal's resume-seed gate read.
         """
         from .digest import _dependent_params_hashes
@@ -123,11 +121,11 @@ class CompiledWorkflow:
         return _dependent_params_hashes(self)
 
     @cached_property
-    def workflow_digest(self) -> str:
-        """Content-addressed identity: see :func:`molab.workflow.compute_workflow_digest`."""
-        from .digest import compute_workflow_digest
+    def workflow_hash(self) -> str:
+        """Content-addressed identity: see :func:`molab.workflow.compute_workflow_hash`."""
+        from .digest import compute_workflow_hash
 
-        return compute_workflow_digest(self)
+        return compute_workflow_hash(self)
 
     # ── Boundary introspection ────────────────────────────────────────────
 
@@ -143,38 +141,20 @@ class CompiledWorkflow:
         """Names of runnable (non-stub) tasks — complement of :attr:`boundary_names`."""
         return frozenset(t.name for t in self._tasks) - self.boundary_names
 
-    # ── Cross-replicate reducer ───────────────────────────────────────────
-
-    @property
-    def reducer_dimension(self) -> str | None:
-        """Dimension declared on ``@wf.reduce(over=...)``; None if no reducer."""
-        return self._reducer[0] if self._reducer is not None else None
-
-    def run_reducer(self, replicate_outputs: list[TaskOutput]) -> TaskOutput:
-        """Invoke the registered ``@wf.reduce`` on a list of replicate outputs."""
-        if self._reducer is None:
-            raise LookupError(
-                f"Workflow {self.name!r}: no reducer registered (call @wf.reduce(over=...))"
-            )
-        return self._reducer[1](replicate_outputs)
-
     # ── Representation codec (folded from spec 01) ─────────────────────────
 
     def to_ir(self, *, strict: bool = True) -> dict[str, JSONValue]:
         """Serialize to the JSON IR (data-DAG **wire** format). Delegates to ``default_codec``.
 
-        This is the persistence / round-trip format: it backs :meth:`from_ir`
-        and :meth:`to_python`, and under ``strict`` (default ``True``) requires
-        a ``task_type`` slug on every task. By design it is the *data DAG only*
-        — it omits the parallel fan-out edges (``map_over→body``, ``body→join``)
-        and other control/branch/loop topology.
+        This is the runnable document: it backs :meth:`from_ir` and
+        :meth:`to_python`. It carries data, control and branch links plus
+        ``loops`` and ``parallels``. Under ``strict`` (default ``True``) every
+        task needs a ``task_type`` slug.
 
-        For a UI canvas, control-flow visualization, or any observability
-        consumer that needs the full graph (including those parallel edges),
-        use :meth:`to_graph_ir`, which is total and never requires slugs —
-        mirroring the :meth:`to_mermaid` / :meth:`to_graph_mermaid` split. Pass
-        ``strict=False`` for observability-only serialization that tolerates
-        slug-less tasks (``task_type: None``).
+        :meth:`to_graph_ir` is the canvas snapshot. It is not a document
+        :meth:`from_ir` can run. Pass ``strict=False`` for the journal's
+        observability copy, which tolerates slug-less tasks
+        (``task_type: None``).
         """
         from .codec import default_codec
 

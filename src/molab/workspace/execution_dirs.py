@@ -36,6 +36,7 @@ __all__ = [
     "ARTIFACTS",
     "CHECKPOINTS",
     "JOBS",
+    "NODES",
     "OUT",
     "SOURCE",
     "WORK",
@@ -157,6 +158,13 @@ CHECKPOINTS = ExecutionDir(
 # ``source/`` is filled once, when the attempt is created, by
 # ``Run._create_execution(source_entrypoint=...)``: the exact code the attempt
 # ran. It is versioned (small, and the point is to keep it) and never prunable.
+NODES = ExecutionDir(
+    name="nodes",
+    purpose="Journals of nested workflows. The attempt's workflow.json stays the outer graph.",
+    versioned=True,
+    products=False,
+)
+
 SOURCE = ExecutionDir(
     name="source",
     purpose=(
@@ -230,5 +238,5 @@ def scratch_dirs() -> tuple[ExecutionDir, ...]:
     return tuple(d for d in list_execution_dirs() if not d.versioned)
 
 
-for _seed in (ARTIFACTS, OUT, WORK, JOBS, CHECKPOINTS, SOURCE):
+for _seed in (ARTIFACTS, OUT, WORK, JOBS, CHECKPOINTS, NODES, SOURCE):
     register_execution_dir(_seed)

@@ -40,7 +40,6 @@ from molab.workflow import (
     CompiledWorkflow,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 from molab.workspace import Workspace
@@ -61,7 +60,7 @@ def _compiled() -> CompiledWorkflow:
         _COUNTER["step"] += 1
         return 42
 
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 async def _check(tmp: Path) -> list[str]:

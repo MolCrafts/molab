@@ -38,7 +38,7 @@ What that unlocks is a research workflow you can trust and revisit: experiments 
 
 | Module | Capability |
 |--------|------------|
-| `molab.workflow`   | Typed task-graph engine — `WorkflowCompiler` (decorator + OOP + protocol styles) compiles to a frozen, content-hashed `CompiledWorkflow`; `WorkflowRuntime` executes it with topology-driven parallelism, IR export, contract validation |
+| `molab.workflow`   | Task graph — write steps on `Workflow`, run them with `wf.run()`, freeze a digest with `wf.compile()`. A tracked run takes the same object (`run.execute(wf)`) |
 | `molab.workspace`  | File-system storage primitive — `Workspace → Project → Experiment → Run` `Folder` hierarchy, content-addressed assets, atomic JSON I/O, run lifecycle |
 | `molab.config`     | In-code process-global config — a live `molcfg.Config` kept as a process-level place to register runtime values in code (never from env) |
 | `molab.profile`    | File-based per-run config — `molcfg.yaml` loading and named profiles; resolves `defaults` + `profiles` into an immutable, content-hashed `ProfileConfig` |
@@ -91,9 +91,7 @@ Three jobs — do not mix them. Full table: [Serve and rebuild the UI](docs/en/d
 ## Quick start
 
 ```python
-import asyncio
-
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow
 
 wf = Workflow(name="demo")
 
@@ -111,11 +109,11 @@ async def reduce(fetch: list[float]) -> float:
     return sum(fetch)
 
 
-result = asyncio.run(WorkflowRuntime().execute(WorkflowCompiler().compile(wf)))
+result = wf.run()
 print(result.outputs)  # {'fetch': [1.0, 4.0, 9.0], 'reduce': 14.0}
 ```
 
-Attaching a workflow to a tracked `Workspace` experiment (`ws.add_project(...).add_experiment(...).define(WorkflowCompiler().compile(wf), params=...)`), running it with `molcfg` profiles via `molab run`, and submitting to a cluster are covered in the docs.
+Attaching a workflow to a tracked `Workspace` experiment (`ws.add_project(...).add_experiment(...).define(wf, params=...)`), running it with `molcfg` profiles via `molab run`, and submitting to a cluster are covered in the docs.
 
 ## Documentation
 

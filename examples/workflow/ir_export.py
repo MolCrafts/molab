@@ -22,7 +22,6 @@ from molab.workflow import (
     Task,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
     default_registry,
 )
@@ -41,9 +40,7 @@ class Summarize(Task):
 
 
 async def main() -> None:
-    compiled = WorkflowCompiler().compile(
-        Workflow(name="demo").add(Fetch()).add(Summarize(), depends_on=["fetch"])
-    )
+    compiled = (Workflow(name="demo").add(Fetch()).add(Summarize(), depends_on=["fetch"])).compile()
 
     # 1. Data-DAG Mermaid diagram (``flowchart LR``)
     print("── to_mermaid() ──────────────────────────────────────────")

@@ -31,7 +31,7 @@ Creation-time vs start-time facts. ``create`` writes a QUEUED record with the
 facts known when the attempt is allocated (mode, predecessor, checkpoint,
 ``bypass_cache``, ``source``, and the creator's ``environment`` / ``executor``).
 ``start`` runs once, from QUEUED only, and adds the facts known when the
-attempt begins (host, python, platform, pid, ``workflow_digest``). It merges
+attempt begins (host, python, platform, pid, ``workflow_hash``). It merges
 by adding missing keys and never overwrites a key the creator wrote.
 
 Immutable fields. ``_IMMUTABLE_FIELDS`` is the union of three named sets:
@@ -179,9 +179,7 @@ _CREATION_PROVENANCE_FIELDS: frozenset[str] = frozenset(
 )
 """Creation-time facts other than identity; written once, by ``create``."""
 
-_START_PROVENANCE_FIELDS: frozenset[str] = frozenset(
-    {"environment", "workflow_digest", "started_at"}
-)
+_START_PROVENANCE_FIELDS: frozenset[str] = frozenset({"environment", "workflow_hash", "started_at"})
 """Start-time facts; ``start`` writes them (``environment`` merged, add-only).
 
 ``environment`` is here, not in ``_CREATION_PROVENANCE_FIELDS``, because it
@@ -193,7 +191,7 @@ _PROVENANCE_FIELDS: frozenset[str] = _CREATION_PROVENANCE_FIELDS | _START_PROVEN
 """Creation-time and start-time facts; never written by an update verb.
 
 ``create`` writes the creation-time ones and ``start`` the start-time ones
-(``started_at``, the merged ``environment``, ``workflow_digest``). ``seal``
+(``started_at``, the merged ``environment``, ``workflow_hash``). ``seal``
 also writes one: an attempt sealed straight from QUEUED never started, so
 ``seal`` fills ``started_at`` with ``created_at``.
 """
@@ -789,7 +787,7 @@ class ExecutionRepository:
         *,
         environment: dict[str, JSONValue] | None = None,
         executor: dict[str, JSONValue] | None = None,
-        workflow_digest: str | None = None,
+        workflow_hash: str | None = None,
     ) -> Execution:
         """Start a QUEUED attempt exactly once, adding its start-time facts.
 
@@ -802,14 +800,14 @@ class ExecutionRepository:
         Merge rule: ``environment`` and ``executor`` only add keys the record
         does not already have. A key written at creation keeps its value, so a
         starter cannot overwrite a creation-time fact. ``started_at`` is set to
-        the current UTC time and ``workflow_digest`` is written as given; both
+        the current UTC time and ``workflow_hash`` is written as given; both
         are always unset on a QUEUED record, so nothing is overwritten.
 
         Args:
             execution_id: The attempt to start (``e01``).
             environment: Start-time environment facts (host, python, platform, pid).
             executor: Start-time executor facts (kind, host, pid).
-            workflow_digest: Digest of the compiled workflow this attempt runs
+            workflow_hash: Digest of the compiled workflow this attempt runs
                 (``sha256:...``), stored as an opaque string. ``Run.start`` /
                 ``ExecutionContext`` forward it here.
 
@@ -834,7 +832,7 @@ class ExecutionRepository:
                 provenance={
                     "started_at": datetime.now(UTC),
                     "environment": {**(environment or {}), **current.environment},
-                    "workflow_digest": workflow_digest,
+                    "workflow_hash": workflow_hash,
                 },
             )
         self._record("ExecutionStarted", started, when=started.started_at)

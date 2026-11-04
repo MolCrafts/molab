@@ -5,7 +5,7 @@ Matches ``docs/en/guide/task-and-actor.md``.
 Demonstrates:
 
 1. Decorator style — ``@wf.task`` decorates async functions.
-2. OOP style — subclass ``Task`` and register via ``WorkflowCompiler.add``.
+2. OOP style — subclass ``Task`` and register via ``wf.add``.
 3. Protocol form — any object with ``async def execute(self, ctx)``.
 4. Actor — ``@wf.actor`` (or ``Actor`` subclass) defines an async generator;
    the engine drives it to exhaustion and records the last yielded value.
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 
-from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Task, TaskContext, Workflow, WorkflowRuntime
 
 
 # ── 1. Decorator style ─────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ async def functional_demo() -> None:
     async def square(load: list[int]) -> list[int]:
         return [x * x for x in load]
 
-    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+    result = await wf.arun()
     print(f"functional: {result.outputs}")
 
 
@@ -52,9 +52,7 @@ class Sum(Task):
 
 
 async def oop_demo() -> None:
-    compiled = WorkflowCompiler().compile(
-        Workflow(name="oop").add(Load()).add(Sum(), depends_on=["load"])
-    )
+    compiled = (Workflow(name="oop").add(Load()).add(Sum(), depends_on=["load"])).compile()
     result = await WorkflowRuntime().execute(compiled)
     print(f"oop:        {result.outputs}")
 
@@ -68,11 +66,11 @@ class ExternalDoubler:
 
 
 async def protocol_demo() -> None:
-    compiled = WorkflowCompiler().compile(
+    compiled = (
         Workflow(name="external")
         .add(Load())
         .add(ExternalDoubler(), name="double", depends_on=["load"])
-    )
+    ).compile()
     result = await WorkflowRuntime().execute(compiled)
     print(f"protocol:   {result.outputs}")
 
@@ -94,7 +92,7 @@ async def actor_demo() -> None:
         for item in source:
             yield {"seen": item}  # last yield becomes the task output
 
-    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+    result = await wf.arun()
     print(f"actor:      {result.outputs}")
 
 

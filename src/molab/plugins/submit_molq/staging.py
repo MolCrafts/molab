@@ -16,8 +16,9 @@ The local↔remote contract is intentionally narrow:
   attempt being submitted, ``executions/<id>/``, which carries the QUEUED
   ``execution.json`` the remote worker opens. The run's ``values/`` store
   rides the run-dir mirror; for a RESUME or a partial RERUN the predecessor's
-  journal (``executions/<based_on>/workflow.json``) is uploaded too, so the
-  worker seeds from the same records it would locally. The isolated namespace also
+  journal (``executions/<based_on>/workflow.json``) and its ``nodes/`` journals
+  are uploaded too, so the worker seeds from the same records it would locally.
+  The isolated namespace also
   receives the selected ancestor ``index.md`` records and workflow code/document;
   code bindings are rewritten only in a temporary staging copy. An existing
   Execution source snapshot takes precedence over the live entrypoint.
@@ -240,6 +241,11 @@ def _stage_predecessor_journal(
     remote_dir = f"{dst}/executions/{based_on}"
     transport.mkdir(remote_dir, parents=True, exist_ok=True)
     transport.upload(str(journal), f"{remote_dir}/workflow.json")
+    nodes = Path(src) / "executions" / based_on / "nodes"
+    if nodes.is_dir():
+        remote_nodes = f"{remote_dir}/nodes"
+        transport.mkdir(remote_nodes, parents=True, exist_ok=True)
+        transport.upload(str(nodes), remote_nodes, recursive=True, exclude=_RSYNC_EXCLUDES)
 
 
 def stage_out(

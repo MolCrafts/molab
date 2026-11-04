@@ -4,11 +4,11 @@ A sweep fans one workflow out over a grid of parameter cells — one content-add
 
 ## Seeding a Sweep
 
-`Experiment.sweep(workflow, params)` expands `params` and materializes one run per cell. A plain `{axis: [values]}` dict is auto-upgraded to a `GridSpace` (Cartesian product); every axis must map to a *list* — a scalar axis fails fast rather than being guessed at. The workflow may be an uncompiled `WorkflowCompiler`; it is compiled automatically and bound to the experiment, so the CLI and server discover the same declaration.
+`Experiment.sweep(workflow, params)` expands `params` and materializes one run per cell. A plain `{axis: [values]}` dict is auto-upgraded to a `GridSpace` (Cartesian product); every axis must map to a *list* — a scalar axis fails fast rather than being guessed at. The workflow may be a `Workflow`; it is compiled automatically and bound to the experiment, so the CLI and server discover the same declaration.
 
 ```python
 import molab as me
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="scan")
 

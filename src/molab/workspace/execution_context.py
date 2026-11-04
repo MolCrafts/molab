@@ -338,7 +338,7 @@ class ExecutionContext:
         bypass_cache: Whether a newly created attempt ignores the workflow
             node cache (the per-task result store that lets an unchanged task
             reuse its earlier output). Read back through :attr:`bypass_cache`.
-        workflow_digest: An opaque digest of the workflow this attempt runs,
+        workflow_hash: An opaque digest of the workflow this attempt runs,
             recorded by the start transition before any task runs. A
             start-time fact, so it may be passed with *execution_id*.
     """
@@ -354,7 +354,7 @@ class ExecutionContext:
         checkpoint: str | None = None,
         created_by: AgentRef | None = None,
         bypass_cache: bool = False,
-        workflow_digest: str | None = None,
+        workflow_hash: str | None = None,
     ) -> None:
         if execution_id is not None:
             conflicts = [
@@ -385,7 +385,7 @@ class ExecutionContext:
         self._based_on_execution_id = predecessor
         self._checkpoint_artifact_id = checkpoint
         self._bypass_cache = bypass_cache
-        self._workflow_digest = workflow_digest
+        self._workflow_hash = workflow_hash
         self._execution_dir: Path | None = None
         self._created_by = created_by or _system_agent()
         self._state: Execution | None = None
@@ -609,7 +609,7 @@ class ExecutionContext:
             state.id,
             environment=environment,
             executor=_start_executor(environment),
-            workflow_digest=self._workflow_digest,
+            workflow_hash=self._workflow_hash,
         )
         self._execution_id = state.id
         self._execution_dir = self.run.execution_dir(state.id)

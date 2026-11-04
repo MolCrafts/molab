@@ -150,7 +150,7 @@ class TaskTypeRegistry:
         Accepts a task *instance* (resolves via ``type(target)``) or a class
         directly. Returns ``None`` when the type was never registered, or was
         registered only as a bare factory callable (no class to map back from).
-        This is the inverse of :meth:`get` and the reason ``WorkflowCompiler.add``
+        This is the inverse of :meth:`get` and the reason ``Workflow.add``
         needs no ``task_type`` argument.
         """
         cls = target if isinstance(target, type) else type(target)

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 from molab.workflow.types import Next
 
 
@@ -47,7 +47,7 @@ class TestValuesOnEdges:
 
         wf.loop(body=["head"], until="check", max_iters=10)
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         # Iteration 1 has no incoming value; iterations 2 and 3 receive the
         # previous iteration's routed output through ctx.inputs.
@@ -73,7 +73,7 @@ class TestValuesOnEdges:
             seen["inputs"] = dict(delivered)
             return delivered
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert seen["inputs"] == {"payload": 42}, (
             "a branch-routed (value, Next(label)) must arrive at the dep-less target by-name"
@@ -104,7 +104,7 @@ class TestValuesOnEdges:
 
         wf.entry("base")  # both src (constructor) and base are entries
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert seen["inputs"] == "base-out"
 
@@ -154,7 +154,7 @@ class TestValuesOnEdges:
         wf.loop(body=["head"], until="check", max_iters=5)
 
         result = await WorkflowRuntime().execute(
-            WorkflowCompiler().compile(wf), run_context=_RunContextStub(tmp_path / "run")
+            (wf).compile(), run_context=_RunContextStub(tmp_path / "run")
         )
         assert result.status == "succeeded"
         assert len(seen_inputs) == 2

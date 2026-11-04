@@ -6,10 +6,11 @@ Core packages:
     - ``molab.plugins``: Optional capabilities (remote HPC, metrics ingest, ...)
 
 Workflow-layer conveniences are re-exported lazily at the top level —
-``molab.WorkflowCompiler``, ``molab.TaskContext`` and
+``molab.Workflow``, ``molab.TaskContext`` and
 ``molab.WorkflowRuntime`` resolve on first attribute access (loading
 the ``molab.workflow`` engine machinery only at that point; plain
-``import molab`` stays light).
+``import molab`` stays light). A graph is frozen with ``wf.compile()``
+and run in memory with ``wf.run()``.
 
 ``molab.print`` is the builtin ``print`` that also records into the current
 execution's ``stdout.log`` / ``stderr.log``; ``molab.current()`` returns that
@@ -172,7 +173,6 @@ __all__ = [
     "TaskContext",
     "UniformSpace",
     "Workflow",
-    "WorkflowCompiler",
     "WorkflowRuntime",
     "Workspace",
     "config",
@@ -190,7 +190,6 @@ __all__ = [
 #: (tests/test_workspace/test_import_guard.py enforces this).
 _LAZY_WORKFLOW_ATTRS = (
     "Workflow",
-    "WorkflowCompiler",
     "TaskContext",
     "WorkflowRuntime",
 )

@@ -333,7 +333,7 @@ class RunResponse(ApiModel):
             wf_snap = WorkflowSnapshotResponse(
                 source=source,
                 gitCommit=_latest_source_commit(records),
-                codeHash=None if latest is None else latest.workflow_digest,
+                codeHash=None if latest is None else latest.workflow_hash,
                 configHash=(
                     None if latest is None else _str_or_none(latest.environment.get("config_hash"))
                 ),

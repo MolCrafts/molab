@@ -351,7 +351,8 @@ class _CopyTransport:
 
 
 _HEALED_MODULE = """\
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
+
 
 wf = Workflow(name="staged")
 
@@ -366,7 +367,7 @@ def stage_b(stage_a: int) -> int:
     return stage_a * 100
 
 
-workflow = WorkflowCompiler().compile(wf)
+workflow = (wf).compile()
 """
 
 

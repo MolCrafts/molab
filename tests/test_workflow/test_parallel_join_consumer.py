@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 from molab.workflow._engine.node import _collect_upstream_outputs
 from molab.workflow._engine.state import WorkflowState
 from molab.workflow._graph_decl import TaskRegistration
@@ -57,7 +57,7 @@ async def test_parallel_join_consumer_sees_real_output_not_none() -> None:
 
     wf.parallel(map_over="M", body="B", join="J", max_concurrency=3)
 
-    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+    result = await WorkflowRuntime().execute((wf).compile())
 
     assert result.status == "succeeded"
     # J's actual reduced output is sum([1, 4, 9]) == 14 — never None.

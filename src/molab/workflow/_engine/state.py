@@ -86,6 +86,8 @@ class WorkflowState:
     # root-input task still RUNS its body with the injected inputs pre-set.
     root_inputs: dict[str, TaskOutput] = field(default_factory=dict)
     loop_counters: dict[str, int] = field(default_factory=dict)
+    # Branch label a seed replays, so a finished route is not re-decided.
+    seed_routes: dict[str, str] = field(default_factory=dict)
     parallel_runs: dict[str, int] = field(default_factory=dict)
     failed: bool = False
     error: str | None = None
@@ -190,6 +192,9 @@ class WorkflowDeps:
     process_pool: ProcessPool | None = None
     process_entrypoint: str | None = None
     process_locators: dict[str, tuple] = field(default_factory=dict)
+    # Cache payloads waiting for the journal's completed flush. The engine
+    # publishes them; a failure pops the entry without writing.
+    pending_cache: dict[str, tuple] = field(default_factory=dict)
 
     def executor_of(self, name: str) -> str:
         """The executor task *name* runs under in this execution."""

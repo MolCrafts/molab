@@ -13,7 +13,6 @@ import asyncio
 
 from molab.workflow import (
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 
@@ -30,7 +29,7 @@ class TestSyncDecoratorTask:
         def double(x: int) -> int:
             return x * 2
 
-        result = _run(WorkflowCompiler().compile(wf), config={"x": 21})
+        result = _run((wf).compile(), config={"x": 21})
         assert result.status == "succeeded"
         assert result.outputs["double"] == 42
 
@@ -41,5 +40,5 @@ class TestSyncDecoratorTask:
         def boom() -> None:
             raise ValueError("broken body")
 
-        result = _run(WorkflowCompiler().compile(wf))
+        result = _run((wf).compile())
         assert result.status == "failed"

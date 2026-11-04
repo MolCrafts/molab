@@ -1,6 +1,6 @@
 """Compile-time validation: control-edge shape, entry, and reachability.
 
-Each test locks one distinct ``WorkflowCompiler().compile(WorkflowCompiler)`` rejection rule
+Each test locks one distinct ``Workflow.compile`` rejection rule
 (a distinct error type + trigger); structural deadlock lives in
 ``test_deadlock_guard``. Spec: .claude/specs/03-molab-workflow-cycles.md.
 """
@@ -15,7 +15,6 @@ from molab.workflow import (
     UnknownTaskError,
     UnreachableTaskError,
     Workflow,
-    WorkflowCompiler,
 )
 
 
@@ -41,7 +40,7 @@ class TestCompileValidation:
         wf.branch("src", "x", "b")  # branch on the same node
 
         with pytest.raises(EdgeShapeError) as exc_info:
-            WorkflowCompiler().compile(wf)
+            (wf).compile()
         assert "src" in str(exc_info.value)
 
     def test_control_edges_without_entry_declaration_rejected(self) -> None:
@@ -60,7 +59,7 @@ class TestCompileValidation:
         wf.control("a", "b")
 
         with pytest.raises(EntryAmbiguousError) as exc_info:
-            WorkflowCompiler().compile(wf)
+            (wf).compile()
         msg = str(exc_info.value)
         assert "wf.entry" in msg
         assert "a" in msg  # candidate list reported
@@ -76,7 +75,7 @@ class TestCompileValidation:
         wf.entry("ghost")
 
         with pytest.raises(UnknownTaskError) as exc_info:
-            WorkflowCompiler().compile(wf)
+            (wf).compile()
         assert "ghost" in str(exc_info.value)
 
     def test_task_unreachable_from_entry_rejected(self) -> None:
@@ -98,5 +97,5 @@ class TestCompileValidation:
         wf.control("a", "b")
 
         with pytest.raises(UnreachableTaskError) as exc_info:
-            WorkflowCompiler().compile(wf)
+            (wf).compile()
         assert "orphan" in str(exc_info.value)

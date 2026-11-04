@@ -153,21 +153,30 @@ def _apply_resume_from(
     seed_outputs: Mapping[str, TaskOutput] | None,
     cache: Caching | None,
     run_context: RunContextLike | None,
-) -> tuple[Mapping[str, TaskOutput] | None, Caching | None]:
+) -> tuple[Mapping[str, TaskOutput] | None, Caching | None, dict[str, str]]:
     """Merge an earlier run's outputs under *seed_outputs*, and layer its cache.
 
-    Explicit seeds win. The earlier run's cache is consulted only when this
-    call did not pass its own ``cache``.
+    Explicit seeds win. The earlier run's outputs pass the same seed gate as
+    a ``RESUME`` before they are trusted. The earlier run's cache is consulted
+    only when this call did not pass its own ``cache``.
     """
     if resume_from is None:
-        return seed_outputs, cache
+        return seed_outputs, cache, {}
     from ..handoff import handoff_cache, handoff_seeds
+    from .persistence import _records, _verify_seeds, apply_resume_policy, read_journal
 
-    merged = handoff_seeds(resume_from, compiled)
+    merged, source_id = handoff_seeds(resume_from, compiled)
+    routes: dict[str, str] = {}
+    if merged and source_id is not None:
+        document = read_journal(resume_from, source_id)
+        verified = _verify_seeds(document, merged, compiled, execution_id=source_id)
+        merged, routes = apply_resume_policy(
+            verified, _records(document) if document is not None else {}, compiled
+        )
     if seed_outputs:
         merged.update(seed_outputs)
     layered = cache if cache is not None else handoff_cache(resume_from, run_context)
-    return (merged or None), layered
+    return (merged or None), layered, routes
 
 
 logger = get_logger(__name__)
@@ -304,6 +313,7 @@ def _apply_attempt_seeds(state: WorkflowState, seeds: AttemptSeeds) -> None:
     state.delivered = dict(seeds.delivered)
     state.output_records = {name: dict(fields) for name, fields in seeds.records.items()}
     state.expected_inputs = dict(seeds.expected_inputs)
+    state.seed_routes = dict(seeds.routes)
 
 
 def _premark(
@@ -329,6 +339,7 @@ def _premark(
             seeded_from=seeds.based_on_execution_id,
             snapshot_key=getattr(compiled.snapshots.get(name), "key", None),
             dependent_params_hash=compiled.dependent_params_hashes.get(name),
+            route=seeds.routes.get(name),
         )
     for name in sorted(seeds.excluded):
         mark_task_status(journal_dir, name, "skipped", reason=NOT_SELECTED_REASON)
@@ -403,7 +414,7 @@ class WorkflowRuntime:
     """Workflow runtime over the structural values-on-edges engine.
 
     Takes a pre-compiled :class:`~molab.workflow.compiled.CompiledWorkflow`
-    (lowered once by :meth:`WorkflowCompiler.compile`) and executes its
+    (lowered once by :meth:`Workflow.compile`) and executes its
     ``.graph`` (an :class:`ExecutionPlan`) via :func:`.engine.run_plan`; no
     recompilation happens here. This class owns the execution facade —
     ``execute`` / ``start`` / ``run_on`` — that used to live on the
@@ -430,6 +441,7 @@ class WorkflowRuntime:
     def _build_initial_state(
         compiled: CompiledWorkflow,
         seed_outputs: Mapping[str, TaskOutput] | None,
+        routes: Mapping[str, str] | None = None,
     ) -> WorkflowState:
         """Construct the initial :class:`WorkflowState`, optionally seeded.
 
@@ -452,7 +464,10 @@ class WorkflowRuntime:
                 f"execute(seed_outputs=...): unknown task name(s) "
                 f"{unknown!r}; registered tasks: {sorted(registered)}"
             )
-        return WorkflowState.from_seed(seed_outputs)
+        state = WorkflowState.from_seed(seed_outputs)
+        if routes:
+            state.seed_routes = dict(routes)
+        return state
 
     @staticmethod
     def _build_deps(
@@ -582,6 +597,7 @@ class WorkflowRuntime:
         bypass_cache: bool = False,
         root_input: Any = _NO_ROOT_INPUT,  # noqa: ANN401
         persist: bool = True,
+        nested_journal: Path | None = None,
         scratch_root: str | Path | None = None,
         resume_from: Run | None = None,
         attempt_seeds: AttemptSeeds | None = None,
@@ -664,7 +680,7 @@ class WorkflowRuntime:
         check_executor(executor, where="execute(executor=...)")
         check_max_workers(max_workers)
 
-        seed_outputs, cache = _apply_resume_from(
+        seed_outputs, cache, routes = _apply_resume_from(
             compiled,
             resume_from=resume_from,
             seed_outputs=seed_outputs,
@@ -673,8 +689,9 @@ class WorkflowRuntime:
         )
         if attempt_seeds is not None:
             seed_outputs = attempt_seeds.outputs
+            routes = None
         # Validate seed_outputs FAIL-FAST before any IO / scheduling work.
-        state = self._build_initial_state(compiled, seed_outputs)
+        state = self._build_initial_state(compiled, seed_outputs, routes)
 
         execution_id, execution_dir, based_on = _read_context(
             run_context, execution_id=execution_id
@@ -693,24 +710,34 @@ class WorkflowRuntime:
             bypass_cache = bypass_cache or run_context.bypass_cache
 
         # The journal lives only in the directory the workspace hands out; a
-        # bare run and a SubWorkflow inner run (``persist=False``) write none.
-        journal_dir = execution_dir if persist else None
+        # bare run writes none. A SubWorkflow writes its own journal under
+        # ``nodes/`` and must not open the outer ``workflow.json``.
+        if nested_journal is not None:
+            journal_dir = nested_journal
+        else:
+            journal_dir = execution_dir if persist else None
+        owns_attempt = nested_journal is None and persist
 
         # The one seed gate, against the predecessor's journal — before this
         # attempt's journal is opened. Unknown names already failed fast above.
         # ``attempt_seeds`` already passed it in ``read_attempt_seeds``.
         if seed_outputs and run_context is not None and based_on and attempt_seeds is None:
-            from .persistence import _verify_seeds, read_journal
+            from .persistence import _records, _verify_seeds, apply_resume_policy, read_journal
 
+            document = read_journal(cast("Run", run_context.run), based_on)
             verified = _verify_seeds(
-                read_journal(cast("Run", run_context.run), based_on),
+                document,
                 seed_outputs,
                 compiled,
                 execution_id=based_on,
             )
-            if set(verified) != set(seed_outputs):
-                seed_outputs = verified
-                state = self._build_initial_state(compiled, seed_outputs)
+            verified, policy_routes = apply_resume_policy(
+                verified,
+                _records(document) if document is not None else {},
+                compiled,
+            )
+            seed_outputs = verified
+            state = self._build_initial_state(compiled, seed_outputs, policy_routes)
 
         if journal_dir is not None and execution_id is not None:
             from .persistence import open_execution_document
@@ -758,9 +785,9 @@ class WorkflowRuntime:
             # previously-failed run back to succeeded (run-recovery bug 1), so
             # a genuinely completed workflow must say so. Only the OUTER run
             # signals success (``persist`` is False for SubWorkflow inner runs).
-            if result_state.failed and run_context is not None:
+            if result_state.failed and owns_attempt and run_context is not None:
                 _record_run_failure(run_context, result_state.error)
-            elif not result_state.failed and persist and run_context is not None:
+            elif not result_state.failed and owns_attempt and run_context is not None:
                 _record_run_success(run_context)
             from .persistence import mark_workflow_finished
 
@@ -862,109 +889,54 @@ class WorkflowRuntime:
                 ``seed_outputs`` naming unknown tasks — raised synchronously,
                 before any IO and before the background task is created.
         """
-        seed_outputs, cache = _apply_resume_from(
+        # Fail-fast on bad seeds so the caller observes the ValueError
+        # synchronously. The background task is :meth:`execute` — one run path.
+        # This preview writes nothing.
+        preview, _preview_cache, _preview_routes = _apply_resume_from(
             compiled,
             resume_from=resume_from,
             seed_outputs=seed_outputs,
             cache=cache,
             run_context=run_context,
         )
-        # Fail-fast on bad seeds so the caller observes the ValueError
-        # synchronously, not via an awaited handle.
-        seed_state = self._build_initial_state(compiled, seed_outputs)
-        execution_id, journal_dir, based_on = _read_context(run_context, execution_id=execution_id)
+        self._build_initial_state(compiled, preview)
+        execution_id, _, _ = _read_context(run_context, execution_id=execution_id)
         run_id = _get_run_id(run_context)
-        if run_context is not None:
-            bypass_cache = bypass_cache or run_context.bypass_cache
-
-        # The one seed gate — see ``execute()``.
-        if seed_outputs and run_context is not None and based_on:
-            from .persistence import _verify_seeds, read_journal
-
-            verified = _verify_seeds(
-                read_journal(cast("Run", run_context.run), based_on),
-                seed_outputs,
-                compiled,
-                execution_id=based_on,
-            )
-            if set(verified) != set(seed_outputs):
-                seed_state = self._build_initial_state(compiled, verified)
-
-        # ``start`` always persists when a context names the attempt; the
-        # writer is closed in ``_bg``'s ``finally``.
-        if journal_dir is not None and execution_id is not None:
-            from .persistence import open_execution_document
-
-            open_execution_document(
-                journal_dir,
-                execution_id=execution_id,
-                compiled=compiled,
-                based_on_execution_id=based_on,
-            )
-
         handle = _GraphWorkflowExecution(
             execution_id=execution_id,
-            workflow_digest=compiled.workflow_digest,
+            workflow_hash=compiled.workflow_hash,
             run_id=run_id,
-        )
-
-        resolved_cache = _resolve_cache(cache, self.cache, run_context)
-        executors = _open_executors(
-            compiled, executor=executor, max_workers=max_workers, run_context=run_context
         )
 
         async def _bg() -> None:
             try:
-                workflow_deps = self._build_deps(
+                handle._result = await self.execute(
                     compiled,
                     run_context=run_context,
-                    execution_id=execution_id,
-                    journal_dir=journal_dir,
                     config=config,
                     deps=deps,
-                    cache=resolved_cache,
+                    execution_id=execution_id,
+                    seed_outputs=seed_outputs,
+                    cache=cache,
                     bypass_cache=bypass_cache,
-                    values=_value_store(run_context, journal_dir),
-                    executors=executors,
+                    resume_from=resume_from,
+                    executor=executor,
+                    max_workers=max_workers,
                 )
-                result_state: WorkflowState = await _run_compiled(
-                    compiled.graph, seed_state, workflow_deps
+            except Exception as exc:
+                _record_run_failure(
+                    run_context,
+                    f"{type(exc).__name__}: {exc}",
+                    traceback.format_exc(),
                 )
-                if result_state.failed:
-                    _record_run_failure(run_context, result_state.error)
-                else:
-                    _record_run_success(run_context)
                 handle._result = WorkflowResult(
-                    status="failed" if result_state.failed else "succeeded",
-                    outputs=result_state.results,
+                    status="failed",
+                    outputs={},
                     run_id=run_id,
                     execution_id=execution_id,
                 )
-                from .persistence import mark_workflow_finished
-
-                mark_workflow_finished(journal_dir, succeeded=not result_state.failed)
-            except Exception:
-                # ``seed_state`` is mutated in place by the graph runner — it
-                # carries the results of every task that completed before the
-                # raise. Preserve them for ``seed_outputs=`` resume.
-                handle._result = WorkflowResult(
-                    status="failed",
-                    outputs=dict(seed_state.results),
-                    run_id=handle.run_id,
-                    execution_id=execution_id,
-                )
-                from .persistence import mark_workflow_finished
-
-                mark_workflow_finished(journal_dir, succeeded=False)
                 logger.exception(f"Background workflow {compiled.name!r} failed")
             finally:
-                # Terminal-flush guarantee for paths the except-arm never sees
-                # (cancellation): land the last document state, end the writer
-                # lifecycle. No-op when mark_workflow_finished already closed.
-                from .persistence import close_execution_document
-
-                executors.close()
-                close_execution_document(journal_dir)
                 handle._done_event.set()
 
         handle._task = asyncio.create_task(_bg())
@@ -989,7 +961,7 @@ class WorkflowRuntime:
         Relocated from the old ``Workflow.run_on``. Does NOT bind the
         workflow to the experiment; register it explicitly via a
         :class:`~molab.workflow.binding.WorkflowBindingRegistry` (or pass
-        ``experiment=`` to :meth:`WorkflowCompiler.compile`) if you need it
+        ``experiment=`` to :meth:`Workflow.compile`) if you need it
         recoverable after process restart.
         """
         params_dict = dict(params) if params is not None else None
@@ -1020,10 +992,10 @@ class WorkflowRuntime:
 class _GraphWorkflowExecution(WorkflowExecution):
     """Concrete WorkflowExecution returned by start()."""
 
-    def __init__(self, execution_id: str | None, workflow_digest: str, run_id: str | None) -> None:
+    def __init__(self, execution_id: str | None, workflow_hash: str, run_id: str | None) -> None:
         super().__init__(
             execution_id=execution_id,
-            workflow_digest=workflow_digest,
+            workflow_hash=workflow_hash,
             run_id=run_id,
         )
         self._result: WorkflowResult | None = None
@@ -1042,4 +1014,11 @@ class _GraphWorkflowExecution(WorkflowExecution):
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+        if self._result is None:
+            self._result = WorkflowResult(
+                status="cancelled",
+                outputs={},
+                run_id=self.run_id,
+                execution_id=self.execution_id,
+            )
         self._done_event.set()

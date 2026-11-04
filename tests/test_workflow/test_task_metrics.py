@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from molab.plugins.metrics import read_run_metrics
-from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import TaskContext, Workflow, WorkflowRuntime
 from molab.workflow.cache import Caching
 from molab.workspace import Workspace, tracking
 from molab.workspace.domain import ExecutionMode
@@ -79,9 +79,7 @@ class TestFromATask:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
         eid = run.executions[-1].id
         records = _records(run, eid)
         assert [r["t"] for r in records] == ["scalar", "histogram", "text", "json", "image_ref"]
@@ -108,7 +106,7 @@ class TestFromATask:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            await WorkflowRuntime().execute(WorkflowCompiler().compile(wf), run_context=ctx)
+            await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
         assert seen == {"live": True}
 
     @pytest.mark.asyncio
@@ -137,7 +135,7 @@ class TestFromATask:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            await WorkflowRuntime().execute(WorkflowCompiler().compile(wf), run_context=ctx)
+            await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
         records = _records(run, run.executions[-1].id)
         assert len(records) == 90
         for record in records:
@@ -153,9 +151,7 @@ class TestFromATask:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
         assert result.outputs["measure"]["n"] == 42.0
         (record,) = _records(run, run.executions[-1].id)
         assert record["tags"] == {"task": "measure", "unit": "count"}
@@ -174,7 +170,7 @@ class TestOffWorkspace:
             ctx.metrics.image("frame", "frame.png", 0)
             return list(ctx.metrics.records)
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         scalar, image = result.outputs["fit"]
         assert scalar["v"] == 0.5 and scalar["tags"] == {"task": "fit"}
         assert image["t"] == "image_ref" and image["v"]["path"] == "frame.png"
@@ -184,7 +180,7 @@ class TestNodeCacheReplay:
     @pytest.mark.asyncio
     async def test_a_hit_replays_the_records_of_the_miss(self, tmp_path: Path) -> None:
         counter = {"train": 0}
-        compiled = WorkflowCompiler().compile(_metric_workflow(counter))
+        compiled = (_metric_workflow(counter)).compile()
         cache = _SpyCache(tmp_path / "cache")
         run = _new_run(tmp_path)
         with run.start() as ctx:
@@ -213,7 +209,7 @@ class TestNodeCacheReplay:
     async def test_over_the_cap_nothing_is_replayed(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setattr(tracking, "TASK_RECORD_CAP", 2)
         counter = {"train": 0}
-        compiled = WorkflowCompiler().compile(_metric_workflow(counter))
+        compiled = (_metric_workflow(counter)).compile()
         cache = _SpyCache(tmp_path / "cache")
         run = _new_run(tmp_path)
         with run.start() as ctx:
@@ -231,7 +227,7 @@ class TestNodeCacheReplay:
     @pytest.mark.asyncio
     async def test_an_old_payload_replays_nothing(self, tmp_path: Path) -> None:
         counter = {"train": 0}
-        compiled = WorkflowCompiler().compile(_metric_workflow(counter))
+        compiled = (_metric_workflow(counter)).compile()
         cache = _SpyCache(tmp_path / "cache", strip_metrics=True)
         run = _new_run(tmp_path)
         with run.start() as ctx:
@@ -245,7 +241,7 @@ class TestNodeCacheReplay:
     @pytest.mark.asyncio
     async def test_the_auto_cache_replays_too(self, tmp_path: Path) -> None:
         counter = {"train": 0}
-        compiled = WorkflowCompiler().compile(_metric_workflow(counter))
+        compiled = (_metric_workflow(counter)).compile()
         run = _new_run(tmp_path)
         with run.start() as ctx:
             await WorkflowRuntime().execute(compiled, run_context=ctx)
@@ -285,7 +281,7 @@ class TestProducerTask:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            await WorkflowRuntime().execute(WorkflowCompiler().compile(wf), run_context=ctx)
+            await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
         produced = {
             a.name: a.metadata.get("task_id")
             for a in run.executions[-1].artifacts

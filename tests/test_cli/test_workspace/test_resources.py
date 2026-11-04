@@ -16,7 +16,7 @@ from molab.cli import app
 from molab.cli.workspace import resources
 from molab.knowledge import Finding, Observation, Report
 from molab.profile import ProfileConfig
-from molab.workflow import RunFailedError, Workflow, WorkflowCompiler
+from molab.workflow import RunFailedError, Workflow
 from molab.workspace import Workspace
 from molab.workspace.run import Run
 from tests.support.records import read_record
@@ -379,7 +379,7 @@ class TestRetryRun:
         run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
         flag = tmp_path / "healed"
         wf = _healing_workflow(flag)
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
 
         with pytest.raises(RunFailedError):
             run.execute(wf)

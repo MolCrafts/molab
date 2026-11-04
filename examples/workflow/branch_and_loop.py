@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 
-from molab.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Next, Workflow
 
 
 # ── 1. Branch — route a value to one downstream task ───────────────────────
@@ -44,7 +44,7 @@ async def branch_demo(score: float) -> None:
 
     wf.branch("classify", routes={"accept": "accepted", "reject": "rejected"})
 
-    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+    result = await wf.arun()
     taken = "accepted" if "accepted" in result.outputs else "rejected"
     print(f"branch: {result.outputs[taken]}")
 
@@ -70,7 +70,7 @@ async def loop_demo() -> None:
 
     wf.loop(body=["step"], until="check", max_iters=10, on_exit="report")
 
-    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+    result = await wf.arun()
     print(f"loop:   {result.outputs['report']} (step ran {result.outputs['step']} times)")
 
 

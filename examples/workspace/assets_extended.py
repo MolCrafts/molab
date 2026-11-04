@@ -21,7 +21,7 @@ from pathlib import Path
 
 import molab as me
 from molab.ids import compute_content_hash
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 from molab.workspace import Asset
 from molab.workspace.artifact_repository import scan_artifacts, scan_asset_repositories
 
@@ -38,7 +38,7 @@ def total(data: list[float]) -> float:
     return sum(data)
 
 
-compiled = WorkflowCompiler().compile(wf)
+compiled = wf.compile()
 
 
 def find_by_digest(ws: me.Workspace, digest: str) -> Asset | None:

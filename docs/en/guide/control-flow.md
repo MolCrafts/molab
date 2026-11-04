@@ -7,7 +7,7 @@ Molab's workflow engine handles control flow through the **shape of the DAG**, n
 Tasks whose dependencies are all satisfied run in parallel automatically. You don't mark anything as "parallel"; you just make sure they share the same set of upstream dependencies.
 
 ```python
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="pipeline")
 
@@ -56,7 +56,7 @@ For larger branch-specific pipelines, route between whole tasks with `wf.branch`
 When a decision selects between **whole downstream tasks**, declare label-routed edges with `wf.branch` and return `Next` from the deciding task:
 
 ```python
-from molab.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Next, Workflow, WorkflowRuntime
 
 wf = Workflow(name="triage", entry="classify")
 
@@ -78,7 +78,7 @@ async def rejected(score: float) -> None: ...
 
 wf.branch("classify", routes={"accept": "accepted", "reject": "rejected"})
 
-result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+result = await wf.arun()
 ```
 
 Two declaration forms are equivalent: `wf.branch("src", routes={"l1": "t1", "l2": "t2"})` and the single-edge `wf.branch("src", "label", "target")`. The same routes can also be declared inline on the task — `@wf.task(routes={"accept": "accepted", ...})`. Route to the reserved name `"_end"` to terminate the workflow on that label.
@@ -103,7 +103,7 @@ async def iterate(xs: list[float], iters: int = 10) -> list[float]:
 When each iteration is itself a (multi-task) piece of the graph, declare a workflow-level loop with `wf.loop`:
 
 ```python
-from molab.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Next, Workflow, WorkflowRuntime
 
 wf = Workflow(name="refine", entry="step")
 
@@ -146,7 +146,7 @@ wf.loop(body=["step"], until="check", max_iters=10, on_exit="report")
 Use `wf.parallel` when you need to fan out over a list produced by an upstream task:
 
 ```python
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="fan-out", entry="scatter")
 

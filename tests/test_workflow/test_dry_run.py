@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 
 
 def test_dry_run_orders_waves_and_skips_bodies() -> None:
@@ -24,7 +24,7 @@ def test_dry_run_orders_waves_and_skips_bodies() -> None:
         calls.append("equilibrate")
         return {"n": n}
 
-    report = WorkflowRuntime().dry_run(WorkflowCompiler().compile(wf))
+    report = WorkflowRuntime().dry_run((wf).compile())
 
     assert calls == []
     assert report.name == "pbix"

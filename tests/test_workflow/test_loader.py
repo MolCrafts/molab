@@ -85,15 +85,15 @@ class TestLoadWorkflowFromEntrypoint:
     def test_compiled_workflow_attribute_is_same_object(self, tmp_path: Path) -> None:
         identity = tmp_path / "identity.txt"
         source = (
-            "from molab.workflow import Task, Workflow, WorkflowCompiler\n"
+            "from molab.workflow import Task, Workflow\n"
             "\n"
             "class Step(Task):\n"
             "    async def execute(self, ctx):\n"
             "        return 1\n"
             "\n"
-            "wf = WorkflowCompiler().compile(\n"
+            "wf = (\n"
             "    Workflow(name='script-demo').add(Step(), name='only_task')\n"
-            ")\n"
+            ").compile()\n"
             f"open({str(identity)!r}, 'w').write(str(id(wf)))\n"
         )
         path = _write(tmp_path / "script_demo.py", source)

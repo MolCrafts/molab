@@ -119,9 +119,9 @@ class TestExperimentBindingWriters:
         )
         assert hits == []
 
-    def test_model_copy_workflow_digest_is_not_flagged(self) -> None:
+    def test_model_copy_workflow_hash_is_not_flagged(self) -> None:
         hits = association_writer_hits(
-            ast.parse('m.model_copy(update={"workflow_digest": 1})'),
+            ast.parse('m.model_copy(update={"workflow_hash": 1})'),
             "snippet.py",
         )
         assert hits == []

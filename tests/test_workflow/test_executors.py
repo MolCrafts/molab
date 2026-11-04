@@ -25,7 +25,6 @@ from molab import print as molab_print
 from molab.workflow import (
     RunFailedError,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 from molab.workflow.execute import execute_run
@@ -302,7 +301,7 @@ class TestFailures:
 
     def test_cancelling_the_run_terminates_running_children(self, tmp_path: Path) -> None:
         run = _run(tmp_path)
-        compiled = WorkflowCompiler().compile(SLEEPY)
+        compiled = (SLEEPY).compile()
 
         async def scenario() -> int:
             with run.start() as ctx:

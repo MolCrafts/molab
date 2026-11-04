@@ -67,7 +67,7 @@ class WorkflowTopology:
     Holds exactly the declaration state the lowering reads — task
     registrations plus the control/branch/loop/parallel/entry decls — so
     ``_engine`` no longer needs to import the public
-    ``WorkflowCompiler`` / ``CompiledWorkflow``. The private attribute
+    ``Workflow`` / ``CompiledWorkflow``. The private attribute
     names mirror the old ``Workflow`` spec so the lowering bodies are
     unchanged.
     """

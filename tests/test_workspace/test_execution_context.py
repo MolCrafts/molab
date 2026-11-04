@@ -286,7 +286,7 @@ class TestExecutionContextStartOnce:
             *,
             environment: dict[str, JSONValue] | None = None,
             executor: dict[str, JSONValue] | None = None,
-            workflow_digest: str | None = None,
+            workflow_hash: str | None = None,
         ) -> Execution:
             # Another process starts the record after ctx2's QUEUED precheck.
             run._execution_repository().start(rec.id)
@@ -294,7 +294,7 @@ class TestExecutionContextStartOnce:
                 execution_id,
                 environment=environment,
                 executor=executor,
-                workflow_digest=workflow_digest,
+                workflow_hash=workflow_hash,
             )
 
         monkeypatch.setattr(ctx2._executions, "start", racing_start)
@@ -363,9 +363,9 @@ class TestExecutionContextWorkflowDigest:
     """arch-own-03a §3: the start transition records the digest."""
 
     def test_digest_is_recorded_at_start(self, run: Run) -> None:
-        with ExecutionContext(run, workflow_digest=_DIGEST) as ctx:
+        with ExecutionContext(run, workflow_hash=_DIGEST) as ctx:
             record = run._execution_repository().get(ctx.id)
-            assert record.workflow_digest == _DIGEST
+            assert record.workflow_hash == _DIGEST
             assert record.status is ExecutionStatus.RUNNING
 
 

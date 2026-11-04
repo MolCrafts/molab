@@ -2,10 +2,6 @@
 
 Debts the arch-own chain recorded and did not close. Decided items are not listed here.
 
-## Scheduler RESUME on a remote target recomputes
-
-A scheduler RESUME against a remote target recomputes the attempt. The predecessor journal is not staged onto the worker, so completed nodes are not seeded. No owner.
-
 ## Crepe `molab:` links are unverified
 
 After knowledge documents may contain `molab:` links, clicking one in the Milkdown Crepe editor (`NoteEditor.tsx`) and proving a Crepe save round-trips `[x](molab:…)` byte for byte has not been checked.

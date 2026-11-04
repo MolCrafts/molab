@@ -8,7 +8,7 @@ Once your script can create a workspace and bind experiments, replace `asyncio.r
 
 ```python
 import molab as me
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="sum")
 
@@ -22,7 +22,7 @@ def fetch(scale: float) -> list[float]:
     me.Workspace("./lab", name="lab")
     .add_project("demo")
     .add_experiment("sum")
-    .run(WorkflowCompiler().compile(wf), params={"scale": [1.0, 2.0]})
+    .run(wf, params={"scale": [1.0, 2.0]})
 )
 ```
 
@@ -42,7 +42,7 @@ The experiment script is **science + declaration only**. These are platform resp
 |---|---|
 | `argparse` / Typer for `--workspace` / `--seed` / … | `molab run`, task params, `molcfg.yaml` profiles, `--override KEY=VAL` |
 | `sys.path.insert` to a package tree | Install the package (`pip install -e …`); sibling modules work because `molab run` adds the script directory |
-| `exp.add_run(..., id=f"…{time.time()}")` + `execute_run` | `exp.run(WorkflowCompiler().compile(wf), params=…)` then `molab run`; re-execute with `--rerun [--fresh]` |
+| `exp.add_run(..., id=f"…{time.time()}")` + `execute_run` | `exp.run(wf, params=…)` then `molab run`; re-execute with `--rerun [--fresh]` |
 | Second `run.start()` after execute to register products | In the task: write under `ctx.workdir`, then `ctx.register_artifact` / `ctx.register_metric` |
 | Nested CLIs for optional trajectory / cutoff | Typed task parameters (or a second task), set via profile / `--override` |
 

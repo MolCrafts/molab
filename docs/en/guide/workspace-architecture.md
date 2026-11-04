@@ -60,7 +60,7 @@ Scientific workflows tend to run the same pipeline many times with different par
 - **Experiment** is the *definition* — parameters, replica count, seeds, optional advisory `workflow_kind` / `workflow_kind` strings used by the UI for grouping.
 - **Run** is a *realization* — one execution, one set of concrete parameter values, one outcome.
 
-Each `Run` captures reproducibility metadata: an opaque `workflow_digest` payload (the canonical typed shape lives in `molab.workflow.workflow_digest`; workspace stores it as a JSON `dict`), the resolved molcfg profile, a `config_hash`, execution history, error info, and produced artifacts.
+Each `Run` captures reproducibility metadata: an opaque `workflow_hash` payload (the canonical typed shape lives in `molab.workflow.workflow_hash`; workspace stores it as a JSON `dict`), the resolved molcfg profile, a `config_hash`, execution history, error info, and produced artifacts.
 
 ## Creating a Hierarchy
 
@@ -90,7 +90,7 @@ Re-calling `add_project` / `add_experiment` with the same name or id returns the
 Workspace itself stores no workflow-shaped types. The association is declared through `Experiment.define(workflow, params=...)`, which records the workflow's graph IR on the experiment and binds the live `CompiledWorkflow` in the workflow layer's `default_binding_registry`:
 
 ```python
-from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Task, TaskContext, Workflow, WorkflowRuntime
 
 
 class TrainTask(Task):
@@ -98,9 +98,7 @@ class TrainTask(Task):
         return {"loss": lr * 10}
 
 
-compiled = WorkflowCompiler().compile(
-    Workflow(name="train").add(TrainTask())
-)  # task auto-named "train"
+compiled = (Workflow(name="train").add(TrainTask())).compile()  # task auto-named "train"
 exp = project.add_experiment("baseline").define(compiled, params={"lr": [1e-3]})
 
 # Workspace just provides the Run the workflow executes within.

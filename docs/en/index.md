@@ -103,7 +103,7 @@ runs independent tasks in parallel, and caches by content.
 </div>
 
 ```python
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="sum")
 
@@ -182,9 +182,7 @@ rerun, and scheduler-backed execution.
 
 ```python
 # train.py — register the experiment once
-ws.add_project("demo").add_experiment("sum").define(
-    WorkflowCompiler().compile(wf), params={"scale": [1.0, 2.0]}
-)
+ws.add_project("demo").add_experiment("sum").define(wf, params={"scale": [1.0, 2.0]})
 ```
 
 ```bash
@@ -353,8 +351,8 @@ Common entry points you will reach for most often.
 
 <div class="molcrafts-manual-list">
   <a href="concept/workflow/">
-    <strong>WorkflowCompiler</strong>
-    <em>Define tasks with @wf.task. Compile to a frozen graph.</em>
+    <strong>Workflow</strong>
+    <em>Define tasks with @wf.task. Run with wf.run().</em>
   </a>
   <a href="getting-started/tracked-runs/">
     <strong>Workspace → Project → Experiment → Run</strong>

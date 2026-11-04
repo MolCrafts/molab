@@ -42,7 +42,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from molab.profile import ProfileConfig
-from molab.workflow import CompiledWorkflow, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import CompiledWorkflow, Workflow, WorkflowRuntime
 from molab.workspace import Workspace
 from molab.workspace.domain import ExecutionMode
 
@@ -71,7 +71,7 @@ def build(factor: float) -> CompiledWorkflow:
     wf = Workflow(name="dependent")
     wf.add(src, name="src")
     wf.add(mech, name="mech", depends_on=["src"], dependent_params=overlay)
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 def _execute(compiled: CompiledWorkflow, ctx: object) -> dict:
@@ -86,7 +86,7 @@ def _check(root: Path) -> None:
 
     wf = Workflow(name="single")
     wf.add(step, name="step")
-    single = WorkflowCompiler().compile(wf)
+    single = (wf).compile()
 
     run = experiment.add_run(params={"seed": 1})
     attempts: list[tuple[str, ProfileConfig, ExecutionMode, str]] = [

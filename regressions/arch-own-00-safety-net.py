@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 
 from molab.server.app import create_app
 from molab.server.dependencies import set_workspace_path_override
-from molab.workflow import RunFailedError, Workflow, WorkflowCompiler
+from molab.workflow import RunFailedError, Workflow
 from molab.workspace import Experiment, Run, Workspace
 
 _INITIAL_OUTPUTS_GOLDEN = {"double": 6, "summarize": "got 6"}
@@ -86,7 +86,7 @@ def _find_node(nodes: list[dict[str, object]], rel_path: str) -> dict[str, objec
 def _check_initial(root: Path) -> None:
     ws = Workspace(root / "ws-initial", name="lab")
     run = ws.add_project("demo").add_experiment("pipeline").add_run(params={"x": 3})
-    result = run.execute(WorkflowCompiler().compile(_build_pipeline()))
+    result = run.execute((_build_pipeline()).compile())
     assert result.status == "succeeded", result.status
     outputs = {name: result.outputs[name] for name in _INITIAL_OUTPUTS_GOLDEN}
     assert outputs == _INITIAL_OUTPUTS_GOLDEN, outputs

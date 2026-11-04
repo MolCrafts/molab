@@ -50,13 +50,13 @@ opaque.
 
 `molab.workflow` owns:
 
-- workflow declaration (`WorkflowCompiler` builder → frozen
+- workflow declaration (`Workflow` → frozen
   `CompiledWorkflow`)
 - task / actor abstractions (`Task`, `Actor`, the single `TaskContext`,
   plus the structural `Runnable` / `Streamable` protocols)
 - task-type registry (`TaskTypeRegistry`) for IR-driven round-trip
 - snapshotting and content-addressed identity (`TaskSnapshot`,
-  `workflow_digest`)
+  `workflow_hash`)
 - **caching**: `Caching` orchestrates the cache policy (key
   derivation, format version, LRU eviction) on top of a pluggable
   `CacheStore` (`.molab/runs/<run-id>/cache/` for execute;
@@ -105,7 +105,7 @@ Allowed outside `molab.workflow`:
 
 ```python
 from molab.workflow import (
-    WorkflowCompiler,
+    Workflow,
     CompiledWorkflow,
     WorkflowRuntime,
     Task,
@@ -113,7 +113,7 @@ from molab.workflow import (
     TaskContext,
     Caching,
     FileCacheStore,
-    workflow_digest,
+    workflow_hash,
 )
 ```
 

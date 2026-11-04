@@ -23,7 +23,7 @@ from types import ModuleType
 from typing import cast
 
 from molab.workflow.compiled import CompiledWorkflow
-from molab.workflow.compiler import Workflow, WorkflowCompiler
+from molab.workflow.compiler import Workflow
 
 _LOAD_LOCK = threading.Lock()
 _loading = threading.local()
@@ -146,13 +146,13 @@ def _materialize(resolved: object, entrypoint: str) -> CompiledWorkflow:
     if isinstance(resolved, CompiledWorkflow):
         return resolved
     if isinstance(resolved, Workflow):
-        return WorkflowCompiler().compile(resolved)
+        return resolved.compile()
     if callable(resolved):
         produced = cast(Callable[[], object], resolved)()
         if isinstance(produced, CompiledWorkflow):
             return produced
         if isinstance(produced, Workflow):
-            return WorkflowCompiler().compile(produced)
+            return produced.compile()
     raise TypeError(
         f"Entrypoint {entrypoint!r} resolved to {type(resolved).__name__}, "
         "expected a CompiledWorkflow, a Workflow, or a zero-arg callable returning one."

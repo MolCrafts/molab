@@ -150,12 +150,12 @@ class TestMolabBootsWithoutPlugins:
         script = tmp_path / "wf.py"
         script.write_text(
             "import molab as me\n"
-            "from molab.workflow import Workflow, WorkflowCompiler\n"
+            "from molab.workflow import Workflow\n"
             "wf = Workflow(name='no-plugins')\n"
             "@wf.task\n"
             "async def step() -> dict:\n"
             "    return {'ok': True}\n"
-            "compiled = WorkflowCompiler().compile(wf)\n"
+            "compiled = wf.compile()\n"
             f"me.Workspace(r'{tmp_path / 'ws'}', name='lab').add_project('p')"
             ".add_experiment('e').define(compiled, params={'seed': [0]})\n",
             encoding="utf-8",

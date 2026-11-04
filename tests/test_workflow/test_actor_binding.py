@@ -11,7 +11,7 @@ like a task's, and the async-generator drain (last yield → output) is unchange
 
 from __future__ import annotations
 
-from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import TaskContext, Workflow, WorkflowRuntime
 
 
 class TestActorBinding:
@@ -28,7 +28,7 @@ class TestActorBinding:
             for x in source:
                 yield x * 10
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.outputs["stream"] == 30  # last yield: 3 * 10
 
     async def test_reads_build_time_config_by_name(self) -> None:
@@ -40,9 +40,7 @@ class TestActorBinding:
             for x in [1, 2, 3]:
                 yield x * factor
 
-        result = await WorkflowRuntime().execute(
-            WorkflowCompiler().compile(wf), config={"factor": 100}
-        )
+        result = await WorkflowRuntime().execute((wf).compile(), config={"factor": 100})
         assert result.outputs["stream"] == 300  # last yield: 3 * 100
 
     async def test_ctx_only_actor_reduces_to_ctx_call(self) -> None:
@@ -54,5 +52,5 @@ class TestActorBinding:
             for item in [1, 2, 3]:
                 yield {"seen": item}
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.outputs["stream"] == {"seen": 3}

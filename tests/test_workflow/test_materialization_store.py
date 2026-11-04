@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 from molab.workspace import Workspace
 
 
@@ -26,7 +26,7 @@ async def test_json_return_is_not_auto_registered_as_artifact(tmp_path: Path) ->
         return {"value": 42}
 
     with run.start() as ctx:
-        out = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf), run_context=ctx)
+        out = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
     assert out.outputs["produce"] == {"value": 42}
     execution_id = run.executions[-1].id

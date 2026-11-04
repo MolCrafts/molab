@@ -24,7 +24,7 @@ import tempfile
 import time
 from collections.abc import Generator
 from pathlib import Path
-from typing import Literal
+from typing import IO, Any, Literal
 
 from mollog import get_logger
 
@@ -87,6 +87,21 @@ def dump_canonical_json(data: object) -> str:
     )
 
 
+def _fsync_parent(path: Path) -> None:
+    """Flush the directory entry so a rename survives power loss."""
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _fsync_file(handle: IO[Any]) -> None:
+    """Flush userspace buffers, then the file, before the rename."""
+    handle.flush()
+    os.fsync(handle.fileno())
+
+
 def atomic_write_json(path: Path, data: object) -> None:
     """Write JSON data to a file atomically via write-to-temp + rename.
 
@@ -109,8 +124,10 @@ def atomic_write_json(path: Path, data: object) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(dump_canonical_json(data))
+            _fsync_file(f)
         os.chmod(tmp_path, 0o600)  # noqa: PTH101
         os.replace(tmp_path, path)  # noqa: PTH105
+        _fsync_parent(path)
     except BaseException:
         # Clean up temp file on any failure (including KeyboardInterrupt)
         with contextlib.suppress(OSError):
@@ -126,7 +143,9 @@ def atomic_write_bytes(path: Path, content: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(content)
+            _fsync_file(f)
         tmp.replace(path)
+        _fsync_parent(path)
     except BaseException:
         with contextlib.suppress(OSError):
             tmp.unlink()
@@ -154,7 +173,9 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
     try:
         with os.fdopen(fd, "w", encoding=encoding) as f:
             f.write(content)
+            _fsync_file(f)
         tmp.replace(path)
+        _fsync_parent(path)
     except BaseException:
         # Clean up temp file on any failure (including KeyboardInterrupt).
         with contextlib.suppress(OSError):

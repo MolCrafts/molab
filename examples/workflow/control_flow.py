@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 
 
 # ── 1. Diamond fan-out ─────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ async def diamond_demo() -> None:
         # Two scalar upstreams bind by their dependency names.
         return {"parsed": parse, "ok": validate}
 
-    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+    result = await wf.arun()
     print(f"diamond:     {result.outputs['merge']}")
 
 
@@ -68,9 +68,7 @@ async def conditional_demo(skip: bool) -> None:
             return items
         return [x for x in items if x >= 0]
 
-    result = await WorkflowRuntime().execute(
-        WorkflowCompiler().compile(wf), config={"skip_cleaning": skip}
-    )
+    result = await WorkflowRuntime().execute(wf.compile(), config={"skip_cleaning": skip})
     tag = "raw    " if skip else "cleaned"
     print(f"conditional {tag}: {result.outputs['maybe_clean']}")
 
@@ -95,7 +93,7 @@ async def fanout_demo() -> None:
     async def total(square_evens: int, square_odds: int) -> int:
         return square_evens + square_odds
 
-    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+    result = await wf.arun()
     print(
         f"fan-out:     squares_evens={result.outputs['square_evens']}, "
         f"squares_odds={result.outputs['square_odds']}, total={result.outputs['total']}"
@@ -120,7 +118,7 @@ async def parallel_demo() -> None:
 
     wf.parallel(map_over="scatter", body="square", join="gather", max_concurrency=2)
 
-    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+    result = await wf.arun()
     print(f"parallel:    square={result.outputs['square']}, gather={result.outputs['gather']}")
 
 

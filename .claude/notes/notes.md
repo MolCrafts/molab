@@ -48,7 +48,7 @@ Side effects worth remembering:
   helpers, and `workspace/sessions.py:SessionLibrary` are **gone**.
   Pairing an Experiment with a workflow is the caller's concern;
   workflow exposes `promote_callable` publicly. Identity of a run's
-  workflow is `workflow_digest` on the Execution and the journal header.
+  workflow is `workflow_hash` on the Execution and the journal header.
 - `agent/_legacy_types.py` is gone; `ToolSchema` / `ModelToolCall`
   live permanently in `agent/tools/spec.py`; `to_jsonable` lives
   privately in `agent/sessions/_serde.py`.

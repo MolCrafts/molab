@@ -24,7 +24,6 @@ from molab.workflow import (
     RunFailedError,
     RunNotExecutableError,
     Workflow,
-    WorkflowCompiler,
     WorkflowRecoveryError,
     WorkflowResult,
     default_binding_registry,
@@ -151,7 +150,7 @@ def _drop_config_hash(run: Run, execution_id: str) -> None:
 class TestExecuteRun:
     def test_one_step_execute_returns_per_task_outputs(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
-        result = run.execute(WorkflowCompiler().compile(_build_wf()))
+        result = run.execute((_build_wf()).compile())
         assert result.status == "succeeded"
         assert result.outputs["double"] == 6
         assert result.outputs["summarize"] == "got 6"
@@ -364,14 +363,14 @@ class TestExecuteRun:
 
         assert len(run.executions) == 1
 
-    def test_records_workflow_digest_at_start(self, tmp_path: Path) -> None:
+    def test_records_workflow_hash_at_start(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
-        compiled = WorkflowCompiler().compile(_build_wf())
+        compiled = (_build_wf()).compile()
 
         run.execute(compiled)
 
-        digest = run.executions[0].workflow_digest
-        assert digest == compiled.workflow_digest
+        digest = run.executions[0].workflow_hash
+        assert digest == compiled.workflow_hash
         assert isinstance(digest, str)
         assert digest.startswith("sha256:")
 
@@ -386,7 +385,7 @@ class TestExecuteRun:
         assert result.status == "succeeded"
         assert result.outputs == {"double": 6, "summarize": "got 6"}
         assert [item.id for item in run.executions] == ["e01"]
-        digest = run.executions[0].workflow_digest
+        digest = run.executions[0].workflow_hash
         assert isinstance(digest, str) and digest != ""
 
     def test_resume_record_seeds_from_based_on_not_latest(self, tmp_path: Path) -> None:
@@ -714,7 +713,7 @@ class TestWorkspaceRunExecutor:
             return {"loss": 0.125}
 
         run = _make_run(tmp_path)
-        run.execute(WorkflowCompiler().compile(wf))
+        run.execute((wf).compile())
         assert workspace_run_executor().read_outputs(run, "e01") == {"train": {"loss": 0.125}}
 
     def test_document_without_memo_runs_constant_add(self, tmp_path: Path) -> None:
@@ -756,7 +755,7 @@ class TestWorkspaceRunExecutor:
         def lone() -> int:
             return 7
 
-        workspace_run_executor().execute(run, WorkflowCompiler().compile(workflow))
+        workspace_run_executor().execute(run, (workflow).compile())
 
         latest = run.executions[-1]
         assert latest.status.value == "succeeded"

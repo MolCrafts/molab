@@ -13,11 +13,28 @@ directory explicitly (``Caching(store_dir=…)``).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+
+def _blob_matches(content_hash: str, data: bytes) -> bool:
+    """True when *data* is the bytes *content_hash* names.
+
+    Accepts ``sha256:<hex>`` or a bare 64-hex digest. Any other label is
+    trusted (the caller did not give a digest to check).
+    """
+    hexdigest = content_hash.split(":")[-1]
+    if len(hexdigest) != 64:
+        return True
+    try:
+        int(hexdigest, 16)
+    except ValueError:
+        return True
+    return hashlib.sha256(data).hexdigest() == hexdigest
 
 
 @runtime_checkable
@@ -193,15 +210,22 @@ class FileCacheStore:
     def put_blob(self, content_hash: str, data: bytes) -> None:
         path = self._blob_path(content_hash)
         path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists():
+        if path.exists() and _blob_matches(content_hash, path.read_bytes()):
             return
-        path.write_bytes(data)
+        path.unlink(missing_ok=True)
+        from molab.atomicio import atomic_write_bytes
+
+        atomic_write_bytes(path, data)
 
     def get_blob(self, content_hash: str) -> bytes | None:
         path = self._blob_path(content_hash)
         if not path.exists():
             return None
-        return path.read_bytes()
+        data = path.read_bytes()
+        if not _blob_matches(content_hash, data):
+            path.unlink(missing_ok=True)
+            return None
+        return data
 
     def clear(self) -> int:
         if not self._store_dir.exists():

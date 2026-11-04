@@ -1,4 +1,4 @@
-"""``compute_workflow_digest`` / ``CompiledWorkflow.workflow_digest`` (``digest.py``).
+"""``compute_workflow_hash`` / ``CompiledWorkflow.workflow_hash`` (``digest.py``).
 
 The digest is the compiled workflow's content-addressed identity: sorted task
 records (name, deps, task type, snapshot key, dependent_params hash) plus the
@@ -17,7 +17,7 @@ import textwrap
 from pathlib import Path
 
 import molab.workflow
-from molab.workflow import Next, Workflow, WorkflowCompiler, compute_workflow_digest
+from molab.workflow import Next, Workflow, compute_workflow_hash
 from molab.workflow.compiled import CompiledWorkflow
 from molab.workflow.digest import _dependent_params_hashes
 
@@ -79,7 +79,7 @@ def _ab(name: str = "ab", *, reverse: bool = False, b_body=b, dependent_params=N
     else:
         wf.add(a, name="a")
         wf.add(b_body, name="b", depends_on=["a"], dependent_params=dependent_params)
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 def _loop(max_iters: int):
@@ -87,7 +87,7 @@ def _loop(max_iters: int):
     wf.add(acc, name="acc")
     wf.add(check, name="check", depends_on=["acc"])
     wf.loop(body=["acc"], until="check", max_iters=max_iters)
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 def _fanout(max_concurrency: int):
@@ -96,50 +96,46 @@ def _fanout(max_concurrency: int):
     wf.add(square, name="square")
     wf.add(collect, name="collect")
     wf.parallel(map_over="emit", body="square", join="collect", max_concurrency=max_concurrency)
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 class TestComputeWorkflowDigest:
     def test_format(self) -> None:
-        assert re.fullmatch(r"sha256:[0-9a-f]{64}", compute_workflow_digest(_ab()))
+        assert re.fullmatch(r"sha256:[0-9a-f]{64}", compute_workflow_hash(_ab()))
 
     def test_order_and_name_independent(self) -> None:
-        assert compute_workflow_digest(_ab("one")) == compute_workflow_digest(
-            _ab("two", reverse=True)
-        )
+        assert compute_workflow_hash(_ab("one")) == compute_workflow_hash(_ab("two", reverse=True))
 
     def test_same_named_task_body_change_differs(self) -> None:
         """The qualname bug: two decorator bodies named ``b`` must not collide."""
         v1, v2 = _ab(), _ab(b_body=b_other_body)
         assert not hasattr(v1, "workflow_id")
-        assert compute_workflow_digest(v1) != compute_workflow_digest(v2)
+        assert compute_workflow_hash(v1) != compute_workflow_hash(v2)
 
     def test_depends_on_change_differs(self) -> None:
         wf = Workflow(name="ab")
         wf.add(a, name="a")
         wf.add(c, name="b")
-        assert compute_workflow_digest(WorkflowCompiler().compile(wf)) != compute_workflow_digest(
-            _ab()
-        )
+        assert compute_workflow_hash((wf).compile()) != compute_workflow_hash(_ab())
 
     def test_loop_max_iters_change_differs(self) -> None:
-        assert compute_workflow_digest(_loop(3)) != compute_workflow_digest(_loop(4))
+        assert compute_workflow_hash(_loop(3)) != compute_workflow_hash(_loop(4))
 
     def test_dependent_params_body_change_differs(self) -> None:
         v1 = _ab(dependent_params=params_v1)
         v2 = _ab(dependent_params=params_v2)
-        assert compute_workflow_digest(v1) != compute_workflow_digest(v2)
+        assert compute_workflow_hash(v1) != compute_workflow_hash(v2)
         assert v1.dependent_params_hashes["b"] != v2.dependent_params_hashes["b"]
 
     def test_max_concurrency_is_not_identity(self) -> None:
-        assert compute_workflow_digest(_fanout(1)) == compute_workflow_digest(_fanout(8))
+        assert compute_workflow_hash(_fanout(1)) == compute_workflow_hash(_fanout(8))
 
     def test_deterministic_across_processes(self, tmp_path: Path) -> None:
         module = tmp_path / "digest_probe.py"
         module.write_text(
             textwrap.dedent(
                 """
-                from molab.workflow import Workflow, WorkflowCompiler
+                from molab.workflow import Workflow
 
 
                 def a() -> int:
@@ -153,7 +149,7 @@ class TestComputeWorkflowDigest:
                 wf = Workflow(name="probe")
                 wf.add(a, name="a")
                 wf.add(b, name="b", depends_on=["a"])
-                print(WorkflowCompiler().compile(wf).workflow_digest)
+                print(wf.compile().workflow_hash)
                 """
             )
         )
@@ -173,12 +169,12 @@ class TestComputeWorkflowDigest:
         assert re.fullmatch(r"sha256:[0-9a-f]{64}", digests[0])
 
     def test_cached_properties_share_one_hasher(self) -> None:
-        assert isinstance(CompiledWorkflow.__dict__["workflow_digest"], functools.cached_property)
+        assert isinstance(CompiledWorkflow.__dict__["workflow_hash"], functools.cached_property)
         assert isinstance(
             CompiledWorkflow.__dict__["dependent_params_hashes"], functools.cached_property
         )
         plain = _ab()
-        assert plain.workflow_digest == molab.workflow.compute_workflow_digest(plain)
+        assert plain.workflow_hash == molab.workflow.compute_workflow_hash(plain)
         assert plain.dependent_params_hashes["b"] is None
         with_params = _ab(dependent_params=params_v1)
         assert dict(with_params.dependent_params_hashes) == _dependent_params_hashes(with_params)

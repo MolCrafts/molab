@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import molab as me
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 # Workspace lives next to this script so repeated ``molab run`` calls reuse it.
 WORKSPACE_ROOT = Path(__file__).resolve().parent / "_workspace"
@@ -44,5 +44,5 @@ async def train(lr: float = 1e-3, epochs: int = 10) -> dict:
     me.Workspace(WORKSPACE_ROOT, name="cli-demo")
     .add_project("demo")
     .add_experiment("train")
-    .define(WorkflowCompiler().compile(wf), params={"seed": [0]})
+    .define(wf, params={"seed": [0]})
 )

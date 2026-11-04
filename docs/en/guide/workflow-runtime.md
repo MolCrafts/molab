@@ -3,7 +3,7 @@
 Execution lives on `WorkflowRuntime`, not on the compiled artifact. You instantiate the runtime (it is cheap and stateless apart from an optional cache) and hand it a `CompiledWorkflow`:
 
 ```python
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 
 wf = Workflow(name="demo")
 
@@ -13,7 +13,7 @@ async def compute(scale: float = 1.0) -> float:
     return 42.0 * scale
 
 
-compiled = WorkflowCompiler().compile(wf)
+compiled = wf.compile()
 
 runtime = WorkflowRuntime()
 result = await runtime.execute(compiled)  # block until done
@@ -29,7 +29,7 @@ When execution begins, the runtime builds the initial workflow state (optionally
 
 If a `RunContext` is attached (`execute(..., run_context=ctx)`), the runtime binds the run's profile config into every task **by name**, binds the run's sweep parameters into root tasks **by name** (with a content-addressed `workdir` exposed as `ctx.workdir`), persists per-node outputs under the run's execution directory, and back-propagates task failures so the run's final status is correct.
 
-The runtime also relies on the compiled workflow identity rather than on ad hoc process state. `workflow_digest` is derived deterministically from the workflow name and task topology, which is what makes it useful for correlating equivalent graphs across executions and machines.
+The runtime also relies on the compiled workflow identity rather than on ad hoc process state. `workflow_hash` is derived deterministically from the workflow name and task topology, which is what makes it useful for correlating equivalent graphs across executions and machines.
 
 ## Where Persistent State Lives
 

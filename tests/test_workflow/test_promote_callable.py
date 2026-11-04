@@ -18,7 +18,6 @@ from molab.workflow import (
     Task,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
 )
 from molab.workflow.promote import (
     promote_callable,
@@ -46,9 +45,7 @@ class _ProbeTask(Task):
 
 
 # Module-level spec for the spec-entrypoint resolver test.
-_FIXTURE_SPEC: CompiledWorkflow = WorkflowCompiler().compile(
-    Workflow(name="probe").add(_ProbeTask(), name="step")
-)
+_FIXTURE_SPEC: CompiledWorkflow = (Workflow(name="probe").add(_ProbeTask(), name="step")).compile()
 
 
 class TestResolveCallableEntrypoint:

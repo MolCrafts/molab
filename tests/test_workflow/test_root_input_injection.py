@@ -13,7 +13,7 @@ import pathlib
 
 import pytest
 
-from molab.workflow import SubWorkflow, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import SubWorkflow, Workflow, WorkflowRuntime
 from molab.workflow.context import TaskContext
 from molab.workspace import Workspace
 
@@ -43,9 +43,7 @@ class TestRootInputInjection:
             return "ok"
 
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.status == "succeeded"
         assert captured["mode"] == "block"
@@ -67,9 +65,7 @@ class TestRootInputInjection:
             return "ok"
 
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.status == "succeeded"
         workdir = captured["workdir"]
@@ -100,9 +96,7 @@ class TestRootInputInjection:
             return 2
 
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.status == "succeeded"
         assert isinstance(captured["root_workdir"], pathlib.Path)
@@ -149,9 +143,7 @@ class TestRootInputInjection:
         outer.parallel(map_over="emit", body="sub", join="collect", max_concurrency=1)
 
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(outer), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((outer).compile(), run_context=ctx)
 
         assert result.status == "succeeded"
         merged = captured["entry_inputs"]

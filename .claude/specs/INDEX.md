@@ -47,7 +47,7 @@ _Step 2 target architecture (plan `pasted-content-id-0977-you-are-scalable-puddl
 | 04b | [arch-own-04b-writers](arch-own-04b-writers.md) | switch every Workflow↔Experiment writer to Experiment.bind_workflow, plus molab migrate workflow-kind [code-complete] (gated on drop-harness-ui, D-6) |
 | 04c | [arch-own-04c-resolve](arch-own-04c-resolve.md) | kind-dispatched workflow resolution, loader moved into workflow [code-complete] |
 | 04d | [arch-own-04d-readers](arch-own-04d-readers.md) | workflow 关联的读者切换与遗留字段删除 [code-complete] |
-| 04e | [arch-own-04e-identity](arch-own-04e-identity.md) | workflow identity — workflow_digest is the only identity; the document carries none; retire run-level workflow fields [code-complete] |
+| 04e | [arch-own-04e-identity](arch-own-04e-identity.md) | workflow identity — workflow_hash is the only identity; the document carries none; retire run-level workflow fields [code-complete] |
 | 04f | [arch-own-04f-generated](arch-own-04f-generated.md) | generated workflows bind by id (plan run + execution + entry); recoverer seam removed [superseded by drop-harness] |
 | 05a | [arch-own-05a-find-refs](arch-own-05a-find-refs.md) | molab: 引用与 Workspace.find [code-complete] |
 | 05b | [arch-own-05b-artifact-readers](arch-own-05b-artifact-readers.md) | Artifact readers move onto Execution records, execution-relative Artifact.path [code-complete] |

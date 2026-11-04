@@ -31,6 +31,7 @@ reads its own values.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -158,8 +159,18 @@ class ValueStore:
         from molab.workspace.file_store import FileStore
 
         digest = hashlib.sha256(data).hexdigest()
-        if not self._fs.exists(self._path(digest, encoding)):
-            FileStore(self._root, fs=self._fs).put(digest + _SUFFIX[encoding], data)
+        path = self._path(digest, encoding)
+        if self._fs.exists(path):
+            try:
+                existing = self._fs.read_bytes(path)
+            except OSError:
+                existing = b""
+            if hashlib.sha256(existing).hexdigest() == digest:
+                return REF_PREFIX + digest
+            # A torn file whose name is the digest would otherwise stay forever:
+            # every later put no-ops and every get rejects it.
+            self._fs.rm(path)
+        FileStore(self._root, fs=self._fs).put(digest + _SUFFIX[encoding], data)
         return REF_PREFIX + digest
 
     def encoding_of(self, ref: str) -> Encoding:
@@ -183,8 +194,11 @@ class ValueStore:
         """
         digest = ref_digest(ref)
         encoding = self.encoding_of(ref)
-        data = self._fs.read_bytes(self._path(digest, encoding))
+        path = self._path(digest, encoding)
+        data = self._fs.read_bytes(path)
         if hashlib.sha256(data).hexdigest() != digest:
+            with contextlib.suppress(OSError):
+                self._fs.rm(path)
             raise ValueError(f"value {ref} in {self._root} is corrupt (digest mismatch)")
         return decode(data, encoding)
 

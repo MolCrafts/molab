@@ -15,7 +15,6 @@ from molab.workflow import (
     RegisterArtifact,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 from molab.workflow.cache import Caching
@@ -49,9 +48,7 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.status == "succeeded"
         promoted = Path(result.outputs["export"]["data"])
@@ -84,9 +81,7 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         eid = run.executions[-1].id
         assert (
@@ -106,9 +101,7 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         eid = run.executions[-1].id
         assert (
@@ -129,9 +122,7 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.outputs["export"] == 1
         eid = run.executions[-1].id
@@ -149,9 +140,7 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.outputs["measure"]["n"] == 42.0
         eid = run.executions[-1].id
@@ -174,7 +163,7 @@ class TestPromoteRegisterArtifact:
             ctx.register_artifact(out)
             return 7
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         # Same workspace so content-hash re-registration can see the first run's
@@ -204,9 +193,7 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.status == "succeeded"
         assets = run.experiment.project.assets.list()
@@ -229,7 +216,7 @@ class TestPromoteRegisterArtifact:
             out.write_bytes(b"png")
             return {"file": ctx.register_artifact(out, mime="image/png", asset="portrait")}
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         run = _new_run(tmp_path)
         with run.start() as ctx:
             await WorkflowRuntime().execute(compiled, run_context=ctx)
@@ -263,9 +250,7 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(
-                WorkflowCompiler().compile(wf), run_context=ctx
-            )
+            result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.status == "failed"
         assert run.experiment.project.assets.list() == []

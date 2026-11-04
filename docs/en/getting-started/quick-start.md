@@ -8,7 +8,7 @@ Copy this into a file named `demo.py`:
 
 ```python
 import molab as me
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 # 1. Define the workflow
 wf = Workflow(name="sum")
@@ -43,7 +43,7 @@ The output is `succeeded 28.0`.
 
 ## What Just Happened
 
-**Step 1 — Define.** `Workflow` holds task definitions. `@wf.task` turns a plain function into a workflow node. `depends_on=["fetch"]` tells the engine that `summarize` runs after `fetch` and receives its output. Compile with `WorkflowCompiler().compile(wf)`.
+**Step 1 — Define.** `Workflow` holds task definitions. `@wf.task` turns a plain function into a workflow node. `depends_on=["fetch"]` tells the engine that `summarize` runs after `fetch` and receives its output. Compile with `wf.compile()`.
 
 **Step 2 — Create.** `Workspace("./lab")` creates a directory on disk. The chain `.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0})` builds the persistent hierarchy: a project groups related work, an experiment names one repeatable definition, and a run records one concrete execution with its parameters. The `add_*` calls are idempotent create-or-get operations; the bare-noun spellings (`ws.project(...)` / `project.experiment(...)`) are strict getters that raise when the node does not exist yet.
 

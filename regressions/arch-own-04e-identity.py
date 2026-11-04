@@ -23,7 +23,6 @@ from molab.workflow import (
     TaskTypeRegistry,
     Workflow,
     WorkflowBindingRegistry,
-    WorkflowCompiler,
 )
 from molab.workspace import Workspace
 from molab.workspace.run import compute_run_definition_hash
@@ -53,7 +52,7 @@ def _compile_ordered(name: str, order: tuple[str, ...]) -> CompiledWorkflow:
     wf = Workflow(name=name)
     for task_name in order:
         wf.task(bodies[task_name])
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 class _StepA(Task):
@@ -98,11 +97,11 @@ def _has_key(blob: object, key: str) -> bool:
 def main() -> None:
     first = _compile_ordered("alpha-wf", ("alpha", "beta"))
     second = _compile_ordered("beta-wf", ("beta", "alpha"))
-    assert first.workflow_digest == second.workflow_digest
+    assert first.workflow_hash == second.workflow_hash
 
     compiled_a = _compile_document(_StepA)
     compiled_b = _compile_document(_StepB)
-    assert compiled_a.workflow_digest != compiled_b.workflow_digest
+    assert compiled_a.workflow_hash != compiled_b.workflow_hash
     ir_a = json.dumps(compiled_a.to_ir(), sort_keys=True)
     ir_b = json.dumps(compiled_b.to_ir(), sort_keys=True)
     assert ir_a == ir_b
@@ -110,18 +109,18 @@ def main() -> None:
         ir = compiled.to_ir()
         graph = compiled.to_graph_ir().model_dump()
         assert not _has_key(ir, "workflow_id")
-        assert not _has_key(ir, "workflow_digest")
+        assert not _has_key(ir, "workflow_hash")
         assert not _has_key(graph, "workflow_id")
-        assert not _has_key(graph, "workflow_digest")
+        assert not _has_key(graph, "workflow_hash")
 
     experiment = _Exp("exp-04e")
     registry = WorkflowBindingRegistry()
     bound_wf = Workflow(name="bound")
     bound_wf.task(_alpha)
-    bound = WorkflowCompiler().compile(bound_wf, experiment=experiment, registry=registry)
+    bound = bound_wf.compile(experiment=experiment, registry=registry)
     binding = bound.binding
     assert binding is not None
-    assert binding.workflow_digest == bound.workflow_digest
+    assert binding.workflow_hash == bound.workflow_hash
 
     assert importlib.util.find_spec("molab.workflow.version") is None
 

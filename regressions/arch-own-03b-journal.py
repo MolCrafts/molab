@@ -3,7 +3,7 @@
 A compiled workflow's content digest, and the node journal the workflow layer
 writes into the directory the workspace hands it:
 
-1. ``compute_workflow_digest`` is ``sha256:<64 hex>``, independent of
+1. ``compute_workflow_hash`` is ``sha256:<64 hex>``, independent of
    declaration order and workflow name, and changes with a task body.
 2. A bare run is not an Execution: ``execution_id`` is ``None``.
 3. e01 (``double`` → ``triple`` → ``summarize``, which fails while a flag is
@@ -48,9 +48,8 @@ from pathlib import Path
 from molab.workflow import (
     CompiledWorkflow,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
-    compute_workflow_digest,
+    compute_workflow_hash,
     read_journal,
     read_outputs,
     read_resume_seeds,
@@ -95,7 +94,7 @@ def _compile(
     ]
     for body, task, deps in reversed(steps) if reverse else steps:
         wf.add(body, name=task, depends_on=deps)
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 def _sorted(mapping: dict) -> dict:
@@ -106,18 +105,18 @@ def _header(doc: dict, digest: str) -> str:
     return (
         f"schema={doc['schema_version']} id={doc['execution_id']} "
         f"based_on={doc['based_on_execution_id']} "
-        f"digest_ok={doc['workflow_digest'] == digest}"
+        f"digest_ok={doc['workflow_hash'] == digest}"
     )
 
 
 def _check(root: Path) -> None:
     v1 = _compile("pipeline")
     v2 = _compile("pipeline", double_body=double_v2)
-    digest = compute_workflow_digest(v1)
+    digest = compute_workflow_hash(v1)
     print(f"digest format ok: {re.fullmatch(r'sha256:[0-9a-f]{64}', digest) is not None}")
-    same = compute_workflow_digest(_compile("renamed", reverse=True)) == digest
+    same = compute_workflow_hash(_compile("renamed", reverse=True)) == digest
     print(f"digest order/name independent: {same}")
-    print(f"digest body sensitive: {compute_workflow_digest(v2) != digest}")
+    print(f"digest body sensitive: {compute_workflow_hash(v2) != digest}")
 
     bare = asyncio.run(WorkflowRuntime().execute(v1, config={"x": 3}))
     print(f"bare run execution_id: {bare.execution_id}")
@@ -132,7 +131,7 @@ def _check(root: Path) -> None:
     assert e01.status == "failed"
     doc = read_journal(run, "e01")
     assert doc is not None
-    print(f"e01 journal: {_header(doc, v1.workflow_digest)}")
+    print(f"e01 journal: {_header(doc, v1.workflow_hash)}")
     print(f"e01 no top-level status/outputs/error: {not {'status', 'outputs', 'error'} & set(doc)}")
     print(f"e01 outputs: {_sorted(read_outputs(run, 'e01'))}")
     seeds = read_resume_seeds(run, "e01", v1)
@@ -145,7 +144,7 @@ def _check(root: Path) -> None:
     assert e02.status == "succeeded"
     doc = read_journal(run, "e02")
     assert doc is not None
-    print(f"e02 journal: {_header(doc, v1.workflow_digest)}")
+    print(f"e02 journal: {_header(doc, v1.workflow_hash)}")
     print(f"e02 outputs: {_sorted(read_outputs(run, 'e02'))}")
     print(
         f"body runs: double={RUNS['double']} triple={RUNS['triple']} summarize={RUNS['summarize']}"

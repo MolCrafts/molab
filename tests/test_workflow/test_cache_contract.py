@@ -35,7 +35,7 @@ from pathlib import Path
 import pytest
 
 from molab.profile import ProfileConfig
-from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Task, TaskContext, Workflow, WorkflowRuntime
 from molab.workflow.cache import Caching
 from molab.workflow.cache_store import FileCacheStore
 from molab.workflow.snapshot import TaskSnapshot
@@ -133,7 +133,7 @@ class TestEngineInjectedCacheIdentity:
             counters["root"] += 1
             return ratio
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _workspace_run(tmp_path, "a", {"ratio": "r1"})
@@ -160,7 +160,7 @@ class TestEngineInjectedCacheIdentity:
             counters["root"] += 1
             return ratio
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _workspace_run(tmp_path, "ws1", {"ratio": "r1"})
@@ -182,7 +182,7 @@ def _dt_workflow(counters: dict[str, int], name: str = "dt"):
         counters["root"] += 1
         return dt * 10
 
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 def _dependent_workflow(factor: float, counters: dict[str, int]):
@@ -200,7 +200,7 @@ def _dependent_workflow(factor: float, counters: dict[str, int]):
     wf = Workflow(name="dependent")
     wf.add(src, name="src")
     wf.add(mech, name="mech", depends_on=["src"], dependent_params=overlay)
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 class TestEffectiveConfigCacheIdentity:

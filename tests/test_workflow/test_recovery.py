@@ -20,7 +20,6 @@ from molab.workflow import (
     CompiledWorkflow,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRecoveryError,
     can_recover_workflow,
     compiled_workflow_for_experiment,
@@ -33,7 +32,8 @@ from molab.workspace.run import Run
 from tests.support.records import read_record, write_record
 
 _SCRIPT_MODULE = """\
-from molab.workflow import TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import TaskContext, Workflow
+
 
 wf = Workflow(name="script-demo")
 
@@ -43,7 +43,7 @@ async def only_task(ctx: TaskContext) -> dict:
     return {"ok": True}
 
 
-workflow = WorkflowCompiler().compile(wf)
+workflow = (wf).compile()
 """
 
 
@@ -121,7 +121,7 @@ def _compiled_named(name: str) -> CompiledWorkflow:
         del ctx
         return {"ok": True}
 
-    return WorkflowCompiler().compile(workflow)
+    return (workflow).compile()
 
 
 class TestScriptExperimentShape:

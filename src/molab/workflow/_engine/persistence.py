@@ -10,8 +10,8 @@ composes either path.
 **Header** (schema :data:`JOURNAL_SCHEMA_VERSION` = 4, the workflow layer's
 own version, unrelated to ``MOLAB_SCHEMA_VERSION``): the compiled IR expanded
 at the top level (``task_configs`` + ``links`` and the IR's own keys), then
-``schema_version``, ``execution_id``, ``workflow_digest``
-(:attr:`CompiledWorkflow.workflow_digest`), ``workflow_name``,
+``schema_version``, ``execution_id``, ``workflow_hash``
+(:attr:`CompiledWorkflow.workflow_hash`), ``workflow_name``,
 ``based_on_execution_id``, ``selected_tasks`` (``null`` when the attempt runs
 every task, else the tasks a partial rerun re-executes), ``seeded_from``
 (``{task: {"execution_id", "ref"}}`` — the predecessor record each seeded
@@ -78,7 +78,7 @@ with a usable recorded output, its ``snapshot_key`` and
 ``dependent_params_hash`` equal the live task's, and every upstream is itself
 verified (or never fired in the predecessor — ``pending`` / ``skipped``, e.g.
 an unchosen branch). The rule is transitive, so a changed upstream drops every
-seed downstream of it. Fast path: when the journal's ``workflow_digest``
+seed downstream of it. Fast path: when the journal's ``workflow_hash``
 equals the live digest, no record is unusable and every seed has a
 ``completed`` record, the seeds are kept without the full evaluation — equal
 digests imply equal per-task keys.
@@ -189,6 +189,19 @@ def _load(fs: FileSystem, path: str | os.PathLike[str]) -> dict[str, JSONValue] 
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _journal_workflow_hash(doc: Mapping[str, JSONValue]) -> str | None:
+    """The graph hash in a journal header.
+
+    Current journals store ``workflow_hash``. Journals written before that
+    rename store the same value as ``workflow_digest``.
+    """
+    value = doc.get("workflow_hash")
+    if isinstance(value, str):
+        return value
+    legacy = doc.get("workflow_digest")
+    return legacy if isinstance(legacy, str) else None
 
 
 def _records(doc: Mapping[str, JSONValue]) -> dict[str, dict[str, JSONValue]]:
@@ -356,6 +369,7 @@ class AttemptSeeds:
     excluded: frozenset[str] = frozenset()
     delivered: Mapping[str, TaskOutput] = field(default_factory=dict)
     expected_inputs: Mapping[str, Mapping[str, JSONValue]] = field(default_factory=dict)
+    routes: Mapping[str, str] = field(default_factory=dict)
 
     def seeded_from(self) -> dict[str, JSONValue]:
         """The journal header's ``seeded_from``: predecessor id + ref per seed."""
@@ -402,12 +416,50 @@ def _why_not_seeded(
     return reasons.get(name, "its record cannot be verified")
 
 
+def apply_resume_policy(
+    verified: Mapping[str, TaskOutput],
+    records: Mapping[str, Mapping[str, JSONValue]],
+    compiled: CompiledWorkflow,
+    *,
+    rerun: set[str] | None = None,
+) -> tuple[dict[str, TaskOutput], dict[str, str]]:
+    """Drop seeds a resume must recompute.
+
+    A branch task is never a seed: it re-decides, because its recorded value
+    carries no ``Next``. A loop body is a seed only when ``until`` recorded
+    ``route == "exit"`` and the cap did not force that exit. Anything
+    downstream of a dropped task is dropped too. The one seeding path calls this.
+    """
+    rerun = rerun or set()
+    # A branch re-decides. Its recorded value has no ``Next``, so it is never
+    # a seed. The recorded label only says whether the loop body is finished.
+    drop: set[str] = {
+        name for name in verified if isinstance(compiled.graph.out_edges.get(name), BranchEdges)
+    }
+    for loop in compiled._loops:
+        record = records.get(loop.until) or {}
+        finished = record.get("route") == "exit" and record.get("forced_exit") is not True
+        if loop.until in rerun or not finished:
+            drop.update(loop.body)
+            drop.add(loop.until)
+    ups, _back, _order = _seed_upstreams(compiled)
+    changed = True
+    while changed:
+        changed = False
+        for name, sources in ups.items():
+            if name not in drop and sources & drop:
+                drop.add(name)
+                changed = True
+    return {name: value for name, value in verified.items() if name not in drop}, {}
+
+
 def read_attempt_seeds(
     run: Run,
     based_on_execution_id: str,
     compiled: CompiledWorkflow,
     *,
     select: Sequence[str] = (),
+    journal_path: Path | None = None,
 ) -> AttemptSeeds:
     """The one seeding path: resolve a predecessor's records into seeds.
 
@@ -443,10 +495,10 @@ def read_attempt_seeds(
         raise ValueError(
             f"unknown task(s) {unknown} selected for rerun; the workflow has {sorted(registered)}"
         )
-    doc = _current(
-        _load(_workspace_fs(run), _journal_path(run, based_on_execution_id)),
-        based_on_execution_id,
+    loaded_path = (
+        journal_path if journal_path is not None else _journal_path(run, based_on_execution_id)
     )
+    doc = _current(_load(_workspace_fs(run), loaded_path), based_on_execution_id)
     store = value_store(run)
     candidates, unusable = _recorded_outputs(doc, store)
     records = _records(doc) if doc is not None else {}
@@ -476,18 +528,13 @@ def read_attempt_seeds(
         return found
 
     if not selection:
-        # A branch task re-decides its route on resume: its recorded value
-        # alone cannot route (it carries no ``Next``), so it is not a seed.
-        verified = {
-            name: value
-            for name, value in verified.items()
-            if not isinstance(compiled.graph.out_edges.get(name), BranchEdges)
-        }
+        verified, routes = apply_resume_policy(verified, records, compiled)
         return AttemptSeeds(
             based_on_execution_id=based_on_execution_id,
             outputs=verified,
             records={name: _output_fields(name) for name in verified},
             expected_inputs=_inputs([name for name in registered if name not in verified]),
+            routes=routes,
         )
 
     ups, _back, _order = _seed_upstreams(compiled)
@@ -497,6 +544,7 @@ def read_attempt_seeds(
         for name, value in verified.items()
         if name not in selection and name not in downstream
     }
+    seeds, routes = apply_resume_policy(seeds, records, compiled, rerun=set(selection))
     plan = compiled.graph
     delivered: dict[str, TaskOutput] = {}
     for name in selection:
@@ -529,6 +577,7 @@ def read_attempt_seeds(
         excluded=excluded,
         delivered=delivered,
         expected_inputs=_inputs(selection),
+        routes=routes,
     )
 
 
@@ -651,7 +700,7 @@ def _verify_seeds(
     records = _records(doc)
     unusable = unusable or {}
     if (
-        doc.get("workflow_digest") == compiled.workflow_digest
+        _journal_workflow_hash(doc) == compiled.workflow_hash
         and not unusable
         and not any(record.get("output_unrecordable") for record in records.values())
         and all(name in records and records[name].get("status") == "completed" for name in seeds)
@@ -753,11 +802,11 @@ def _initial_document(
     selected_tasks: Sequence[str] | None = None,
     seeded_from: Mapping[str, JSONValue] | None = None,
 ) -> dict[str, JSONValue]:
-    """Journal header. ``workflow_digest`` is its only identity; the spread IR has none."""
+    """Journal header. ``workflow_hash`` is its only identity; the spread IR has none."""
     header: dict[str, JSONValue] = {
         "schema_version": JOURNAL_SCHEMA_VERSION,
         "execution_id": execution_id,
-        "workflow_digest": compiled.workflow_digest if compiled is not None else None,
+        "workflow_hash": compiled.workflow_hash if compiled is not None else None,
         "workflow_name": compiled.name if compiled is not None else None,
         "based_on_execution_id": based_on_execution_id,
         "selected_tasks": list(selected_tasks) if selected_tasks else None,
@@ -997,6 +1046,8 @@ def mark_task_status(
     runner: Mapping[str, JSONValue] | None = None,
     started: bool = False,
     ended: bool = False,
+    route: str | None = None,
+    forced_exit: bool | None = None,
 ) -> None:
     """Update one task record and its adjacent links in the journal.
 
@@ -1025,6 +1076,10 @@ def mark_task_status(
             if _task_id(task) == task_name:
                 task["status"] = status
                 if status == "running":
+                    # A relaunch (loop iteration) must not keep the previous
+                    # decision. The completion write records the label taken.
+                    task.pop("route", None)
+                    task.pop("forced_exit", None)
                     # Launched is not started: a task waiting for its turn
                     # (inline, a full pool) is only queued. ``started`` comes
                     # from the executor the moment the body begins, so the
@@ -1058,13 +1113,22 @@ def mark_task_status(
                     task.update(runner)
                 if error:
                     task["error"] = error
+                if route is not None:
+                    task["route"] = route
+                if forced_exit is not None:
+                    task["forced_exit"] = forced_exit
         for link in _iter_dicts(data.get("links", [])):
             if _link_target(link) == task_name and status == "running":
                 link["status"] = "running"
             if _link_target(link) == task_name and status in {"completed", "skipped"}:
                 link["status"] = "completed"
             if _link_source(link) == task_name and status == "completed":
-                link["status"] = "running"
+                # A branch records the label it took. The other routes are
+                # dead; they must not look like work still in flight.
+                if route is not None and link.get("kind") == "branch":
+                    link["status"] = "running" if link.get("condition") == route else "skipped"
+                else:
+                    link["status"] = "running"
             if (
                 _link_source(link) == task_name or _link_target(link) == task_name
             ) and status == "failed":

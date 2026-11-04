@@ -20,7 +20,7 @@ import tempfile
 from pathlib import Path
 
 import molab as me
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 
 wf = Workflow(name="step")
 
@@ -31,7 +31,7 @@ async def step(seed: int | None = None) -> dict:
     return {"noted": True, "seed": seed}
 
 
-compiled = WorkflowCompiler().compile(wf)
+compiled = wf.compile()
 
 
 async def main() -> None:

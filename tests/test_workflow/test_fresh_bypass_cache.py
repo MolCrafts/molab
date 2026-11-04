@@ -19,7 +19,6 @@ from molab.workflow import (
     Caching,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 from molab.workspace import Workspace
@@ -58,7 +57,7 @@ def _counted_workflow():
         _bump("step")
         return 42
 
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 class TestBypassCache:

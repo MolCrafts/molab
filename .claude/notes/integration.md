@@ -21,11 +21,11 @@ Coordination between the layers that already exist. Module roles live in `archit
 
 ## Workflow identity
 
-The workflow-layer IR is the wire IR owned by `WorkflowCodec` (`molab.workflow.codec`) and `WorkflowGraphIR` (`molab.workflow.ir`). A compiled workflow's identity is `workflow_digest` (`molab.workflow.digest`). It is stored on the Execution record and in the journal header. The document itself carries none.
+The workflow-layer IR is the wire IR owned by `WorkflowCodec` (`molab.workflow.codec`) and `WorkflowGraphIR` (`molab.workflow.ir`). A compiled workflow's identity is `workflow_hash` (`molab.workflow.digest`). It is stored on the Execution record and in the journal header. The document itself carries none.
 
 ## Events
 
-History is the workspace git log. An event that names a workflow carries `workflow_digest`, not a second topology id.
+History is the workspace git log. An event that names a workflow carries `workflow_hash`, not a second topology id.
 
 ## Seams
 

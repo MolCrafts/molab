@@ -21,7 +21,6 @@ from molab.fs import LocalFS
 from molab.workflow import (
     Next,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
     read_attempt_seeds,
     read_journal,
@@ -98,7 +97,7 @@ def _ab(a_body=a_v1, *, dependent_params=None, name: str = "ab"):
     wf = Workflow(name=name)
     wf.add(a_body, name="a")
     wf.add(b, name="b", depends_on=["a"], dependent_params=dependent_params)
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 def _branchy(right_body):
@@ -107,7 +106,7 @@ def _branchy(right_body):
     wf.add(left, name="left")
     wf.add(right_body, name="right")
     wf.branch("route", routes={"left": "left", "right": "right"})
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 def _loop(check_body):
@@ -115,7 +114,7 @@ def _loop(check_body):
     wf.add(acc, name="acc")
     wf.add(check_body, name="check", depends_on=["acc"])
     wf.loop(body=["acc"], until="check", max_iters=3)
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 def _run(tmp_path: Path, *, fs=None):
@@ -193,7 +192,7 @@ class TestOpenExecutionDocument:
         assert doc["based_on_execution_id"] is None
         assert doc["selected_tasks"] is None
         assert doc["seeded_from"] == {}
-        assert doc["workflow_digest"] == compiled.workflow_digest
+        assert doc["workflow_hash"] == compiled.workflow_hash
         assert "workflow_id" not in doc
         assert doc["workflow_name"] == "ab"
         assert doc["started_at"] is not None
@@ -354,7 +353,7 @@ class TestReadJournal:
         exported = set(molab.workflow.__all__)
         assert {"read_journal", "read_outputs", "read_attempt_seeds", "AttemptSeeds"} <= exported
         assert "read_resume_seeds" not in exported
-        assert "compute_workflow_digest" in exported
+        assert "compute_workflow_hash" in exported
 
 
 def _hand_journal(run, tasks: list[dict], *, schema_version: int = 4) -> str:
@@ -477,7 +476,7 @@ class TestVerifySeeds:
     def test_unfired_branch_route_does_not_block(self, tmp_path: Path) -> None:
         run = _run(tmp_path)
         v1, v2 = _branchy(right_v1), _branchy(right_v2)
-        assert v1.workflow_digest != v2.workflow_digest
+        assert v1.workflow_hash != v2.workflow_hash
         _execute(run, v1)
         assert _record(read_journal(run, "e01"), "right")["status"] == "pending"
         assert read_resume_seeds(run, "e01", v2) == {"left": "L"}
@@ -500,7 +499,7 @@ class TestVerifySeeds:
         _rewrite(run, lambda doc: _record(doc, "a").__setitem__("snapshot_key", "tampered"))
         assert read_resume_seeds(run, "e01", compiled) == {"a": 1, "b": 11}
 
-        _rewrite(run, lambda doc: doc.__setitem__("workflow_digest", "sha256:" + "0" * 64))
+        _rewrite(run, lambda doc: doc.__setitem__("workflow_hash", "sha256:" + "0" * 64))
         assert read_resume_seeds(run, "e01", compiled) == {}
 
     def test_filter_resume_seeds_is_removed(self) -> None:

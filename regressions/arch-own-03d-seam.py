@@ -62,7 +62,8 @@ EXPECTED = [
 
 WRITER = """
 import molab
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
+
 
 wf = Workflow(name="single")
 
@@ -75,7 +76,7 @@ def train() -> dict:
 ws = molab.Workspace(ROOT, name="lab")
 exp = ws.add_project("p").add_experiment("e")
 run1 = exp.add_run(params={"seed": 1})
-run1.execute(WorkflowCompiler().compile(wf))
+run1.execute((wf).compile())
 run2 = exp.add_run(params={"seed": 2})
 with run2.start() as ctx:
     ctx.set_result("train", "driver")

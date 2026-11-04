@@ -2,7 +2,7 @@
 
 arch-own-02a-record: ``SourceFile`` / ``SourceManifest`` are frozen,
 ``extra="forbid"`` value types; ``Execution`` gains ``bypass_cache`` /
-``source`` / ``workflow_digest`` with defaults so legacy records still
+``source`` / ``workflow_hash`` with defaults so legacy records still
 validate. New symbols are imported inside each test so every test fails for
 its own reason before the implementation lands.
 """
@@ -91,7 +91,7 @@ class TestExecution:
         ex = Execution.model_validate(_legacy_execution_dict())
         assert ex.bypass_cache is False
         assert ex.source is None
-        assert ex.workflow_digest is None
+        assert ex.workflow_hash is None
 
     def test_source_round_trips_through_json(self) -> None:
         data = _legacy_execution_dict()
@@ -104,7 +104,7 @@ class TestExecution:
             "captured_at": "2026-01-01T00:00:00Z",
         }
         data["bypass_cache"] = True
-        data["workflow_digest"] = "sha256:d"
+        data["workflow_hash"] = "sha256:d"
         ex = Execution.model_validate(data)
         again = Execution.model_validate(ex.model_dump(mode="json"))
         assert again == ex

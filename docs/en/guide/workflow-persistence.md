@@ -8,7 +8,7 @@ Three pieces of data, all written atomically (temp file + `os.rename`):
 
 ### 1. `Experiment.workflow_kind`
 
-`Experiment.bind_workflow` is the only writer. `code` names an entrypoint; `document` stores the graph. An experiment with no `workflow_kind` is unbound until something calls `bind_workflow`. `workflow_digest` lives on the Execution and in the journal header, not in the document.
+`Experiment.bind_workflow` is the only writer. `code` names an entrypoint; `document` stores the graph. An experiment with no `workflow_kind` is unbound until something calls `bind_workflow`. `workflow_hash` lives on the Execution and in the journal header, not in the document.
 
 ```json
 {
@@ -21,13 +21,13 @@ Three pieces of data, all written atomically (temp file + `os.rename`):
 }
 ```
 
-### 2. `RunMetadata.workflow_digest`
+### 2. `RunMetadata.workflow_hash`
 
-An opaque JSON dict captured at run-creation time. The canonical shape is `molab.workflow.snapshot_ref.workflow_digest` — but workspace stores the value as a plain dict to keep the dependency direction one-way (workspace ← workflow). Workflow-layer code dumps the model into JSON before handing it to workspace; workspace just round-trips it:
+An opaque JSON dict captured at run-creation time. The canonical shape is `molab.workflow.snapshot_ref.workflow_hash` — but workspace stores the value as a plain dict to keep the dependency direction one-way (workspace ← workflow). Workflow-layer code dumps the model into JSON before handing it to workspace; workspace just round-trips it:
 
 ```json
 {
-  "workflow_digest": {
+  "workflow_hash": {
     "source": "train.py",
     "git_commit": "abc123",
     "code_hash": null,
@@ -56,7 +56,7 @@ The fully merged molcfg profile data the run executed against, plus a `sha256` d
 - Task code — implicit in `workflow_kind` + `git_commit`.
 - Per-task configuration — implicit in the workflow definition.
 
-This is deliberate: a serialized DAG can drift from the live code base. Re-importing the script guarantees the on-disk `Run` always lines up with the current Python definition. If the definition has changed, the `workflow_digest` (topology hash) or `TaskSnapshot.code_hash` will too.
+This is deliberate: a serialized DAG can drift from the live code base. Re-importing the script guarantees the on-disk `Run` always lines up with the current Python definition. If the definition has changed, the `workflow_hash` (topology hash) or `TaskSnapshot.code_hash` will too.
 
 ## Replaying a Run
 
@@ -74,11 +74,11 @@ molab execute path/to/<params>/
 
 | Field | Where | Meaning |
 |-------|-------|---------|
-| `Workflow.workflow_digest` | derived | sha256 over `name + task topology`; stable across machines |
+| `Workflow.workflow_hash` | derived | sha256 over `name + task topology`; stable across machines |
 | `TaskSnapshot.code_hash` | derived | sha256 over AST-normalized `execute()` source |
 | `TaskSnapshot.config_hash` | derived | sha256 over serialized task config |
-| `RunMetadata.workflow_digest.source` | `run.json` | path to the defining script |
-| `RunMetadata.workflow_digest.git_commit` | `run.json` | commit SHA at experiment-creation time |
+| `RunMetadata.workflow_hash.source` | `run.json` | path to the defining script |
+| `RunMetadata.workflow_hash.git_commit` | `run.json` | commit SHA at experiment-creation time |
 | `RunMetadata.config_hash` | `run.json` | sha256 over the merged profile dict |
 
 Use these to group, compare, and replay runs.

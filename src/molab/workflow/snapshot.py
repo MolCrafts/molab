@@ -21,6 +21,7 @@ import json
 import textwrap
 from datetime import UTC, datetime
 from types import CodeType
+from typing import cast
 
 from mollog import get_logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,17 +50,22 @@ def task_config_of(body: object) -> dict[str, JSONValue]:
     return {}
 
 
-def _stable_config_default(obj: object) -> str:
+def _stable_config_default(obj: object) -> JSONValue:
     """Deterministic JSON fallback for non-JSON ``__init__`` args.
 
     ``json.dumps(default=str)`` is unusable for the config hash: a default
     ``repr`` embeds the instance's memory address (``<… at 0x…>``), so a task
-    constructed with a live object (a callable, a sub-workflow) would hash
-    differently every process — breaking content-addressing across a run/resume.
+    constructed with a live object would hash differently every process.
 
-    Callables hash by their AST-normalized source (stable AND discriminating);
-    other objects collapse to their *type* name (stable, address-free).
+    Values that change what the body computes are encoded: callables by their
+    AST-normalized source, paths as text, mappings, sequences and dataclass
+    fields recursively. Only an object with no stable fields collapses to its
+    type name.
     """
+    import dataclasses
+    from collections.abc import Mapping, Sequence
+    from pathlib import Path
+
     code = getattr(obj, "__code__", None) or getattr(
         getattr(obj, "__func__", None), "__code__", None
     )
@@ -68,6 +74,28 @@ def _stable_config_default(obj: object) -> str:
         mod = getattr(obj, "__module__", "?")
         qualname = getattr(obj, "__qualname__", getattr(obj, "__name__", "?"))
         return f"callable:{mod}.{qualname}:{source_hash or 'nosrc'}"
+    if isinstance(obj, Path):
+        return {"__path__": str(obj)}
+    inner = getattr(obj, "inner", None)
+    digest = getattr(inner, "workflow_hash", None) or getattr(obj, "workflow_hash", None)
+    if isinstance(digest, str):
+        return {"__workflow__": digest}
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return {"__dataclass__": type(obj).__qualname__, "fields": dataclasses.asdict(obj)}
+    if isinstance(obj, Mapping):
+        return {str(key): value for key, value in obj.items()}
+    if isinstance(obj, Sequence) and not isinstance(obj, str | bytes | bytearray):
+        return list(obj)
+    fields: dict[str, object] = {}
+    if hasattr(obj, "__dict__"):
+        fields = {
+            key: value
+            for key, value in vars(obj).items()
+            if not key.startswith("_") and not callable(value)
+        }
+    if fields:
+        qualname = f"{type(obj).__module__}.{type(obj).__qualname__}"
+        return cast("JSONValue", {"__object__": qualname, "fields": fields})
     return f"<{type(obj).__module__}.{type(obj).__qualname__}>"
 
 
@@ -151,7 +179,7 @@ class TaskSnapshot(BaseModel):
         ``Actor`` instance, a bare ``async def`` function, or any ``Runnable`` /
         ``Streamable``. It resolves the hashable callable (``execute`` → ``run``
         → the body itself), so the compiler computes one snapshot per task and
-        reuses its ``code_hash`` inside ``workflow_digest``.
+        reuses its ``code_hash`` inside ``workflow_hash``.
 
         The ``config_hash`` is derived from the task *instance's* construction
         identity — its ``__init__`` arguments (see :func:`task_config_of`), NOT a

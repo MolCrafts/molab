@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from molab.workflow import CycleError, Workflow, WorkflowCompiler
+from molab.workflow import CycleError, Workflow
 
 
 class TestWorkflowCompiler:
@@ -36,7 +36,7 @@ class TestWorkflowCompiler:
         wf.branch("x", "loop", "a")
 
         with pytest.raises(CycleError) as exc_info:
-            WorkflowCompiler().compile(wf)
+            (wf).compile()
         msg = str(exc_info.value).lower()
         assert "data graph" in msg
         assert "control" in msg, "the error must hint at using control edges"

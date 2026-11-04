@@ -31,7 +31,7 @@ def _emitted_check_ids(report) -> set[ValidationCheckId]:  # type: ignore[no-unt
 class TestUniqueArtifactPaths:
     def test_passes_when_paths_distinct(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -48,7 +48,7 @@ class TestUniqueArtifactPaths:
 
     def test_fails_on_duplicate_path(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -71,7 +71,7 @@ class TestUniqueArtifactPaths:
 class TestAcyclicDataEdges:
     def test_passes_on_dag(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -88,7 +88,7 @@ class TestAcyclicDataEdges:
 
     def test_fails_on_cycle(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -108,7 +108,7 @@ class TestAcyclicDataEdges:
 class TestEveryInputHasSource:
     def test_passes_when_all_inputs_have_source(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -125,7 +125,7 @@ class TestEveryInputHasSource:
 
     def test_fails_without_spec_when_source_none(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -145,7 +145,7 @@ class TestEveryInputHasSource:
 class TestProducedByResolves:
     def test_passes_when_produced_by_known_task(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -158,7 +158,7 @@ class TestProducedByResolves:
 
     def test_fails_on_unknown_task(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -176,7 +176,7 @@ class TestProducedByResolves:
 class TestOutputsMatchDownstreamInputs:
     def test_passes_when_names_align(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -193,7 +193,7 @@ class TestOutputsMatchDownstreamInputs:
 
     def test_warns_on_name_mismatch_but_report_stays_ok(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -221,25 +221,25 @@ class TestNoOrphanTasks:
 
     def test_no_op_without_spec(self) -> None:
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(TaskIO(task_id="phantom"),),
         )
         rep = validate_workflow_contract(contract, spec=None)
         assert ValidationCheckId.no_orphan_tasks not in _emitted_check_ids(rep)
 
     def test_passes_when_spec_set_matches_contract(self) -> None:
-        from molab.workflow.compiler import Workflow, WorkflowCompiler
+        from molab.workflow.compiler import Workflow
         from molab.workflow.task import Task
 
         class Inert(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]
                 return None
 
-        spec = WorkflowCompiler().compile(
+        spec = (
             Workflow(name="wf").add(Inert(), name="A").add(Inert(), name="B", depends_on=["A"])
-        )
+        ).compile()
         contract = WorkflowContract(
-            workflow_digest=spec.workflow_digest,
+            workflow_hash=spec.workflow_hash,
             task_io=(
                 TaskIO(task_id="A", outputs=(TaskOutputSpec(name="x", type="int"),)),
                 TaskIO(
@@ -252,19 +252,19 @@ class TestNoOrphanTasks:
         assert ValidationCheckId.no_orphan_tasks not in _emitted_check_ids(rep)
 
     def test_fails_when_spec_has_task_absent_from_contract(self) -> None:
-        from molab.workflow.compiler import Workflow, WorkflowCompiler
+        from molab.workflow.compiler import Workflow
         from molab.workflow.task import Task
 
         class Inert(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]
                 return None
 
-        spec = WorkflowCompiler().compile(
+        spec = (
             Workflow(name="wf").add(Inert(), name="A").add(Inert(), name="B", depends_on=["A"])
-        )
+        ).compile()
         # Contract is missing TaskIO for "B".
         contract = WorkflowContract(
-            workflow_digest=spec.workflow_digest,
+            workflow_hash=spec.workflow_hash,
             task_io=(TaskIO(task_id="A"),),
         )
         rep = validate_workflow_contract(contract, spec=spec)
@@ -279,7 +279,7 @@ class TestValidationReportAggregation:
         """A consumer promoting ``outputs_match_downstream_inputs`` to error
         severity flips ``report.ok`` to False."""
         contract = WorkflowContract(
-            workflow_digest="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",

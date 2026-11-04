@@ -78,7 +78,7 @@ def main() -> int:
         assert journal is not None
         assert journal["based_on_execution_id"] == "e01"
         assert "status" not in journal
-        digest = journal["workflow_digest"]
+        digest = journal["workflow_hash"]
         assert isinstance(digest, str) and digest.startswith("sha256:")
 
         assert sorted(set(RunMetadata.model_fields) & _EXECUTION_ERA) == []

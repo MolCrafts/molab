@@ -111,13 +111,13 @@ class TestFluentExperimentChain:
 
     @staticmethod
     def _workflow() -> object:
-        from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
+        from molab.workflow import Task, TaskContext, Workflow
 
         class Step(Task):
             async def execute(self, ctx: TaskContext) -> int:
                 return 1
 
-        return WorkflowCompiler().compile(Workflow(name="wf").add(Step(), name="step"))
+        return (Workflow(name="wf").add(Step(), name="step")).compile()
 
     def test_execute_binds_workflow_and_registers_entry(self, tmp_path):
         from molab.workflow import default_binding_registry
@@ -181,13 +181,13 @@ class TestExecuteExperiment:
 
     @staticmethod
     def _compiled() -> object:
-        from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
+        from molab.workflow import Task, TaskContext, Workflow
 
         class Step(Task):
             async def execute(self, ctx: TaskContext) -> int:
                 return 1
 
-        return WorkflowCompiler().compile(Workflow(name="wf").add(Step(), name="step"))
+        return (Workflow(name="wf").add(Step(), name="step")).compile()
 
     @staticmethod
     def _exp(tmp_path: Path) -> Experiment:

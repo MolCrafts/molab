@@ -110,7 +110,7 @@ Experiments also own `exp.assets`, the experiment-scoped asset view, and `exp.ex
 Creating an experiment does not automatically attach executable workflow code. The sanctioned way to pair the two is `Experiment.run(workflow, params=...)`:
 
 ```python
-from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import Task, TaskContext, Workflow
 
 
 class TrainTask(Task):
@@ -118,14 +118,14 @@ class TrainTask(Task):
         return lr
 
 
-compiled = WorkflowCompiler().compile(Workflow(name="train").add(TrainTask()))
+compiled = (Workflow(name="train").add(TrainTask())).compile()
 
 exp = ws.add_project("demo").add_experiment("baseline").run(compiled, params={"lr": [1e-3, 1e-4]})
 ```
 
 `params` is the per-run sweep — a plain `{axis: [values]}` grid (expanded as a Cartesian product) or any `ParamSpace`. The call materializes one content-addressed `Run` per cell (idempotent: re-declaring the same sweep adds no duplicates), binds the compiled workflow to the experiment in `molab.workflow.default_binding_registry` (an explicit, injectable `{experiment_id → CompiledWorkflow}` store that replaced the old class-level registry), records the workflow's graph IR on the experiment for the server/UI, and registers the workspace for CLI discovery. Read the binding back with `default_binding_registry.for_experiment(experiment)` from anywhere in the same process. Re-declaring replaces the earlier binding; the registry is process-local, so cluster workers re-establish it by re-importing the user script.
 
-The expected input is a `CompiledWorkflow` (the product of `WorkflowCompiler().compile(workflow)`). For a bare callable on the pure `fn(inputs, config)` contract, `molab.workflow.promote_callable(fn, name=...)` wraps it into a single-task `CompiledWorkflow` that works in `Experiment.run` too: a module-level (importable) function is serialized into the experiment's graph IR as a `module:qualname` entrypoint ref and resolved back via importlib at execution time. Non-importable callables (lambdas, closures, functions defined in `__main__` / a REPL) cannot be serialized for tracked execution — `Experiment.run` raises a clear error for those; execute them in-memory through `WorkflowRuntime().execute(...)` instead.
+The expected input is a `CompiledWorkflow` (the product of `workflow.compile()`). For a bare callable on the pure `fn(inputs, config)` contract, `molab.workflow.promote_callable(fn, name=...)` wraps it into a single-task `CompiledWorkflow` that works in `Experiment.run` too: a module-level (importable) function is serialized into the experiment's graph IR as a `module:qualname` entrypoint ref and resolved back via importlib at execution time. Non-importable callables (lambdas, closures, functions defined in `__main__` / a REPL) cannot be serialized for tracked execution — `Experiment.run` raises a clear error for those; execute them in-memory through `WorkflowRuntime().execute(...)` instead.
 
 Replica handling also lives on the experiment. `exp.n_replicas` and `exp.seeds` describe the declared policy, while `exp.get_seeds()` returns the effective seed list. If no explicit seeds were stored, Molab expands a deterministic default seed sequence and truncates it to the requested replica count.
 
@@ -221,7 +221,7 @@ When workflows are launched from the CLI, the fluent chain is the registration p
 
 ```python
 import molab as me
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="train")
 
@@ -235,7 +235,7 @@ def train(lr: float) -> float:
     me.Workspace("./lab", name="lab")
     .add_project("demo")
     .add_experiment("baseline")
-    .run(WorkflowCompiler().compile(wf), params={"lr": [1e-3]})
+    .run(wf, params={"lr": [1e-3]})
 )
 ```
 
@@ -247,7 +247,7 @@ The following example shows the full path from workflow definition to persistent
 
 ```python
 import molab as me
-from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import TaskContext, Workflow, WorkflowRuntime
 
 wf = Workflow(name="demo")
 
@@ -259,7 +259,7 @@ async def compute(ctx: TaskContext, lr: float, scale: float = 1.0) -> float:
     return lr * scale
 
 
-compiled = WorkflowCompiler().compile(wf)
+compiled = wf.compile()
 
 ws = me.Workspace("./lab", name="lab")
 exp = ws.add_project("walkthrough").add_experiment("baseline").run(compiled, params={"lr": [1e-3]})

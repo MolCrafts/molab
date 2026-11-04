@@ -21,7 +21,7 @@ import tempfile
 from pathlib import Path
 
 import molab as me
-from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import TaskContext, Workflow, WorkflowRuntime
 
 wf = Workflow(name="train")
 
@@ -31,7 +31,7 @@ async def train(ctx: TaskContext) -> dict:
     return {"loss": 0.08, "acc": 0.94}
 
 
-compiled = WorkflowCompiler().compile(wf)
+compiled = wf.compile()
 
 
 async def main() -> None:

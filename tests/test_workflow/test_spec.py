@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from molab.workflow import Task, Workflow, WorkflowCompiler
+from molab.workflow import Task, Workflow
 
 
 class TestWorkflowCompiler:
@@ -13,7 +13,7 @@ class TestWorkflowCompiler:
         async def fn(ctx):
             return 1
 
-        spec = WorkflowCompiler().compile(wf)
+        spec = (wf).compile()
         assert spec._tasks[0].name == "custom_name"
 
     def test_add_strips_task_suffix_and_snake_cases(self):
@@ -21,7 +21,7 @@ class TestWorkflowCompiler:
             async def execute(self, ctx):
                 return 1
 
-        spec = WorkflowCompiler().compile(Workflow(name="strip").add(FetchTask()))
+        spec = (Workflow(name="strip").add(FetchTask())).compile()
         assert spec._tasks[0].name == "fetch"
 
     def test_mixed_decorator_and_add_preserves_registration_order(self):
@@ -36,5 +36,5 @@ class TestWorkflowCompiler:
             return "pre"
 
         wf.add(PostTask(), depends_on=["pre"])
-        spec = WorkflowCompiler().compile(wf)
+        spec = (wf).compile()
         assert [t.name for t in spec._tasks] == ["pre", "post"]

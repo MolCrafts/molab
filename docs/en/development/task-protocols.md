@@ -35,9 +35,9 @@ class ExternalProcessor:
         return {"processed": records}
 
 
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
-compiled = WorkflowCompiler().compile(Workflow(name="pipeline").add(ExternalProcessor()))
+compiled = Workflow(name="pipeline").add(ExternalProcessor()).compile()
 ```
 
 ## Relationship to `Task` / `Actor`
@@ -52,14 +52,14 @@ At runtime, the compiler treats a `Task` subclass and a third-party `Runnable` o
 ## What the Protocol Does *Not* Require
 
 - **No configuration class.** The old `config_type` / Pydantic-config pattern is gone — configuration values bind to the body's named parameters (from build-time config, itself a molcfg `ProfileConfig`) and per-instance attributes you set in `__init__`.
-- **No registration step.** There is no `register_task(...)` hoop to jump through — registering on a `WorkflowCompiler` (decorator or `.add(...)`) is the source of truth. (A separate `TaskTypeRegistry` exists only for IR (de)serialization slugs.)
+- **No registration step.** There is no `register_task(...)` hoop to jump through — registering on a `Workflow` (`@wf.task` or `.add(...)`) is the source of truth. (A separate `TaskTypeRegistry` exists only for IR (de)serialization slugs.)
 - **No explicit input/output schema.** Type hints on `execute()` / `run()` are advisory; the runtime does not enforce them.
 
 ## Persistence
 
 Workflows are **authored in Python and re-imported on each execution** — there is no JSON IR or on-disk workflow schema. Identity is captured at two levels:
 
-- `CompiledWorkflow.workflow_digest` — sha256 of the compiled workflow. The document itself carries no identity.
+- `CompiledWorkflow.workflow_hash` — sha256 of the compiled workflow. The document itself carries no identity.
 - `TaskSnapshot` — per-task AST-normalized code hash + config hash.
 
-Trace a run by `workflow_digest` on the Execution and the journal header, plus the content-only profile `config_hash`. The replay path is: re-import the script, recompile the workflow, and activate the same molcfg profile.
+Trace a run by `workflow_hash` on the Execution and the journal header, plus the content-only profile `config_hash`. The replay path is: re-import the script, recompile the workflow, and activate the same molcfg profile.

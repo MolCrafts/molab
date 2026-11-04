@@ -22,18 +22,23 @@ if TYPE_CHECKING:
 _NODE_CACHE_DIRNAME = "cache"
 
 
-def handoff_seeds(previous: Run, compiled: CompiledWorkflow) -> dict[str, TaskOutput]:
+def handoff_seeds(
+    previous: Run, compiled: CompiledWorkflow
+) -> tuple[dict[str, TaskOutput], str | None]:
     """Completed outputs of *previous* that this workflow still has.
 
     The latest attempt that recorded any completed output wins. Names the
-    next workflow does not register are dropped.
+    next workflow does not register are dropped. The attempt id is returned
+    so the caller can run those outputs through the same seed gate as a
+    ``RESUME``.
 
     Args:
         previous: A workspace run whose attempts have a node journal.
         compiled: The workflow about to run.
 
     Returns:
-        ``{task_name: output}`` safe to pass as ``seed_outputs``.
+        ``({task_name: output}, execution_id)``. The dict is empty and the
+        id is ``None`` when nothing completed.
     """
     from ._engine.persistence import read_outputs
 
@@ -42,8 +47,8 @@ def handoff_seeds(previous: Run, compiled: CompiledWorkflow) -> dict[str, TaskOu
         outputs = read_outputs(previous, record.id)
         shared = {name: outputs[name] for name in outputs if name in names}
         if shared:
-            return shared
-    return {}
+            return shared, record.id
+    return {}, None
 
 
 def handoff_cache(previous: object, run_context: RunContextLike | None) -> Caching | None:

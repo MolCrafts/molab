@@ -33,7 +33,8 @@ from tests.support.journal import poison_node_output
 _HEALING_MODULE = """\
 from pathlib import Path
 
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
+
 
 FLAG = Path({flag!r})
 RESULT = Path({result!r})
@@ -54,7 +55,7 @@ def stage_b(stage_a: int) -> int:
     return stage_a * 100
 
 
-workflow = WorkflowCompiler().compile(wf)
+workflow = (wf).compile()
 """
 
 

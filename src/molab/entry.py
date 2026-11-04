@@ -11,11 +11,11 @@ script and retrieve all registered workspaces.
 Example (user script)::
 
     import molab as me
-    from molab.workflow import Workflow, WorkflowCompiler
+    from molab.workflow import Workflow
 
 
     def build_workflow():
-        return WorkflowCompiler().compile(Workflow(name="train").add(...))
+        return Workflow(name="train").add(...).compile()
 
 
     (
@@ -106,13 +106,12 @@ def _execute_experiment(experiment: Experiment, workflow: object) -> None:
     from molab.workflow import (
         CompiledWorkflow,
         Workflow,
-        WorkflowCompiler,
         default_binding_registry,
     )
 
     authored = workflow
     if isinstance(workflow, Workflow):
-        workflow = WorkflowCompiler().compile(workflow)
+        workflow = workflow.compile()
     if not isinstance(workflow, CompiledWorkflow):
         raise TypeError(
             f"Experiment.define expects a Workflow or CompiledWorkflow, "

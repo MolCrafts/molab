@@ -9,13 +9,13 @@ Molab separates a workflow's lifecycle into three stages:
 | Stage | Tool | What happens |
 |---|---|---|
 | **Author** | `Workflow` | Declare tasks and dependencies |
-| **Compile** | `WorkflowCompiler().compile(workflow)` | Freeze into a validated `CompiledWorkflow` |
-| **Execute** | `WorkflowRuntime` or `Run.execute()` | Drive the graph |
+| **Compile** | `wf.compile()` | Freeze the graph when you need its digest or a diagram |
+| **Execute** | `wf.run()` or `run.execute(wf)` | Drive the graph |
 
 You can author with decorators:
 
 ```python
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="demo")
 
@@ -30,7 +30,7 @@ def summarize(data: list[float]) -> float:
     return sum(data)
 
 
-compiled = WorkflowCompiler().compile(wf)
+compiled = wf.compile()
 ```
 
 Or with reusable task classes — both produce the same kind of `CompiledWorkflow`.
@@ -40,10 +40,7 @@ Or with reusable task classes — both produce the same kind of `CompiledWorkflo
 A compiled workflow can run purely in memory:
 
 ```python
-import asyncio
-from molab.workflow import WorkflowRuntime
-
-result = asyncio.run(WorkflowRuntime().execute(compiled))
+result = wf.run()
 ```
 
 Or under a tracked run with full persistence:

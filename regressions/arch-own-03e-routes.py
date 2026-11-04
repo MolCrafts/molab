@@ -37,7 +37,7 @@ from fastapi.testclient import TestClient
 from molab import Workspace
 from molab.server.app import create_app
 from molab.server.dependencies import set_workspace_path_override
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 EXPECTED_TASKS = {"double": ("completed", 6), "summarize": ("completed", "got 6")}
 
@@ -67,7 +67,7 @@ def main() -> int:
         ws = Workspace(Path(tmp) / "lab", name="lab")
         exp = ws.add_project("demo").add_experiment("pipeline")
         run = exp.add_run(params={"x": 3})
-        compiled = WorkflowCompiler().compile(_pipeline())
+        compiled = (_pipeline()).compile()
         run.execute(compiled)
         driver = exp.add_run(params={"x": 1})
         with driver.start() as ctx:
@@ -98,8 +98,8 @@ def main() -> int:
                 tasks = {t["task_id"]: (t["status"], t["outputs"]) for t in journal["task_configs"]}
                 print(f"tasks={tasks!r}")
                 check("tasks", tasks, EXPECTED_TASKS)
-                digest = journal["workflow_digest"]
-                check("workflow_digest", digest, compiled.workflow_digest)
+                digest = journal["workflow_hash"]
+                check("workflow_hash", digest, compiled.workflow_hash)
                 check("digest prefix", digest[:7], "sha256:")
                 check("digest length", len(digest), 71)
                 check("top-level status in journal", "status" in journal, False)

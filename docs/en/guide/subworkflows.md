@@ -20,7 +20,6 @@ from molab.workflow import (
     Task,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 
@@ -48,17 +47,17 @@ class Train(Task):
         return sum(values) / len(values)
 
 
-outer = WorkflowCompiler().compile(
+outer = (
     Workflow(name="train")
     .add(SubWorkflow(inner), name="preprocess")
     .add(Train(), depends_on=["preprocess"])
-)
+).compile()
 
 result = await WorkflowRuntime().execute(outer)
 ```
 
 The outer workflow sees `preprocess` as a single task; the inner workflow keeps
-its own topology, `workflow_digest`, and compile-time validation. By default
+its own topology, `workflow_hash`, and compile-time validation. By default
 `SubWorkflow` returns the inner spec's single **dependency leaf** (the task no
 other task depends on — `normalize` above). Pass `output="<task_name>"` to
 select a different inner output. If the inner spec has more than one leaf and no
@@ -96,7 +95,7 @@ async def collect(values: list[list[float]]) -> list[list[float]]:
 
 wf.parallel(map_over="enumerate", body="preprocess", join="collect", max_concurrency=2)
 
-compiled = WorkflowCompiler().compile(wf)
+compiled = wf.compile()
 result = await WorkflowRuntime().execute(compiled)
 # `collect` receives one inner output per element, in iteration order.
 ```
@@ -111,7 +110,7 @@ class can appear in multiple workflows — the lightest form of reuse when you d
 not need a whole sub-pipeline as one node:
 
 ```python
-from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import Task, TaskContext, Workflow
 
 
 class Fetch(Task):
@@ -129,16 +128,14 @@ class Augment(Task):
         return clean + [x * 2 for x in clean]
 
 
-baseline = WorkflowCompiler().compile(
-    Workflow(name="baseline").add(Fetch()).add(Clean(), depends_on=["fetch"])
-)
+baseline = (Workflow(name="baseline").add(Fetch()).add(Clean(), depends_on=["fetch"])).compile()
 
-augmented = WorkflowCompiler().compile(
+augmented = (
     Workflow(name="augmented")
     .add(Fetch())
     .add(Clean(), depends_on=["fetch"])
     .add(Augment(), depends_on=["clean"])
-)
+).compile()
 ```
 
 ## Runnable Example

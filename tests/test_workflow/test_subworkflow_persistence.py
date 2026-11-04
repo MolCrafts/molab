@@ -19,7 +19,6 @@ import pytest
 from molab.workflow import (
     SubWorkflow,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
     read_journal,
     read_outputs,
@@ -81,9 +80,7 @@ class TestSubWorkflowPersistence:
     async def test_parent_doc_describes_outer_graph_after_success(
         self, tmp_path: pathlib.Path
     ) -> None:
-        outer = WorkflowCompiler().compile(
-            Workflow(name="outer-doc").add(SubWorkflow(_build_inner()), name="sub")
-        )
+        outer = (Workflow(name="outer-doc").add(SubWorkflow(_build_inner()), name="sub")).compile()
         run = _new_run(tmp_path)
         with run.start() as ctx:
             result = await WorkflowRuntime().execute(outer, run_context=ctx)
@@ -96,7 +93,7 @@ class TestSubWorkflowPersistence:
         assert set(statuses) == {"sub"}
         assert not (set(statuses) & INNER_TASKS)
         assert statuses["sub"] == "completed"
-        assert doc["workflow_digest"] == outer.workflow_digest
+        assert doc["workflow_hash"] == outer.workflow_hash
 
         # The recorded outputs are the outer nodes' only.
         outputs = read_outputs(run, result.execution_id)
@@ -105,9 +102,9 @@ class TestSubWorkflowPersistence:
 
     @pytest.mark.asyncio
     async def test_parent_doc_intact_after_inner_failure(self, tmp_path: pathlib.Path) -> None:
-        outer = WorkflowCompiler().compile(
+        outer = (
             Workflow(name="outer-doc-fail").add(SubWorkflow(_build_failing_inner()), name="sub")
-        )
+        ).compile()
         run = _new_run(tmp_path)
         with run.start() as ctx:
             result = await WorkflowRuntime().execute(outer, run_context=ctx)
@@ -118,7 +115,7 @@ class TestSubWorkflowPersistence:
         statuses = _task_statuses(doc)
         assert set(statuses) == {"sub"}  # outer graph only, even mid-failure
         assert statuses["sub"] == "failed"
-        assert doc["workflow_digest"] == outer.workflow_digest
+        assert doc["workflow_hash"] == outer.workflow_hash
         assert read_outputs(run, result.execution_id) == {}
 
     @pytest.mark.asyncio
@@ -139,7 +136,7 @@ class TestSubWorkflowPersistence:
 
         wf.parallel(map_over="emit", body="sub", join="collect", max_concurrency=4)
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         run = _new_run(tmp_path)
         with run.start() as ctx:
             result = await WorkflowRuntime().execute(compiled, run_context=ctx)
@@ -151,7 +148,7 @@ class TestSubWorkflowPersistence:
         assert set(statuses) == {"emit", "sub", "collect"}
         assert not (set(statuses) & INNER_TASKS)
         assert statuses == {"emit": "completed", "sub": "completed", "collect": "completed"}
-        assert doc["workflow_digest"] == compiled.workflow_digest
+        assert doc["workflow_hash"] == compiled.workflow_hash
 
         outputs = read_outputs(run, result.execution_id)
         assert set(outputs) == {"emit", "sub", "collect"}

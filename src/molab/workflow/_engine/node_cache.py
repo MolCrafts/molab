@@ -378,7 +378,11 @@ async def run_task_body_cached(
     if cacheable and not deps.bypass_cache:
         try:
             payload = cache.get(snapshot, cache_inputs)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                f"cache: get for task {name!r} failed ({type(exc).__name__}: {exc}); "
+                "the body will run"
+            )
             payload = None
         if payload is not None:
             # The hit's restored artifacts name this task, like a body's.
@@ -421,24 +425,32 @@ async def run_task_body_cached(
         if records and deps.execution_id is not None:
             result_payload["metrics"] = cast("JSONValue", records)
             result_payload["producer_execution"] = deps.execution_id
-        try:
-            cache.put(snapshot, cache_inputs, result_payload)
-        except Exception as exc:
-            # JSON-safety is pre-checked above, so an exception here is a real
-            # store failure (permissions, full disk, …) — promote the FIRST
-            # one per (execution, task) to WARNING so a permanently failing
-            # cache is visible; repeats stay at debug. The run continues
-            # uncached either way (graceful degradation).
-            warn_key = (id(deps), name)
-            if warn_key not in _PUT_FAILURE_WARNED:
-                if len(_PUT_FAILURE_WARNED) >= _PUT_FAILURE_WARNED_MAX:
-                    _PUT_FAILURE_WARNED.clear()
-                _PUT_FAILURE_WARNED.add(warn_key)
-                logger.warning(
-                    f"cache: put for task {name!r} failed "
-                    f"({type(exc).__name__}: {exc}); result caching is degraded "
-                    f"for this task — the workflow continues uncached"
-                )
-            else:
-                logger.debug(f"cache: put for task {name!r} failed again (suppressed)")
+        # Published only after the journal records completion. A crash between
+        # the body and that flush must not leave a cache hit the journal
+        # cannot seed.
+        deps.pending_cache[name] = (snapshot, cache_inputs, result_payload)
     return raw
+
+
+def flush_pending_cache(deps: WorkflowDeps, name: str) -> None:
+    """Write the cache entry staged for *name*, after its journal record is durable."""
+    pending = deps.pending_cache.pop(name, None)
+    cache = deps.cache
+    if pending is None or cache is None:
+        return
+    snapshot, cache_inputs, result_payload = pending
+    try:
+        cache.put(snapshot, cache_inputs, result_payload)
+    except Exception as exc:
+        warn_key = (id(deps), name)
+        if warn_key not in _PUT_FAILURE_WARNED:
+            if len(_PUT_FAILURE_WARNED) >= _PUT_FAILURE_WARNED_MAX:
+                _PUT_FAILURE_WARNED.clear()
+            _PUT_FAILURE_WARNED.add(warn_key)
+            logger.warning(
+                f"cache: put for task {name!r} failed "
+                f"({type(exc).__name__}: {exc}); result caching is degraded "
+                f"for this task — the workflow continues uncached"
+            )
+        else:
+            logger.debug(f"cache: put for task {name!r} failed again (suppressed)")

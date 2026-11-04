@@ -159,7 +159,7 @@ class TestRunResponse:
         run = exp.add_run(params={"seed": 1})
         repo = _repo(ws, run)
         created = repo.create(created_by=SYSTEM_AGENT, source=_source("0123abc"))
-        repo.start(created.id, environment={"config_hash": "cfg42"}, workflow_digest="sha256:feed")
+        repo.start(created.id, environment={"config_hash": "cfg42"}, workflow_hash="sha256:feed")
         body = RunResponse.from_model(run)
         assert body.workflow is not None
         assert body.workflow.gitCommit == "0123abc"

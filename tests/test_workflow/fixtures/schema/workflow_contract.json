@@ -36,9 +36,9 @@
         }
     },
     "properties": {
-        "workflow_digest": {
+        "workflow_hash": {
             "type": "string",
-            "description": "Must equal the wrapped workflow's workflow_digest."
+            "description": "Must equal the wrapped workflow's workflow_hash."
         },
         "task_io": {
             "type": "array",
@@ -58,7 +58,7 @@
         }
     },
     "required": [
-        "workflow_digest"
+        "workflow_hash"
     ],
     "additionalProperties": false
 }

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molab.workflow import TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import TaskContext, Workflow
 from molab.workflow._engine.plan import START, ExecutionPlan
 from molab.workflow.types import BranchEdges, Next
 
@@ -68,7 +68,7 @@ class TestExecutionPlan:
         async def b(value: int) -> int:
             return value + 1
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         assert isinstance(compiled.graph, ExecutionPlan)
         assert set(compiled.graph.task_names) == {"a", "b"}
         # The entry frontier is the data-zero task; b is triggered by a.
@@ -92,7 +92,7 @@ class TestExecutionPlan:
             return sum(results)
 
         wf.parallel(map_over="seed", body="body", join="gather", max_concurrency=2)
-        plan = WorkflowCompiler().compile(wf).graph
+        plan = (wf).compile().graph
 
         assert plan.parallel_by_map_over["seed"].body == "body"
         assert plan.parallel_by_body["body"].join == "gather"
@@ -114,7 +114,7 @@ class TestExecutionPlan:
         async def leg_b(ctx: TaskContext) -> str:
             return "b"
 
-        plan = WorkflowCompiler().compile(wf).graph
+        plan = (wf).compile().graph
         edge_set = plan.out_edges["route"]
         assert isinstance(edge_set, BranchEdges)
         assert edge_set.routes == {"a": "leg_a", "b": "leg_b"}
@@ -133,7 +133,7 @@ class TestExecutionPlan:
             return Next("exit")
 
         wf.loop(body=["step"], until="check", max_iters=3)
-        plan = WorkflowCompiler().compile(wf).graph
+        plan = (wf).compile().graph
 
         assert ("check", "step") in plan.back_edges
         # Both cycle members are recurrent — a later iteration may re-fire them.

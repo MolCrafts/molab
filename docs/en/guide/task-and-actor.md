@@ -10,7 +10,7 @@ Three equivalent ways to define a task, all on the same `Workflow`:
 
 ```python
 # 1. Function decorated with @wf.task
-from molab.workflow import TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import TaskContext, Workflow
 
 wf = Workflow(name="pipeline")
 
@@ -55,12 +55,9 @@ async def add_bias(square: float) -> float:
     return square + 10.0
 ```
 
-For instance registration, chain `.add(...)` calls and compile with `WorkflowCompiler().compile(workflow)`:
+For instance registration, chain `.add(...)` calls and compile with `workflow.compile()`:
 
 ```python
-from molab.workflow import WorkflowCompiler
-
-
 class Process(Task):
     async def execute(self, ctx: TaskContext, fetch: dict) -> int:
         return fetch["n"] * 2  # upstream output binds by its task name
@@ -71,12 +68,12 @@ class Report(Task):
         return f"n = {process}"
 
 
-compiled = WorkflowCompiler().compile(
+compiled = (
     Workflow(name="pipeline")
     .add(Fetch())  # auto-named "fetch"
     .add(Process(), depends_on=["fetch"])  # name inferred from class
     .add(Report(), depends_on=["process"], name="report")
-)
+).compile()
 ```
 
 ## Generic Parameters
@@ -98,7 +95,7 @@ Plain `Task` (no generics) defaults to `Any` everywhere. Build-time configuratio
 
 ```python
 # Decorator style
-from molab.workflow import TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import TaskContext, Workflow
 
 wf = Workflow(name="stream")
 
@@ -155,8 +152,6 @@ Relevant code: `molab.workflow.task.Actor`, `molab.workflow.context.TaskContext`
 Fan-out over a runtime-produced list is declared with `wf.parallel`:
 
 ```python
-from molab.workflow import WorkflowCompiler
-
 wf = Workflow(name="fan-out", entry="scatter")
 
 

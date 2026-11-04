@@ -11,7 +11,6 @@ from molab.workflow import (
     Task,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     compiled_workflow_for_run,
     default_binding_registry,
 )
@@ -72,7 +71,7 @@ def _compiled():
         async def execute(self, ctx: TaskContext) -> int:
             return 1
 
-    return WorkflowCompiler().compile(Workflow(name="memo").add(Step(), name="step"))
+    return (Workflow(name="memo").add(Step(), name="step")).compile()
 
 
 class TestPutWorkflowDocument:
@@ -279,10 +278,10 @@ class TestPutWorkflowDocument:
             raw = (bound.experiment_dir / "workflow.ir.json").read_bytes()
             revision = bound.metadata.revision
             revision_id = bound.metadata.revision_id
-            digest_v1 = default_codec.ir_to_spec(document).workflow_digest
+            digest_v1 = default_codec.ir_to_spec(document).workflow_hash
             del default_registry._factories[slug]
             default_registry.register(slug, StepV2)
-            assert default_codec.ir_to_spec(document).workflow_digest != digest_v1
+            assert default_codec.ir_to_spec(document).workflow_hash != digest_v1
             with served(ws) as client:
                 second = client.put(_workflow_url(exp), json={"document": document})
             assert second.status_code == 200, second.text

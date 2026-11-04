@@ -73,7 +73,7 @@ from ._engine.executors import check_executor, check_max_workers
 from ._engine.persistence import AttemptSeeds, RecordedInputError, read_attempt_seeds
 from ._engine.runtime import WorkflowRuntime
 from .compiled import CompiledWorkflow
-from .compiler import Workflow, WorkflowCompiler
+from .compiler import Workflow
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -126,7 +126,7 @@ def _ensure_compiled(workflow: object) -> CompiledWorkflow:
     if isinstance(workflow, CompiledWorkflow):
         return workflow
     if isinstance(workflow, Workflow):
-        return WorkflowCompiler().compile(workflow)
+        return workflow.compile()
     raise TypeError(
         f"execution.execute expects a CompiledWorkflow or a Workflow, got {type(workflow).__name__}"
     )
@@ -428,8 +428,9 @@ async def aexecute_run(
         fresh: Record ``bypass_cache``. Requires ``rerun=True``.
         profile_config: Profile written when this call creates the attempt.
             With ``execution_id``, ``run.start`` checks it against the record.
-        checkpoint_artifact_id: Optional checkpoint a new ``RESUME`` starts
-            from. Only valid with ``resume=True``.
+        checkpoint_artifact_id: Recorded on the attempt. Resume seeds come
+            from the predecessor journal, not from this artifact. Only valid
+            with ``resume=True``.
         execution_id: Start this pre-created QUEUED attempt. Its config and
             task selection are taken from the record. Mutually exclusive with
             the creation verbs.
@@ -487,7 +488,7 @@ async def aexecute_run(
         with run.start(
             profile_config,
             execution_id=record.id,
-            workflow_digest=compiled.workflow_digest,
+            workflow_hash=compiled.workflow_hash,
         ) as ctx:
             entered = True
             result = await WorkflowRuntime().execute(
@@ -546,8 +547,9 @@ def execute_run(
         profile_config: Profile applied when this call creates the Execution.
             With ``execution_id`` it is not a creation fact; ``run.start``
             still checks it against the record.
-        checkpoint_artifact_id: Optional checkpoint a new ``RESUME`` starts
-            from. Only valid with ``resume=True``.
+        checkpoint_artifact_id: Recorded on the attempt. Resume seeds come
+            from the predecessor journal, not from this artifact. Only valid
+            with ``resume=True``.
         execution_id: Start this pre-created QUEUED Execution instead of
             allocating one. Its config and task selection are taken from the
             record. Mutually exclusive with the creation-time verbs.

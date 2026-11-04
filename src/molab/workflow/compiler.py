@@ -1,16 +1,12 @@
-"""Workflow authoring and compilation — two types, never mixed.
+"""Workflow authoring.
 
-:class:`Workflow` is the mutable authored graph (decorator + OOP).
-:class:`WorkflowCompiler` lowers a :class:`Workflow` to a frozen
-:class:`CompiledWorkflow`. There is no builder constructor on the compiler
-and no ``compile`` method on the graph::
-
-    wf = Workflow(name="pipeline")
-    compiled = WorkflowCompiler().compile(wf)
+:class:`Workflow` is the graph a person writes. :meth:`Workflow.compile`
+freezes it. :meth:`Workflow.run` runs that frozen graph in memory.
 """
 
 from __future__ import annotations
 
+import inspect
 import warnings
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
@@ -27,14 +23,64 @@ from ._graph_decl import (
 from ._helpers import _callable_name, _to_snake_case
 from .binding import default_binding_registry
 from .compiled import CompiledWorkflow
-from .protocols import Streamable, TaskBody, TaskOutput
+from .protocols import Streamable, TaskBody
 from .snapshot import TaskSnapshot
+from .types import WorkflowResult
 
 if TYPE_CHECKING:
     from .binding import WorkflowBindingRegistry
     from .compiled import _ExperimentLike
 
 _lowering = WorkflowGraphCompiler()
+
+_NOT_A_DEPENDENCY = frozenset({"self", "ctx"})
+
+
+def _copy_registration(task: TaskRegistration) -> TaskRegistration:
+    """A registration the compiler may edit without touching the author's."""
+    return TaskRegistration(
+        name=task.name,
+        fn_or_class=task.fn_or_class,
+        depends_on=list(task.depends_on),
+        is_actor=task.is_actor,
+        task_type=task.task_type,
+        dependent_params=task.dependent_params,
+        position=task.position,
+        executor=task.executor,
+    )
+
+
+def _body_callable(body: object) -> Callable | None:
+    if inspect.isfunction(body) or inspect.ismethod(body):
+        return body
+    for attr in ("execute", "run"):
+        candidate = getattr(body, attr, None)
+        if callable(candidate):
+            return candidate
+    return body if callable(body) else None
+
+
+def _infer_depends_on(tasks: list[TaskRegistration]) -> None:
+    """A parameter whose name is a task is a dependency. One place, at compile."""
+    known = {task.name for task in tasks}
+    for task in tasks:
+        fn = _body_callable(task.fn_or_class)
+        if fn is None:
+            continue
+        try:
+            signature = inspect.signature(fn)
+        except (TypeError, ValueError):
+            continue
+        for param in signature.parameters.values():
+            if param.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                continue
+            if param.name in _NOT_A_DEPENDENCY or param.name == task.name:
+                continue
+            if param.name in known and param.name not in task.depends_on:
+                task.depends_on.append(param.name)
 
 
 def compile_registrations(
@@ -48,16 +94,15 @@ def compile_registrations(
     branch_edges: tuple[tuple[str, str, str], ...] = (),
     loops: tuple[LoopDecl, ...] = (),
     parallels: tuple[ParallelDecl, ...] = (),
-    reducer: tuple[str, Callable[..., TaskOutput]] | None = None,
     experiment: _ExperimentLike | None = None,
     registry: WorkflowBindingRegistry | None = None,
     executor: str | None = None,
 ) -> CompiledWorkflow:
     """Lower registrations once and assemble the :class:`CompiledWorkflow`.
 
-    Shared by :meth:`WorkflowCompiler.compile` and
+    Shared by :meth:`Workflow.compile` and
     :meth:`CompiledWorkflow.subgraph`. The CFG lowering runs once (it may
-    inject parallel-join data deps). Identity is ``workflow_digest``, derived
+    inject parallel-join data deps). Identity is ``workflow_hash``, derived
     from the lowered tasks.
     """
     # Resolve each task's serialization slug from the type registry. The slug
@@ -66,6 +111,8 @@ def compile_registrations(
     # deserialize path (``ir_to_spec`` sets it from the incoming JSON) — keep it.
     from .registry import default_registry
 
+    tasks = [_copy_registration(task) for task in tasks]
+    _infer_depends_on(tasks)
     for t in tasks:
         if t.task_type is None:
             t.task_type = default_registry.slug_for(t.fn_or_class)
@@ -97,7 +144,6 @@ def compile_registrations(
         branch_edges=branch_edges,
         loops=loops,
         parallels=parallels,
-        reducer=reducer,
         executor=executor,
     )
     if experiment is not None:
@@ -109,10 +155,12 @@ def compile_registrations(
 class Workflow:
     """Mutable authored graph (decorator + OOP).
 
-    Compile with :class:`WorkflowCompiler`::
+    Freeze it with :meth:`compile` when you need the digest or a diagram.
+    Run it in memory with :meth:`run`. A workspace run does not use either:
+    pass this object to ``exp.define(wf)`` or ``run.execute(wf)``.
 
         wf = Workflow(name="pipeline")
-        compiled = WorkflowCompiler().compile(wf)
+        result = wf.run()
 
     ``executor`` (``"thread"`` — the default —, ``"process"`` or
     ``"inline"``) is how its task bodies run unless a task or the run chooses
@@ -141,7 +189,6 @@ class Workflow:
         self._branch_edges: list[tuple[str, str, str]] = []
         self._loops: list[LoopDecl] = []
         self._parallels: list[ParallelDecl] = []
-        self._reducer: tuple[str, Callable[..., TaskOutput]] | None = None
         if entry is not None:
             if isinstance(entry, str):
                 self.entry(entry)
@@ -204,10 +251,10 @@ class Workflow:
 
         Args:
             fn: The function (when used as a bare ``@wf.task``).
-            depends_on: Upstream task names this task waits for. Optional
-                when the name-binding rule already implies the edge — a
-                parameter named exactly after an upstream task creates the
-                dependency; declare ``depends_on`` for ordering-only edges.
+            depends_on: Upstream task names this task waits for. A parameter
+                whose name is another task is added at compile
+                (:func:`_infer_depends_on`); pass ``depends_on`` for an
+                ordering-only edge whose name the body does not take.
             name: Task name (defaults to the function name). Must be unique
                 within the workflow.
             routes: ``{label: target}`` branch routing — the task returns
@@ -428,26 +475,6 @@ class Workflow:
         )
         return self
 
-    # ── Cross-replicate reducer ───────────────────────────────────────────
-
-    def reduce(
-        self,
-        *,
-        over: str = "replicate",
-    ) -> Callable[[Callable[..., TaskOutput]], Callable[..., TaskOutput]]:
-        """Register a cross-replicate reducer (not part of the DAG)."""
-
-        def decorator(fn: Callable[..., TaskOutput]) -> Callable[..., TaskOutput]:
-            if self._reducer is not None:
-                raise ValueError(
-                    f"Workflow {self._name!r}: reducer already registered "
-                    f"({_callable_name(self._reducer[1])!r})"
-                )
-            self._reducer = (over, fn)
-            return fn
-
-        return decorator
-
     def _record_decorator_edges(
         self,
         task_name: str,
@@ -461,54 +488,66 @@ class Workflow:
             for lbl, target in routes.items():
                 self._branch_edges.append((task_name, lbl, target))
 
-
-class WorkflowCompiler:
-    """Lowers a :class:`Workflow` to a :class:`CompiledWorkflow`.
-
-    The compiler is not a graph and is not a builder. Author tasks on
-    :class:`Workflow`, then::
-
-        compiled = WorkflowCompiler().compile(workflow)
-    """
-
     def compile(
         self,
-        workflow: Workflow,
         *,
         experiment: _ExperimentLike | None = None,
         registry: WorkflowBindingRegistry | None = None,
     ) -> CompiledWorkflow:
-        """Lower *workflow* to a :class:`CompiledWorkflow`.
+        """Freeze this graph.
 
-        When ``experiment`` is given, the artifact is bound into ``registry``
-        (or :data:`~molab.workflow.binding.default_binding_registry`).
+        The result carries the task code, the edges, and ``workflow_hash``.
+        ``experiment`` records the binding. A tracked run does not need this
+        call: ``exp.define(wf)`` and ``run.execute(wf)`` freeze the graph.
         """
-        if not isinstance(workflow, Workflow):
-            raise TypeError(
-                f"WorkflowCompiler.compile requires a Workflow, got {type(workflow).__name__}"
-            )
-        if not workflow._tasks:
+        if not self._tasks:
             warnings.warn(
-                f"workflow {workflow._name!r} compiles with zero tasks — it will "
-                f"execute and report succeeded without doing anything. "
-                f"Register tasks with @wf.task / wf.add(...) first.",
+                f"workflow {self._name!r} compiles with zero tasks — it will "
+                "execute and report succeeded without doing anything. "
+                "Register tasks with @wf.task / wf.add(...) first.",
                 stacklevel=2,
             )
         return compile_registrations(
-            name=workflow._name,
-            version_label=workflow._version,
-            tasks=list(workflow._tasks),
-            mode=workflow._mode,
-            entries=tuple(workflow._entries),
-            control_edges=tuple(workflow._control_edges),
-            branch_edges=tuple(workflow._branch_edges),
-            loops=tuple(workflow._loops),
-            parallels=tuple(workflow._parallels),
-            reducer=workflow._reducer,
+            name=self._name,
+            version_label=self._version,
+            tasks=list(self._tasks),
+            mode=self._mode,
+            entries=tuple(self._entries),
+            control_edges=tuple(self._control_edges),
+            branch_edges=tuple(self._branch_edges),
+            loops=tuple(self._loops),
+            parallels=tuple(self._parallels),
             experiment=experiment,
             registry=registry,
-            executor=workflow._executor,
+            executor=self._executor,
         )
 
+    async def arun(self) -> WorkflowResult:
+        """Run this graph in memory. No workspace and no new attempt.
 
-__all__ = ["Workflow", "WorkflowCompiler", "compile_registrations"]
+        A tracked run is ``run.execute(self)``, not this method.
+        """
+        from ._engine.runtime import WorkflowRuntime
+
+        return await WorkflowRuntime().execute(self.compile())
+
+    def run(self) -> WorkflowResult:
+        """Run this graph in memory and return its outputs.
+
+        Synchronous. Inside a running event loop, await :meth:`arun`.
+        A tracked run is ``run.execute(self)``.
+        """
+        import asyncio
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError(
+                "wf.run() was called from inside a running event loop; await wf.arun() instead."
+            )
+        return asyncio.run(self.arun())
+
+
+__all__ = ["Workflow", "compile_registrations"]

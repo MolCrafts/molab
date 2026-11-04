@@ -13,7 +13,7 @@ start-time workflow digest:
    records ``bypass_cache=True``.
 6. ``create_execution(mode=RERUN)`` while e04 is queued raises ``ValueError``.
 7. ``run.execution_dir("e04")`` is ``<run>/executions/e04``; starting e04 by id
-   with ``workflow_digest=`` records the digest.
+   with ``workflow_hash=`` records the digest.
 8. ``run.machine_dir()`` is ``<root>/.molab/runs/<run-id>`` and is not created.
 
 Expected stdout (exactly these lines, exit code 0):
@@ -24,7 +24,7 @@ Expected stdout (exactly these lines, exit code 0):
     e02 resume succeeded e01 bypass_cache=False
     e03 rerun succeeded e02 bypass_cache=False
     e04 reproduce succeeded e03 bypass_cache=True
-    e04 workflow_digest=sha256:abababababababababababababababababababababababababababababababab
+    e04 workflow_hash=sha256:abababababababababababababababababababababababababababababababab
     machine_dir: .molab/runs/<run-id> (not created)
     arch-own-03a-modes: ok
 
@@ -75,7 +75,7 @@ def _check(root: Path) -> None:
     _refused("rerun while e04 queued", lambda: run.create_execution(mode=ExecutionMode.RERUN))
 
     assert run.execution_dir("e04") == Path(run.run_dir) / "executions" / "e04"
-    with run.start(execution_id="e04", workflow_digest=DIGEST):
+    with run.start(execution_id="e04", workflow_hash=DIGEST):
         pass
 
     for item in run.executions:
@@ -83,7 +83,7 @@ def _check(root: Path) -> None:
             f"{item.id} {item.mode.value} {item.status.value} "
             f"{item.based_on_execution_id} bypass_cache={item.bypass_cache}"
         )
-    print(f"e04 workflow_digest={run.execution('e04').workflow_digest}")
+    print(f"e04 workflow_hash={run.execution('e04').workflow_hash}")
 
     machine = run.machine_dir()
     assert machine.relative_to(Path(str(ws.root))) == Path(".molab/runs") / run.id

@@ -15,7 +15,6 @@ from molab.workflow import (
     GraphLoopIR,
     GraphParallelIR,
     Workflow,
-    WorkflowCompiler,
     WorkflowGraphIR,
 )
 
@@ -56,12 +55,12 @@ class TestToGraphIR:
     def test_exports_all_nodes_without_slug_and_marks_actors(self):
         """Decorator tasks carry no slug yet all export (in order, ``task_type``
         None), and actor nodes are flagged ``is_actor``."""
-        spec = WorkflowCompiler().compile(_branchy_builder())
+        spec = (_branchy_builder()).compile()
         ir = spec.to_graph_ir()
 
         assert isinstance(ir, WorkflowGraphIR)
         assert ir.name == "pipeline"
-        assert {"workflow_id", "workflow_digest"}.isdisjoint(type(ir).model_fields)
+        assert {"workflow_id", "workflow_hash"}.isdisjoint(type(ir).model_fields)
 
         by_name = {t.name: t for t in ir.tasks}
         assert [t.name for t in ir.tasks] == ["fetch", "validate", "publish", "rollback", "stream"]
@@ -71,7 +70,7 @@ class TestToGraphIR:
 
     @pytest.mark.unit
     def test_captures_entries_dependencies_and_branch_routes(self):
-        ir = WorkflowCompiler().compile(_branchy_builder()).to_graph_ir()
+        ir = (_branchy_builder()).compile().to_graph_ir()
         by_name = {t.name: t for t in ir.tasks}
         assert by_name["validate"].depends_on == ("fetch",)
         assert ir.entries == ("fetch",)
@@ -92,7 +91,7 @@ class TestToGraphIR:
 
         wf.entry("a")
         wf.control(src="a", to="b")
-        ir = WorkflowCompiler().compile(wf).to_graph_ir()
+        ir = (wf).compile().to_graph_ir()
         assert ("a", "b") in ir.control_edges
 
     @pytest.mark.unit
@@ -128,7 +127,7 @@ class TestToGraphIR:
 
         wf.loop(body=["compute"], until="check_done", max_iters=10)
         wf.parallel(map_over="items", body="process", join="gather", max_concurrency=4)
-        ir = WorkflowCompiler().compile(wf).to_graph_ir()
+        ir = (wf).compile().to_graph_ir()
 
         assert ir.loops == (
             GraphLoopIR(body=("compute",), until="check_done", max_iters=10, on_exit="_end"),
@@ -141,7 +140,7 @@ class TestToGraphIR:
     def test_projects_unified_kind_tagged_edge_set(self):
         """``build_workflow_graph_ir`` projects the split collections into one
         ``kind``-tagged edge set: depends_on→data, branch routes→branch(+condition)."""
-        ir = WorkflowCompiler().compile(_branchy_builder()).to_graph_ir()
+        ir = (_branchy_builder()).compile().to_graph_ir()
         data_edges = {(e.source, e.target) for e in ir.edges if e.kind == "data"}
         branch_edges = {(e.source, e.condition, e.target) for e in ir.edges if e.kind == "branch"}
         assert ("fetch", "validate") in data_edges
@@ -168,7 +167,7 @@ class TestToGraphIR:
             return 4
 
         wf.parallel(map_over="items", body="process", join="gather")
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
 
         parallel_pairs = {
             (e.source, e.target) for e in compiled.to_graph_ir().edges if e.kind == "parallel"
@@ -227,7 +226,7 @@ class TestToGraphIR:
         wf = Workflow(name="oop")
         # Config is the instance's captured __init__ args — IR carries them.
         wf.add(Adder(value=10), name="adder")
-        ir = WorkflowCompiler().compile(wf).to_graph_ir()
+        ir = (wf).compile().to_graph_ir()
         adder = next(t for t in ir.tasks if t.name == "adder")
         assert adder.task_type == "test.adder"
         assert adder.config == {"value": 10}
@@ -249,11 +248,11 @@ class TestToGraphIR:
         async def scale(ctx):
             return ctx.inputs
 
-        outer = WorkflowCompiler().compile(
+        outer = (
             Workflow(name="outer")
             .add(SubWorkflow(inner), name="sub")
             .add(_Noop(), name="after", depends_on=["sub"])
-        )
+        ).compile()
         ir = outer.to_graph_ir()
         by_name = {t.name: t for t in ir.tasks}
 
@@ -276,7 +275,7 @@ class TestToGraphMermaid:
     def test_renders_nodes_entry_dependencies_and_branch_routes(self):
         """Nodes + start marker + dependency edges render; branch routes carry
         their label and suppress the plain duplicate edge on the same pair."""
-        out = WorkflowCompiler().compile(_branchy_builder()).to_graph_mermaid()
+        out = (_branchy_builder()).compile().to_graph_mermaid()
 
         assert 'n_fetch["fetch"]' in out
         assert "__start((start))" in out

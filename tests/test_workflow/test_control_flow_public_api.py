@@ -22,13 +22,12 @@ from molab.workflow import (
     Next,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 
 
 class TestControlFlow:
-    """``WorkflowCompiler.branch`` / ``.loop`` — values-on-edges routing."""
+    """``Workflow.branch`` / ``.loop`` — values-on-edges routing."""
 
     @pytest.mark.asyncio
     async def test_branch_routes_value_to_target_and_skips_unrouted(self) -> None:
@@ -53,7 +52,7 @@ class TestControlFlow:
 
         wf.branch("classify", routes={"accept": "accepted", "reject": "rejected"})
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert seen["inputs"] == {"score": 0.9}, (
             "the branch-routed value must arrive at the target as ctx.inputs"
@@ -86,7 +85,7 @@ class TestControlFlow:
 
         wf.loop(body=["step"], until="check", max_iters=10, on_exit="report")
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         # First iteration has no incoming value; later ones see the previous
         # iteration's routed output as ctx.inputs (values-on-edges).

@@ -1,8 +1,8 @@
 # Compiler Internals
 
-This page is for contributors who need to understand — or modify — how a `WorkflowCompiler` produces a `CompiledWorkflow` and how that artifact becomes an executable graph. End-users should read the [Quick Start](../getting-started/quick-start.md) first.
+This page is for contributors who need to understand — or modify — how `Workflow.compile` produces a `CompiledWorkflow` and how that artifact becomes an executable graph. End-users should read the [Quick Start](../getting-started/quick-start.md) first.
 
-There is **no intermediate JSON representation on the execution path**. Compilation happens in memory, in one pass, when `WorkflowCompiler().compile(wf)` is called. The lowering lives in `molab.workflow._engine.*`, which is private to the workflow package. The plan and engine are molab-owned plain Python — the former `pydantic_graph` dependency is gone entirely (no import anywhere in the repo; the `End` sentinel is molab's own, in `molab.workflow.types`).
+There is **no intermediate JSON representation on the execution path**. Compilation happens in memory, in one pass, when `wf.compile()` is called. The lowering lives in `molab.workflow._engine.*`, which is private to the workflow package. The plan and engine are molab-owned plain Python — the former `pydantic_graph` dependency is gone entirely (no import anywhere in the repo; the `End` sentinel is molab's own, in `molab.workflow.types`).
 
 ## Compilation Flow
 
@@ -10,25 +10,25 @@ There is **no intermediate JSON representation on the execution path**. Compilat
 @wf.task / wf.actor / Workflow.add(...)           →  TaskRegistration[]
 wf.control / wf.branch / wf.loop / wf.parallel    →  control-flow declarations
                               │
-                              ▼   WorkflowCompiler().compile(wf)
+                              ▼   wf.compile()
                   compile_registrations(...)
                   (validation + snapshotting + structural lowering)
                               │
                               ▼
-        CompiledWorkflow (frozen: name, workflow_digest, version,
+        CompiledWorkflow (frozen: name, workflow_hash, version,
                           tasks, snapshots, .graph)
                               │
                               ▼
         WorkflowRuntime().execute(compiled, ...)   →  WorkflowResult
 ```
 
-One compilation boundary: `WorkflowCompiler().compile(wf)` validates the declarations, computes the `workflow_digest`, snapshots every task, and lowers the whole thing to a frozen, molab-owned `ExecutionPlan` stored on the artifact as `.graph`. The runtime never recompiles — it builds fresh per-execution state/deps and drives the prebuilt plan through the structural engine (`engine.run_plan`).
+One compilation boundary: `wf.compile()` validates the declarations, computes the `workflow_hash`, snapshots every task, and lowers the whole thing to a frozen, molab-owned `ExecutionPlan` stored on the artifact as `.graph`. The runtime never recompiles — it builds fresh per-execution state/deps and drives the prebuilt plan through the structural engine (`engine.run_plan`).
 
 ## Source Layout
 
 ```
 src/molab/workflow/
-├── compiler.py            # Workflow (decorator + OOP registration) + WorkflowCompiler.compile + compile_registrations
+├── compiler.py            # Workflow (decorator + OOP registration) + Workflow.compile + compile_registrations
 ├── compiled.py            # CompiledWorkflow — frozen artifact (graph + snapshots + IR exports)
 ├── binding.py             # WorkflowBindingRegistry / default_binding_registry
 ├── task.py                # Task / Actor convenience base classes
@@ -57,10 +57,10 @@ The outer API (`molab.workflow.__init__`) is the public boundary. Anything under
 
 ## Deterministic Workflow ID
 
-`workflow_digest` is a 16-hex-character `sha256` over the workflow `name` plus, for each task, `name + type(fn_or_class).__qualname__ + sorted(depends_on)` (see `_helpers.compute_workflow_digest`):
+`workflow_hash` is a 16-hex-character `sha256` over the workflow `name` plus, for each task, `name + type(fn_or_class).__qualname__ + sorted(depends_on)` (see `_helpers.compute_workflow_hash`):
 
 ```python
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="demo")
 
@@ -70,8 +70,8 @@ async def fetch() -> int:
     return 42
 
 
-compiled = WorkflowCompiler().compile(wf)
-print(compiled.workflow_digest)  # e.g. "c3f9e2b8a7d4e1f0"
+compiled = wf.compile()
+print(compiled.workflow_hash)  # e.g. "c3f9e2b8a7d4e1f0"
 ```
 
 Properties:
@@ -80,11 +80,11 @@ Properties:
 - **Topology-scoped** — changing only the *implementation* of a task keeps the ID stable; changing edges or class identity changes it.
 - **Cheap** — no source hashing happens at this level; that's `TaskSnapshot`'s job.
 
-Pair `workflow_digest` with `config_hash` on `RunMetadata` and the experiment's persisted graph IR when you need to group runs that share a topology + source version.
+Pair `workflow_hash` with `config_hash` on `RunMetadata` and the experiment's persisted graph IR when you need to group runs that share a topology + source version.
 
 ## Validation and Lowering
 
-`compile_registrations` hands the declaration set to `WorkflowGraphCompiler` (`_engine/compiler.py`), which runs five stages — all synchronous from `WorkflowCompiler().compile(wf)`, before any user task code runs:
+`compile_registrations` hands the declaration set to `WorkflowGraphCompiler` (`_engine/compiler.py`), which runs five stages — all synchronous from `wf.compile()`, before any user task code runs:
 
 1. **Data-DAG validation** — the `depends_on` graph must be acyclic (`CycleError`) and reference only registered tasks (`UnknownTaskError`).
 2. **Edge-set construction** — explicit `wf.control` / `wf.branch` declarations bucket into per-source `UnconditionalEdges` / `BranchEdges`; `wf.parallel` expands into `map_over → body → join` control edges; `wf.loop` expands into a `{"continue", "exit"}` branch on its `until` task; tasks with no explicit edges get a fan-out synthesised from their reverse data edges. Mixing branch + unconditional edges on one source raises `EdgeShapeError`.
@@ -158,7 +158,7 @@ For callers with no run, use `FileCacheStore(path)` or a plain `store_dir=...` a
 
 ## What the Compiler Does Not Do
 
-- **It does not serialize executable workflows.** There is no `CompiledWorkflow.load(...)` path; workflows are authored in Python and re-imported on each execution. `to_graph_ir()` / `to_ir()` are one-way exports for the UI, server, and provenance — use them plus `workflow_digest` and the experiment's source snapshot for traceability.
+- **It does not serialize executable workflows.** There is no `CompiledWorkflow.load(...)` path; workflows are authored in Python and re-imported on each execution. `to_graph_ir()` / `to_ir()` are one-way exports for the UI, server, and provenance — use them plus `workflow_hash` and the experiment's source snapshot for traceability.
 - **It does not allocate workers or pick execution backends.** The authoring `remote=` kwarg is removed; the scheduler path owns remote execution.
 - **It does not infer data contracts.** `depends_on` declares both ordering and the data interface — the declared upstreams' outputs are bound to the body's named parameters (keyed by upstream task name) — but the *types* flowing through are your responsibility (use generics on `Task` / `TaskContext` if you want static checking). Optional declared contracts live in `contract.py` (`validate_workflow_contract`).
 
@@ -166,7 +166,7 @@ For callers with no run, use `FileCacheStore(path)` or a plain `store_dir=...` a
 
 Keep the boundaries:
 
-- **New authoring surface** → add to `compiler.py`; make sure `compute_workflow_digest` still produces a stable hash.
+- **New authoring surface** → add to `compiler.py`; make sure `compute_workflow_hash` still produces a stable hash.
 - **Different runtime** → a swap-in runtime must consume a `CompiledWorkflow` and honor the `execute` / `start` signatures; `WorkflowRuntime` is the only one we ship.
 - **New cache strategy** → implement a `CacheStore`, or compose `Caching` with a different storage backend; don't teach the lowering about caching directly.
 - **New snapshot semantics** → change `TaskSnapshot`; bump `CACHE_FORMAT_VERSION` in `cache.py` so stale cache entries are invalidated.
@@ -175,7 +175,7 @@ All other public behaviour should route through `molab.workflow`'s re-exports.
 
 ## Pointer to the Implementation
 
-- `molab.workflow._helpers.compute_workflow_digest` — workflow ID hash
+- `molab.workflow._helpers.compute_workflow_hash` — workflow ID hash
 - `molab.workflow.compiler.compile_registrations` — validation + snapshotting + lowering entry
 - `molab.workflow._engine.compiler.WorkflowGraphCompiler` — topology → `ExecutionPlan`
 - `molab.workflow._engine.plan.ExecutionPlan` — the frozen lowering artifact

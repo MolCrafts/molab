@@ -27,7 +27,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime, read_journal
+from molab.workflow import TaskContext, Workflow, WorkflowRuntime, read_journal
 from molab.workspace import Workspace
 
 
@@ -73,7 +73,7 @@ def _ok_workflow():
     async def step(ctx: TaskContext) -> str:
         return "ok"
 
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ class TestWorkflowRuntimeExecute:
         async def boom(ctx):
             raise RuntimeError("oops")
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "failed"
 
     async def test_external_runnable_protocol_body_executes(self):
@@ -95,7 +95,7 @@ class TestWorkflowRuntimeExecute:
             async def execute(self, ctx) -> int:
                 return 99
 
-        spec = WorkflowCompiler().compile(Workflow(name="ext").add(External(), name="ext"))
+        spec = (Workflow(name="ext").add(External(), name="ext")).compile()
         result = await WorkflowRuntime().execute(spec)
         assert result.outputs["ext"] == 99
 
@@ -115,9 +115,7 @@ class TestWorkflowRuntimeExecute:
             assert not hasattr(ctx, "run_context")
             return True
 
-        result = await WorkflowRuntime().execute(
-            WorkflowCompiler().compile(wf), run_context=run_ctx
-        )
+        result = await WorkflowRuntime().execute((wf).compile(), run_context=run_ctx)
         assert result.status == "succeeded"
         assert result.outputs["inspect"] is True
 
@@ -229,9 +227,7 @@ class TestWorkflowRuntimeExecute:
             return {"report": str(path)}
 
         scratch = tmp_path / "scratch"
-        result = await WorkflowRuntime().execute(
-            WorkflowCompiler().compile(wf), scratch_root=scratch
-        )
+        result = await WorkflowRuntime().execute((wf).compile(), scratch_root=scratch)
         assert result.status == "succeeded"
         report = Path(result.outputs["write_report"]["report"])
         assert report.exists()
@@ -247,7 +243,7 @@ class TestWorkflowRuntimeExecute:
         async def probe(ctx: TaskContext) -> dict:
             return {"workdir": ctx.workdir}
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert result.outputs["probe"]["workdir"] is None
 
@@ -284,10 +280,10 @@ class TestWorkflowRuntimeStart:
         assert handle.execution_id is None
         assert (await handle.wait()).status == "succeeded"
 
-    async def test_bare_start_handle_carries_workflow_digest(self) -> None:
+    async def test_bare_start_handle_carries_workflow_hash(self) -> None:
         compiled = _ok_workflow()
         handle = await WorkflowRuntime().start(compiled)
-        assert handle.workflow_digest == compiled.workflow_digest
+        assert handle.workflow_hash == compiled.workflow_hash
         assert not hasattr(handle, "workflow_id")
         assert (await handle.wait()).status == "succeeded"
 

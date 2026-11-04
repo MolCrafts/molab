@@ -157,21 +157,21 @@ class TestWorkflowCodec:
         }
         spec_v1 = default_codec.ir_to_spec(document, registry=registry_v1)
         spec_v2 = default_codec.ir_to_spec(document, registry=registry_v2)
-        assert spec_v1.workflow_digest != spec_v2.workflow_digest
+        assert spec_v1.workflow_hash != spec_v2.workflow_hash
         dumped_v1 = json.dumps(default_codec.spec_to_ir(spec_v1), sort_keys=True)
         dumped_v2 = json.dumps(default_codec.spec_to_ir(spec_v2), sort_keys=True)
         assert dumped_v1 == dumped_v2
-        for digest in (spec_v1.workflow_digest, spec_v2.workflow_digest):
+        for digest in (spec_v1.workflow_hash, spec_v2.workflow_hash):
             assert digest not in dumped_v1
         assert "workflow_id" not in dumped_v1
-        assert "workflow_digest" not in dumped_v1
+        assert "workflow_hash" not in dumped_v1
 
     @pytest.mark.unit
     def test_spec_to_ir_carries_no_identity(self) -> None:
         _register_golden_task_types()
         ir = json.loads((_GOLDEN / "sample_ir.json").read_text())
         spec = default_codec.ir_to_spec(ir)
-        assert {"workflow_id", "workflow_digest"}.isdisjoint(default_codec.spec_to_ir(spec))
+        assert {"workflow_id", "workflow_hash"}.isdisjoint(default_codec.spec_to_ir(spec))
 
 
 class TestLinkSchema:

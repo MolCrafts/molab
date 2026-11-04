@@ -9,7 +9,9 @@ stale/wrong results.
 
 from __future__ import annotations
 
-from molab.workflow.snapshot import _normalize_ast
+from pathlib import Path
+
+from molab.workflow.snapshot import _normalize_ast, _stable_config_default
 
 
 class TestNormalizeAst:
@@ -24,6 +26,11 @@ class TestNormalizeAst:
         plain = "def f(x):\n    return x + 1\n"
         decorated = "@retry(3)\ndef f(x):\n    return x + 1\n"
         assert _normalize_ast(plain) != _normalize_ast(decorated)
+
+
+class TestConfigIdentity:
+    def test_two_paths_do_not_share_a_config_encoding(self) -> None:
+        assert _stable_config_default(Path("/tmp/a")) != _stable_config_default(Path("/tmp/b"))
 
 
 class TestHelperModuleIdentity:
@@ -53,6 +60,20 @@ class TestHelperModuleIdentity:
         before = TaskSnapshot.from_task_body("t", self._load(tmp_path, "wf_mod").task).code_hash
         (tmp_path / "helper.py").write_text("def stat():\n    return 2\n")
         after = TaskSnapshot.from_task_body("t", self._load(tmp_path, "wf_mod").task).code_hash
+        assert before != after
+
+    def test_editing_a_relative_import_changes_the_code_hash(self, tmp_path):
+        from molab.workflow.snapshot import TaskSnapshot
+
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "helper.py").write_text("def stat():\n    return 1\n")
+        (pkg / "wf_mod.py").write_text(
+            "def task():\n    from .helper import stat\n\n    return stat()\n"
+        )
+        before = TaskSnapshot.from_task_body("t", self._load(pkg, "wf_mod").task).code_hash
+        (pkg / "helper.py").write_text("def stat():\n    return 2\n")
+        after = TaskSnapshot.from_task_body("t", self._load(pkg, "wf_mod").task).code_hash
         assert before != after
 
     def test_a_task_with_no_local_import_keeps_its_ast_hash(self, tmp_path):

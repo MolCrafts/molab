@@ -87,9 +87,9 @@ and binds the compiled workflow), then either let `molab run` drive the
 runs or execute one in-process through `WorkflowRuntime`:
 
 ```python
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 
-compiled = WorkflowCompiler().compile(Workflow(name="train").add(Train()))
+compiled = (Workflow(name="train").add(Train())).compile()
 
 exp = ws.project("demo").experiment("train").run(compiled, params={"lr": [1e-3]})
 

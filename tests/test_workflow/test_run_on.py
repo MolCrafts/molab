@@ -16,7 +16,6 @@ import pytest
 from molab.workflow import (
     CompiledWorkflow,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
     default_binding_registry,
 )
@@ -40,7 +39,7 @@ def _trivial_workflow() -> CompiledWorkflow:
     async def emit(ctx: TaskContext[None, None, None]) -> int:
         return 42
 
-    return WorkflowCompiler().compile(builder)
+    return (builder).compile()
 
 
 def _failing_workflow() -> CompiledWorkflow:
@@ -50,7 +49,7 @@ def _failing_workflow() -> CompiledWorkflow:
     async def boom(ctx: TaskContext[None, None, None]) -> None:
         raise RuntimeError("intentional failure")
 
-    return WorkflowCompiler().compile(builder)
+    return (builder).compile()
 
 
 class TestRunOn:

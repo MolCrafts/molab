@@ -1,6 +1,6 @@
 """Content-addressed identity of a compiled workflow.
 
-:func:`compute_workflow_digest` hashes what a workflow *does*, not what it
+:func:`compute_workflow_hash` hashes what a workflow *does*, not what it
 is called. The digest is ``"sha256:" + 64 hex`` over one canonical JSON
 document (``json.dumps(sort_keys=True, separators=(",", ":"))``) holding:
 
@@ -42,7 +42,7 @@ from .snapshot import TaskSnapshot
 if TYPE_CHECKING:
     from .compiled import CompiledWorkflow
 
-__all__ = ["compute_workflow_digest"]
+__all__ = ["compute_workflow_hash"]
 
 
 def _canonical(value: object) -> str:
@@ -74,8 +74,8 @@ def _dependent_params_hashes(compiled: CompiledWorkflow) -> dict[str, str | None
     return hashes
 
 
-def compute_workflow_digest(compiled: CompiledWorkflow) -> str:
-    """Return the content-addressed identity of *compiled*.
+def compute_workflow_hash(compiled: CompiledWorkflow) -> str:
+    """Return the content hash of *compiled*.
 
     See the module docstring for the hashed and the excluded fields.
 

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import molab as me
 from molab.profile import ProfileConfig
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 from molab.workspace.domain import ExecutionMode
 
 # Module-level marker so the first attempt fails and the second succeeds.
@@ -38,7 +38,7 @@ async def flaky_train(epochs: int = 3) -> dict:
     return {"epochs": epochs}
 
 
-compiled = WorkflowCompiler().compile(wf)
+compiled = wf.compile()
 
 
 async def main() -> None:

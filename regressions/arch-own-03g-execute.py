@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from molab import Workflow, WorkflowCompiler, Workspace
+from molab import Workflow, Workspace
 from molab.workflow import RunFailedError, RunNotExecutableError
 from molab.workflow.execute import execute_run
 from molab.workflow.types import WorkflowResult
@@ -70,9 +70,9 @@ def _digest_line(executions: list[Execution], digest: str) -> str:
     ok = sum(
         1
         for item in executions
-        if item.workflow_digest == digest
-        and isinstance(item.workflow_digest, str)
-        and item.workflow_digest.startswith("sha256:")
+        if item.workflow_hash == digest
+        and isinstance(item.workflow_hash, str)
+        and item.workflow_hash.startswith("sha256:")
     )
     return f"digest: {ok}/{len(executions)} sha256"
 
@@ -95,8 +95,8 @@ def main() -> int:
         root = Path(raw)
         flag = root / "FLAG"
         wf = _healing_wf(flag)
-        compiled = WorkflowCompiler().compile(wf)
-        digest = compiled.workflow_digest
+        compiled = (wf).compile()
+        digest = compiled.workflow_hash
         assert isinstance(digest, str) and digest.startswith("sha256:")
 
         ws = Workspace(root / "ws", name="lab")

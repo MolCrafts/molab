@@ -54,7 +54,7 @@ def main() -> None:
         if not ir_path.is_file():
             _die("workflow.ir.json missing")
         ir = json.loads(ir_path.read_text(encoding="utf-8"))
-        if "workflow_digest" in ir or "workflow_id" in ir:
+        if "workflow_hash" in ir or "workflow_id" in ir:
             _die("document carries an identity")
         runs = list(experiment.list_runs())
         if len(runs) != 1:
@@ -81,8 +81,8 @@ def main() -> None:
             _die("missing journal")
         if journal.get("based_on_execution_id") != "e01":
             _die("journal predecessor")
-        digest = journal.get("workflow_digest")
-        if digest != run.execution("e02").workflow_digest or not str(digest).startswith("sha256:"):
+        digest = journal.get("workflow_hash")
+        if digest != run.execution("e02").workflow_hash or not str(digest).startswith("sha256:"):
             _die(f"digest {digest}")
         if "workflow_id" in journal:
             _die("journal workflow_id")

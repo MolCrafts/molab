@@ -23,7 +23,6 @@ from molab.workflow import (
     Task,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 
@@ -61,11 +60,11 @@ class Train(Task):
 
 async def run_chained() -> None:
     """SubWorkflow as one node of an outer chain: preprocess → train."""
-    outer = WorkflowCompiler().compile(
+    outer = (
         Workflow(name="train")
         .add(SubWorkflow(build_preprocess()), name="preprocess")
         .add(Train(), depends_on=["preprocess"])
-    )
+    ).compile()
 
     result = await WorkflowRuntime().execute(outer)
     print("── chained ──")
@@ -96,7 +95,7 @@ async def run_parallel_body() -> None:
 
     wf.parallel(map_over="enumerate", body="preprocess", join="collect", max_concurrency=2)
 
-    compiled = WorkflowCompiler().compile(wf)
+    compiled = wf.compile()
     result = await WorkflowRuntime().execute(compiled)
     print("── parallel body ──")
     print(f"task set: {sorted(t.name for t in compiled._tasks)}")

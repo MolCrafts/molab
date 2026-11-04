@@ -22,7 +22,6 @@ from molab.workflow import (
     UnknownRouteError,
     UnknownTaskError,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 
@@ -44,7 +43,7 @@ class TestControlFlowRouting:
         wf.entry("alpha")
         wf.control("alpha", "beta")
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert result.outputs == {"alpha": "alpha-out", "beta": "beta-out"}
 
@@ -66,7 +65,7 @@ class TestControlFlowRouting:
         async def leg_b(ctx) -> str:
             return "took-b"
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert "route" not in result.outputs  # decision node records no output
         assert result.outputs.get("leg_a") == "took-a"
@@ -85,7 +84,7 @@ class TestControlFlowRouting:
         async def dst(ctx) -> str:
             return "arrived"
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.outputs["src"] == 42
         assert result.outputs["dst"] == "arrived"
 
@@ -104,7 +103,7 @@ class TestControlFlowRouting:
 
         wf.control("src", "never")
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.outputs["src"] == 99
         assert "never" not in result.outputs
 
@@ -125,7 +124,7 @@ class TestControlFlowRouting:
         async def survivor(ctx) -> str:
             return "survivor-out"
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.outputs["quitter"] == "quitter-out"
         assert result.outputs["survivor"] == "survivor-out"
 
@@ -150,7 +149,7 @@ class TestControlFlowRouting:
         async def implement(approved_plan: str) -> str:
             return "implemented"
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert result.outputs["plan"] == "plan-v2"  # ran twice
         assert result.outputs["implement"] == "implemented"
@@ -170,7 +169,7 @@ class TestControlFlowRouting:
         async def sink(ctx) -> str:
             return "sunk"
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert result.outputs["sink"] == "sunk"
 
@@ -188,7 +187,7 @@ class TestControlFlowRouting:
             return "a"
 
         with pytest.raises(UnknownRouteError) as exc_info:
-            await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+            await WorkflowRuntime().execute((wf).compile())
         msg = str(exc_info.value)
         assert "nope" in msg
         assert "route" in msg  # task name
@@ -212,7 +211,7 @@ class TestControlFlowRouting:
             return "b"
 
         with pytest.raises(MissingRouteError) as exc_info:
-            await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+            await WorkflowRuntime().execute((wf).compile())
         msg = str(exc_info.value)
         assert "route" in msg
         assert "a" in msg and "b" in msg  # declared labels listed
@@ -237,7 +236,7 @@ class TestControlFlowRouting:
         wf.loop(body=["step"], until="always_continue", max_iters=3)
 
         with pytest.warns(LoopMaxItersExceeded):
-            result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+            result = await WorkflowRuntime().execute((wf).compile())
 
         assert result.status == "succeeded"
         assert runs[0] == 3
@@ -253,7 +252,7 @@ class TestControlFlowRouting:
         wf.loop(body=["step"], until="nonexistent", max_iters=10)
 
         with pytest.raises(UnknownTaskError) as exc_info:
-            WorkflowCompiler().compile(wf)
+            (wf).compile()
         assert "nonexistent" in str(exc_info.value)
 
 

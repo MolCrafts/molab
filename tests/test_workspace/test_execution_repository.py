@@ -593,14 +593,14 @@ class TestExecutionRepositoryStart:
         assert started.started_at is not None
         assert repo.get(state.id) == started
 
-    def test_records_workflow_digest(self, run: Run) -> None:
+    def test_records_workflow_hash(self, run: Run) -> None:
         repo = _run_repo(run)
         state = repo.create(created_by=_TEST_AGENT)
 
-        started = repo.start(state.id, workflow_digest="sha256:d")
+        started = repo.start(state.id, workflow_hash="sha256:d")
 
-        assert started.workflow_digest == "sha256:d"
-        assert repo.get(state.id).workflow_digest == "sha256:d"
+        assert started.workflow_hash == "sha256:d"
+        assert repo.get(state.id).workflow_hash == "sha256:d"
 
     def test_second_start_raises(self, run: Run) -> None:
         repo = _run_repo(run)
@@ -676,7 +676,7 @@ class TestExecutionRepositoryUpdateOperational:
             {"bypass_cache": True},
             {"environment": {}},
             {"source": None},
-            {"workflow_digest": "x"},
+            {"workflow_hash": "x"},
             {"started_at": datetime.now(UTC)},
             {"based_on_execution_id": "e00"},
             {"checkpoint_artifact_id": "a"},
@@ -790,7 +790,7 @@ class TestExecutionRepositoryTransition:
             {"environment": {}},
             {"source": None},
             {"bypass_cache": True},
-            {"workflow_digest": "x"},
+            {"workflow_hash": "x"},
             {"started_at": _FIXED_TIME},
             {"id": "e99"},
             {"created_by": _TEST_AGENT},

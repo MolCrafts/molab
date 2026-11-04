@@ -18,7 +18,7 @@ import molab as me
 from molab.knowledge import Report
 from molab.server.routes import run as run_routes
 from molab.server.schemas.requests import RunHarvestRequest
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 from molab.workspace import Experiment, Run, Workspace
 from molab.workspace.domain import Artifact, ExecutionMode, ExecutionStatus
 from molab.workspace.history import AgentRef
@@ -996,8 +996,8 @@ class TestGetRunExecution:
         assert wf["execution_id"] == "e01"
         assert wf["workflow_name"] == "pipeline"
         assert wf["based_on_execution_id"] is None
-        assert re.fullmatch(r"sha256:[0-9a-f]{64}", wf["workflow_digest"])
-        assert wf["workflow_digest"] == WorkflowCompiler().compile(_build_wf()).workflow_digest
+        assert re.fullmatch(r"sha256:[0-9a-f]{64}", wf["workflow_hash"])
+        assert wf["workflow_hash"] == (_build_wf()).compile().workflow_hash
         assert {t["task_id"]: (t["status"], t["outputs"]) for t in wf["task_configs"]} == {
             "double": ("completed", 6),
             "summarize": ("completed", "got 6"),

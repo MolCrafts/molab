@@ -30,7 +30,7 @@ from molab.workflow.contract import (
 
 def _sample_contract() -> WorkflowContract:
     return WorkflowContract(
-        workflow_digest="workflow_00000000",
+        workflow_hash="workflow_00000000",
         task_io=(
             TaskIO(
                 task_id="A",
@@ -66,7 +66,7 @@ class TestWorkflowCodecYamlRoundTrip:
 
     def test_spec_survives_yaml_round_trip_through_ir(self) -> None:
         """``spec_to_yaml`` ⇄ ``yaml_to_spec`` is IR-stable (slugged tasks only)."""
-        from molab.workflow.compiler import Workflow, WorkflowCompiler
+        from molab.workflow.compiler import Workflow
         from molab.workflow.registry import default_registry
         from molab.workflow.task import Task
 
@@ -77,9 +77,9 @@ class TestWorkflowCodecYamlRoundTrip:
         if not default_registry.has("test.inert_yaml_rt"):
             default_registry.register("test.inert_yaml_rt", Inert)
 
-        spec = WorkflowCompiler().compile(
+        spec = (
             Workflow(name="rt").add(Inert(), name="A").add(Inert(), name="B", depends_on=["A"])
-        )
+        ).compile()
         text = default_codec.spec_to_yaml(spec)
         spec2 = default_codec.yaml_to_spec(text)
         assert default_codec.spec_to_ir(spec) == default_codec.spec_to_ir(spec2)
@@ -120,7 +120,7 @@ class TestWorkflowCodecYamlRoundTrip:
         ir_out = default_codec.spec_to_ir(spec)
         assert "workflow_contract" not in ir_out
         assert "workflow_id" not in ir_out
-        assert "workflow_digest" not in ir_out
+        assert "workflow_hash" not in ir_out
 
 
 class TestWorkflowCodecYamlSafety:

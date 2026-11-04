@@ -39,25 +39,41 @@ class DryRunReport:
 def simulate(compiled: CompiledWorkflow) -> DryRunReport:
     """Return the walk of *compiled* without executing a task.
 
+    A task is ready when its data dependencies and its forward control
+    sources are done. Back-edges (``wf.loop``) do not hold the first pass,
+    and no branch is taken. The same :class:`ExecutionPlan` the engine runs.
+
     Args:
         compiled: A compiled workflow.
 
     Returns:
         The waves and the declared branches.
     """
+    from ._engine.plan import START
+
+    plan = compiled.graph
     regs = compiled.registration_by_name
+    back_by_target: dict[str, set[str]] = {}
+    for src, tgt in plan.back_edges:
+        back_by_target.setdefault(tgt, set()).add(src)
     pending = set(regs)
     waves: list[DryRunWave] = []
     while pending:
-        ready = tuple(
-            sorted(
-                name for name in pending if all(dep not in pending for dep in regs[name].depends_on)
-            )
-        )
+        ready: list[str] = []
+        for name in pending:
+            sources = set(plan.in_sources.get(name, ())) - {START}
+            sources |= set(regs[name].depends_on)
+            sources -= back_by_target.get(name, set())
+            parallel = plan.parallel_by_body.get(name)
+            if parallel is not None:
+                sources.add(parallel.map_over)
+            if sources & pending:
+                continue
+            ready.append(name)
         if not ready:
             waves.append(DryRunWave(tuple(sorted(pending))))
             break
-        waves.append(DryRunWave(ready))
+        waves.append(DryRunWave(tuple(sorted(ready))))
         pending.difference_update(ready)
     return DryRunReport(
         name=compiled.name,

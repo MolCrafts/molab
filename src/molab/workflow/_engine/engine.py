@@ -53,6 +53,7 @@ from typing import TYPE_CHECKING
 from ..types import (
     BranchEdges,
     LoopMaxItersExceeded,
+    Next,
     ParallelExecutionError,
     UnconditionalEdges,
     UnknownRouteError,
@@ -61,13 +62,14 @@ from ..types import (
 from .node import (
     END_TARGET,
     NO_OUTPUT,
+    SUB_INDEX,
     TakeEnd,
     TakeLabel,
     _classify_return,
     _Failure,
     run_task_body,
 )
-from .node_cache import run_task_body_cached
+from .node_cache import flush_pending_cache, run_task_body_cached
 from .node_params import _resolve_dependent_params
 from .node_record import input_fields, output_fields
 from .persistence import mark_task_status
@@ -395,8 +397,13 @@ class _PlanEngine:
         state, deps = self.state, self.deps
         if name in state.seeded:
             # Body already produced its value (seed_outputs); skip running it
-            # but still route as if it returned that value.
-            return state.results.get(name)
+            # but still route as if it returned that value. A recorded branch
+            # label is replayed — the output alone cannot choose a route.
+            value = state.results.get(name)
+            route = state.seed_routes.get(name)
+            if route is not None:
+                return (value, Next(route))
+            return value
         try:
             # Resolved once here: the inputs record and the body share it, so
             # a ``dependent_params`` function runs once per launch.
@@ -431,6 +438,7 @@ class _PlanEngine:
                 name, deps, state, delivered=delivered, effective_config=effective_config
             )
         except Exception as exc:
+            deps.pending_cache.pop(name, None)
             mark_task_status(
                 deps.journal_dir,
                 name,
@@ -457,6 +465,7 @@ class _PlanEngine:
         try:
             recorded_value, dispatch = _classify_return(event.raw, edge_set, task_name=name)
         except Exception as exc:
+            deps.pending_cache.pop(name, None)
             mark_task_status(
                 deps.journal_dir,
                 name,
@@ -464,31 +473,11 @@ class _PlanEngine:
                 error=f"{type(exc).__name__}: {exc}",
             )
             raise
-        if recorded_value is not NO_OUTPUT:
-            state.record(name, recorded_value)
-            mark_task_status(
-                deps.journal_dir,
-                name,
-                "completed",
-                output=output_fields(deps, state, name, recorded_value),
-                snapshot_key=_snapshot_key_of(deps, name),
-                dependent_params_hash=_dependent_params_hash_of(deps, name),
-            )
-        else:
-            state.completed.add(name)
-            state.output_records.pop(name, None)
-            mark_task_status(
-                deps.journal_dir,
-                name,
-                "completed",
-                output={} if deps.journal_dir is not None else None,
-                snapshot_key=_snapshot_key_of(deps, name),
-                dependent_params_hash=_dependent_params_hash_of(deps, name),
-            )
-
         # wf.loop max_iters guard — increment the until-task's counter
         # whenever it would route "continue"; once at the cap, emit
-        # LoopMaxItersExceeded and force "exit".
+        # LoopMaxItersExceeded and force "exit". The journal records the
+        # label actually taken, including a forced exit.
+        forced_exit = False
         if isinstance(dispatch, TakeLabel) and dispatch.label == "continue":
             max_iters = deps.loop_max_iters.get(name)
             if max_iters is not None:
@@ -504,6 +493,34 @@ class _PlanEngine:
                         stacklevel=2,
                     )
                     dispatch = TakeLabel("exit")
+                    forced_exit = True
+        route = dispatch.label if isinstance(dispatch, TakeLabel) else None
+        if recorded_value is not NO_OUTPUT:
+            state.record(name, recorded_value)
+            mark_task_status(
+                deps.journal_dir,
+                name,
+                "completed",
+                output=output_fields(deps, state, name, recorded_value),
+                snapshot_key=_snapshot_key_of(deps, name),
+                dependent_params_hash=_dependent_params_hash_of(deps, name),
+                route=route,
+                forced_exit=forced_exit,
+            )
+        else:
+            state.completed.add(name)
+            state.output_records.pop(name, None)
+            mark_task_status(
+                deps.journal_dir,
+                name,
+                "completed",
+                output={} if deps.journal_dir is not None else None,
+                snapshot_key=_snapshot_key_of(deps, name),
+                dependent_params_hash=_dependent_params_hash_of(deps, name),
+                route=route,
+                forced_exit=forced_exit,
+            )
+        flush_pending_cache(deps, name)
 
         if isinstance(dispatch, TakeEnd):
             # Frame-scoped End: this task's out-edges die (unless the task
@@ -591,7 +608,8 @@ class _PlanEngine:
             runner=_runner_of(deps, body),
         )
 
-        async def _one(element: TaskInput) -> TaskOutput:
+        async def _one(index: int, element: TaskInput) -> TaskOutput:
+            token = SUB_INDEX.set(index)
             mark_task_status(deps.journal_dir, body, "running")
             try:
                 if limiter is not None:
@@ -606,21 +624,21 @@ class _PlanEngine:
                     error=f"{type(exc).__name__}: {exc}",
                 )
                 return _Failure(exc)
+            finally:
+                SUB_INDEX.reset(token)
 
-        outcomes = await asyncio.gather(*(_one(element) for element in elements))
+        outcomes = await asyncio.gather(
+            *(_one(index, element) for index, element in enumerate(elements))
+        )
         failures = {
             idx: outcome.exc
             for idx, outcome in enumerate(outcomes)
             if isinstance(outcome, _Failure)
         }
         if failures:
-            mark_task_status(
-                deps.journal_dir,
-                body,
-                "failed",
-                error=f"{len(failures)} parallel element failure(s)",
-            )
-            raise ParallelExecutionError(body=body, failures=failures)
+            error = ParallelExecutionError(body=body, failures=failures)
+            mark_task_status(deps.journal_dir, body, "failed", error=str(error))
+            raise error
         ordered = list(outcomes)
         state.results[body] = ordered
         state.completed.add(body)

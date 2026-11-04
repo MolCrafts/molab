@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from molab.profile import ProfileConfig
-from molab.workflow import Caching, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Caching, Workflow, WorkflowRuntime
 from molab.workflow._engine.node_cache import _cache_inputs
 from molab.workflow._engine.state import WorkflowState
 
@@ -82,7 +82,7 @@ def _dep_workflow(
 
     wf.add(src, name="src")
     wf.add(mech, name="mech", depends_on=["src"], dependent_params=overlay)
-    return WorkflowCompiler().compile(wf)
+    return (wf).compile()
 
 
 def _factor_overlay(factor: float, counts: dict[str, int]) -> Callable[[dict], dict]:
@@ -136,7 +136,7 @@ class TestRunTaskBodyCached:
 
         wf = Workflow(name="opaque")
         wf.add(mech, name="mech", dependent_params=overlay)
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         store_dir = tmp_path / "c"
         cache = Caching(store_dir=store_dir)
 

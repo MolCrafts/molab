@@ -13,7 +13,6 @@ from molab.workflow import (
     CompiledWorkflow,
     Workflow,
     WorkflowBindingRegistry,
-    WorkflowCompiler,
     default_binding_registry,
 )
 from molab.workflow.binding import WorkflowBinding
@@ -38,7 +37,7 @@ def _make_spec(name: str = "wf") -> CompiledWorkflow:
     def noop() -> None:
         return None
 
-    return WorkflowCompiler().compile(builder)
+    return (builder).compile()
 
 
 class TestWorkflowBindingRegistry:
@@ -51,12 +50,12 @@ class TestWorkflowBindingRegistry:
         assert reg.unbind(exp) is True
         assert reg.is_bound(exp, spec) is False
 
-    def test_binding_carries_workflow_digest(self) -> None:
+    def test_binding_carries_workflow_hash(self) -> None:
         reg = WorkflowBindingRegistry()
         spec = _make_spec("digest")
         exp = _StubExperiment("e1")
         binding = reg.bind(exp, spec)
-        assert binding.workflow_digest == spec.workflow_digest
+        assert binding.workflow_hash == spec.workflow_hash
         assert "workflow_id" not in WorkflowBinding.model_fields
 
     def test_bind_rejects_target_without_string_id(self) -> None:

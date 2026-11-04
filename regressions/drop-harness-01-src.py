@@ -63,7 +63,6 @@ from molab.server.app import create_app  # noqa: E402
 from molab.workflow import (  # noqa: E402
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRecoveryError,
     compiled_workflow_for_run,
 )
@@ -160,7 +159,7 @@ def _check_script_run(ws: Workspace) -> None:
         del ctx  # the body only has to succeed
         return {"ok": True}
 
-    compiled = WorkflowCompiler().compile(wf)
+    compiled = (wf).compile()
     experiment = ws.add_project("p").add_experiment("e").define(compiled, params={"seed": [0]})
     [run] = experiment.list_runs()
     run.execute(compiled)

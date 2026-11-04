@@ -696,7 +696,7 @@ class Run(Folder):
         predecessor: str | None = None,
         checkpoint: str | None = None,
         bypass_cache: bool = False,
-        workflow_digest: str | None = None,
+        workflow_hash: str | None = None,
     ) -> RunContext:
         """Return a context manager for executing this run.
 
@@ -729,7 +729,7 @@ class Run(Folder):
                 workflow node cache — the per-task result store that lets an
                 unchanged task reuse its earlier output instead of running
                 again. Read back as ``ctx.bypass_cache``.
-            workflow_digest: An opaque digest of the workflow this attempt
+            workflow_hash: An opaque digest of the workflow this attempt
                 runs (``sha256:...``), recorded by the start transition before
                 any task runs. A start-time fact, so unlike the creation
                 arguments it may be passed with ``execution_id``.
@@ -746,7 +746,7 @@ class Run(Folder):
             predecessor=predecessor,
             checkpoint=checkpoint,
             bypass_cache=bypass_cache,
-            workflow_digest=workflow_digest,
+            workflow_hash=workflow_hash,
         )
 
     def create_execution(

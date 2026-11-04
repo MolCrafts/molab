@@ -7,7 +7,7 @@ Before Molab becomes a workspace or a CLI tool, it is a workflow system. A workf
 A task is an ordinary function. It declares the data it needs as named parameters. The engine binds values by name from upstream outputs.
 
 ```python
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="pipeline")
 
@@ -38,20 +38,15 @@ The two styles mix freely in one graph.
 
 ## Compile and Run (No Workspace)
 
-`WorkflowCompiler().compile(wf)` freezes the definition into a `CompiledWorkflow`. You can run it purely in memory — no projects, experiments, or directories:
+`wf.compile()` freezes the definition into a `CompiledWorkflow`. You can run it purely in memory — no projects, experiments, or directories:
 
 ```python
-import asyncio
-from molab.workflow import WorkflowRuntime
-
-compiled = WorkflowCompiler().compile(wf)
-result = asyncio.run(WorkflowRuntime().execute(compiled))
-print(
-    result.status, result.outputs
-)  # succeeded {'fetch': ..., 'scale': 84, 'publish': 'published 84'}
+result = wf.run()
+print(result.status, result.outputs)
+# succeeded {'fetch': ..., 'scale': 84, 'publish': 'published 84'}
 ```
 
-This is useful during early iteration — iterate on task boundaries and data flow without thinking about persistence. When you want a durable record, hand the same `compiled` to a tracked run.
+This is useful during early iteration — iterate on task boundaries and data flow without thinking about persistence. When you want a durable record, hand the same `wf` to a tracked run.
 
 ## Task Classes (Reusable)
 
@@ -71,9 +66,7 @@ class Scale(Task):
         return value * factor
 
 
-compiled = WorkflowCompiler().compile(
-    Workflow(name="pipeline-oop").add(Fetch()).add(Scale(), depends_on=["fetch"])
-)
+compiled = (Workflow(name="pipeline-oop").add(Fetch()).add(Scale(), depends_on=["fetch"])).compile()
 ```
 
 The `ctx` parameter gives you a scratch directory (`ctx.workdir`) — omit it when you don't need one. Both styles produce the same kind of compiled workflow.

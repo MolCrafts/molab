@@ -291,16 +291,26 @@ class Execution(BaseModel):
     A creation-time fact. ``None`` on records that captured no source; no
     production creator captures one until arch-own-02b.
     """
-    workflow_digest: str | None = None
-    """Digest of the compiled workflow this attempt ran, recorded at start.
+    workflow_hash: str | None = None
+    """Content hash of the compiled workflow this attempt ran, recorded at start.
 
-    The *compiled workflow* is the frozen task graph the engine executes; its
-    digest (``sha256:...``) changes whenever that graph does. A start-time
-    fact written by ``ExecutionRepository.start``; always ``None`` on a QUEUED
-    record. Its production writers are arch-own-03a (``Run.start`` and
-    ``ExecutionContext`` pass it to ``start``) and arch-own-03g
-    (``run.execute`` records it).
+    ``sha256:...`` over the task code and the edges. It changes when that
+    graph changes. A start-time fact written by ``ExecutionRepository.start``;
+    always ``None`` on a QUEUED record. Records written before this field
+    was named ``workflow_hash`` stored the same value as ``workflow_digest``.
     """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_workflow_hash(cls, data: object) -> object:
+        """Read ``workflow_digest`` from an older ``execution.json``."""
+        if not isinstance(data, dict) or "workflow_digest" not in data:
+            return data
+        migrated = dict(data)
+        migrated.setdefault("workflow_hash", migrated.pop("workflow_digest"))
+        migrated.pop("workflow_digest", None)
+        return migrated
+
     observed_input_ids: tuple[str, ...] = ()
     artifacts: tuple[Artifact, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()

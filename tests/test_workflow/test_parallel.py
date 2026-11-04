@@ -25,7 +25,6 @@ from molab.workflow import (
     ParallelExecutionError,
     UnknownTaskError,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 from molab.workflow.types import Next
@@ -55,7 +54,7 @@ class TestParallel:
 
         wf.parallel(map_over="enumerate", body="square", join="sum_results", max_concurrency=2)
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
 
         assert {t.name for t in compiled._tasks} == {"enumerate", "square", "sum_results"}, (
             f"Expected exactly 3 task entries, got {sorted(t.name for t in compiled._tasks)}"
@@ -80,7 +79,7 @@ class TestParallel:
 
         wf.parallel(map_over="enumerate", body="body", join="join", max_concurrency=3)
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert result.outputs["body"] == [1, 4, 9]
         assert result.outputs["join"] == 14
@@ -110,7 +109,7 @@ class TestParallel:
 
         wf.parallel(map_over="enumerate", body="body", join="join", max_concurrency=5)
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert result.outputs["body"] == [0.05, 0.04, 0.03, 0.02, 0.01]
         assert result.outputs["join"] == [0.05, 0.04, 0.03, 0.02, 0.01]
@@ -149,7 +148,7 @@ class TestParallel:
 
         wf.parallel(map_over="enumerate", body="body", join="join", max_concurrency=2)
 
-        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert result.outputs["join"] == 5
         assert observed_max <= 2, f"Expected in-flight cap of 2, observed {observed_max}"
@@ -181,7 +180,7 @@ class TestParallel:
         wf.parallel(map_over="enumerate", body="body", join="join", max_concurrency=3)
 
         with pytest.raises(ParallelExecutionError) as exc_info:
-            await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+            await WorkflowRuntime().execute((wf).compile())
 
         assert exc_info.value.body == "body"
         assert set(exc_info.value.failures.keys()) == {1}
@@ -205,7 +204,7 @@ class TestParallel:
         wf.parallel(map_over="missing", body="body", join="join", max_concurrency=2)
 
         with pytest.raises(UnknownTaskError) as exc_info:
-            WorkflowCompiler().compile(wf)
+            (wf).compile()
         assert "missing" in str(exc_info.value)
 
     def test_rejects_body_shared_across_two_parallels(self) -> None:
@@ -232,7 +231,7 @@ class TestParallel:
         wf.parallel(map_over="other_seed", body="shared_body", join="join", max_concurrency=2)
 
         with pytest.raises(EdgeShapeError) as exc_info:
-            WorkflowCompiler().compile(wf)
+            (wf).compile()
         assert "shared_body" in str(exc_info.value)
 
     def test_rejects_loop_until_reused_as_parallel_body(self) -> None:
@@ -258,7 +257,7 @@ class TestParallel:
         wf.parallel(map_over="seed", body="join", join="seed", max_concurrency=2)
 
         with pytest.raises(EdgeShapeError):
-            WorkflowCompiler().compile(wf)
+            (wf).compile()
 
     def test_rejects_body_with_extra_depends_on(self) -> None:
         """A body declared with extra ``depends_on`` beyond ``[map_over]`` →
@@ -285,4 +284,4 @@ class TestParallel:
         wf.parallel(map_over="seed", body="body", join="join", max_concurrency=2)
 
         with pytest.raises(EdgeShapeError):
-            WorkflowCompiler().compile(wf)
+            (wf).compile()

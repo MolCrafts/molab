@@ -13,12 +13,10 @@ Run directly::
 
 from __future__ import annotations
 
-import asyncio
-
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow
 
 
-async def main() -> None:
+def main() -> None:
     wf = Workflow(name="first-workflow")
 
     @wf.task
@@ -35,13 +33,11 @@ async def main() -> None:
     async def total(square: list[int]) -> int:
         return sum(square)
 
-    compiled = WorkflowCompiler().compile(wf)
-    result = await WorkflowRuntime().execute(compiled)
-
-    print(f"workflow_digest: {compiled.workflow_digest}")
+    print(f"hash: {wf.compile().workflow_hash}")
+    result = wf.run()
     print(f"status:      {result.status}")
     print(f"outputs:     {result.outputs}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

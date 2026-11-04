@@ -1,4 +1,4 @@
-"""Tests for :meth:`molab.workflow.compiler.WorkflowCompiler.compile`.
+"""Tests for :meth:`molab.workflow.Workflow.compile`.
 
 ``compile()`` lowers the registrations exactly once and emits a single frozen
 :class:`CompiledWorkflow` carrying the executable graph, per-task snapshots,
@@ -12,7 +12,7 @@ import inspect
 
 import pytest
 
-from molab.workflow import CompiledWorkflow, Workflow, WorkflowCompiler
+from molab.workflow import CompiledWorkflow, Workflow
 from molab.workflow._graph_decl import TaskRegistration
 
 
@@ -36,7 +36,7 @@ class TestWorkflowCompilerCompile:
         async def train(ctx):
             return {"b": 2}
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         assert isinstance(compiled, CompiledWorkflow)
         # exactly one TaskSnapshot per registered task
         assert set(compiled.snapshots) == {"fetch", "train"}
@@ -64,33 +64,54 @@ class TestWorkflowCompilerCompile:
 
         reg = WorkflowBindingRegistry()
         exp = _Exp("exp-001")
-        compiled = WorkflowCompiler().compile(wf, experiment=exp, registry=reg)
+        compiled = wf.compile(experiment=exp, registry=reg)
         assert reg.for_experiment(exp) is compiled
         assert compiled.binding is not None
         assert compiled.binding.experiment_id == "exp-001"
-        from molab.workflow.digest import compute_workflow_digest
+        from molab.workflow.digest import compute_workflow_hash
 
-        assert compiled.binding.workflow_digest == compiled.workflow_digest
-        assert compiled.workflow_digest == compute_workflow_digest(compiled)
+        assert compiled.binding.workflow_hash == compiled.workflow_hash
+        assert compiled.workflow_hash == compute_workflow_hash(compiled)
 
     @pytest.mark.unit
-    def test_compiler_is_not_a_workflow(self):
-        assert not issubclass(WorkflowCompiler, Workflow)
-        assert not hasattr(Workflow, "compile")
+    def test_compile_is_a_method_on_the_graph(self):
         wf = Workflow(name="x")
-        assert not hasattr(wf, "compile")
+
+        @wf.task
+        def only() -> int:
+            return 1
+
+        compiled = wf.compile()
+        assert compiled.name == "x"
+        assert compiled.workflow_hash.startswith("sha256:")
+        import molab
+        import molab.workflow as workflow
+
+        assert "WorkflowCompiler" not in molab.__all__
+        assert "WorkflowCompiler" not in workflow.__all__
 
     @pytest.mark.unit
-    def test_compiler_rejects_builder_constructor(self):
-        with pytest.raises(TypeError):
-            WorkflowCompiler(name="legacy")  # type: ignore[call-arg]
+    def test_run_returns_task_outputs(self):
+        wf = Workflow(name="x")
 
-    @pytest.mark.unit
-    def test_compiler_requires_a_workflow(self):
-        with pytest.raises(TypeError):
-            WorkflowCompiler().compile()  # type: ignore[call-arg]
-        with pytest.raises(TypeError, match="requires a Workflow"):
-            WorkflowCompiler().compile(object())  # type: ignore[arg-type]
+        @wf.task
+        def only() -> int:
+            return 1
+
+        result = wf.run()
+        assert result.status == "succeeded"
+        assert result.outputs["only"] == 1
+
+    @pytest.mark.asyncio
+    async def test_run_refuses_a_running_loop(self):
+        wf = Workflow(name="x")
+
+        @wf.task
+        def only() -> int:
+            return 1
+
+        with pytest.raises(RuntimeError, match=r"await wf\.arun\(\)"):
+            wf.run()
 
 
 class TestRemoteKwargRemoved:
@@ -123,7 +144,7 @@ class TestRemoteKwargRemoved:
         def b(a: int) -> int:
             return a + 1
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         sub = compiled.subgraph(["b"])
         assert isinstance(sub, CompiledWorkflow)
         registrations = list(sub.registration_by_name.values())

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import molab as me
 from molab.param import GridSpace, UniformSpace
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="train")
 
@@ -41,7 +41,7 @@ def report(loss: float, accuracy: float) -> float:
     return loss
 
 
-compiled = WorkflowCompiler().compile(wf)
+compiled = wf.compile()
 
 
 def main() -> None:

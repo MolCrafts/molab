@@ -97,7 +97,7 @@ hero:
 
 ```python
 import molab as me
-from molab.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow
 
 wf = Workflow(name="sum")
 
@@ -151,7 +151,7 @@ best = summary.min_by("summarize")
     me.Workspace("./lab", name="lab")
     .add_project("demo")
     .add_experiment("sum")
-    .define(WorkflowCompiler().compile(wf), params={"scale": [1.0, 2.0]})
+    .define(wf, params={"scale": [1.0, 2.0]})
 )
 ```
 
@@ -340,8 +340,8 @@ Molab 不是功能的大杂烩。每个子系统服务于以下目标之一。
 
 <div class="molcrafts-manual-list">
   <a href="concept/workflow/">
-    <strong>WorkflowCompiler</strong>
-    <em>用 @wf.task 定义任务。编译为冻结图。</em>
+    <strong>Workflow</strong>
+    <em>用 @wf.task 定义任务。用 wf.run() 运行。</em>
   </a>
   <a href="getting-started/tracked-runs/">
     <strong>Workspace → Project → Experiment → Run</strong>

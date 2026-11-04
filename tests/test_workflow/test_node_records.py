@@ -24,7 +24,6 @@ from molab.workflow import (
     RunFailedError,
     RunNotExecutableError,
     Workflow,
-    WorkflowCompiler,
     read_journal,
     read_outputs,
 )
@@ -401,7 +400,7 @@ class TestValuesLayout:
 
 def test_compiled_workflow_is_accepted_too(tmp_path: Path) -> None:
     run = _run(tmp_path)
-    compiled = WorkflowCompiler().compile(_chain())
+    compiled = (_chain()).compile()
     _fail_once(compiled, run)
     execute_run(compiled, run, rerun=True, only=("b",))
     assert _CALLS == {"a": 1, "b": 2}

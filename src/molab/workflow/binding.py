@@ -4,7 +4,7 @@ Replaces the old ``Workflow._bindings_registry`` ``ClassVar`` (an
 un-injectable process-global that leaked across tests via a private
 ``_reset_registry`` hook). A :class:`WorkflowBindingRegistry` is an
 explicit, injectable ``{experiment_id → CompiledWorkflow}`` store passed
-into :meth:`WorkflowCompiler.compile` via ``registry=``; a module-level
+into :meth:`Workflow.compile` via ``registry=``; a module-level
 :data:`default_binding_registry` provides the per-process default (mirroring
 ``default_codec`` / ``default_registry``), and ``registry.clear()`` is the
 public test-isolation hook.
@@ -38,7 +38,7 @@ class WorkflowBinding(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     experiment_id: str
-    workflow_digest: str
+    workflow_hash: str
 
 
 class WorkflowBindingRegistry:
@@ -61,7 +61,7 @@ class WorkflowBindingRegistry:
                 f"bind expects an experiment with a non-empty string `id`; got {experiment!r}"
             )
         self._by_experiment[exp_id] = compiled
-        return WorkflowBinding(experiment_id=exp_id, workflow_digest=compiled.workflow_digest)
+        return WorkflowBinding(experiment_id=exp_id, workflow_hash=compiled.workflow_hash)
 
     def for_experiment(self, experiment: _ExperimentLike) -> CompiledWorkflow | None:
         """Return the compiled workflow bound to *experiment*, or ``None``."""

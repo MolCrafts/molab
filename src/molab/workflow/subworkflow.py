@@ -29,7 +29,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .compiled import CompiledWorkflow
-from .compiler import Workflow, WorkflowCompiler
+from .compiler import Workflow
 from .task import Task
 
 if TYPE_CHECKING:
@@ -62,7 +62,7 @@ class SubWorkflow(Task):
 
     def __init__(self, inner: CompiledWorkflow | Workflow, *, output: str | None = None) -> None:
         self._inner: CompiledWorkflow = (
-            inner if isinstance(inner, CompiledWorkflow) else WorkflowCompiler().compile(inner)
+            inner if isinstance(inner, CompiledWorkflow) else inner.compile()
         )
         self._output = output
 

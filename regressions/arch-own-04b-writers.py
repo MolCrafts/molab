@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 import molab.entry  # noqa: F401  (registers Experiment.define)
 from molab.server.app import create_app
 from molab.server.dependencies import set_workspace_path_override
-from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import Task, TaskContext, Workflow
 from molab.workspace import Workspace
 
 DOC_A = {
@@ -70,7 +70,7 @@ class _Step(Task):
 
 
 def _compiled() -> object:
-    return WorkflowCompiler().compile(Workflow(name="wf").add(_Step(), name="step"))
+    return (Workflow(name="wf").add(_Step(), name="step")).compile()
 
 
 def _check(cond: bool, message: str) -> None:

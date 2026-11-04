@@ -20,7 +20,6 @@ from molab.workflow import (
     Task,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 from molab.workflow._graph_decl import _BoundaryStubTask
@@ -47,7 +46,7 @@ def _build_chain() -> tuple[CompiledWorkflow, list[str]]:
     wf.add(_RecordTask("b", recorder), name="b", depends_on=["a"])
     wf.add(_RecordTask("c", recorder), name="c", depends_on=["b"])
     wf.add(_RecordTask("d", recorder), name="d", depends_on=["c"])
-    return WorkflowCompiler().compile(wf), recorder
+    return (wf).compile(), recorder
 
 
 def _build_diamond() -> tuple[CompiledWorkflow, list[str]]:
@@ -58,7 +57,7 @@ def _build_diamond() -> tuple[CompiledWorkflow, list[str]]:
     wf.add(_RecordTask("b", recorder), name="b", depends_on=["a"])
     wf.add(_RecordTask("c", recorder), name="c", depends_on=["a"])
     wf.add(_RecordTask("d", recorder), name="d", depends_on=["b", "c"])
-    return WorkflowCompiler().compile(wf), recorder
+    return (wf).compile(), recorder
 
 
 def _selected_names(sub: CompiledWorkflow) -> set[str]:
@@ -96,10 +95,10 @@ class TestSubgraph:
         assert by_name["c"].depends_on == ["b"]
         assert _all_names(sub) == {"a", "b", "c"}
 
-    def test_recomputes_workflow_digest(self) -> None:
+    def test_recomputes_workflow_hash(self) -> None:
         spec, _ = _build_chain()
         sub = spec.subgraph(["c"])
-        assert sub.workflow_digest != spec.workflow_digest
+        assert sub.workflow_hash != spec.workflow_hash
 
     def test_include_downstream_pulls_in_reachable_closure(self) -> None:
         spec, _ = _build_diamond()
@@ -144,7 +143,7 @@ class TestSubgraphSeedOutputs:
         wf.add(_ProducerTask(), name="a")
         wf.add(_ConsumerTask(), name="b", depends_on=["a"])
 
-        sub = WorkflowCompiler().compile(wf).subgraph(["b"])
+        sub = (wf).compile().subgraph(["b"])
         result = await WorkflowRuntime().execute(sub, seed_outputs={"a": "SEEDED"})
         assert result.status == "succeeded"
         assert result.outputs["b"] == "consumed:SEEDED"

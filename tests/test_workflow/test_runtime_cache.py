@@ -18,7 +18,6 @@ from molab.workflow import (
     Task,
     TaskContext,
     Workflow,
-    WorkflowCompiler,
     WorkflowRuntime,
 )
 from molab.workspace import Workspace
@@ -98,7 +97,7 @@ class TestRuntimeCaching:
             _bump("step")
             return 42
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "run1")
@@ -122,7 +121,7 @@ class TestRuntimeCaching:
             _bump("auto")
             return 7
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         run = _new_run(workspace, "auto")
         with run.start() as ctx:
             result = await WorkflowRuntime().execute(compiled, run_context=ctx)
@@ -145,7 +144,7 @@ class TestRuntimeCaching:
             _bump("shared")
             return 3
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         run = _new_run(workspace, "shared")
         with run.start() as ctx:
             first = await WorkflowRuntime().execute(compiled, run_context=ctx)
@@ -166,7 +165,7 @@ class TestRuntimeCaching:
             ctx.register_artifact("produced", name="produce.txt")
             return "produced"
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "art1")
@@ -204,9 +203,7 @@ class TestRuntimeCaching:
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         def _compiled(factor: int):
-            return WorkflowCompiler().compile(
-                Workflow(name="cfg").add(Compute(factor), name="compute")
-            )
+            return (Workflow(name="cfg").add(Compute(factor), name="compute")).compile()
 
         run1 = _new_run(workspace, "cfg1")
         with run1.start() as ctx1:
@@ -235,7 +232,7 @@ class TestRuntimeCaching:
             _bump("step")
             return 1
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
 
         await WorkflowRuntime().execute(compiled)
         await WorkflowRuntime().execute(compiled)
@@ -249,7 +246,7 @@ class TestRuntimeCaching:
             _bump("streamer")
             yield "chunk"
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "act1")
@@ -284,7 +281,7 @@ class TestRuntimeCaching:
             _bump("second")
             return first + 1
 
-        compiled = WorkflowCompiler().compile(wf)
+        compiled = (wf).compile()
         cache = Caching(store=_FailingPutStore())
 
         result = await WorkflowRuntime().execute(compiled, cache=cache)

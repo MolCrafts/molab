@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowRuntime
 from molab.workflow.types import Next, WorkflowDeadlockError
 
 
@@ -47,9 +47,7 @@ class TestStructuralDeadlockDetection:
         with pytest.raises(WorkflowDeadlockError) as excinfo:
             # wait_for bounds the regression: if detection ever stopped being
             # structural this would hang and surface as TimeoutError instead.
-            await asyncio.wait_for(
-                WorkflowRuntime().execute(WorkflowCompiler().compile(wf)), timeout=10
-            )
+            await asyncio.wait_for(WorkflowRuntime().execute((wf).compile()), timeout=10)
 
         assert "bad" in str(excinfo.value), "the error must name the unsatisfied dependency"
 
@@ -73,9 +71,7 @@ class TestStructuralDeadlockDetection:
         async def join(ctx) -> str:
             return "joined"
 
-        result = await asyncio.wait_for(
-            WorkflowRuntime().execute(WorkflowCompiler().compile(wf)), timeout=10
-        )
+        result = await asyncio.wait_for(WorkflowRuntime().execute((wf).compile()), timeout=10)
         assert result.status == "succeeded"
         assert result.outputs["join"] == "joined"
         assert result.outputs["slow"] == "slow-out"

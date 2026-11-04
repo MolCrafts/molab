@@ -1,10 +1,9 @@
 """Molab workflow layer — public OOP API.
 
-Define a workflow by instantiating :class:`Workflow`, registering
-tasks via its methods, then calling :meth:`WorkflowCompiler.compile` to
-produce the frozen, content-addressed :class:`CompiledWorkflow` (graph +
-per-task snapshots + version + optional experiment binding). Three
-equivalent styles share the :class:`Workflow` builder:
+Define a workflow by instantiating :class:`Workflow` and registering
+tasks. :meth:`Workflow.run` runs it in memory. :meth:`Workflow.compile`
+freezes it when you need the digest or a diagram. A workspace run takes
+the :class:`Workflow` itself (``exp.define(wf)``, ``run.execute(wf)``).
 
 1. **Decorator** (functions as tasks)::
 
@@ -15,8 +14,7 @@ equivalent styles share the :class:`Workflow` builder:
        async def fetch(ctx: TaskContext) -> FetchResult: ...
 
 
-       compiled = WorkflowCompiler().compile(wf)
-       result = await WorkflowRuntime().execute(compiled)
+       result = wf.run()
 
 2. **OOP** (subclass ``Task`` and ``.add()``)::
 
@@ -24,7 +22,7 @@ equivalent styles share the :class:`Workflow` builder:
            async def execute(self, ctx: TaskContext) -> FetchResult: ...
 
 
-       compiled = WorkflowCompiler().compile(Workflow(name="pipeline").add(FetchTask()))
+       result = Workflow(name="pipeline").add(FetchTask()).run()
 
 3. **Protocol** (any object with ``async execute(ctx)``)::
 
@@ -32,7 +30,7 @@ equivalent styles share the :class:`Workflow` builder:
            async def execute(self, ctx) -> dict: ...
 
 
-       compiled = WorkflowCompiler().compile(Workflow(name="pipeline").add(ExternalProcessor()))
+       result = Workflow(name="pipeline").add(ExternalProcessor()).run()
 
 Control flow beyond the DAG shape is declared on the workflow:
 ``wf.parallel`` (runtime-sized fan-out), ``wf.branch`` (label-routed
@@ -41,13 +39,8 @@ returns ``(value, Next("label"))``; the routed target receives ``value``
 bound to its named parameters (values-on-edges delivery — see
 ``docs/en/guide/control-flow.md``).
 
-Execution lives on :class:`WorkflowRuntime`
-(``runtime.execute(compiled)`` / ``.start`` / ``.run_on``), not on the
-artifact. Bind a compiled workflow to an experiment via
-``WorkflowCompiler().compile(wf, experiment=exp)`` or
-:data:`default_binding_registry`.bind(exp, compiled)`` so that downstream
-code (CLI / server / cluster workers) can recover it via
-``default_binding_registry.for_experiment(experiment)``.
+``wf.compile(experiment=exp)`` binds the frozen graph.
+:data:`default_binding_registry` is what the CLI and the server read back.
 """
 
 from ._engine.persistence import AttemptSeeds, read_attempt_seeds, read_journal, read_outputs
@@ -58,7 +51,7 @@ from .cache_store import CacheStore, FileCacheStore
 from .codec import WorkflowCodec, default_codec
 from .command_task import CommandTask
 from .compiled import CompiledWorkflow
-from .compiler import Workflow, WorkflowCompiler
+from .compiler import Workflow
 from .context import TaskContext
 from .contract import (
     ArtifactDecl,
@@ -72,7 +65,7 @@ from .contract import (
     ValidationReport,
     WorkflowContract,
 )
-from .digest import compute_workflow_digest
+from .digest import compute_workflow_hash
 from .execute import RunFailedError, RunNotExecutableError
 from .ir import (
     EdgeKind,
@@ -173,7 +166,6 @@ __all__ = [
     "WorkflowBinding",
     "WorkflowBindingRegistry",
     "WorkflowCodec",
-    "WorkflowCompiler",
     "WorkflowContract",
     "WorkflowDeadlockError",
     "WorkflowError",
@@ -185,7 +177,7 @@ __all__ = [
     "can_recover_workflow",
     "compiled_workflow_for_experiment",
     "compiled_workflow_for_run",
-    "compute_workflow_digest",
+    "compute_workflow_hash",
     "default_binding_registry",
     "default_codec",
     "default_registry",

@@ -1,4 +1,4 @@
-"""arch-own-04e: workflow_digest is the only workflow identity left in source."""
+"""arch-own-04e: workflow_hash is the only workflow identity left in source."""
 
 from __future__ import annotations
 
@@ -127,7 +127,7 @@ class TestIdentityResidue:
         import json
 
         required = json.loads((fixture / "workflow_contract.json").read_text())["required"]
-        assert "workflow_digest" in required
+        assert "workflow_hash" in required
 
     def test_src_does_not_cite_the_moved_schema(self) -> None:
         for path in _SRC.rglob("*.py"):

@@ -320,26 +320,26 @@ class TestRunStart:
 
         assert run.executions[-1].bypass_cache is False
 
-    def test_workflow_digest_is_recorded(self, run: Run) -> None:
-        with run.start(workflow_digest=_DIGEST):
+    def test_workflow_hash_is_recorded(self, run: Run) -> None:
+        with run.start(workflow_hash=_DIGEST):
             pass
 
-        assert run.executions[-1].workflow_digest == _DIGEST
+        assert run.executions[-1].workflow_hash == _DIGEST
 
-    def test_workflow_digest_defaults_none(self, run: Run) -> None:
+    def test_workflow_hash_defaults_none(self, run: Run) -> None:
         with run.start():
             pass
 
-        assert run.executions[-1].workflow_digest is None
+        assert run.executions[-1].workflow_hash is None
 
-    def test_workflow_digest_with_explicit_id(self, run: Run) -> None:
+    def test_workflow_hash_with_explicit_id(self, run: Run) -> None:
         rec = run._create_execution()
-        assert rec.workflow_digest is None
+        assert rec.workflow_hash is None
 
-        with run.start(execution_id=rec.id, workflow_digest=_DIGEST):
+        with run.start(execution_id=rec.id, workflow_hash=_DIGEST):
             pass
 
-        assert run.execution(rec.id).workflow_digest == _DIGEST
+        assert run.execution(rec.id).workflow_hash == _DIGEST
         assert len(run.executions) == 1
 
 
