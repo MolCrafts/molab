@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Archive, File, FileOutput, Folder, Terminal } from "lucide-react";
-import { type JSX, useState } from "react";
+import { type JSX, Suspense, useMemo, useState } from "react";
 import { runsApi } from "@/api";
 import { ApiError } from "@/api/generated";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
@@ -13,7 +13,10 @@ import {
   runFileTextQueryOptions,
 } from "@/app/state/entityQueries";
 import { WorkbenchIconAction } from "@/components/workbench";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
+import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { formatBytes } from "@/lib/format-bytes";
+import { isChemicalStructureName, structureRank } from "@/lib/structure-files";
 import { useObjectUrl } from "@/lib/use-object-url";
 
 type SelectedOutput =
@@ -111,7 +114,26 @@ export const RunExecutionOutputs = ({
     picked && selectedExecutionId !== null && picked.executionId === selectedExecutionId
       ? picked.selected
       : null;
-  const selected = userPick ?? (selectedExecutionId !== null ? preferred : null);
+  const contributionGeneration = useContributionGeneration();
+  const defaultStructure = useMemo((): SelectedOutput | null => {
+    if (!outputs || !selectedExecutionId) return null;
+    const ranked: { rank: number; selected: SelectedOutput }[] = [];
+    for (const item of outputs.artifacts ?? []) {
+      if (!isChemicalStructureName(item.name)) continue;
+      ranked.push({ rank: structureRank(item.name), selected: { kind: "artifact", id: item.id } });
+    }
+    for (const row of outputs.unregistered ?? []) {
+      if (!isChemicalStructureName(row.name)) continue;
+      ranked.push({
+        rank: structureRank(row.name),
+        selected: { kind: "file", path: row.relPath },
+      });
+    }
+    ranked.sort((left, right) => left.rank - right.rank);
+    return ranked[0]?.selected ?? null;
+  }, [outputs, selectedExecutionId]);
+  const selected =
+    userPick ?? (selectedExecutionId !== null ? (preferred ?? defaultStructure) : null);
   const frameClass = fill ? "h-full min-h-0" : "h-chart-lg";
   const choose = (next: SelectedOutput): void => {
     if (!selectedExecutionId) return;
@@ -166,6 +188,17 @@ export const RunExecutionOutputs = ({
         : selected?.kind === "file"
           ? (fileQuery.data ?? null)
           : null;
+  const previewName =
+    selected?.kind === "artifact"
+      ? (outputs?.artifacts?.find((item) => item.id === selected.id)?.name ?? "")
+      : selected?.kind === "file"
+        ? (selected.path.split("/").pop() ?? selected.path)
+        : "";
+  const structurePlugin = useMemo(() => {
+    void contributionGeneration;
+    if (!previewName || !isChemicalStructureName(previewName)) return null;
+    return filePreviewPluginRegistry.getPluginForFile(previewName, previewName);
+  }, [contributionGeneration, previewName]);
 
   if (!selectedExecutionId) {
     return (
@@ -283,6 +316,24 @@ export const RunExecutionOutputs = ({
         )}
         {binaryKind && !previewError ? (
           <BinaryPreview kind={binaryKind} url={blobUrl} name={filePath} />
+        ) : structurePlugin &&
+          typeof preview === "string" &&
+          preview.length > 0 &&
+          !previewError ? (
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-label text-muted-foreground">
+                Loading structure…
+              </div>
+            }
+          >
+            <structurePlugin.Component
+              content={preview}
+              name={previewName}
+              path={previewName}
+              folderId=""
+            />
+          </Suspense>
         ) : (
           <Preview value={preview} error={previewError} empty="Select an output" />
         )}

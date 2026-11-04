@@ -3,32 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Literal, overload
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from molab._typing import JSONValue
 
 from .history import AgentRef, EntityRef
-
-
-@overload
-def _as_utc(value: datetime) -> datetime: ...
-@overload
-def _as_utc(value: datetime | None) -> datetime | None: ...
-def _as_utc(value: datetime | None) -> datetime | None:
-    """Attach UTC to a naive timestamp so records stay comparable.
-
-    A timestamp without a zone is ambiguous, and two records that disagree
-    about whether they carry one cannot be ordered at all — which is how a
-    run's attempts become unsortable. Older records were written naive in
-    local time; read them as UTC rather than refusing to compare them.
-    """
-    if value is not None and value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value
+from .timestamps import as_utc as _as_utc
 
 
 class ContentRef(BaseModel):
@@ -292,6 +276,14 @@ class Execution(BaseModel):
     output instead of running again. ``True`` means this attempt recomputes
     every task. A creation-time fact: it is written when the record is
     created and never changed afterwards.
+    """
+    selected_tasks: tuple[str, ...] = ()
+    """The tasks a partial ``rerun`` attempt re-executes; empty means every task.
+
+    A creation-time fact (``molab run --rerun --task NAME``). A non-empty
+    selection runs exactly these tasks with the inputs their predecessor
+    recorded: every other completed task is seeded from that record and every
+    task downstream of a selected one is skipped. Only valid with ``rerun``.
     """
     source: SourceManifest | None = None
     """The workflow source this attempt was created from, if it was captured.

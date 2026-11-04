@@ -38,7 +38,6 @@ class TargetSummary:
     name: str
     scheduler: str
     cluster_name: str | None
-    jobs_dir: str | None
     healthy: bool
     health_reason: str | None
     active_jobs: int
@@ -170,13 +169,11 @@ def list_targets(config_path: str | Path | None = None) -> list[TargetSummary]:
                 healthy = False
                 reason = f"{type(exc).__name__}: {exc}"
             cluster_id = record.get("id")
-            target_root = record.get("target_root")
             targets.append(
                 TargetSummary(
                     name=name,
                     scheduler=str(record.get("scheduler") or ""),
                     cluster_name=str(cluster_id) if cluster_id else name or None,
-                    jobs_dir=str(target_root) if target_root else None,
                     healthy=healthy,
                     health_reason=reason,
                     active_jobs=active,

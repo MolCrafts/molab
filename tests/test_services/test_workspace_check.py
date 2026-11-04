@@ -22,6 +22,7 @@ from molab.services.workspace_check import (
     Verdict,
     baseline_path,
     changed_scope,
+    check_command,
     check_path,
     check_tree,
     check_workspace,
@@ -388,3 +389,33 @@ class TestHookCost:
         scoped = check_workspace(ws, scope={"projects/alpha/experiments/sweep"})
         assert {v.path for v in scoped.errors} == {"projects/alpha/experiments/sweep/new.txt"}
         assert len(check_workspace(ws).errors) == 2
+
+
+class TestCheckCommand:
+    def test_a_move_beside_the_experiment_is_refused(self, lab: dict[str, Any]) -> None:
+        target = lab["exp"] / "plot.py"
+        verdict = check_command(f"mv /tmp/a.py {target}", lab["root"])
+        _deny(verdict, "layout.stray")
+        assert verdict.root == os.path.realpath(lab["root"])
+
+    def test_a_move_into_scratch_is_allowed(self, lab: dict[str, Any]) -> None:
+        target = lab["exp"] / "scratch" / "plot.py"
+        verdict = check_command(f"mv /tmp/a.py {target}", lab["root"])
+        assert verdict.allowed
+        assert verdict.in_workspace
+        assert verdict.root == os.path.realpath(lab["root"])
+
+    def test_an_unparsed_command_is_allowed_and_names_the_workspace(
+        self, lab: dict[str, Any]
+    ) -> None:
+        verdict = check_command("mv 'unterminated", lab["root"])
+        assert verdict.allowed
+        assert verdict.in_workspace
+        assert "could not be parsed" in verdict.reason
+        assert verdict.root == os.path.realpath(lab["root"])
+
+    def test_outside_a_workspace_an_unparsed_command_is_allowed(self, tmp_path: Path) -> None:
+        verdict = check_command("mv 'unterminated", tmp_path)
+        assert verdict.allowed
+        assert verdict.in_workspace is False
+        assert verdict.root is None

@@ -768,13 +768,19 @@ class TestRetargetLinks:
         assert retarget_links(text, lambda _target, _image: None) == (text, 0)
         assert retarget_links(text, lambda target, _image: target) == (text, 0)
 
-    def test_a_fenced_link_is_offered(self) -> None:
+    def test_code_is_never_rewritten(self) -> None:
+        """Code is literal: moving a document must not rewrite a SMILES like ``[N+](C)``."""
         from molab.knowledge.concept import retarget_links
 
         seen: list[str] = []
-        retarget_links("```\n[a](b.md)\n```\n", lambda target, _image: seen.append(target))
+        text = "```\n[a](b.md)\n```\nSMILES `C[N+](C)(C)C` and [c](d.md)\n"
+        new, count = retarget_links(
+            text, lambda target, _image: seen.append(target) or f"../{target}"
+        )
 
-        assert seen == ["b.md"]
+        assert seen == ["d.md"]
+        assert count == 1
+        assert "`C[N+](C)(C)C`" in new and "[a](b.md)" in new and "[c](../d.md)" in new
 
     def test_the_private_wrapper_delegates(self) -> None:
         import inspect

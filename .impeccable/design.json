@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-18T20:00:35.045566+00:00",
+  "generatedAt": "2026-11-03T14:11:53.794739+00:00",
   "title": "Design System: molab",
   "extensions": {
     "colorMeta": {
@@ -481,9 +481,16 @@
       "name": "Dashboard Section",
       "kind": "card",
       "refersTo": "dashboard-section",
-      "description": "Legacy DashboardCard is an unframed section on the shared canvas.",
+      "description": "Legacy DashboardCard is an unframed section on the shared canvas, kept for settings and detail tabs; workspace and project Overviews use Gauge frames instead.",
       "html": "<section class=\"ds-section\" aria-labelledby=\"ds-section-title\"><header class=\"ds-section-header\"><h3 id=\"ds-section-title\">Runs</h3><span class=\"ds-count\">12</span></header><div class=\"ds-section-body\">Section content</div></section>",
       "css": ".ds-section{min-width:0;background:var(--molab-background,#fff);color:var(--molab-foreground,#242424);font:400 .8125rem/1.4 var(--font-sans,\"Geist\",\"Inter\",sans-serif)}.ds-section-header{display:flex;align-items:center;gap:.5rem;height:1.75rem;padding:0 .75rem}.ds-section-header h3{margin:0;font-size:.75rem;font-weight:500}.ds-count{font:.6875rem/1.4 var(--font-mono,\"JetBrains Mono\",monospace);font-variant-numeric:tabular-nums;color:var(--molab-muted-foreground,#616161)}.ds-section-body{padding:.5rem .75rem}"
+    },
+    {
+      "name": "Instrument Strip",
+      "kind": "custom",
+      "description": "Overview band of gauges: shared top/bottom hairline, hairline dividers, no card frames; a cell that summarises a list opens that list's tab.",
+      "html": "<section class=\"ds-strip\" aria-label=\"Execution gauges\"><div class=\"ds-cell\"><span class=\"ds-cell-head\"><span>Run duration</span></span><span class=\"ds-fig\">48m</span><span class=\"ds-cap\">median of 12 finished runs</span></div><button type=\"button\" class=\"ds-cell ds-cell-btn\" aria-label=\"In flight: 3 running, 1 queued executions. Open the timeline\"><span class=\"ds-cell-head\"><span>In flight</span><span class=\"ds-hint\">Timeline<svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\"/></svg></span></span><span class=\"ds-fig\">4</span><span class=\"ds-cap\">executions: 3 running, 1 queued</span><span class=\"ds-meter\" aria-hidden=\"true\"><i class=\"ds-run\"></i><i class=\"ds-run\"></i><i class=\"ds-run\"></i><i class=\"ds-queued\"></i></span></button></section>",
+      "css": ".ds-strip{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--molab-border,#e5e5e5);border-bottom:1px solid var(--molab-border,#e5e5e5);font:400 .8125rem/1.4 var(--font-sans,\"Geist\",\"Inter\",sans-serif);color:var(--molab-foreground,#242424);background:var(--molab-background,#fff)}.ds-cell{display:flex;flex-direction:column;gap:.125rem;padding:.75rem 1rem;min-width:0;text-align:left;font:inherit;color:inherit;background:transparent;border:0}.ds-cell+.ds-cell{border-left:1px solid var(--molab-border,#e5e5e5)}.ds-cell-head{display:flex;align-items:center;gap:.5rem;font-size:.75rem;font-weight:500}.ds-hint{margin-left:auto;display:flex;align-items:center;font-size:.6875rem;font-weight:400;color:var(--molab-muted-foreground,#616161);transition:color .15s}.ds-fig{margin-top:.5rem;font-size:1rem;font-weight:600;line-height:1.25;font-variant-numeric:tabular-nums}.ds-cap{font-size:.75rem;color:var(--molab-muted-foreground,#616161)}.ds-meter{display:flex;gap:.25rem;height:2rem;align-items:flex-end;margin-top:.75rem}.ds-meter i{display:block;width:.75rem;height:2rem;border-radius:.125rem}.ds-run{background:var(--status-running,oklch(0.62 0.15 250))}.ds-queued{border:1px solid var(--status-queued,oklch(0.62 0.04 250))}.ds-cell-btn{cursor:pointer;outline:none;transition:background-color .15s}.ds-cell-btn:hover,.ds-cell-btn:focus-visible{background:color-mix(in srgb,var(--molab-interactive,#e8e8e8) 50%,transparent)}.ds-cell-btn:hover .ds-hint,.ds-cell-btn:focus-visible .ds-hint{color:var(--molab-foreground,#242424)}.ds-cell-btn:focus-visible{box-shadow:inset 0 0 0 1px var(--molab-accent,#005fb8)}"
     }
   ],
   "narrative": {
@@ -499,10 +506,25 @@
         "name": "The Accent Has a Job Rule",
         "body": "Blue identifies selection and focus; it is not decoration around every section.",
         "section": "colors"
+      },
+      {
+        "name": "The Gauge Opens Its List Rule",
+        "body": "An instrument that summarises a list is a button that opens that list's tab. It shows a persistent “Timeline ›” or “List ›” hint at rest. The list itself lives behind the tab.",
+        "section": "components"
+      },
+      {
+        "name": "The One Gesture Grammar Rule",
+        "body": "Every Overview chart is a Vega-Lite view and answers the same gestures. Hover keeps the mark, or its whole row or bucket, at full ink, recedes the rest to 0.32, and shows a one-sentence tooltip. Click opens what the mark stands for: a run, a project or experiment, the Attention tab for a failed or cancelled dial segment. Drag a window across Activity, or click a backend (click again to release it), to filter the rest of the Overview; a filter strip names what is applied and clears it. Click is a view listener, not a point selection, so a second click on the same mark still registers.",
+        "section": "components"
+      },
+      {
+        "name": "The Outlined Queue Rule",
+        "body": "Wherever queued appears in a status mix (distribution segment, legend dot, unit mark), draw it as an outline, never a fill. That is its non-color cue apart from cancelled grey.",
+        "section": "components"
       }
     ],
     "dos": [
-      "Do reuse workbench actions, entity tabs, dashboard sections, settings rows, and the shared ArcChart.",
+      "Do reuse workbench actions, entity tabs, dashboard sections, settings rows, the shared Overview gauges, and the shared ArcChart where StatusLedger leads an experiment or run overview.",
       "Do retain text for navigation, data choices, status, units, counts, and parameter meaning.",
       "Do keep retry, dismiss, cancel, and denied-action explanations available.",
       "Do preserve visible keyboard focus, non-color status cues, tabular numbers, and coarse-pointer targets."

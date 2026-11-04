@@ -27,7 +27,7 @@ from __future__ import annotations
 
 __version__ = "0.1.0"
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 import molcfg
@@ -93,6 +93,10 @@ class _LazyRunExecutor:
         fresh: bool = False,
         checkpoint: str | None = None,
         execution_id: str | None = None,
+        resume_from: Run | None = None,
+        only: Sequence[str] = (),
+        executor: str | None = None,
+        max_workers: int | None = None,
     ) -> object:
         return self._target().execute(
             run,
@@ -102,6 +106,10 @@ class _LazyRunExecutor:
             fresh=fresh,
             checkpoint=checkpoint,
             execution_id=execution_id,
+            resume_from=resume_from,
+            only=only,
+            executor=executor,
+            max_workers=max_workers,
         )
 
     async def aexecute(
@@ -114,6 +122,10 @@ class _LazyRunExecutor:
         fresh: bool = False,
         checkpoint: str | None = None,
         execution_id: str | None = None,
+        resume_from: Run | None = None,
+        only: Sequence[str] = (),
+        executor: str | None = None,
+        max_workers: int | None = None,
     ) -> object:
         return await self._target().aexecute(
             run,
@@ -123,6 +135,10 @@ class _LazyRunExecutor:
             fresh=fresh,
             checkpoint=checkpoint,
             execution_id=execution_id,
+            resume_from=resume_from,
+            only=only,
+            executor=executor,
+            max_workers=max_workers,
         )
 
     def read_outputs(self, run: Run, execution_id: str) -> dict[str, TaskOutput]:

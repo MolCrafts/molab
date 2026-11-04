@@ -376,6 +376,7 @@ class ExecutionRepository:
         environment: dict[str, JSONValue] | None = None,
         bypass_cache: bool = False,
         source: SourceManifest | None = None,
+        selected_tasks: Sequence[str] = (),
     ) -> Execution:
         """Allocate the next attempt after validating its mode rules.
 
@@ -403,6 +404,7 @@ class ExecutionRepository:
             - ``reproduce``: the predecessor must have succeeded, and the
               record always has ``bypass_cache=True`` whatever was passed.
             - A checkpoint is valid only for ``resume``.
+            - A task selection is valid only for ``rerun``.
 
         Args:
             mode: How this attempt relates to earlier ones.
@@ -415,6 +417,9 @@ class ExecutionRepository:
             bypass_cache: Whether the attempt ignores the workflow node cache;
                 forced to ``True`` for ``reproduce``.
             source: The captured workflow source, if any.
+            selected_tasks: The tasks a partial ``rerun`` re-executes (empty:
+                every task). Names are checked against the workflow when the
+                attempt starts, not here.
 
         Returns:
             The QUEUED record as written.
@@ -430,6 +435,12 @@ class ExecutionRepository:
         """
         if mode is ExecutionMode.REPRODUCE:
             bypass_cache = True
+        selection = tuple(dict.fromkeys(selected_tasks))
+        if selection and mode is not ExecutionMode.RERUN:
+            raise ValueError(
+                f"a task selection {list(selection)} is only valid for a rerun attempt, "
+                f"not {mode.value}"
+            )
         self.fs.mkdir(self.executions_dir, parents=True, exist_ok=True)
         with file_lock(self._create_lock()):
             prior = self.list()
@@ -456,6 +467,7 @@ class ExecutionRepository:
                 environment=environment or {},
                 bypass_cache=bypass_cache,
                 source=source,
+                selected_tasks=selection,
             )
             if self.fs.exists(self.state_path(state.id)):
                 raise FileExistsError(f"Execution {state.id!r} already exists")

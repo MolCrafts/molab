@@ -86,7 +86,7 @@ describe("RunOverview", () => {
       />,
     );
     expect(html).toContain("Completed in 5m");
-    expect(html).toContain("attempt 2 of 2, a resume");
+    expect(html).toContain("Attempt 2 of 2, a resume");
     expect(html).not.toContain("success");
     expect(html).not.toContain(">e01");
     // Scalar results are the run's science; structured values stay on their tab.

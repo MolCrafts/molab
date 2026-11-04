@@ -6,13 +6,14 @@ The server, CLI, and Python API all derive from these models.
 
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from molab._typing import JSONValue
+
+from .timestamps import UtcDatetime, utc_now
 
 # ── Shared value objects ────────────────────────────────────────────────────
 
@@ -68,8 +69,8 @@ class FolderMetadata(BaseModel, frozen=True):
     id: str
     name: str
     kind: str
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: UtcDatetime = Field(default_factory=utc_now)
+    updated_at: UtcDatetime = Field(default_factory=utc_now)
     extra: dict[str, JSONValue] = Field(default_factory=dict)
 
 
@@ -105,7 +106,7 @@ class WorkspaceMetadata(BaseModel, frozen=True):
     id: str
     name: str
     type: str = "workspace.root"
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: UtcDatetime = Field(default_factory=utc_now)
     targets: list[ComputeTarget] = Field(default_factory=list)
 
 
@@ -122,7 +123,7 @@ class ProjectMetadata(BaseModel, frozen=True):
     owner: str = ""
     tags: list[str] = Field(default_factory=list)
     config: dict[str, JSONValue] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: UtcDatetime = Field(default_factory=utc_now)
 
 
 WorkflowKind = Literal["code", "document"]
@@ -154,10 +155,10 @@ class ExperimentMetadata(BaseModel, frozen=True):
     type: str = "workspace.experiment"
     description: str = ""
     tags: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: UtcDatetime = Field(default_factory=utc_now)
     revision_id: str
     revision: int = 1
-    revision_created_at: datetime = Field(default_factory=datetime.now)
+    revision_created_at: UtcDatetime = Field(default_factory=utc_now)
     definition_hash: str
 
     # Association record. ``None`` is unbound, or a legacy experiment
@@ -197,7 +198,7 @@ class RunMetadata(BaseModel, frozen=True):
     id: str
     type: str = "workspace.run"
     parameters: dict[str, JSONValue] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: UtcDatetime = Field(default_factory=utc_now)
     definition_hash: str
     experiment_revision_id: str
     input_asset_ids: tuple[str, ...] = ()

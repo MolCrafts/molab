@@ -54,6 +54,58 @@ class CacheStore(Protocol):
         """Drop every entry. Returns the number removed."""
 
 
+class ReadThroughCacheStore:
+    """Read earlier stores, write only the front store.
+
+    A later workflow reads a previous run's node cache and keeps its own
+    writes in the front store. A hit that lives only in a back store is
+    copied forward, so this run stays readable after the previous cache is
+    gone. Eviction and ``clear`` touch the front store only.
+    """
+
+    def __init__(self, front: CacheStore, *backs: CacheStore) -> None:
+        if not backs:
+            raise ValueError("ReadThroughCacheStore needs at least one store to read through")
+        self._front = front
+        self._reads = (front, *backs)
+
+    @property
+    def front(self) -> CacheStore:
+        """The store this run writes."""
+        return self._front
+
+    def read(self, key: str) -> str | None:
+        for store in self._reads:
+            found = store.read(key)
+            if found is None:
+                continue
+            if store is not self._front and self._front.read(key) is None:
+                self._front.write(key, found)
+            return found
+        return None
+
+    def write(self, key: str, content: str) -> None:
+        self._front.write(key, content)
+
+    def remove(self, key: str) -> bool:
+        return self._front.remove(key)
+
+    def keys(self) -> Iterable[str]:
+        return self._front.keys()
+
+    def access_time(self, key: str) -> float:
+        return self._front.access_time(key)
+
+    def touch(self, key: str) -> None:
+        self._front.touch(key)
+
+    def total_bytes(self) -> int:
+        return self._front.total_bytes()
+
+    def clear(self) -> int:
+        return self._front.clear()
+
+
 # ── File-system implementation ──────────────────────────────────────────
 
 

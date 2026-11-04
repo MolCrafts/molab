@@ -18,6 +18,7 @@ from pathlib import Path, PurePath
 from mollog import get_logger
 
 from molab._typing import JSONValue
+from molab.workspace.timestamps import as_utc, utc_now
 
 logger = get_logger(__name__)
 
@@ -41,8 +42,8 @@ def elapsed(started: str | None, finished: str | None = None) -> str | None:
     if not started:
         return None
     try:
-        start = datetime.fromisoformat(started)
-        end = datetime.fromisoformat(finished) if finished else datetime.now()
+        start = as_utc(datetime.fromisoformat(started))
+        end = as_utc(datetime.fromisoformat(finished)) if finished else utc_now()
         secs = max(0, int((end - start).total_seconds()))
         if secs < 60:
             return f"{secs}s"

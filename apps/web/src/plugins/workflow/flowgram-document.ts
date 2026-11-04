@@ -159,6 +159,7 @@ export const normalizeTaskGraph = (raw: Record<string, unknown>): TaskGraphJson 
       label: typeof item.label === "string" ? item.label : undefined,
       position,
       config: isRecord(item.config) ? item.config : undefined,
+      outputs: isRecord(item.outputs) ? item.outputs : undefined,
       status: typeof item.status === "string" ? item.status : undefined,
       startedAt: typeof item.started_at === "string" ? item.started_at : undefined,
       finishedAt: typeof item.finished_at === "string" ? item.finished_at : undefined,

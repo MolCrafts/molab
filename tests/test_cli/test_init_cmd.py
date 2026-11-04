@@ -39,7 +39,7 @@ def test_init_starts_the_history(tmp_path, app):
     target = tmp_path / "lab"
     CliRunner().invoke(app, ["init", str(target)])
     assert (target / ".git").is_dir()
-    assert "**/assets/*/payload" in (target / ".gitignore").read_text()
+    assert "**/assets/*/payload*" in (target / ".gitignore").read_text()
 
 
 def test_init_is_idempotent_and_keeps_the_id(tmp_path, app):
@@ -133,7 +133,11 @@ def test_init_rewrites_a_legacy_tree_without_keeping_the_old_files(tmp_path, app
     root = read_record(target)
     assert root["id"] == "lab"
     assert root["name"] == "lab"
-    assert str(root["created_at"]).startswith("2020-01-02T03:04:05")
+    # The legacy naive stamp was local time; the record keeps the same instant in UTC.
+    from datetime import UTC, datetime
+
+    stored = datetime.fromisoformat(str(root["created_at"]).replace("Z", "+00:00"))
+    assert stored == datetime(2020, 1, 2, 3, 4, 5).astimezone(UTC)
     assert frontmatter.split((target / "index.md").read_text(encoding="utf-8"))[1] == (
         "# The lab\n\nNotes stay.\n"
     )

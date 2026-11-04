@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from ._engine.compiler import WorkflowGraphCompiler
+from ._engine.executors import check_executor
 from ._graph_decl import (
     DependentParamsFn,
     LoopDecl,
@@ -50,6 +51,7 @@ def compile_registrations(
     reducer: tuple[str, Callable[..., TaskOutput]] | None = None,
     experiment: _ExperimentLike | None = None,
     registry: WorkflowBindingRegistry | None = None,
+    executor: str | None = None,
 ) -> CompiledWorkflow:
     """Lower registrations once and assemble the :class:`CompiledWorkflow`.
 
@@ -96,6 +98,7 @@ def compile_registrations(
         loops=loops,
         parallels=parallels,
         reducer=reducer,
+        executor=executor,
     )
     if experiment is not None:
         reg = registry if registry is not None else default_binding_registry
@@ -110,6 +113,13 @@ class Workflow:
 
         wf = Workflow(name="pipeline")
         compiled = WorkflowCompiler().compile(wf)
+
+    ``executor`` (``"thread"`` — the default —, ``"process"`` or
+    ``"inline"``) is how its task bodies run unless a task or the run chooses
+    otherwise (see :mod:`molab.workflow._engine.executors`). The
+    ``process`` executor imports the module that defines the workflow in each
+    worker and finds the task by name, so define the workflow at module level
+    (or bind it with a locator).
     """
 
     def __init__(
@@ -119,8 +129,10 @@ class Workflow:
         version: str = "0",
         *,
         entry: str | list[str] | tuple[str, ...] | None = None,
+        executor: str | None = None,
     ) -> None:
         self._name = name
+        self._executor = check_executor(executor, where="Workflow(executor=...)")
         self._mode = mode
         self._version = version
         self._tasks: list[TaskRegistration] = []
@@ -149,6 +161,11 @@ class Workflow:
     def version_label(self) -> str:
         return self._version
 
+    @property
+    def executor(self) -> str | None:
+        """The workflow's default task executor (``None``: ``thread``)."""
+        return self._executor
+
     # ── Decorator: function-as-task ───────────────────────────────────────
 
     def _append_registration(self, registration: TaskRegistration) -> None:
@@ -174,6 +191,7 @@ class Workflow:
         routes: Mapping[str, str] | None = None,
         next_: str | None = None,
         dependent_params: DependentParamsFn | None = None,
+        executor: str | None = None,
     ) -> Callable:
         """Register a function as a batch workflow task.
 
@@ -181,7 +199,8 @@ class Workflow:
         parameter named after an upstream task receives that task's output,
         and any other parameter is filled from the run's ``params`` (sweep
         cell / ``add_run(params=…)``). Task bodies may be plain ``def`` or
-        ``async def`` (sync bodies run via ``asyncio.to_thread``).
+        ``async def``; how a sync body runs is its executor (worker thread by
+        default, see *executor*).
 
         Args:
             fn: The function (when used as a bare ``@wf.task``).
@@ -198,6 +217,9 @@ class Workflow:
                 Mutually exclusive with ``routes``.
             dependent_params: Optional callable deriving extra params from
                 upstream outputs before the body runs.
+            executor: How this task's body runs (``"thread"`` / ``"process"``
+                / ``"inline"``), overriding the workflow's; a run's executor
+                overrides both.
 
         Example::
 
@@ -215,6 +237,7 @@ class Workflow:
         """
         if routes is not None and next_ is not None:
             raise TypeError("Workflow.task: routes= and next_= are mutually exclusive")
+        check_executor(executor, where="Workflow.task(executor=...)")
 
         def decorator(f: Callable) -> Callable:
             task_name = name or _callable_name(f)
@@ -225,6 +248,7 @@ class Workflow:
                     depends_on=depends_on or [],
                     is_actor=False,
                     dependent_params=dependent_params,
+                    executor=executor,
                 )
             )
             self._record_decorator_edges(task_name, routes=routes, next_=next_)
@@ -242,13 +266,15 @@ class Workflow:
         name: str | None = None,
         routes: Mapping[str, str] | None = None,
         next_: str | None = None,
+        executor: str | None = None,
     ) -> Callable:
         """Register an async generator as a streaming actor.
 
-        Same ``routes=`` / ``next_=`` semantics as :meth:`task`.
+        Same ``routes=`` / ``next_=`` / ``executor=`` semantics as :meth:`task`.
         """
         if routes is not None and next_ is not None:
             raise TypeError("Workflow.actor: routes= and next_= are mutually exclusive.")
+        check_executor(executor, where="Workflow.actor(executor=...)")
 
         def decorator(f: Callable) -> Callable:
             actor_name = name or _callable_name(f)
@@ -258,6 +284,7 @@ class Workflow:
                     fn_or_class=f,
                     depends_on=depends_on or [],
                     is_actor=True,
+                    executor=executor,
                 )
             )
             self._record_decorator_edges(actor_name, routes=routes, next_=next_)
@@ -278,6 +305,7 @@ class Workflow:
         routes: Mapping[str, str] | None = None,
         next_: str | None = None,
         dependent_params: DependentParamsFn | None = None,
+        executor: str | None = None,
     ) -> Workflow:
         """Register a Task / Actor instance (or any Runnable/Streamable).
 
@@ -288,10 +316,12 @@ class Workflow:
         config is **not** declared here either — it is the task instance's own
         ``__init__`` arguments (captured automatically; see
         :func:`~molab.workflow.snapshot.task_config_of`), which the cache and IR
-        both key on. Returns ``self`` to support chaining.
+        both key on. ``executor`` is as for :meth:`task`. Returns ``self`` to
+        support chaining.
         """
         if routes is not None and next_ is not None:
             raise TypeError("Workflow.add: routes= and next_= are mutually exclusive.")
+        check_executor(executor, where="Workflow.add(executor=...)")
 
         task_name = name or _to_snake_case(type(task).__name__)
         for suffix in ("_task", "_actor"):
@@ -306,6 +336,7 @@ class Workflow:
                 depends_on=depends_on or [],
                 is_actor=isinstance(task, Streamable),
                 dependent_params=dependent_params,
+                executor=executor,
             )
         )
         self._record_decorator_edges(task_name, routes=routes, next_=next_)
@@ -476,6 +507,7 @@ class WorkflowCompiler:
             reducer=workflow._reducer,
             experiment=experiment,
             registry=registry,
+            executor=workflow._executor,
         )
 
 

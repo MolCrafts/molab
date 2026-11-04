@@ -6,7 +6,6 @@ export type MolqTargetSummary = {
     name: string;
     scheduler: string;
     clusterName?: (string | null);
-    jobsDir?: (string | null);
     healthy: boolean;
     healthReason?: (string | null);
     activeJobs: number;

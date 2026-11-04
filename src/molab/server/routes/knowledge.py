@@ -23,13 +23,13 @@ import re
 import zipfile
 from pathlib import Path as _StdPath
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from molab.knowledge.concepts import Note
+from molab.knowledge.concepts import Delegation, Note
 from molab.knowledge.edges import EdgeRole
 from molab.server.dependencies import get_workspace
 from molab.workspace import Workspace
@@ -38,6 +38,7 @@ from ..deps.served import active_served_key, assert_workspace_writable
 from ..schemas import MessageResponse
 
 if TYPE_CHECKING:
+    from molab.fs import PathArg
     from molab.knowledge.concept import Concept
     from molab.workspace.domain import Asset
     from molab.workspace.folder import Folder
@@ -97,6 +98,7 @@ class NoteDetailResponse(BaseModel):
     body: str
     links: list[str]
     cards: list[EntityCard] = []
+    record: dict[str, Any] = Field(default_factory=dict)
 
 
 class EmbedRequest(BaseModel):
@@ -122,7 +124,7 @@ class EmbedResponse(BaseModel):
 class DocSource(BaseModel):
     """One source a sourced document is derived from."""
 
-    kind: Literal["run", "experiment", "asset", "project", "reference"]
+    kind: Literal["run", "experiment", "asset", "project", "reference", "file"]
     ref: str
 
 
@@ -130,8 +132,21 @@ class DocCreateRequest(BaseModel):
     name: str
     body: str = ""
     hostPath: str | None = None
-    cls: Literal["Note", "Literature", "Report", "Finding", "Plan", "Observation"] = "Note"
+    cls: Literal[
+        "Note",
+        "Literature",
+        "Report",
+        "Finding",
+        "Plan",
+        "Roadmap",
+        "Todo",
+        "Milestone",
+        "Observation",
+        "Delegation",
+    ] = "Note"
     sources: list[DocSource] = []
+    record: dict[str, Any] | None = None
+    createdBy: str = "ui"
     title: str | None = None
     authors: list[str] | None = None
     year: int | None = None
@@ -148,6 +163,27 @@ class DocMediaResponse(BaseModel):
 
 class DocBodyUpdate(BaseModel):
     body: str
+
+
+class DocRecordResponse(BaseModel):
+    """A document's structured record and the digest of the file it came from."""
+
+    relPath: str
+    cls: str
+    record: dict[str, Any]
+    digest: str
+
+
+class DocRecordUpdate(BaseModel):
+    """Replace a document's structured record whole.
+
+    ``ifMatch`` is the digest the caller read; a changed file answers 409.
+    ``body`` optionally rewrites the narrative in the same write.
+    """
+
+    record: dict[str, Any]
+    ifMatch: str | None = None
+    body: str | None = None
 
 
 class DocMoveRequest(BaseModel):
@@ -237,11 +273,46 @@ def _resolve_host(workspace: Workspace, host_path: str | None) -> str:
     return str(_host_folder(workspace, host_path).resolve())
 
 
+def _file_source(workspace: Workspace, ref: str) -> object:
+    """A workspace-relative file as a ``file`` source.
+
+    The stored pointer is absolute so the writer can relativize the link from
+    the new document. A path that leaves the workspace is rejected.
+    """
+    from molab.knowledge.knowledge_item import SourceRef
+
+    text = ref.strip()
+    pure = PurePosixPath(text)
+    if not text or pure.is_absolute() or ".." in pure.parts:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"file source {ref!r} must be a path inside this workspace",
+        )
+    joined = workspace.fs.join(str(workspace.root), text)
+    if not workspace.fs.is_file(joined):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"file source {ref!r} is not a file in this workspace",
+        )
+    root = _StdPath(workspace.fs.resolve(str(workspace.root)))
+    absolute = _StdPath(workspace.fs.resolve(joined))
+    try:
+        absolute.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"file source {ref!r} must be a path inside this workspace",
+        ) from exc
+    return SourceRef(kind="file", ref=str(absolute))
+
+
 def _source_from_request(workspace: Workspace, source: DocSource) -> object:
     """Turn one create-request source into a :class:`SourceRef`."""
     from molab.knowledge.knowledge_item import SourceRef
     from molab.workspace.refs import MolabRef, is_ref, parse_ref
 
+    if source.kind == "file":
+        return _file_source(workspace, source.ref)
     if source.kind == "reference":
         text = source.ref.strip()
         if text.upper().startswith("DOI:"):
@@ -333,6 +404,39 @@ def _note_summary(workspace: Workspace, note: Concept) -> NoteSummary:
     )
 
 
+def _json_ready(value: object) -> object:
+    """JSON-safe copy of a planning field. Models and tuples become plain values."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, tuple | list):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    return value
+
+
+def _document_record(note: Concept) -> dict[str, Any]:
+    """Role fields the viewer shows. A document with none is ``{}``.
+
+    A corrupt record does not fail the read; the narrative still opens.
+    """
+    try:
+        fields = getattr(note, "planning_fields", None)
+        if callable(fields):
+            raw = fields()
+            if isinstance(raw, dict) and raw:
+                ready = _json_ready(raw)
+                if isinstance(ready, dict):
+                    return ready
+        if isinstance(note, Delegation):
+            ready = _json_ready(note.record())
+            if isinstance(ready, dict):
+                return ready
+    except (TypeError, ValueError):
+        return {}
+    return {}
+
+
 def _note_detail(workspace: Workspace, note: Concept, path: str) -> NoteDetailResponse:
     """Build a :class:`NoteDetailResponse` for *note* at its identity *path*."""
     return NoteDetailResponse(
@@ -341,6 +445,7 @@ def _note_detail(workspace: Workspace, note: Concept, path: str) -> NoteDetailRe
         body=note.read(),
         links=list(note.out_edges()),
         cards=_resolve_cards(workspace, note),
+        record=_document_record(note),
     )
 
 
@@ -510,6 +615,38 @@ def _open_doc(workspace: Workspace, path: str) -> Concept:
         return _open_document(workspace.fs.join(str(workspace.root), path), fs=workspace.fs)
     except (KnowledgeNotFoundError, FileNotFoundError, OSError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found") from exc
+
+
+def _record_history(
+    workspace: Workspace,
+    doc: Concept,
+    event: str,
+    summary: str,
+    *,
+    paths: tuple[PathArg, ...] = (),
+) -> None:
+    """Commit a knowledge change to the workspace history (best effort).
+
+    A served node is not the history root; the enclosing workspace is. A
+    history failure never fails the request — the file is already written.
+    """
+    from contextlib import suppress
+
+    with suppress(Exception):
+        from molab.knowledge.location import enclosing_workspace_root
+        from molab.workspace.history import EntityRef, GitHistory
+
+        history_root = enclosing_workspace_root(doc.path, fs=workspace.fs)
+        if history_root is None:
+            return
+        root = _StdPath(str(history_root))
+        rel = _StdPath(str(doc.path)).relative_to(root).as_posix()
+        GitHistory(str(root)).record(
+            event,
+            subject=EntityRef(id=rel, type=type(doc).__name__),
+            summary=summary,
+            paths=paths or (doc.path,),
+        )
 
 
 def _reject_tex(path: str) -> None:
@@ -800,7 +937,7 @@ def create_doc(
     body: DocCreateRequest,
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteSummary:
-    """Create one of the six classes under *hostPath* (the workspace root when omitted)."""
+    """Create one knowledge class under *hostPath* (the workspace root when omitted)."""
     from molab.knowledge.concepts import _product
     from molab.knowledge.reference_meta import ReferenceMeta
     from molab.knowledge.write import write_knowledge
@@ -808,7 +945,7 @@ def create_doc(
     klass = _product(body.cls)
     host = _resolve_host(workspace, body.hostPath)
     sources = [_source_from_request(workspace, item) for item in body.sources]
-    record = None
+    record: object | None = body.record
     if body.cls == "Literature":
         record = ReferenceMeta(
             title=body.title,
@@ -824,7 +961,7 @@ def create_doc(
             name=body.name,
             of=klass,
             sources=sources,
-            created_by="ui",
+            created_by=body.createdBy or "ui",
             text=body.body,
             record=record,
             fs=workspace.fs,
@@ -861,6 +998,7 @@ def embed_doc(
     target = _resolve_embed_entity(workspace, body.target_kind, body.target)
     role = body.role if body.role is not None else default_role_for(target)
     append_link(doc, resolve_embed_target(target), role=role)
+    _record_history(workspace, doc, "knowledge.linked", f"@{role} {body.target} from {doc.name}")
     return EmbedResponse(srcPath=path, target=body.target, role=role)
 
 
@@ -876,10 +1014,11 @@ def edit_doc(
     ),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteDetailResponse:
-    """Rewrite a document's narrative — ``Knowledge.write`` for all six classes."""
+    """Rewrite a document's narrative — ``Knowledge.write`` for every knowledge class."""
     _reject_tex(path)
     doc = _open_doc(workspace, path)
     doc.write(payload.body)
+    _record_history(workspace, doc, "knowledge.edited", f"edit {doc.name}")
     return _note_detail(workspace, doc, path)
 
 
@@ -898,6 +1037,7 @@ def move_doc(
     """Rename and/or move a document onto another host."""
     _reject_tex(path)
     doc = _open_doc(workspace, path)
+    before = doc.path
     try:
         if payload.name is not None:
             doc.rename(payload.name, within=workspace.root)
@@ -905,6 +1045,7 @@ def move_doc(
             doc.move_to(_resolve_host(workspace, payload.hostPath), within=workspace.root)
     except FileExistsError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    _record_history(workspace, doc, "knowledge.moved", f"move {doc.name}", paths=(before, doc.path))
     return _note_summary(workspace, doc)
 
 
@@ -920,12 +1061,74 @@ def update_doc_meta(
     ),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteSummary:
-    """Update a document's tags/status — ``Knowledge.write`` for all six classes."""
+    """Update a document's tags/status — ``Knowledge.write`` for every knowledge class."""
     _reject_tex(path)
     doc = _open_doc(workspace, path)
     if payload.tags is not None or payload.status is not None:
         doc.write(tags=payload.tags, status=payload.status)
+        _record_history(
+            workspace,
+            doc,
+            "knowledge.meta_changed",
+            f"{doc.name}: status {payload.status}" if payload.status else f"{doc.name}: tags",
+        )
     return _note_summary(workspace, doc)
+
+
+@router.get("/doc/record", response_model=DocRecordResponse)
+def get_doc_record(
+    path: str = Query(..., description="The document's workspace-relative path (its identity)."),
+    workspace: Workspace = Depends(get_workspace),
+) -> DocRecordResponse:
+    """A document's structured record and its file digest (for ``ifMatch``)."""
+    from molab.knowledge.record import digest_of, record_of
+
+    _reject_tex(path)
+    doc = _open_doc(workspace, path)
+    return DocRecordResponse(
+        relPath=path, cls=type(doc).__name__, record=record_of(doc), digest=digest_of(doc)
+    )
+
+
+@router.patch(
+    "/doc/record",
+    response_model=DocRecordResponse,
+    dependencies=[Depends(_require_writable)],
+)
+def replace_doc_record(
+    payload: DocRecordUpdate,
+    path: str = Query(..., description="The document's workspace-relative path (its identity)."),
+    workspace: Workspace = Depends(get_workspace),
+) -> DocRecordResponse:
+    """Replace a document's structured record whole — 409 when ``ifMatch`` is stale.
+
+    Only classes that own a record (Delegation, Roadmap, Todo, Milestone) accept
+    it (422 otherwise, and for a record the class rejects). The change is
+    recorded in the workspace history as ``knowledge.record_replaced``.
+    """
+    import hashlib
+
+    from molab.atomicio import file_lock
+    from molab.knowledge.record import RecordConflictError, record_of, replace_record
+
+    _reject_tex(path)
+    doc = _open_doc(workspace, path)
+    lock_name = hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
+    lock_path = _StdPath(str(workspace.root)) / ".molab" / "locks" / f"knowledge-{lock_name}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with file_lock(lock_path):
+            digest = replace_record(
+                doc, payload.record, if_match=payload.ifMatch, body=payload.body
+            )
+    except RecordConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    _record_history(workspace, doc, "knowledge.record_replaced", f"replace record of {doc.name}")
+    return DocRecordResponse(
+        relPath=path, cls=type(doc).__name__, record=record_of(doc), digest=digest
+    )
 
 
 @router.delete(
@@ -943,6 +1146,7 @@ def delete_doc(
     _reject_tex(path)
     doc = _open_doc(workspace, path)
     doc.delete()
+    _record_history(workspace, doc, "knowledge.deleted", f"delete {doc.name}")
     return MessageResponse(message=f"note {path!r} deleted")
 
 

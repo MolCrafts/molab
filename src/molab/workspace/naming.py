@@ -36,6 +36,17 @@ RUN_CONTAINER = "runs"
 EXECUTION_CONTAINER = "executions"
 """The subdir of a Run holding its attempts (``e01``, ``e02``, …)."""
 
+VALUE_CONTAINER = "values"
+"""The subdir of a Run holding its recorded task values, shared by every attempt.
+
+Content-addressed: each entry is ``<sha256-hex>.json`` or ``<sha256-hex>.pkl``,
+the bytes behind a ``sha256:`` ref in a node journal. A record (tracked in
+git), written only by the workflow engine.
+"""
+
+VALUE_FILE_RE = re.compile(r"^[0-9a-f]{64}\.(json|pkl)$")
+"""The only legal entry name inside :data:`VALUE_CONTAINER` (a file)."""
+
 SCRATCH_CONTAINER = "scratch"
 """An experiment's disposable tier for quick tests (D90).
 
@@ -148,6 +159,8 @@ __all__ = [
     "PROJECT_CONTAINER",
     "RUN_CONTAINER",
     "SCRATCH_CONTAINER",
+    "VALUE_CONTAINER",
+    "VALUE_FILE_RE",
     "WORKFLOW_SCRIPT_FILENAME",
     "disambiguate",
     "entity_slug",

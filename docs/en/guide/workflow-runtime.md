@@ -33,7 +33,7 @@ The runtime also relies on the compiled workflow identity rather than on ad hoc 
 
 ## Where Persistent State Lives
 
-Workflow execution state — the `workflow.json` snapshot under `<run_dir>/executions/<exec_id>/` — is written through workspace's public `atomic_write_json` helper, not raw filesystem calls. The atomicity guarantee is workspace's, not a runtime-layer reinvention. This is the runtime side of the *workflow → workspace* dependency direction documented in CLAUDE.md. Resume is caller-driven: a failed run preserves completed node outputs on disk, and the caller (e.g. `molab run --resume`) re-seeds them via `execute(..., seed_outputs=...)`.
+Workflow execution state — the `workflow.json` snapshot under `<run_dir>/executions/<exec_id>/` — is written through workspace's public `atomic_write_json` helper, not raw filesystem calls. The atomicity guarantee is workspace's, not a runtime-layer reinvention. This is the runtime side of the *workflow → workspace* dependency direction documented in CLAUDE.md. Resume is caller-driven: every node records its inputs and output by ref into the run's content-addressed `values/` store, and the caller (e.g. `molab run --resume`, or `--rerun --task NAME` for one node) builds the seeds with `read_attempt_seeds` and passes them as `execute(..., attempt_seeds=...)`. See [Workflow persistence](workflow-persistence.md#node-records).
 
 ## Caching
 
@@ -68,6 +68,34 @@ with run.start() as ctx:  # run.start(profile_config=cfg) to attach a resolved p
 ```
 
 When a live `RunContext` is passed, its profile config supplies the values bound to tasks by name (the `config=` kwarg is ignored in its favor), and the run's lifecycle — status transitions, execution records, error capture — is managed by the `with run.start()` block. For the common "build a fresh run and execute on it" shape, `runtime.run_on(compiled, experiment, params=...)` does both steps in one call.
+
+## Task Executors: Threads, Processes or Inline
+
+How a task body runs is a choice, made per workflow, per task or per run — the run wins, then the task, then the workflow:
+
+```python
+wf = Workflow(name="charges", executor="process")  # workflow default
+
+
+@wf.task(executor="inline")  # this task only
+def load(path: str) -> Frame: ...
+```
+
+```bash
+molab run flow.py --executor process --max-workers 8   # this run, every task
+```
+
+The same choice is `execute_run(wf, run, executor="process", max_workers=8)`, `WorkflowRuntime().execute(..., executor=...)`, and `"taskExecutor"` / `"maxWorkers"` on `POST …/executions`. A run's choice is recorded on its Execution (`executor.task_executor`, `executor.task_max_workers`), and each journal record says how and where its body ran (`executor`, `worker_pid`).
+
+| executor | how a body runs | use it for |
+|---|---|---|
+| `thread` (default) | sync bodies in worker threads (`max_workers` caps a dedicated pool) | I/O, subprocesses, libraries that release the GIL |
+| `process` | each body in a worker process — a fresh interpreter (spawn semantics) | CPU-bound Python holding the GIL, native libraries that are not thread-safe, isolation |
+| `inline` | on the engine's own thread, one at a time | debugging, thread-bound objects (e.g. a pyo3 `unsendable` value) |
+
+Under `process`, a worker imports the module that defines the workflow and finds the task by name — no closure is pickled. Define the workflow at module level (`wf = Workflow(...)`) or bind it with a locator; a task defined inside a function cannot run in a worker and is refused with a message saying so. A `molab run` script is imported under a private name, so its `if __name__ == "__main__":` block does not run in a worker, but its top level does: keep heavy side effects under the guard. Inputs and outputs cross the boundary in the value store's encoding (JSON, else pickle): an upstream output goes to the worker as its `values/` ref, and the parent stores the bytes the worker encoded without pickling the value again. Inside the worker, `ctx.workdir`, `ctx.metrics`, `ctx.register_artifact` and `from molab import print` behave as in-process: prints land in the attempt's `stdout.log` / `stderr.log`, metrics in its metrics log (tagged with the task), artifacts are recorded by the parent. The node cache, node records, resume and `--rerun --task` behave the same under every executor.
+
+A body's exception fails its task with the exception's own type and message (the worker's traceback is chained to it); a worker that dies (segfault, `SIGKILL`) fails its task with `WorkerCrashedError` naming the signal; cancelling the run kills its running workers. The `process` executor needs a POSIX system.
 
 ## Cancellation and Failure
 

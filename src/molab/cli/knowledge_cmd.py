@@ -8,6 +8,7 @@ pointed at, never copied.
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -19,6 +20,7 @@ from molab.cli._common import rprint
 
 if TYPE_CHECKING:
     from molab.workspace import Workspace
+    from molab.workspace.folder import Folder
 
 knowledge_app = typer.Typer(
     name="knowledge",
@@ -450,10 +452,16 @@ def _require_workspace(path: Path | None) -> Workspace:
         raise typer.Exit(1) from None
 
 
-def _host(workspace: Workspace, on: str | None) -> object:
-    """The folder ``--on`` names: the workspace, a ref, a run id, or a relative path."""
+def _host(workspace: Workspace, on: str | None) -> Folder:
+    """The folder ``--on`` names: the workspace, a ref, a run id, or a relative path.
+
+    A relative path names the workspace, project, experiment, or run directory
+    it points at, or that folder's ``knowledges`` container. Any other path
+    exits 1: it is not a host, the same rule as the server's ``host_path``.
+    """
     if on is None or on in {"", "."}:
         return workspace
+    from molab.knowledge.naming import KNOWLEDGE_CONTAINER
     from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
     from molab.workspace.folder import Folder
     from molab.workspace.refs import InvalidRefError, is_ref, qualify_run_id
@@ -470,11 +478,22 @@ def _host(workspace: Workspace, on: str | None) -> object:
         return found
     if "/" not in on:
         try:
-            return workspace.find(qualify_run_id(workspace, on))
+            run = workspace.find(qualify_run_id(workspace, on))
         except (InvalidRefError, RefNotFoundError, AmbiguousRefError):
-            pass
+            run = None
+        if isinstance(run, Folder):
+            return run
     path = Path(str(workspace.root)) / on
-    return workspace.folder_at(path) or path
+    if path.name == KNOWLEDGE_CONTAINER:
+        path = path.parent
+    folder = workspace.folder_at(path)
+    if folder is None:
+        rprint(
+            f"[red]Error:[/red] --on {on!r} is not a project, experiment, or run directory "
+            "(or its knowledges/ folder)."
+        )
+        raise typer.Exit(1)
+    return folder
 
 
 def _document(workspace: Workspace, ref: str) -> object:
@@ -493,6 +512,18 @@ def _rel_to_workspace(workspace: Workspace, doc_path: object) -> str:
     return Path(str(doc_path)).relative_to(Path(str(workspace.root))).as_posix()
 
 
+def _load_record(raw: str | None) -> dict[str, object] | None:
+    """A ``--record`` JSON object, or the object in a JSON file."""
+    if raw is None:
+        return None
+    path = Path(raw)
+    text = path.read_text(encoding="utf-8") if path.is_file() else raw
+    loaded = json.loads(text)
+    if not isinstance(loaded, dict):
+        raise ValueError("--record must be a JSON object")
+    return loaded
+
+
 @knowledge_app.command("write")
 def knowledge_write(
     name: Annotated[str, typer.Argument(help="Document name.")],
@@ -508,7 +539,10 @@ def knowledge_write(
         str,
         typer.Option(
             "--class",
-            help="Note, Literature, Report, Finding, Plan, or Observation.",
+            help=(
+                "Note, Literature, Report, Finding, Plan, Roadmap, Todo, "
+                "Milestone, Observation, or Delegation."
+            ),
         ),
     ] = "Note",
     path: Annotated[
@@ -518,6 +552,20 @@ def knowledge_write(
         str,
         typer.Option("--created-by", help="Author recorded in the frontmatter (a person or tool)."),
     ] = "cli",
+    source: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--source",
+            help="File path or DOI (10.… or DOI:…). Repeat once per source.",
+        ),
+    ] = None,
+    record: Annotated[
+        str | None,
+        typer.Option(
+            "--record",
+            help="JSON object of this class's frontmatter fields, or a path to that JSON.",
+        ),
+    ] = None,
 ) -> None:
     """Write one knowledge document. The same verb as ``write_knowledge``."""
     from molab.knowledge.concepts import _product
@@ -531,18 +579,24 @@ def knowledge_write(
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
     sources = (
-        normalize_sources(None, default_host=host)
-        if getattr(cls, "REQUIRES_SOURCES", False)
+        normalize_sources(source, default_host=host)
+        if source or getattr(cls, "REQUIRES_SOURCES", False)
         else ()
     )
     try:
+        payload = _load_record(record)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    try:
         item = write_knowledge(
-            host,  # ty: ignore[invalid-argument-type]
+            host,
             name=name,
             of=cls,
             sources=sources,
             created_by=created_by,
             text=text,
+            record=payload,
             fs=workspace.fs,
         )
     except (TypeError, ValueError) as exc:

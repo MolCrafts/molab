@@ -21,10 +21,12 @@ import {
 import { attentionRuns, NeedsAttention, RunTimeline } from "@/app/dashboard/dashboardWidgets";
 import { ExecutionOverview } from "@/app/dashboard/ExecutionOverview";
 import { useWorkspaceTabVisible } from "@/app/dashboard/useWorkspaceTab";
-import { projectPath } from "@/app/entities/paths";
+import { experimentPath, projectPath } from "@/app/entities/paths";
 import type { NavigationLandingProps } from "@/app/navigation/sections";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
+import { useNavigationState } from "@/app/state/useNavigationState";
 import { WorkbenchIconAction, WorkbenchOperationState } from "@/components/workbench";
+import { PlanProgress } from "@/plugins/knowledge/PlanProgress";
 
 type DashboardTab = "overview" | "attention" | "timeline";
 
@@ -36,6 +38,18 @@ export const DashboardPage = ({ snapshot }: NavigationLandingProps): JSX.Element
     useWorkspaceRuns();
   const [tab, setTab] = useState<DashboardTab>("overview");
   const navigate = useNavigate();
+  const { setSelection } = useNavigationState(snapshot);
+  const openPlanExperiment = useCallback(
+    (name: string) => {
+      const experiment = snapshot.experiments.find((item) => item.name === name);
+      if (experiment) navigate(experimentPath(experiment.projectId, experiment.id));
+    },
+    [navigate, snapshot.experiments],
+  );
+  const openPlanDoc = useCallback(
+    (path: string) => setSelection({ objectType: "knowledge", objectId: path }),
+    [setSelection],
+  );
   const waitingForCode = activeNeedsAuth(snapshot.workspaces);
   const reportRunsError = loading || waitingForCode ? null : error;
   const blocked = isInventoryBlocked(snapshot, {
@@ -104,6 +118,7 @@ export const DashboardPage = ({ snapshot }: NavigationLandingProps): JSX.Element
         </div>
       ) : quiet ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
+          <PlanProgress onOpenExperiment={openPlanExperiment} onOpenDoc={openPlanDoc} />
           <p className="max-w-[65ch] text-body text-foreground">No executions yet.</p>
           <div className="mt-4 flex flex-wrap gap-2">
             <WorkbenchIconAction label="Open projects" asChild>
@@ -138,6 +153,7 @@ export const DashboardPage = ({ snapshot }: NavigationLandingProps): JSX.Element
           <EntityTabContent value="overview">
             <OverviewSurface>
               <DashboardCanvas className="px-4 py-6 sm:px-8 sm:py-8">
+                <PlanProgress onOpenExperiment={openPlanExperiment} onOpenDoc={openPlanDoc} />
                 <ExecutionOverview
                   rows={rows}
                   partial={truncated}

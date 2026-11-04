@@ -404,3 +404,50 @@ class TestValidateWorkspace:
         assert "layout.stray" in report.issues_by_rule()
         assert report.error_count >= 1
         assert report.ok is False
+
+
+class TestEntrypointPortability:
+    def test_binding_stores_an_in_workspace_file_relative(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        exp = ws.add_project("p").add_experiment("e")
+        exp.bind_workflow("code", entrypoint=f"{exp.resolve()}/workflow.py:wf")
+        assert exp.metadata.workflow_entrypoint == "workflow.py:wf"
+        assert exp.entrypoint == f"{exp.resolve()}/workflow.py:wf"
+
+    def test_a_file_outside_the_workspace_stays_absolute(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        exp = ws.add_project("p").add_experiment("e")
+        exp.bind_workflow("code", entrypoint=f"{tmp_path}/elsewhere/wf.py:wf")
+        assert exp.metadata.workflow_entrypoint == f"{tmp_path}/elsewhere/wf.py:wf"
+
+    def test_a_hand_written_absolute_entrypoint_warns(self, tmp_path: Path) -> None:
+        from molab import frontmatter
+        from molab.workspace import Workspace
+        from molab.workspace.validate import validate_workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        exp = ws.add_project("p").add_experiment("e")
+        exp.bind_workflow("code", entrypoint="workflow.py:wf")
+        index = Path(str(exp.resolve())) / "index.md"
+        meta, body = frontmatter.split(index.read_text())
+        meta["workflow_entrypoint"] = f"{exp.resolve()}/workflow.py:wf"
+        index.write_text(frontmatter.dump(meta, body))
+        rules = [v.rule for v in validate_workspace(ws.resolve()).violations]
+        assert "experiment.absolute_entrypoint" in rules
+
+    def test_a_relative_entrypoint_is_clean(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+        from molab.workspace.validate import validate_workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        ws.add_project("p").add_experiment("e").bind_workflow("code", entrypoint="workflow.py:wf")
+        report = validate_workspace(ws.resolve())
+        assert not any(v.rule == "experiment.absolute_entrypoint" for v in report.violations)

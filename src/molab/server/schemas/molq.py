@@ -21,7 +21,6 @@ class MolqTargetSummary(ApiModel):
     name: str
     scheduler: str
     clusterName: str | None = None
-    jobsDir: str | None = None
     healthy: bool
     healthReason: str | None = None
     activeJobs: int
@@ -32,7 +31,6 @@ class MolqTargetSummary(ApiModel):
             name=target.name,
             scheduler=target.scheduler,
             clusterName=target.cluster_name,
-            jobsDir=target.jobs_dir,
             healthy=target.healthy,
             healthReason=target.health_reason,
             activeJobs=target.active_jobs,

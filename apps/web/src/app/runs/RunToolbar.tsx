@@ -118,7 +118,6 @@ export function RunToolbar({
         ...(mode === "resume" && checkpointArtifactId ? { checkpointArtifactId } : {}),
         bypassCache: bypassCacheFor(mode, bypassCache),
         target,
-        dispatch: true,
       });
       setOpen(false);
       toast.success("Execution created");

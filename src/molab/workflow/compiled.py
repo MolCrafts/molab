@@ -69,8 +69,12 @@ class CompiledWorkflow:
         parallels: tuple[ParallelDecl, ...] = (),
         reducer: tuple[str, Callable[..., TaskOutput]] | None = None,
         binding: WorkflowBinding | None = None,
+        executor: str | None = None,
     ) -> None:
         self.name = name
+        # The workflow's default task executor (``None``: ``thread``); an
+        # execution strategy, not part of the workflow's identity.
+        self.executor = executor
         self.version_label = version_label
         self._mode = mode
         # ``graph`` is the layer-private ExecutionPlan; only the runtime reads it.
@@ -285,6 +289,7 @@ class CompiledWorkflow:
                     is_actor=t.is_actor,
                     task_type=t.task_type,
                     dependent_params=t.dependent_params,
+                    executor=t.executor,
                 )
             )
             for dep in t.depends_on:
@@ -305,6 +310,7 @@ class CompiledWorkflow:
             version_label=self.version_label,
             tasks=new_tasks,
             mode=self._mode,
+            executor=self.executor,
         )
 
 

@@ -6,9 +6,12 @@ checks what lives inside it, at every host (the root, each project,
 experiment and run):
 
 * ``knowledge.class`` (error) — a document whose frontmatter has no ``class:``
-  or names a class that is not one of the six.
+  or names a class that is not a knowledge class.
 * ``knowledge.stray`` (error) — an entry of ``knowledges/`` that is not a
   markdown document (a directory, a data file).
+* the content rules of :mod:`molab.knowledge.content_rules` — malformed
+  records, campaign gaps, uncited planning documents, missing experiments,
+  links that leave the workspace, Literature without bibliographic fields.
 * ``knowledge.section_drift`` (warning) — the host's ``index.knowledges``
   section differs from a rebuild from the files. Like the derived ``index:``
   keys it is navigation sugar: a legal direct write of a document leaves it
@@ -28,6 +31,7 @@ from typing import TYPE_CHECKING
 
 from molab.fs import FileSystem, LocalFS, PathArg
 
+from .content_rules import CONTENT_RULE_HINTS, content_issues
 from .naming import KNOWLEDGE_CONTAINER, is_knowledge_file
 
 if TYPE_CHECKING:
@@ -45,7 +49,7 @@ RULE_HINTS: dict[str, str] = {
     "knowledge.class": (
         "A knowledge document names its class in frontmatter. Write it with "
         "`molab knowledge write NAME TEXT --on HOST --class CLASS` "
-        "(Note, Literature, Report, Finding, Plan or Observation)."
+        "(Note, Literature, Report, Finding, Plan, Roadmap, Todo, Milestone, Observation, or Delegation)."
     ),
     "knowledge.stray": (
         "knowledges/ holds markdown documents only. Keep data with the run that "
@@ -54,11 +58,12 @@ RULE_HINTS: dict[str, str] = {
     "knowledge.section_drift": (
         "The index.knowledges section disagrees with the documents; run `molab index sync`."
     ),
+    **CONTENT_RULE_HINTS,
 }
 
 
 def known_classes() -> frozenset[str]:
-    """The six document class names a frontmatter ``class:`` may spell."""
+    """The document class names a frontmatter ``class:`` may spell."""
     from .concepts import _PRODUCTS
 
     return frozenset(_PRODUCTS)
@@ -172,6 +177,7 @@ def validate_knowledge(
     base = str(workspace.resolve())
     wanted = None if scope is None else frozenset(scope)
     issues: list[dict[str, str]] = []
+    documents: list[str] = []
     for host_path in Workspace.list_hosts(base, fs=disk):
         host = str(host_path)
         prefix = base.rstrip("/") + "/"
@@ -195,9 +201,13 @@ def validate_knowledge(
             problem = class_problem(read_text_or_none(path, fs=disk) or "")
             if problem is not None:
                 issues.append(_issue(base, path, "knowledge.class", problem, "error"))
+            else:
+                documents.append(path)
         if errors_only:
             continue
         drift = _check_section(workspace, host, disk, base)
         if drift is not None:
             issues.append(drift)
+    for found in content_issues(documents, root=base, fs=disk, errors_only=errors_only):
+        issues.append(_issue(base, found.path, found.rule, found.detail, found.severity))
     return issues

@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from molab.cli.knowledge_cmd import knowledge_app
@@ -123,6 +124,90 @@ class TestKnowledgeWrite:
         assert "RDF converged" in landed.read_text(encoding="utf-8")
         assert "knowledges/rdf.md" in result.stdout
 
+    def test_write_plan_records_a_file_and_a_doi(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        brief = tmp_path / "brief.pdf"
+        brief.write_text("plan", encoding="utf-8")
+        doi = "10.1021/jp409664d"
+        result = CliRunner().invoke(
+            knowledge_app,
+            [
+                "write",
+                "PBIX plan",
+                "The question.",
+                "--class",
+                "Plan",
+                "--source",
+                str(brief),
+                "--source",
+                doi,
+                "--path",
+                str(ws.root),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        text = (Path(str(ws.root)) / "knowledges" / "pbix-plan.md").read_text(encoding="utf-8")
+        assert "brief.pdf" in text
+        assert "https://doi.org/10.1021/jp409664d" in text
+        assert "class: Plan" in text
+
+    def test_write_roadmap_record_cites_the_plan(self, tmp_path: Path) -> None:
+        from molab.knowledge import Plan, campaign_of, check_campaign
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        root = str(ws.root)
+        brief = tmp_path / "brief.pdf"
+        brief.write_text("plan", encoding="utf-8")
+        plan = CliRunner().invoke(
+            knowledge_app,
+            [
+                "write",
+                "PBIX plan",
+                "The question.",
+                "--class",
+                "Plan",
+                "--source",
+                str(brief),
+                "--path",
+                root,
+            ],
+        )
+        assert plan.exit_code == 0, plan.output
+        plan_path = Path(root) / "knowledges" / "pbix-plan.md"
+        record = tmp_path / "roadmap.json"
+        record.write_text(
+            '{"stages": [{"id": "monomers", "title": "Fragments", "experiment": "monomers"}]}',
+            encoding="utf-8",
+        )
+        roadmap = CliRunner().invoke(
+            knowledge_app,
+            [
+                "write",
+                "PBIX roadmap",
+                "The order.",
+                "--class",
+                "Roadmap",
+                "--source",
+                str(plan_path),
+                "--record",
+                str(record),
+                "--path",
+                root,
+            ],
+        )
+        assert roadmap.exit_code == 0, roadmap.output
+        text = (Path(root) / "knowledges" / "pbix-roadmap.md").read_text(encoding="utf-8")
+        assert "class: Roadmap" in text
+        assert "monomers" in text
+        campaign = campaign_of(Plan(plan_path))
+        check_campaign(campaign)
+        assert campaign.roadmaps[0].stages()[0].id == "monomers"
+
     def test_list_rename_and_delete(self, tmp_path: Path) -> None:
         from molab.workspace import Workspace
 
@@ -144,6 +229,61 @@ class TestKnowledgeWrite:
         )
         assert deleted.exit_code == 0, deleted.output
         assert not (Path(root) / "knowledges" / "cooling.md").exists()
+
+    @pytest.mark.parametrize("level", ["project", "experiment"])
+    @pytest.mark.parametrize("container", ["", "/knowledges", "/knowledges/"])
+    def test_write_on_a_relative_host_directory(
+        self, tmp_path: Path, level: str, container: str
+    ) -> None:
+        """A workspace-relative ``--on`` (the host or its knowledges/) is that host."""
+        from molab.workspace import Workspace
+        from molab.workspace.refs import ref_of
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        project = ws.add_project("membranes")
+        host = project if level == "project" else project.add_experiment("sweep")
+        host_dir = Path(str(host.resolve()))
+        rel = host_dir.relative_to(Path(str(ws.root))).as_posix()
+        (host_dir / "knowledges").mkdir(exist_ok=True)
+        record = tmp_path / "record.json"
+        record.write_text('{"tags": ["membrane"]}', encoding="utf-8")
+        for name, extra in (("plain", []), ("recorded", ["--record", str(record)])):
+            result = CliRunner().invoke(
+                knowledge_app,
+                [
+                    "write", name, "Water uptake plateaus.",
+                    "--on", rel + container,
+                    "--class", "Observation",
+                    "--created-by", "tack",
+                    *extra,
+                    "--path", str(ws.root),
+                ],
+            )  # fmt: skip
+            assert result.exit_code == 0, result.output
+            landed = host_dir / "knowledges" / f"{name}.md"
+            assert landed.is_file()
+            assert str(ref_of(host)) in landed.read_text(encoding="utf-8")
+        assert not (host_dir / "knowledges" / "knowledges").exists()
+        assert "membrane" in (host_dir / "knowledges" / "recorded.md").read_text(encoding="utf-8")
+
+    def test_write_on_a_non_host_directory_exits(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        project = ws.add_project("membranes")
+        assets = Path(str(project.resolve())) / "assets"
+        assets.mkdir(exist_ok=True)
+        rel = assets.relative_to(Path(str(ws.root))).as_posix()
+        result = CliRunner().invoke(
+            knowledge_app,
+            ["write", "obs", "text", "--on", rel, "--class", "Observation",
+             "--path", str(ws.root)],
+        )  # fmt: skip
+        assert result.exit_code == 1
+        assert "is not a project" in result.output
+        assert not (assets / "knowledges").exists()
 
 
 class TestSourcesAdd:

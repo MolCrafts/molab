@@ -4,7 +4,7 @@ Coding agents (Claude Code, Codex) write files into a workspace directly. A
 hook in ``molcrafts-harness`` forwards each write, and each session's start
 and stop, here; it holds no rule of its own. This service composes the
 workspace layout law and the knowledge document law (neither may name the
-other) and answers three questions:
+other) and answers these questions:
 
 * :func:`check_workspace` — the whole report: the workspace validator with
   the knowledge container declared at every host level, plus the knowledge
@@ -14,6 +14,10 @@ other) and answers three questions:
   evidence, machine state) or that adds a new stray, and says which molab
   command does the job instead. An edit to a stray that already exists is
   allowed: that is old debt, not a new mess.
+* :func:`check_command` — which files would this shell command write, and
+  would each of those writes keep the tree legal? The grammar lives in
+  :mod:`molab.services.command_paths`. A command it cannot read is allowed;
+  the stop check sees what it wrote.
 * :func:`check_tree` — the tree, against a snapshot. A session takes a
   snapshot when it starts (``--snapshot``) and asks at its end which errors
   are new (``--since``); ``--new-only`` asks against the workspace's
@@ -76,6 +80,7 @@ __all__ = [
     "Verdict",
     "baseline_path",
     "changed_scope",
+    "check_command",
     "check_path",
     "check_tree",
     "check_workspace",
@@ -675,7 +680,7 @@ class _PathCheck:
         if problem is not None:
             return self.deny(
                 "knowledge.class",
-                f"A knowledge document names one of the six classes in its frontmatter: {problem}.",
+                f"A knowledge document names one known class in its frontmatter: {problem}.",
                 write,
             )
         return self.allow("a knowledge document with a known class")
@@ -824,3 +829,65 @@ def check_path(
         )
     walk = _PathCheck(fs, str(root), rel.split("/"), fs.exists(target), content)
     return walk.run()
+
+
+def _cwd_workspace(directory: str) -> tuple[bool, str | None]:
+    """Whether *directory* sits in a workspace, and that workspace's root id."""
+    from molab.workspace import Workspace
+    from molab.workspace.fs_local import LocalFS
+
+    root = Workspace.enclosing_root(_absolute(directory), fs=LocalFS())
+    if root is None:
+        return False, None
+    return True, _root_id(root)
+
+
+def check_command(command: str, cwd: str | os.PathLike[str] = ".") -> Verdict:
+    """Would the files *command* writes from *cwd* keep the workspace legal?
+
+    Args:
+        command: The shell command, as one string. It is not executed.
+        cwd: The directory the command would run in.
+
+    Returns:
+        The first refused destination, or an allow. A command the grammar
+        cannot read is allowed, with the workspace of *cwd* when it has one,
+        so the hook can still snapshot the session.
+    """
+    from molab.services.command_paths import destinations
+
+    directory = os.fspath(cwd)
+    in_workspace, root = _cwd_workspace(directory)
+    found = destinations(command, directory)
+    if found is None:
+        return Verdict(
+            in_workspace=in_workspace,
+            allowed=True,
+            reason="the command could not be parsed; the stop check covers what it writes",
+            path=directory,
+            root=root,
+        )
+    refused: Verdict | None = None
+    for path in found:
+        verdict = check_path(path, "write")
+        if verdict.in_workspace:
+            in_workspace = True
+            root = root or verdict.root
+        if refused is None and not verdict.allowed:
+            refused = verdict
+    if refused is not None:
+        return refused.model_copy(
+            update={
+                "root": refused.root or root,
+                "in_workspace": refused.in_workspace or in_workspace,
+            }
+        )
+    return Verdict(
+        in_workspace=in_workspace,
+        allowed=True,
+        reason="the command's destinations are legal"
+        if found
+        else "the command names no file to check",
+        path=found[0] if found else directory,
+        root=root,
+    )

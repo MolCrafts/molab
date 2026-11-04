@@ -42,6 +42,35 @@ if TYPE_CHECKING:
 
 #: ``[label](target)`` — both halves captured; the label carries the edge role.
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+_CODE_FENCE = re.compile(
+    r"^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[ \t]*$", re.MULTILINE | re.DOTALL
+)
+_CODE_SPAN = re.compile(r"(?<!`)(?P<ticks>`+)(?!`).+?(?<!`)(?P=ticks)(?!`)", re.DOTALL)
+
+
+def _blank(match: re.Match[str]) -> str:
+    """The matched text with every character but newlines turned into spaces."""
+    return re.sub(r"[^\n]", " ", match.group(0))
+
+
+def _mask_code(text: str) -> str:
+    """*text* with code blocks and inline code blanked, every offset kept.
+
+    Markdown does not read links inside code, so neither does molab: a SMILES
+    such as ``[N+](C)`` in backticks is chemistry, not a link.
+    """
+    return _CODE_SPAN.sub(_blank, _CODE_FENCE.sub(_blank, text))
+
+
+def markdown_links(text: str) -> list[re.Match[str]]:
+    """Every markdown link in *text* outside code, as matches against *text*."""
+    masked = _mask_code(text)
+    return [
+        match
+        for match in _MD_LINK.finditer(text)
+        if masked[match.start() : match.end()] == match.group(0)
+    ]
+
 
 #: Declared type of a bare root handle.
 FALLBACK_CONCEPT_TYPE = "concept"
@@ -199,8 +228,9 @@ class Concept:
     def _document_paths(self) -> Iterator[str]:
         """Yield each markdown file this handle walks, in listing order.
 
-        A directory that is itself a workspace root lists ``knowledges/*.md``
-        on the root and on every project, experiment and run. Any other
+        A directory that is itself a workspace root, or a project, experiment
+        or run directory (a served node), lists ``knowledges/*.md`` on it and
+        on every host below it. Any other
         directory is itself the container. Both lookups keep this handle's
         spelling and ignore the CLI root override.
 
@@ -212,7 +242,9 @@ class Concept:
         from .location import is_workspace_root
         from .naming import KNOWLEDGE_CONTAINER, is_knowledge_file
 
-        if is_workspace_root(self._path, fs=self._fs):
+        if is_workspace_root(self._path, fs=self._fs) or Workspace.is_node_dir(
+            self._path, fs=self._fs
+        ):
             containers = [
                 self._fs.join(str(host), KNOWLEDGE_CONTAINER)
                 for host in Workspace.list_hosts(self._path, fs=self._fs)
@@ -689,7 +721,8 @@ class Concept:
         typed_concepts: list[Edge] = []
         refs: list[str] = []
         missing: list[str] = []
-        for raw_label, target in _MD_LINK.findall(body):
+        for link in markdown_links(body):
+            raw_label, target = link.group(1), link.group(2)
             role, _human = parse_role(raw_label)
             if target.startswith(("http://", "https://")):
                 external.append(target)
@@ -924,18 +957,20 @@ def retarget_links(
         The new text and how many targets actually changed.
     """
     count = 0
-
-    def _sub(match: re.Match[str]) -> str:
-        nonlocal count
+    pieces: list[str] = []
+    cursor = 0
+    for match in markdown_links(text):
         label, target = match.group(1), match.group(2)
         image = match.start() > 0 and text[match.start() - 1] == "!"
         updated = rewrite(target, image)
         if updated is None or updated == target:
-            return match.group(0)
+            continue
         count += 1
-        return f"[{label}]({updated})"
-
-    return _MD_LINK.sub(_sub, text), count
+        pieces.append(text[cursor : match.start()])
+        pieces.append(f"[{label}]({updated})")
+        cursor = match.end()
+    pieces.append(text[cursor:])
+    return "".join(pieces), count
 
 
 def _retarget_links(doc: Concept, rewrite: Callable[[str], str | None]) -> bool:
@@ -982,7 +1017,7 @@ def append_source_links(
         return body, 0
     have = {
         (parse_role(label)[0], posixpath.normpath(target))
-        for label, target in _MD_LINK.findall(body)
+        for label, target in (link.groups() for link in markdown_links(body))
     }
     lines: list[str] = []
     for source in sources:

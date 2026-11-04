@@ -10,6 +10,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from molab.atomicio import file_lock
 from molab.fs.window import iter_file_chunks
 from molab.plugins.submit_molq.submit import SubmitHandler
 from molab.workflow import read_journal
@@ -32,7 +33,8 @@ from molab.workspace.execution_repository import (
 from molab.workspace.fs_cached import CachedRemoteFS
 from molab.workspace.fs_tree import list_tree_children, tree_to_run_file_dicts
 from molab.workspace.history import AgentRef
-from molab.workspace.targets import get_target
+from molab.workspace.models import ComputeTarget
+from molab.workspace.targets import resolve_compute_target
 
 from ..dependencies import get_workspace
 from ..exceptions import RunNotFoundError
@@ -97,6 +99,64 @@ def _get_scoped_run(workspace, project_id: str, experiment_id: str, run_id: str)
     return node if isinstance(node, Run) else None
 
 
+#: ``executor`` key holding the idempotency key an attempt was requested with.
+REQUEST_KEY = "request_key"
+
+
+def _create_attempt(run, body: ExecutionAttemptCreateRequest, target: ComputeTarget):  # noqa: ANN001, ANN202
+    """Create one QUEUED attempt from *body* (422 on a refused creation).
+
+    An active attempt whose owner is dead (same host: its pid is gone; other
+    host: its heartbeat is stale) is sealed FAILED first, as ``molab run`` and
+    cancel do, so a resume or rerun after a crashed or killed owner is not
+    refused as "still active".
+    """
+    from molab.workspace.run_reaper import reap_zombie_run
+
+    reap_zombie_run(run)
+    created_by = (
+        AgentRef(id=body.requested_by, type="software", name=body.requested_by)
+        if body.requested_by
+        else AgentRef(id="ui", type="person", name="Molab UI")
+    )
+    backend = "local" if target.cluster_id is None else "molq"
+    executor: dict[str, object] = {"backend": backend, "target": target.name}
+    if body.request_key is not None:
+        executor[REQUEST_KEY] = body.request_key
+    if body.task_executor is not None:
+        executor["task_executor"] = body.task_executor
+    if body.max_workers is not None:
+        executor["task_max_workers"] = body.max_workers
+    try:
+        return run._create_execution(
+            mode=ExecutionMode(body.mode),
+            created_by=created_by,
+            predecessor=body.based_on_execution_id,
+            checkpoint=body.checkpoint_artifact_id,
+            bypass_cache=body.bypass_cache,
+            executor=executor,
+            environment={"submit_cwd": str(Path.cwd().resolve())},
+            selected_tasks=tuple(body.tasks or ()),
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _attempt_with_request_key(run, key: str):  # noqa: ANN001, ANN202
+    """The attempt of *run* created with idempotency *key*, or ``None``."""
+    for state in run.executions:
+        if (state.executor or {}).get(REQUEST_KEY) == key:
+            return state
+    return None
+
+
+def _request_key_lock(workspace, run) -> Path:  # noqa: ANN001
+    """Lock serializing keyed attempt creation on one Run."""
+    lock = Path(str(workspace.root)) / ".molab" / "locks" / f"{run.id}.request-key.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    return lock
+
+
 def _execution_repository(workspace, run) -> ExecutionRepository:  # noqa: ANN001
     return ExecutionRepository(
         workspace.root,
@@ -122,6 +182,7 @@ def _execution_response(state) -> ExecutionResponse:  # noqa: ANN001
         environment=state.environment,
         artifactIds=list(state.artifact_ids),
         error=state.error,
+        selectedTasks=list(state.selected_tasks),
     )
 
 
@@ -147,15 +208,8 @@ def _artifact_response(artifact: Artifact) -> ArtifactResponse:
     )
 
 
-def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # noqa: ANN001
-    """Submit *run* through molq onto *target*.
-
-    Resources and scheduling come from the target's defaults — the API
-    has no per-run CLI overrides like ``molab run --cpus``. When
-    *execution_id* is given the worker starts that record (a RESUME record
-    is the new Execution; rerun runs the freshly-derived id) instead of
-    deriving its own.
-    """
+def _require_recoverable(run) -> None:  # noqa: ANN001
+    """422 unless a worker process can rebuild *run*'s workflow on its own."""
     from molab.workflow import can_recover_workflow
 
     if not can_recover_workflow(run):
@@ -174,6 +228,18 @@ def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # 
             ),
         )
 
+
+def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # noqa: ANN001
+    """Submit *run* through molq onto *target*.
+
+    Resources and scheduling come from the target's defaults — the API
+    has no per-run CLI overrides like ``molab run --cpus``. When
+    *execution_id* is given the worker starts that record (a RESUME record
+    is the new Execution; rerun runs the freshly-derived id) instead of
+    deriving its own.
+    """
+    _require_recoverable(run)
+
     handler = SubmitHandler(
         scheduler="",
         cluster=target.cluster_id,
@@ -182,6 +248,34 @@ def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # 
         target=target,
     )
     handler(None, run, run.experiment, run.experiment.project, execution_id=execution_id)
+
+
+def _start_locally(run, execution_id: str) -> None:  # noqa: ANN001
+    """Start the QUEUED attempt on this machine, detached from the server.
+
+    The same worker a scheduler job runs (``molab execute <run_dir>
+    --execution-id eNN``), launched in its own session so it outlives the
+    request and the server. Its stdout/stderr is scheduler evidence, so it
+    goes to ``jobs/worker.log`` in the attempt's directory (a file directly
+    in the attempt directory is a stray); the worker records its own pid.
+    """
+    import subprocess
+    import sys
+
+    _require_recoverable(run)
+    attempt_dir = Path(str(run.run_dir)) / "executions" / execution_id
+    jobs_dir = attempt_dir / JOBS.name
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    argv = [sys.executable, "-m", "molab.cli", "execute", str(run.run_dir)]
+    with (jobs_dir / "worker.log").open("ab") as log:
+        subprocess.Popen(
+            [*argv, "--execution-id", execution_id],
+            cwd=str(attempt_dir),
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
 
 
 def _invalidate_run_nav_cache(workspace, run_or_exp_path: str) -> None:  # noqa: ANN001
@@ -249,41 +343,39 @@ def create_execution(
     body: ExecutionAttemptCreateRequest,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ExecutionResponse:
-    """Create one queued physical attempt without mutating the Run."""
+    """Create one physical attempt and submit it to its compute target.
+
+    The attempt is submitted in the same request, so a QUEUED record always
+    has a job behind it. A submission failure seals the attempt FAILED with
+    the reason, and the error is returned.
+    """
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    target = None
-    if body.target is not None:
-        try:
-            target = get_target(workspace, body.target)
-        except KeyError as exc:
-            raise HTTPException(status_code=422, detail=f"unknown target {body.target!r}") from exc
-    if body.dispatch and target is None:
-        raise HTTPException(status_code=422, detail="dispatch requires a compute target")
     try:
-        state = run._create_execution(
-            mode=ExecutionMode(body.mode),
-            created_by=AgentRef(id="ui", type="person", name="Molab UI"),
-            predecessor=body.based_on_execution_id,
-            checkpoint=body.checkpoint_artifact_id,
-            bypass_cache=body.bypass_cache,
-            executor={"backend": "molq", "target": body.target},
-            environment={"submit_cwd": str(Path.cwd().resolve())},
-        )
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if body.dispatch:
-        assert target is not None
-        try:
+        target = resolve_compute_target(workspace, body.target)
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown target {body.target!r}") from exc
+    if body.request_key is None:
+        state = _create_attempt(run, body, target)
+    else:
+        with file_lock(_request_key_lock(workspace, run)):
+            existing = _attempt_with_request_key(run, body.request_key)
+            if existing is not None:
+                return _execution_response(existing)
+            state = _create_attempt(run, body, target)
+    try:
+        if target.cluster_id is None:
+            _start_locally(run, state.id)
+        else:
             _dispatch_to_molq(target, run, execution_id=state.id)
-        except Exception as exc:
-            _execution_repository(workspace, run).seal(
-                state.id,
-                ExecutionStatus.FAILED,
-                error={"type": type(exc).__name__, "message": str(exc)},
-            )
-            raise
+    except Exception as exc:
+        _execution_repository(workspace, run).seal(
+            state.id,
+            ExecutionStatus.FAILED,
+            error={"type": type(exc).__name__, "message": str(exc)},
+        )
+        raise
     return _execution_response(state)
 
 

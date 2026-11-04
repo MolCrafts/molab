@@ -50,7 +50,7 @@ code (CLI / server / cluster workers) can recover it via
 ``default_binding_registry.for_experiment(experiment)``.
 """
 
-from ._engine.persistence import read_journal, read_outputs, read_resume_seeds
+from ._engine.persistence import AttemptSeeds, read_attempt_seeds, read_journal, read_outputs
 from ._engine.runtime import WorkflowRuntime
 from .binding import WorkflowBinding, WorkflowBindingRegistry, default_binding_registry
 from .cache import Caching
@@ -122,6 +122,7 @@ from .types import (
 __all__ = [
     "Actor",
     "ArtifactDecl",
+    "AttemptSeeds",
     "BranchEdges",
     "CacheStore",
     "Caching",
@@ -189,7 +190,7 @@ __all__ = [
     "default_codec",
     "default_registry",
     "load_workflow_from_entrypoint",
+    "read_attempt_seeds",
     "read_journal",
     "read_outputs",
-    "read_resume_seeds",
 ]

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from ..protocols import (
     JSONMapping,
+    JSONValue,
     RunContextLike,
     RunLike,
     TaskOutput,
@@ -29,6 +30,9 @@ if TYPE_CHECKING:
     from .._graph_decl import ParallelDecl, TaskRegistration
     from ..cache import Caching
     from ..snapshot import TaskSnapshot
+    from .executors import SyncCaller
+    from .process_pool import ProcessPool
+    from .values import Encoding, ValueStore
 
 
 @dataclass
@@ -55,6 +59,20 @@ class WorkflowState:
     * ``seeded`` — names that arrived already-completed via
       ``Workflow.execute(seed_outputs=...)``; their node skips the body
       but still routes normally.
+    * ``excluded`` — names this execution never launches: they are
+      journalled ``skipped`` up front, a trigger into one is dropped, and
+      they never count for quiescence / deadlock.
+    * ``selected`` — non-empty for a partial rerun: only these tasks launch.
+      A selected task waits only on in-edges from other selected tasks (its
+      other sources are seeded or excluded); one with none launches at once,
+      with ``delivered[name]`` as its trigger-delivered input when present.
+    * ``output_records`` — task → its journal output fields (``output_ref``
+      …), so a downstream input names the upstream's ref without re-encoding.
+    * ``expected_inputs`` — task → the ``input_refs`` its predecessor record
+      shows; a re-executed task whose live inputs differ is warned.
+    * ``encoded_outputs`` — task → ``(value, bytes, encoding)`` a worker
+      process returned; the journal stores those bytes instead of encoding
+      the value again.
     """
 
     results: dict[str, TaskOutput] = field(default_factory=dict)
@@ -72,6 +90,12 @@ class WorkflowState:
     failed: bool = False
     error: str | None = None
     seeded: set[str] = field(default_factory=set)
+    excluded: set[str] = field(default_factory=set)
+    selected: frozenset[str] = frozenset()
+    delivered: dict[str, TaskOutput] = field(default_factory=dict)
+    output_records: dict[str, dict[str, JSONValue]] = field(default_factory=dict)
+    expected_inputs: dict[str, Mapping[str, JSONValue]] = field(default_factory=dict)
+    encoded_outputs: dict[str, tuple[object, bytes, Encoding]] = field(default_factory=dict)
 
     @classmethod
     def from_seed(cls, seed: Mapping[str, TaskOutput]) -> WorkflowState:
@@ -131,6 +155,18 @@ class WorkflowDeps:
         dependent_params_hashes: ``task_name → hash of its dependent_params
             callable`` (``None`` when it has none), recorded on each
             completed journal record for the resume-seed gate.
+        values: The run's value store the journal's refs point into — the
+            workspace-supplied ``run_context.values_dir`` — or ``None`` when
+            this execution records no values.
+        executors: ``task → executor`` (``thread`` / ``process`` /
+            ``inline``), resolved per execution (run > task > workflow >
+            default, :func:`.executors.resolve_executors`).
+        runners: ``executor → SyncCaller`` for the in-process executors.
+        process_pool: The execution's worker pool when any task runs under
+            ``process``.
+        process_entrypoint: The experiment's code locator, one way a worker
+            can find a task (:func:`.process_pool.locate_task`).
+        process_locators: ``task → locator`` memo.
     """
 
     run: RunLike | None = None
@@ -148,3 +184,13 @@ class WorkflowDeps:
     snapshots: Mapping[str, TaskSnapshot] = field(default_factory=dict)
     dependent_params_hashes: Mapping[str, str | None] = field(default_factory=dict)
     scratch_root: Path | None = None
+    values: ValueStore | None = None
+    executors: Mapping[str, str] = field(default_factory=dict)
+    runners: Mapping[str, SyncCaller] = field(default_factory=dict)
+    process_pool: ProcessPool | None = None
+    process_entrypoint: str | None = None
+    process_locators: dict[str, tuple] = field(default_factory=dict)
+
+    def executor_of(self, name: str) -> str:
+        """The executor task *name* runs under in this execution."""
+        return self.executors.get(name, "thread")

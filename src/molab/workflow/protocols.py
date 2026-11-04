@@ -93,6 +93,14 @@ class RunLike(Protocol):
         """The directory of one attempt; the workspace owns the layout."""
         ...
 
+    def values_dir(self) -> Path:
+        """The run's recorded-value store, shared by every attempt.
+
+        The node journal cites task inputs and outputs by ref into it; the
+        workspace owns the layout.
+        """
+        ...
+
     def artifact_location(self, execution_id: str, artifact: object) -> str:
         """Resolve one artifact to a path on this run's filesystem.
 
@@ -157,6 +165,16 @@ class RunContextLike(Protocol):
     @property
     def predecessor(self) -> str | None:
         """The predecessor attempt this one resumes / reruns, if any."""
+        ...
+
+    @property
+    def values_dir(self) -> Path:
+        """The run's recorded-value store, supplied by the workspace.
+
+        The runtime writes every task input and output there by content
+        (it composes no path itself). A context that does not provide it
+        records no values: its journal carries statuses only.
+        """
         ...
 
     @property

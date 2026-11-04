@@ -9,6 +9,8 @@ export type DocCreateRequest = {
     hostPath?: (string | null);
     cls?: DocCreateRequest.cls;
     sources?: Array<DocSource>;
+    record?: (Record<string, any> | null);
+    createdBy?: string;
     title?: (string | null);
     authors?: (Array<string> | null);
     year?: (number | null);
@@ -23,7 +25,11 @@ export namespace DocCreateRequest {
         REPORT = 'Report',
         FINDING = 'Finding',
         PLAN = 'Plan',
+        ROADMAP = 'Roadmap',
+        TODO = 'Todo',
+        MILESTONE = 'Milestone',
         OBSERVATION = 'Observation',
+        DELEGATION = 'Delegation',
     }
 }
 

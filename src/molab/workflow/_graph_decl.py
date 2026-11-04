@@ -108,6 +108,7 @@ class TaskRegistration:
     __slots__ = (
         "dependent_params",
         "depends_on",
+        "executor",
         "fn_or_class",
         "is_actor",
         "name",
@@ -124,6 +125,7 @@ class TaskRegistration:
         task_type: str | None = None,
         dependent_params: DependentParamsFn | None = None,
         position: tuple[float, float] | None = None,
+        executor: str | None = None,
     ) -> None:
         self.name = name
         self.fn_or_class = fn_or_class
@@ -137,3 +139,7 @@ class TaskRegistration:
         # code + captured ``__init__`` config), so moving a node never
         # invalidates the cache.
         self.position = position
+        # How this task's body runs (``thread`` / ``process`` / ``inline``);
+        # ``None`` defers to the workflow's executor. Not part of the task's
+        # identity: changing it never invalidates the cache or a seed.
+        self.executor = executor

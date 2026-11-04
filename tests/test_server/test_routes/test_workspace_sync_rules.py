@@ -20,9 +20,7 @@ def remote_client(tmp_path, monkeypatch):
     workspace = Workspace(root)
     workspace.materialize()
     with Molq(registry=tmp_path / "registry.db") as molq:
-        cluster = molq.clusters.register(
-            name="files", scheduler="shell", target_root=str(tmp_path / "jobs")
-        )
+        cluster = molq.clusters.register(name="files", scheduler="shell")
         inner = RemoteFS(molq, cluster.name, str(root))
         fs = CachedRemoteFS(inner, mirror_root=tmp_path / "mirror")
         remote = Workspace(str(root), fs=fs)

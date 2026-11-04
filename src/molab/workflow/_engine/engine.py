@@ -30,8 +30,13 @@ Semantics preserved from the prior pg-driven lowering:
   per-body capacity limiter, captures per-element failures without cancelling
   siblings, and publishes the index-ordered list before triggering the join —
   the engine owns the gather, so no partial-finalization handling exists;
-* per-node status persistence via :func:`.persistence.mark_task_status` is
-  byte-compatible with the previous lowering.
+* per-node status persistence via :func:`.persistence.mark_task_status`:
+  a task's inputs are recorded (by ref, :mod:`.node_record`) when it starts
+  and its output when it completes;
+* ``state.excluded`` tasks never launch and never count for quiescence;
+  a partial rerun (``state.selected``) launches only the selected tasks —
+  each waits only on selected upstreams, and one with none launches at once
+  with its recorded delivered input (``state.delivered``).
 
 This module MUST NOT import ``pydantic_graph``.
 """
@@ -40,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -62,9 +68,12 @@ from .node import (
     run_task_body,
 )
 from .node_cache import run_task_body_cached
+from .node_params import _resolve_dependent_params
+from .node_record import input_fields, output_fields
 from .persistence import mark_task_status
 
 if TYPE_CHECKING:
+    from ..._typing import JSONValue
     from .._graph_decl import ParallelDecl
     from ..protocols import TaskInput, TaskOutput
     from ..types import OutEdges
@@ -92,6 +101,18 @@ def _dependent_params_hash_of(deps: WorkflowDeps, name: str) -> str | None:
     the effective config, which the task snapshot does not cover.
     """
     return deps.dependent_params_hashes.get(name)
+
+
+def _runner_of(deps: WorkflowDeps, name: str) -> dict[str, JSONValue]:
+    """The journal's ``executor`` / ``worker_pid`` for a task about to run.
+
+    In-process executors run in this process; a ``process`` task's
+    ``worker_pid`` is written when a worker takes it.
+    """
+    executor = deps.executor_of(name)
+    if executor == "process":
+        return {"executor": executor}
+    return {"executor": executor, "worker_pid": os.getpid()}
 
 
 def _cache_is_active(deps: WorkflowDeps, name: str) -> bool:
@@ -160,8 +181,7 @@ class _PlanEngine:
         self.state = state
         self.deps = deps
         self.flows: dict[str, _EdgeFlow] = {
-            name: _EdgeFlow(pending=set(plan.in_sources.get(name, frozenset())))
-            for name in plan.task_names
+            name: _EdgeFlow(pending=self._sources(name)) for name in plan.task_names
         }
         self.running: dict[str, asyncio.Task[None]] = {}
         self.dead: set[str] = set()
@@ -169,11 +189,39 @@ class _PlanEngine:
 
     # ── Main loop ────────────────────────────────────────────────────────
 
-    async def run(self) -> None:
-        for entry in self.plan.entry_frontier:
-            if entry in self.plan.parallel_by_body:
+    def _sources(self, name: str) -> set[str]:
+        """The in-edges *name* waits on: all of them, or the selected ones."""
+        sources = set(self.plan.in_sources.get(name, frozenset()))
+        if self.state.selected:
+            # A partial rerun: sources outside the selection are seeded or
+            # excluded and will never fire; they are already satisfied.
+            sources &= self.state.selected
+        return sources
+
+    def _launchable(self, name: str) -> bool:
+        if name in self.state.excluded:
+            return False
+        return not self.state.selected or name in self.state.selected
+
+    def _start(self) -> None:
+        """Deliver the first triggers (or, for a partial rerun, launch the roots)."""
+        if not self.state.selected:
+            for entry in self.plan.entry_frontier:
+                if entry in self.plan.parallel_by_body:
+                    continue
+                self._fire(START, entry, NO_OUTPUT)
+            return
+        for name in self.plan.task_names:
+            if not self._launchable(name) or self.flows[name].pending:
                 continue
-            self._fire(START, entry, NO_OUTPUT)
+            par = self.plan.parallel_by_body.get(name)
+            if par is not None:
+                self._start_parallel(par)
+            else:
+                self._launch(name, preset=self.state.delivered.get(name, NO_OUTPUT))
+
+    async def run(self) -> None:
+        self._start()
         try:
             self._launch_ready()
             while self.running:
@@ -199,7 +247,7 @@ class _PlanEngine:
 
     def _fire(self, src: str, tgt: str, value: TaskOutput) -> None:
         """Deliver one trigger (optionally carrying *value*) along ``src → tgt``."""
-        if tgt == END_TARGET:
+        if tgt == END_TARGET or not self._launchable(tgt):
             return
         if (src, tgt) in self.plan.back_edges:
             # Cycle re-entry: re-launch the target directly, bypassing
@@ -218,6 +266,8 @@ class _PlanEngine:
         """Mark the edge ``src → tgt`` as never-firing; propagate task death."""
         if tgt == END_TARGET or (src, tgt) in self.plan.back_edges:
             # A dead back-edge is just a loop exit — the target already ran.
+            return
+        if not self._launchable(tgt):
             return
         flow = self.flows[tgt]
         flow.pending.discard(src)
@@ -261,6 +311,8 @@ class _PlanEngine:
         for name in self.plan.task_names:
             if name in self.running or name in self.plan.parallel_by_body:
                 continue
+            if not self._launchable(name):
+                continue
             flow = self.flows[name]
             if flow.pending or not flow.fired:
                 continue
@@ -276,19 +328,28 @@ class _PlanEngine:
                 continue  # a live upstream will record it; re-checked per event
             self._launch(name)
 
-    def _launch(self, name: str, extra_carried: dict[str, TaskOutput] | None = None) -> None:
+    def _launch(
+        self,
+        name: str,
+        extra_carried: dict[str, TaskOutput] | None = None,
+        *,
+        preset: TaskInput = NO_OUTPUT,
+    ) -> None:
         flow = self.flows[name]
         carried = dict(flow.carried)
         if extra_carried:
             carried.update(extra_carried)
         # Reset the wave so a later loop iteration coalesces afresh.
-        flow.pending = set(self.plan.in_sources.get(name, frozenset()))
+        flow.pending = self._sources(name)
         flow.fired = set()
         flow.carried = {}
 
         registration = self.deps.registration_by_name.get(name)
         delivered: TaskInput = NO_OUTPUT
-        if registration is not None and not registration.depends_on and carried:
+        if registration is not None and not registration.depends_on and preset is not NO_OUTPUT:
+            # A partial rerun's selected root: the value its record shows.
+            delivered = preset
+        elif registration is not None and not registration.depends_on and carried:
             # Values-on-edges delivery: a task with no declared data deps
             # receives the value(s) carried by its activating trigger(s) —
             # the loop-back / branch-routed input channel. The declared
@@ -305,6 +366,8 @@ class _PlanEngine:
         means the graph stalled; name the unsatisfiable dependencies."""
         for name in self.plan.task_names:
             if name in self.dead or name in self.plan.parallel_by_body:
+                continue
+            if not self._launchable(name):
                 continue
             flow = self.flows[name]
             if not flow.fired:
@@ -334,15 +397,39 @@ class _PlanEngine:
             # Body already produced its value (seed_outputs); skip running it
             # but still route as if it returned that value.
             return state.results.get(name)
-        mark_task_status(deps.journal_dir, name, "running")
         try:
+            # Resolved once here: the inputs record and the body share it, so
+            # a ``dependent_params`` function runs once per launch.
+            registration = deps.registration_by_name.get(name)
+            effective_config = (
+                _resolve_dependent_params(
+                    registration=registration, state=state, base_config=deps.config
+                )
+                if registration is not None
+                else deps.config
+            )
+            mark_task_status(
+                deps.journal_dir,
+                name,
+                "running",
+                inputs=input_fields(
+                    deps, state, name, delivered=delivered, effective_config=effective_config
+                )
+                if registration is not None
+                else None,
+                runner=_runner_of(deps, name),
+            )
             if _cache_is_active(deps, name):
                 # Opt-in content-addressed caching (batch Task only): on a hit
                 # the body is skipped + cached artifacts re-registered; on a
                 # miss the body runs and the result + artifact manifest are
                 # stored. Routing is identical to a plain return.
-                return await run_task_body_cached(name, deps, state, delivered=delivered)
-            return await run_task_body(name, deps, state, delivered=delivered)
+                return await run_task_body_cached(
+                    name, deps, state, delivered=delivered, effective_config=effective_config
+                )
+            return await run_task_body(
+                name, deps, state, delivered=delivered, effective_config=effective_config
+            )
         except Exception as exc:
             mark_task_status(
                 deps.journal_dir,
@@ -383,16 +470,18 @@ class _PlanEngine:
                 deps.journal_dir,
                 name,
                 "completed",
-                output=recorded_value,
+                output=output_fields(deps, state, name, recorded_value),
                 snapshot_key=_snapshot_key_of(deps, name),
                 dependent_params_hash=_dependent_params_hash_of(deps, name),
             )
         else:
             state.completed.add(name)
+            state.output_records.pop(name, None)
             mark_task_status(
                 deps.journal_dir,
                 name,
                 "completed",
+                output={} if deps.journal_dir is not None else None,
                 snapshot_key=_snapshot_key_of(deps, name),
                 dependent_params_hash=_dependent_params_hash_of(deps, name),
             )
@@ -460,7 +549,8 @@ class _PlanEngine:
                 continue
             par = self.plan.parallel_by_body.get(tgt)
             if par is not None and par.map_over == name:
-                self._start_parallel(par)
+                if self._launchable(tgt):
+                    self._start_parallel(par)
                 continue
             self._fire(name, tgt, value)
 
@@ -491,6 +581,15 @@ class _PlanEngine:
         body = par.body
         elements = list(state.results.get(par.map_over) or [])
         limiter = deps.parallel_limiters.get(body)
+        mark_task_status(
+            deps.journal_dir,
+            body,
+            "running",
+            inputs=input_fields(
+                deps, state, body, effective_config=deps.config, upstream=(par.map_over,)
+            ),
+            runner=_runner_of(deps, body),
+        )
 
         async def _one(element: TaskInput) -> TaskOutput:
             mark_task_status(deps.journal_dir, body, "running")
@@ -530,7 +629,7 @@ class _PlanEngine:
             deps.journal_dir,
             body,
             "completed",
-            output=ordered,
+            output=output_fields(deps, state, body, ordered),
             snapshot_key=_snapshot_key_of(deps, body),
             dependent_params_hash=_dependent_params_hash_of(deps, body),
         )

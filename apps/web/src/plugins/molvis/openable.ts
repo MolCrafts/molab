@@ -1,6 +1,8 @@
+import { isChemicalStructureName } from "@/lib/structure-files";
+
 /** Formats molvis-stage can load in-browser today. Not a file tree. */
 
-const TRAJECTORY = /\.(lammpstrj|lmptrj|lammpsdump|dump|xyz|extxyz|pdb)$/i;
+const TRAJECTORY = /\.(lammpstrj|lmptrj|lammpsdump|dump)$/i;
 const ZARR_GROUP = /(?:^|\/)(?:frame|trajectory|meta)\/zarr\.json$/i;
 
 const posix = (relPath: string): string => relPath.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -12,7 +14,8 @@ const isMlpZarrPath = (path: string, name: string): boolean =>
 const hasMrecAncestor = (path: string): boolean =>
   path.split("/").some((seg) => seg.endsWith(".mrec"));
 
-export const isMolvisTrajectoryName = (name: string): boolean => TRAJECTORY.test(name);
+export const isMolvisTrajectoryName = (name: string): boolean =>
+  isChemicalStructureName(name) || TRAJECTORY.test(name);
 
 /**
  * True when this file is a molvis-openable ``*.mrec`` store marker.

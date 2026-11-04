@@ -2,6 +2,8 @@ import type { ArtifactPromoteRequest } from "@/api/generated/models/ArtifactProm
 import type { ExecutionAttemptCreateRequest } from "@/api/generated/models/ExecutionAttemptCreateRequest";
 import type { RunCreateRequest } from "@/api/generated/models/RunCreateRequest";
 import type { RunFilesResponse } from "@/api/generated/models/RunFilesResponse";
+import type { RunPruneRequest } from "@/api/generated/models/RunPruneRequest";
+import type { RunPruneResponse } from "@/api/generated/models/RunPruneResponse";
 import { RunsService } from "@/api/generated/services/RunsService";
 
 export type { ArtifactResponse } from "@/api/generated/models/ArtifactResponse";
@@ -122,6 +124,12 @@ export const runsApi = {
     RunsService.listExecutionsWs(projectId, experimentId, runId, ws),
   cancelExecution: (projectId: string, experimentId: string, runId: string, executionId: string) =>
     RunsService.cancelExecution(projectId, experimentId, runId, executionId),
+  prune: (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    data: RunPruneRequest,
+  ): Promise<RunPruneResponse> => RunsService.pruneRunRoute(projectId, experimentId, runId, data),
   exportUrl: (projectId: string, experimentId: string, runId: string): string =>
     `/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}/export`,
 };

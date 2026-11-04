@@ -14,13 +14,18 @@ The local↔remote contract is intentionally narrow:
   excluding ``executions/`` and Python bytecode, so no other attempt on the
   remote side is overwritten by a stale local copy. It then uploads the one
   attempt being submitted, ``executions/<id>/``, which carries the QUEUED
-  ``execution.json`` the remote worker opens. The isolated namespace also
+  ``execution.json`` the remote worker opens. The run's ``values/`` store
+  rides the run-dir mirror; for a RESUME or a partial RERUN the predecessor's
+  journal (``executions/<based_on>/workflow.json``) is uploaded too, so the
+  worker seeds from the same records it would locally. The isolated namespace also
   receives the selected ancestor ``index.md`` records and workflow code/document;
   code bindings are rewritten only in a temporary staging copy. An existing
   Execution source snapshot takes precedence over the live entrypoint.
 * **Stage-out** pulls the remote ``executions/<id>/`` back **without** its
-  ``execution.json`` (products, logs, the per-attempt ``alive`` heartbeat),
-  then reads the remote ``execution.json`` and hands it to
+  ``execution.json`` (products, logs, the per-attempt ``alive`` heartbeat)
+  and the run's ``values/`` store (the content-addressed values the pulled
+  journal cites; rsync adds only the new files), then reads the remote
+  ``execution.json`` and hands it to
   :meth:`~molab.workspace.execution_repository.ExecutionRepository.merge_remote`.
   The plugin only moves bytes and decodes JSON; the workspace owns the record
   and decides how the worker's state and the local job ids combine. The
@@ -51,8 +56,10 @@ from molq import MolqError
 
 from molab.ids import hash_bytes
 from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionMode
 from molab.workspace.entity_record import ENTITY_FILENAME
 from molab.workspace.execution_repository import ExecutionRepository
+from molab.workspace.naming import VALUE_CONTAINER
 from molab.workspace.source_snapshot import SourceCaptureError, copy_sources, source_manifest
 from molab.workspace.targets import target_run_dir
 
@@ -87,6 +94,8 @@ class StagingFiles(Protocol):
     ) -> None: ...
 
     def read_text(self, path: str) -> str: ...
+
+    def exists(self, path: str) -> bool: ...
 
 
 def stage_in(
@@ -137,6 +146,7 @@ def stage_in(
         recursive=True,
         exclude=_RSYNC_EXCLUDES,
     )
+    _stage_predecessor_journal(transport, mol_run, execution_id, src, dst)
 
     # One private workspace namespace per run: concurrent runs never overwrite
     # each other's workflow binding. Only selected ancestor metadata is staged.
@@ -213,6 +223,25 @@ def stage_in(
             transport.upload(str(bundle / relative_record), str(remote))
 
 
+def _stage_predecessor_journal(
+    transport: StagingFiles, mol_run: Run, execution_id: str, src: str, dst: str
+) -> None:
+    """Upload the journal a RESUME / partial RERUN seeds from, when there is one."""
+    record = mol_run.execution(execution_id)
+    based_on = record.based_on_execution_id
+    seeded = record.mode is ExecutionMode.RESUME or (
+        record.mode is ExecutionMode.RERUN and bool(record.selected_tasks)
+    )
+    if not based_on or not seeded:
+        return
+    journal = Path(src) / "executions" / based_on / "workflow.json"
+    if not journal.is_file():
+        return
+    remote_dir = f"{dst}/executions/{based_on}"
+    transport.mkdir(remote_dir, parents=True, exist_ok=True)
+    transport.upload(str(journal), f"{remote_dir}/workflow.json")
+
+
 def stage_out(
     transport: StagingFiles,
     mol_run: Run,
@@ -267,6 +296,7 @@ def stage_out(
             recursive=True,
             exclude=(*_RSYNC_EXCLUDES, "execution.json"),
         )
+        _pull_values(transport, remote_run, local_run)
         text = transport.read_text(f"{remote_exec}/execution.json")
     except MolqError as exc:
         if exc.outcome == "unknown":
@@ -286,6 +316,16 @@ def stage_out(
         fs=workspace.fs,
     ).merge_remote(execution_id, json.loads(text))
     return True
+
+
+def _pull_values(transport: StagingFiles, remote_run: str, local_run: str) -> None:
+    """Pull the run's ``values/`` store back; a remote run without one has nothing to pull."""
+    remote_values = f"{remote_run}/{VALUE_CONTAINER}"
+    if not transport.exists(remote_values):
+        return
+    local_values = Path(local_run) / VALUE_CONTAINER
+    local_values.mkdir(parents=True, exist_ok=True)
+    transport.download(remote_values, str(local_values), recursive=True, exclude=_RSYNC_EXCLUDES)
 
 
 __all__ = ["StagingFiles", "stage_in", "stage_out"]

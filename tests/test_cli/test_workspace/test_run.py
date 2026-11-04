@@ -835,6 +835,73 @@ class TestRun:
         assert "No runs resumed." in output
         assert len(_only_run(tmp_path).executions) == 2
 
+    def test_rerun_task_reruns_only_the_selected_task(self, tmp_path: Path) -> None:
+        script = _write_script(tmp_path)
+        exit_code, output = _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        assert exit_code == 1, output
+        _heal(tmp_path)
+
+        exit_code, output = _molab(
+            "run", str(script), "--rerun", "--task", "stage_b", "--local", "-ws", str(tmp_path)
+        )
+
+        assert exit_code == 0, output
+        run = _only_run(tmp_path)
+        second = run.execution("e02")
+        assert second.mode.value == "rerun"
+        assert second.selected_tasks == ("stage_b",)
+        assert second.status.value == "succeeded"
+        assert (tmp_path / "result.txt").read_text() == "200"
+        journal = json.loads((run.execution_dir("e02") / "workflow.json").read_text())
+        assert journal["selected_tasks"] == ["stage_b"]
+        assert set(journal["seeded_from"]) == {"stage_a"}
+
+    @pytest.mark.parametrize("executor", ["inline", "process"])
+    def test_executor_is_recorded_and_used(self, tmp_path: Path, executor: str) -> None:
+        script = _write_script(tmp_path)
+        _heal(tmp_path)
+
+        exit_code, output = _molab(
+            "run", str(script), "--executor", executor, "--local", "-ws", str(tmp_path)
+        )
+
+        assert exit_code == 0, output
+        run = _only_run(tmp_path)
+        assert run.execution("e01").executor["task_executor"] == executor
+        journal = json.loads((run.execution_dir("e01") / "workflow.json").read_text())
+        assert {task["executor"] for task in journal["task_configs"]} == {executor}
+        assert (tmp_path / "result.txt").read_text() == "200"
+
+    def test_unknown_executor_is_refused(self, tmp_path: Path) -> None:
+        script = _write_script(tmp_path)
+        exit_code, output = _molab(
+            "run", str(script), "--executor", "gpu", "--local", "-ws", str(tmp_path)
+        )
+        assert exit_code == 1, output
+        assert "--executor" in output
+
+    def test_task_without_rerun_is_refused(self, tmp_path: Path) -> None:
+        script = _write_script(tmp_path)
+        exit_code, output = _molab(
+            "run", str(script), "--task", "stage_b", "--local", "-ws", str(tmp_path)
+        )
+        assert exit_code == 1, output
+        assert "--rerun" in output
+
+    def test_rerun_task_with_an_unknown_task_fails_the_attempt(self, tmp_path: Path) -> None:
+        script = _write_script(tmp_path)
+        _molab("run", str(script), "--local", "-ws", str(tmp_path))
+
+        exit_code, output = _molab(
+            "run", str(script), "--rerun", "--task", "nope", "--local", "-ws", str(tmp_path)
+        )
+
+        assert exit_code == 1, output
+        assert "nope" in output
+        second = _only_run(tmp_path).execution("e02")
+        assert second.status.value == "failed"
+        assert "nope" in second.error["message"]
+
     def test_one_failed_run_of_two_exits_1(self, tmp_path: Path) -> None:
         script = tmp_path / "split.py"
         script.write_text(_SPLIT_SCRIPT, encoding="utf-8")
@@ -969,12 +1036,12 @@ class TestFailureDetail:
 
 # ── _submit_to_scheduler ──────────────────────────────────────────────────────
 # Moved verbatim from arch-own-02d's tests/test_cli/test_workspace/test_run_submit.py
-# (SubmitSpy / SchedulerFixture / _install_fake_submitor / scheduler_fixture).
+# (SubmitSpy / SchedulerFixture / _install_fake_molq / scheduler_fixture).
 
 
 @dataclass
 class SubmitSpy:
-    """What the fake ``Submitor`` saw inside ``submit_job``."""
+    """What the fake molq cluster saw when the job was submitted."""
 
     submits: int = 0
     execution_id: str | None = None
@@ -990,7 +1057,7 @@ class SchedulerFixture:
     spy: SubmitSpy
 
 
-def _install_fake_submitor(monkeypatch: pytest.MonkeyPatch, run: Run) -> SubmitSpy:
+def _install_fake_molq(monkeypatch: pytest.MonkeyPatch, run: Run) -> SubmitSpy:
     spy = SubmitSpy()
 
     class _FakeJob:
@@ -1064,7 +1131,7 @@ def scheduler_fixture(
     monkeypatch.setattr(
         "molab.plugins.submit_molq.metadata.supported_schedulers", lambda: ("local",)
     )
-    spy = _install_fake_submitor(monkeypatch, run)
+    spy = _install_fake_molq(monkeypatch, run)
     try:
         yield SchedulerFixture(ws=ws, run=run, script=script, spy=spy)
     finally:

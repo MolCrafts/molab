@@ -11,7 +11,17 @@ from pathlib import Path
 
 import pytest
 
-from molab.knowledge import Finding, Literature, Note, Observation, Plan, Report
+from molab.knowledge import (
+    Finding,
+    Literature,
+    Milestone,
+    Note,
+    Observation,
+    Plan,
+    Report,
+    Roadmap,
+    Todo,
+)
 from molab.knowledge.concepts import _product
 
 _EXPECTED: tuple[tuple[str, type], ...] = (
@@ -20,6 +30,9 @@ _EXPECTED: tuple[tuple[str, type], ...] = (
     ("Report", Report),
     ("Finding", Finding),
     ("Plan", Plan),
+    ("Roadmap", Roadmap),
+    ("Todo", Todo),
+    ("Milestone", Milestone),
     ("Observation", Observation),
 )
 
@@ -35,7 +48,10 @@ class TestParseKnowledgeClass:
 
         message = str(excinfo.value)
         assert "unknown knowledge class 'Chart'" in message
-        assert "Finding, Literature, Note, Observation, Plan, Report" in message
+        assert (
+            "Finding, Literature, Milestone, Note, Observation, Plan, Report, Roadmap, Todo"
+            in message
+        )
 
 
 class TestSourcedKnowledgeSources:

@@ -242,6 +242,10 @@ class ExecutionResponse(ApiModel):
     environment: dict[str, Any] = Field(default_factory=dict)
     artifactIds: list[str] = Field(default_factory=list)
     error: dict[str, Any] | None = None
+    selectedTasks: list[str] = Field(
+        default_factory=list,
+        description="Tasks a partial rerun re-executes; empty when the attempt runs every task.",
+    )
 
 
 def workspace_relative(root: object, full: object) -> str:
@@ -349,6 +353,7 @@ class RunResponse(ApiModel):
                 environment=rec.environment,
                 artifactIds=list(rec.artifact_ids),
                 error=rec.error,
+                selectedTasks=list(rec.selected_tasks),
             )
             for rec in records
         ]

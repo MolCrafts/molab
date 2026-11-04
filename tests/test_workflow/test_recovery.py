@@ -280,7 +280,8 @@ class TestKindDispatch:
         )
         _ws, exp, run = _seed(tmp_path)
         exp.bind_workflow("code", entrypoint=f"{script}:wf")
-        assert compiled_workflow_for_run(run).name == "script-demo"
+        with pytest.warns(UserWarning, match="zero tasks"):
+            assert compiled_workflow_for_run(run).name == "script-demo"
 
     def test_code_package_locator_resolves_build_workflow(self, tmp_path: Path) -> None:
         default_binding_registry.clear()
@@ -298,7 +299,8 @@ class TestKindDispatch:
         )
         _ws, exp, run = _seed(tmp_path)
         exp.bind_workflow("code", entrypoint=f"{tmp_path}/pkgA/workflow:build_workflow")
-        assert compiled_workflow_for_run(run).name == "wf-one"
+        with pytest.warns(UserWarning, match="zero tasks"):
+            assert compiled_workflow_for_run(run).name == "wf-one"
 
     def test_code_without_locator_or_memo_asks_to_re_run(self, tmp_path: Path) -> None:
         default_binding_registry.clear()

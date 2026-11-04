@@ -193,3 +193,37 @@ def test_asset_download_reads_bounded_ranges(served, fresh_run, tmp_path, monkey
             assert response.status_code == 200, response.text
             assert response.content == payload
     assert len(ranges) >= 8
+
+
+class TestImportProjectAsset:
+    """``POST /projects/{p}/assets`` — the HTTP twin of ``molab asset import``."""
+
+    def test_registers_a_workspace_file(self, served, tmp_path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        project = ws.add_project("p")
+        (tmp_path / "lab" / "pbix-br.pdb").write_text("ATOM\n")
+        with served(ws) as client:
+            created = client.post(
+                f"/api/projects/{project.id}/assets",
+                json={"name": "pbix-br", "path": "pbix-br.pdb"},
+            )
+        assert created.status_code == 201, created.text
+        version = project.data_assets.versions(created.json()["id"])[0]
+        assert version.origin.location.endswith("payload.pdb")
+        assert version.metadata == {"filename": "pbix-br.pdb"}
+
+    def test_refuses_a_path_outside_the_served_directory(self, served, tmp_path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        project = ws.add_project("p")
+        (tmp_path / "outside.txt").write_text("x")
+        with served(ws) as client:
+            response = client.post(
+                f"/api/projects/{project.id}/assets", json={"name": "x", "path": "../outside.txt"}
+            )
+        assert response.status_code == 422, response.text

@@ -74,9 +74,7 @@ def molq_destination(tmp_path, monkeypatch):
     root = tmp_path / "remote"
     root.mkdir()
     with Molq(registry=tmp_path / "molq.db") as client:
-        cluster = client.clusters.register(
-            name="files", scheduler="shell", target_root=str(tmp_path / "jobs")
-        )
+        cluster = client.clusters.register(name="files", scheduler="shell")
         registry = client.rpc("molq.hello")["registry_id"]
 
         def owned(expected=None):

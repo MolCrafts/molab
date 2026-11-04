@@ -27,7 +27,13 @@ from molab.workspace import tracking
 
 from ..protocols import JSONMapping, JSONValue, TaskInput, TaskOutput
 from ..types import UnknownTaskError
-from .node import NO_OUTPUT, _collect_upstream_outputs, run_task_body, take_task_metrics
+from .node import (
+    _UNRESOLVED_CONFIG,
+    NO_OUTPUT,
+    _collect_upstream_outputs,
+    run_task_body,
+    take_task_metrics,
+)
 from .node_params import _resolve_dependent_params
 from .state import WorkflowDeps, WorkflowState
 
@@ -320,6 +326,7 @@ async def run_task_body_cached(
     state: WorkflowState,
     *,
     delivered: TaskInput = NO_OUTPUT,
+    effective_config: JSONMapping | None = _UNRESOLVED_CONFIG,
 ) -> TaskOutput:
     """Run task *name*'s body with content-addressed result caching.
 
@@ -329,7 +336,8 @@ async def run_task_body_cached(
     * collect the upstream inputs once and resolve the task's effective
       config once (profile data plus the ``dependent_params`` overlay value —
       the user's function runs exactly once per execution, on a hit too, since
-      the key needs its value); wrap them — together with any engine-injected
+      the key needs its value; the engine passes it in as *effective_config*
+      when it already resolved it); wrap them — together with any engine-injected
       root inputs for this task (sweep params; the workdir Path is
       canonicalized out) — as the cache ``inputs`` payload. The profile name
       and the execution location are not part of the key;
@@ -356,11 +364,12 @@ async def run_task_body_cached(
     assert cache is not None and snapshot is not None  # caller-gated
 
     inputs = _collect_upstream_outputs(registration, state)
-    effective_config = _resolve_dependent_params(
-        registration=registration,
-        state=state,
-        base_config=deps.config,
-    )
+    if effective_config is _UNRESOLVED_CONFIG:
+        effective_config = _resolve_dependent_params(
+            registration=registration,
+            state=state,
+            base_config=deps.config,
+        )
     cache_inputs = _cache_inputs(name, state, inputs, delivered, config=effective_config)
     cacheable = _is_json_safe(cache_inputs)
 

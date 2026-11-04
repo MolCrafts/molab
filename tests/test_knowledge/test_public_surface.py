@@ -41,7 +41,16 @@ REQUIRED_PUBLIC: tuple[str, ...] = (
     "GeneratedPart",
     "GeneratedParts",
     "Plan",
+    "Roadmap",
+    "Todo",
+    "Milestone",
     "Observation",
+    "Delegation",
+    "DelegationRecord",
+    "PlanningDocument",
+    "Campaign",
+    "campaign_of",
+    "check_campaign",
     "SourceRef",
     "KnowledgeNotFoundError",
 )
@@ -61,10 +70,19 @@ PINNED_ALL: frozenset[str] = frozenset(
         "KnowledgeSourceStore",
         "Literature",
         "Note",
+        "Campaign",
+        "Delegation",
+        "DelegationRecord",
+        "Milestone",
         "Observation",
         "Plan",
+        "PlanningDocument",
         "ReferenceMeta",
         "Report",
+        "Roadmap",
+        "Todo",
+        "campaign_of",
+        "check_campaign",
         "SearchHit",
         "SearchResult",
         "SourceKind",
@@ -197,7 +215,7 @@ class TestTheInformationARefMustYield:
 
 
 class TestPublicAll:
-    """``molab.knowledge.__all__`` is the Knowledge handle plus six subclasses."""
+    """``molab.knowledge.__all__`` is the Knowledge handle plus the document classes."""
 
     @pytest.mark.parametrize("name", REQUIRED_PUBLIC)
     def test_name_is_exported(self, name: str) -> None:

@@ -29,6 +29,7 @@
     "@molcrafts/molplot": "^0.1.6",
     "@molcrafts/molwasm": "^0.20.0",
     "@molcrafts/molvis-core": "file:../../../molvis/core",
+    "@molcrafts/molvis-sketch": "file:../../../molvis/sketch",
     "@molcrafts/molvis-stage": "file:../../../molvis/stage",
     "@molcrafts/ui": "^0.1.0-alpha.1",
     "@molcrafts/ui-markdown": "file:../../../molcrafts-ui/packages/markdown",

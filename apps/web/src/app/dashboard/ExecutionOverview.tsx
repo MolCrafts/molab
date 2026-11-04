@@ -274,7 +274,7 @@ export const ExecutionOverview = ({
         </Instrument>
 
         <Instrument
-          title="Needs attention"
+          title="Attention"
           figure={
             <span className={cn(flagged.length > 0 && "text-status-failed-foreground")}>
               {flagged.length}
@@ -311,7 +311,7 @@ export const ExecutionOverview = ({
         </Instrument>
 
         <Instrument
-          title="Run duration"
+          title="Duration"
           figure={median === null ? "—" : formatSpan(median)}
           caption={
             median === null ? undefined : (

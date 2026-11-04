@@ -195,6 +195,24 @@ class TestStageIn:
         )
         assert f"{dst}/executions/e01" in transport.mkdirs
 
+    def test_resume_uploads_the_predecessor_journal(self, tmp_path: Path) -> None:
+        from molab.workspace.domain import ExecutionMode, ExecutionStatus
+
+        ws, run = _make_run(tmp_path)
+        run._create_execution()
+        _repo(ws, run).seal("e01", ExecutionStatus.FAILED, error={"type": "X", "message": "x"})
+        journal = Path(run.run_dir) / "executions" / "e01" / "workflow.json"
+        journal.write_text("{}")
+        run._create_execution(mode=ExecutionMode.RESUME)
+        transport = FakeTransport()
+
+        stage_in(transport, run, _remote_target(), "e02")
+
+        dst = transport.uploads[0][1]
+        assert (str(journal), f"{dst}/executions/e01/workflow.json", False, ()) in (
+            transport.uploads
+        )
+
 
 class TestStageOut:
     def test_noop_when_remote_dir_equals_run_dir(
@@ -209,6 +227,19 @@ class TestStageOut:
 
         assert transport.downloads == []
         assert result is True
+
+    def test_remote_pulls_the_attempt_dir_and_the_value_store(self, tmp_path: Path) -> None:
+        ws, run = _make_run(tmp_path)
+        remote_run = target_run_dir(_remote_target(), ws, run)
+        transport = FakeTransport(existing={f"{remote_run}/values"})
+
+        stage_out(transport, run, _remote_target(), "exec-abc")
+
+        assert [d[0] for d in transport.downloads] == [
+            f"{remote_run}/executions/exec-abc",
+            f"{remote_run}/values",
+        ]
+        assert transport.downloads[1][1] == str(Path(run.run_dir).resolve() / "values")
 
     def test_remote_pulls_only_the_attempt_dir(self, tmp_path: Path) -> None:
         _ws, run = _make_run(tmp_path)

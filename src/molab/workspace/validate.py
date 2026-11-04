@@ -31,6 +31,7 @@ does not quietly become storage (``scratch.stale``, D90).
 from __future__ import annotations
 
 import json
+import posixpath
 import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -61,6 +62,8 @@ from .naming import (
     PROJECT_CONTAINER,
     RUN_CONTAINER,
     SCRATCH_CONTAINER,
+    VALUE_CONTAINER,
+    VALUE_FILE_RE,
     WORKFLOW_SCRIPT_FILENAME,
     run_slug,
 )
@@ -74,8 +77,8 @@ if TYPE_CHECKING:
 Severity = Literal["error", "warning"]
 
 #: A position in the tree whose entries have a closed set of legal names.
-#: The four record levels, the three child containers, an attempt container
-#: and one attempt.
+#: The four record levels, the three child containers, an attempt container,
+#: one attempt, and a run's value store.
 Level = Literal[
     "workspace",
     "project",
@@ -86,6 +89,7 @@ Level = Literal[
     "runs",
     "executions",
     "execution",
+    "values",
 ]
 
 #: The levels that host records (and may host a container declared through
@@ -141,6 +145,10 @@ _RULE_HINTS: dict[str, str] = {
         "Rename the experiment directory to its kebab-case slug (no prefix), then "
         "run `molab index sync`."
     ),
+    "experiment.absolute_entrypoint": (
+        "Rebind the code workflow with a path relative to the experiment directory "
+        "(e.g. workflow.py:wf); an absolute path names one machine's checkout."
+    ),
     "run.entity": (
         "No index.md record with type workspace.run. Create runs with "
         "`molab runs create PROJECT EXPERIMENT --params '{...}'`; do not leave a "
@@ -180,6 +188,11 @@ _RULE_HINTS: dict[str, str] = {
         "<experiment>/scratch/, record finished results with `molab runs adopt`, "
         "and move or remove anything else."
     ),
+    "values.name": (
+        "A run's values/ holds only the content-addressed records molab writes "
+        "(<sha256-hex>.json / .pkl). Remove anything else; never edit a value in "
+        "place, its name is its digest."
+    ),
     "scratch.stale": (
         "scratch/ holds quick tests only. Clear old entries with "
         "`molab scratch clean --older-than 14d`; anything worth keeping becomes a "
@@ -215,7 +228,7 @@ def _legal_names(level: str) -> tuple[frozenset[str], frozenset[str]]:
             frozenset({INDEX_FILENAME, WORKFLOW_SCRIPT_FILENAME, WORKFLOW_DOC_FILENAME}),
         )
     if level == "run":
-        return frozenset({EXECUTION_CONTAINER}), frozenset({INDEX_FILENAME})
+        return frozenset({EXECUTION_CONTAINER, VALUE_CONTAINER}), frozenset({INDEX_FILENAME})
     if level == "execution":
         return execution_dir_names(), ATTEMPT_FILES
     raise ValueError(f"unknown level {level!r}")
@@ -236,7 +249,8 @@ def classify_entry(
         level: A :data:`Level` — a record level (``workspace`` / ``project`` /
             ``experiment`` / ``run``), a child container (``projects`` /
             ``experiments`` / ``runs``), the attempt container
-            (``executions``) or one attempt (``execution``).
+            (``executions``), one attempt (``execution``) or a run's value
+            store (``values``).
         name: The entry's name.
         is_dir: Whether the entry is a directory.
         extra: Level -> extra directory names a layer above workspace declares
@@ -245,7 +259,9 @@ def classify_entry(
     Returns:
         ``None`` when the entry is legal. Otherwise ``layout.stray``, or, under
         ``executions/``, ``execution.legacy_name`` (a legacy UUID attempt) /
-        ``execution.name`` (any other non-attempt directory).
+        ``execution.name`` (any other non-attempt directory); under
+        ``values/``, ``values.name`` (anything but a ``<sha256-hex>.json`` /
+        ``.pkl`` file).
 
     Raises:
         ValueError: *level* is not a known level.
@@ -261,6 +277,8 @@ def classify_entry(
         if _LEGACY_EXECUTION_RE.match(name):
             return "execution.legacy_name"
         return "execution.name"
+    if level == VALUE_CONTAINER:
+        return None if not is_dir and VALUE_FILE_RE.match(name) else "values.name"
     directories, files = _legal_names(level)
     if is_dir and (name in directories or name in extra.get(level, frozenset())):
         return None
@@ -587,15 +605,33 @@ class _Checker:
             if _EXECUTION_RE.match(entry.name):
                 self._check_attempt_id(attempt)
             self._check_level(attempt, "execution")
+        self._check_level(self._fs.join(path, VALUE_CONTAINER), VALUE_CONTAINER)
 
     def _check_experiment(self, path: str) -> None:
-        self._check_concept(path, "experiment")
+        record = self._check_concept(path, "experiment")
+        if record is not None:
+            self._check_entrypoint(path, record)
         self._check_level(path, "experiment")
         self._check_scratch(path)
         runs_dir = self._fs.join(path, RUN_CONTAINER)
         for entry in self._check_level(runs_dir, RUN_CONTAINER):
             if entry.is_dir:
                 self._check_run(self._fs.join(runs_dir, entry.name))
+
+    def _check_entrypoint(self, path: str, record: EntityRecord) -> None:
+        """A code workflow's file is named relative to its experiment, so the tree can move."""
+        locator = record.canonical.get("workflow_entrypoint")
+        if not isinstance(locator, str) or locator == "":
+            return
+        file_part = locator.rsplit(":", 1)[0] if ":" in locator.lstrip("/") else locator
+        if posixpath.isabs(file_part):
+            self._add(
+                path,
+                "experiment.absolute_entrypoint",
+                f"workflow_entrypoint {locator!r} is an absolute path; it breaks when the "
+                "workspace is moved or cloned",
+                severity="warning",
+            )
 
     def _check_project(self, path: str) -> None:
         self._check_concept(path, "project")

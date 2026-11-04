@@ -9,6 +9,8 @@ import type { DocCreateRequest } from '../models/DocCreateRequest';
 import type { DocMediaResponse } from '../models/DocMediaResponse';
 import type { DocMetaUpdate } from '../models/DocMetaUpdate';
 import type { DocMoveRequest } from '../models/DocMoveRequest';
+import type { DocRecordResponse } from '../models/DocRecordResponse';
+import type { DocRecordUpdate } from '../models/DocRecordUpdate';
 import type { EmbedRequest } from '../models/EmbedRequest';
 import type { EmbedResponse } from '../models/EmbedResponse';
 import type { EntityBacklinksResponse } from '../models/EntityBacklinksResponse';
@@ -156,7 +158,7 @@ export class KnowledgeService {
     }
     /**
      * Create Doc
-     * Create one of the six classes under *hostPath* (the workspace root when omitted).
+     * Create one knowledge class under *hostPath* (the workspace root when omitted).
      * @param requestBody
      * @param molabSession
      * @returns NoteSummary Successful Response
@@ -181,7 +183,7 @@ export class KnowledgeService {
     }
     /**
      * Edit Doc
-     * Rewrite a document's narrative — ``Knowledge.write`` for all six classes.
+     * Rewrite a document's narrative — ``Knowledge.write`` for every knowledge class.
      * @param path The note Concept's workspace-relative document path (its identity).
      * @param requestBody
      * @param molabSession
@@ -302,7 +304,7 @@ export class KnowledgeService {
     }
     /**
      * Update Doc Meta
-     * Update a document's tags/status — ``Knowledge.write`` for all six classes.
+     * Update a document's tags/status — ``Knowledge.write`` for every knowledge class.
      * @param path The note Concept's workspace-relative document path (its identity).
      * @param requestBody
      * @param molabSession
@@ -317,6 +319,66 @@ export class KnowledgeService {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/knowledge/doc/meta',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'path': path,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Get Doc Record
+     * A document's structured record and its file digest (for ``ifMatch``).
+     * @param path The document's workspace-relative path (its identity).
+     * @param molabSession
+     * @returns DocRecordResponse Successful Response
+     * @throws ApiError
+     */
+    public static getDocRecord(
+        path: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<DocRecordResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/doc/record',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Replace Doc Record
+     * Replace a document's structured record whole — 409 when ``ifMatch`` is stale.
+     *
+     * Only classes that own a record (Delegation, Roadmap, Todo, Milestone) accept
+     * it (422 otherwise, and for a record the class rejects). The change is
+     * recorded in the workspace history as ``knowledge.record_replaced``.
+     * @param path The document's workspace-relative path (its identity).
+     * @param requestBody
+     * @param molabSession
+     * @returns DocRecordResponse Successful Response
+     * @throws ApiError
+     */
+    public static replaceDocRecord(
+        path: string,
+        requestBody: DocRecordUpdate,
+        molabSession?: (string | null),
+    ): CancelablePromise<DocRecordResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/knowledge/doc/record',
             cookies: {
                 'molab_session': molabSession,
             },

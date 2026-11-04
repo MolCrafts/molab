@@ -61,6 +61,16 @@ def _hook(guard: Path, mode: str, event: dict[str, Any]) -> dict[str, Any] | Non
     return json.loads(done.stdout) if done.stdout.strip() else None
 
 
+@pytest.fixture(autouse=True)
+def _isolated_hook_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hook keeps per-session state under ``$XDG_CACHE_HOME/molab-guard``.
+
+    A shared cache lets a fixed session id carry roots from earlier test runs
+    (pytest keeps recent temp dirs), so a later ``stop`` re-checks an old lab.
+    """
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
+
 @pytest.fixture
 def lab(tmp_path: Path) -> Path:
     ws = Workspace(tmp_path / "lab")

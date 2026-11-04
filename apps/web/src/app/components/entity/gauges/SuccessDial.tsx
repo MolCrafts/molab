@@ -77,9 +77,6 @@ export const SuccessDial = ({ counts, onPick, className }: SuccessDialProps): JS
             <span className="text-title font-normal text-muted-foreground">%</span>
           ) : null}
         </span>
-        <span className="mt-1 text-micro text-muted-foreground">
-          {share === null ? "in flight" : "success"}
-        </span>
       </div>
     </div>
   );

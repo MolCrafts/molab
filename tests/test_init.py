@@ -36,9 +36,26 @@ class _FakeExecutor:
         fresh=False,
         checkpoint=None,
         execution_id=None,
+        resume_from=None,
+        only=(),
+        executor=None,
+        max_workers=None,
     ):
         self.calls.append(
-            ("execute", run, workflow, resume, rerun, fresh, checkpoint, execution_id)
+            (
+                "execute",
+                run,
+                workflow,
+                resume,
+                rerun,
+                fresh,
+                checkpoint,
+                execution_id,
+                resume_from,
+                only,
+                executor,
+                max_workers,
+            )
         )
         return "sync"
 
@@ -52,9 +69,26 @@ class _FakeExecutor:
         fresh=False,
         checkpoint=None,
         execution_id=None,
+        resume_from=None,
+        only=(),
+        executor=None,
+        max_workers=None,
     ):
         self.calls.append(
-            ("aexecute", run, workflow, resume, rerun, fresh, checkpoint, execution_id)
+            (
+                "aexecute",
+                run,
+                workflow,
+                resume,
+                rerun,
+                fresh,
+                checkpoint,
+                execution_id,
+                resume_from,
+                only,
+                executor,
+                max_workers,
+            )
         )
         return "async"
 
@@ -91,12 +125,17 @@ class TestLazyRunExecutor:
         proxy = molab._LazyRunExecutor(load=lambda: fake)
         run, wf = object(), object()
 
-        assert proxy.execute(run, wf, rerun=True, fresh=True) == "sync"  # type: ignore[arg-type]
+        assert (
+            proxy.execute(
+                run, wf, rerun=True, fresh=True, only=("b",), executor="process", max_workers=3
+            )
+            == "sync"
+        )  # type: ignore[arg-type]
         assert asyncio.run(proxy.aexecute(run, None, resume=True)) == "async"  # type: ignore[arg-type]
 
         assert fake.calls == [
-            ("execute", run, wf, False, True, True, None, None),
-            ("aexecute", run, None, True, False, False, None, None),
+            ("execute", run, wf, False, True, True, None, None, None, ("b",), "process", 3),
+            ("aexecute", run, None, True, False, False, None, None, None, (), None, None),
         ]
 
     def test_default_loader_imports_workflow_on_first_call(self, tmp_path: Path) -> None:

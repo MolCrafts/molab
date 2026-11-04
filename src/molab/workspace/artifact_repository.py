@@ -22,7 +22,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, cast, get_args
+from typing import TYPE_CHECKING, NamedTuple, cast, get_args
 
 from pydantic import BaseModel, ConfigDict
 
@@ -407,6 +407,10 @@ class AssetRepository:
     ) -> Asset:
         """Import bytes as a new asset with one import version.
 
+        A copied or moved file keeps its extension (``payload.pdf``), and the
+        version records its media type and original file name, so a reader
+        knows what the bytes are without opening them.
+
         Args:
             name: Display title and slug source.
             src: File or directory to import.
@@ -428,8 +432,11 @@ class AssetRepository:
             raise FileNotFoundError(f"Source path does not exist: {src}")
         if action not in get_args(ImportAction):
             raise ValueError(f"Unknown import action: {action!r}")
+        described = _described(source)
         with self._assets_lock():
-            return self._import_locked(name, source, action, meta or {}, tuple(consumed or ()))
+            return self._import_locked(
+                name, source, action, meta or {}, tuple(consumed or ()), described
+            )
 
     def register_in_place(
         self,
@@ -464,8 +471,9 @@ class AssetRepository:
             relative = source.relative_to(Path(self.scope_dir).resolve())
         except ValueError:
             raise ValueError(f"{source} is not under {self.scope_dir}") from None
+        described = _described(source)
         with self._assets_lock():
-            return self._register_locked(name, source, relative.as_posix(), meta or {})
+            return self._register_locked(name, source, relative.as_posix(), meta or {}, described)
 
     def _require_local(self) -> None:
         if not isinstance(self.fs, LocalFS):
@@ -485,11 +493,13 @@ class AssetRepository:
         action: ImportAction,
         tags: dict[str, str],
         input_ids: tuple[str, ...],
+        described: _Description,
     ) -> Asset:
         slug = self._free_slug(name)
         asset_root = self.fs.join(self.assets_dir, slug)
-        payload = self.fs.join(asset_root, "payload")
-        location = None if action == "reference" else f"assets/{slug}/payload"
+        stored = f"payload{source.suffix}" if source.is_file() else "payload"
+        payload = self.fs.join(asset_root, stored)
+        location = None if action == "reference" else f"assets/{slug}/{stored}"
         # Resolve while *source* still exists. ``move`` deletes it, and a
         # symlink would otherwise stop resolving to its target.
         uri = str(source.resolve())
@@ -509,6 +519,7 @@ class AssetRepository:
                 location=location,
                 input_ids=input_ids,
                 content=content,
+                described=described,
             )
             self._write_import(asset_root, asset, version)
         except Exception:
@@ -524,6 +535,7 @@ class AssetRepository:
         source: Path,
         location: str,
         tags: dict[str, str],
+        described: _Description,
     ) -> Asset:
         slug = self._free_slug(name)
         asset_root = self.fs.join(self.assets_dir, slug)
@@ -536,6 +548,7 @@ class AssetRepository:
                 location=location,
                 input_ids=(),
                 content=content_ref(self.fs, source),
+                described=described,
             )
             self._write_import(asset_root, asset, version)
         except Exception:
@@ -555,6 +568,7 @@ class AssetRepository:
         location: str | None,
         input_ids: tuple[str, ...],
         content: ContentRef | None,
+        described: _Description,
     ) -> tuple[Asset, AssetVersion]:
         now = datetime.now(UTC)
         asset_id = generate_uuid7()
@@ -574,6 +588,8 @@ class AssetRepository:
             version=1,
             created_at=now,
             created_by=SYSTEM_AGENT,
+            media_type=described.media_type,
+            metadata=described.metadata,
         )
         return asset, version
 
@@ -1005,9 +1021,9 @@ def walk_artifacts(
 ) -> Iterator[ArtifactLocation]:
     """Yield every emitted Artifact with the execution that holds it.
 
-    Walks ``list_projects``, then ``list_experiments``, then ``list_runs``,
-    then each run's executions. ``project_id`` skips every other project
-    and does not descend into it. A :meth:`Run.artifact_location` ``ValueError``
+    Walks every run at or below the served node (a workspace, or a project,
+    experiment or run opened by ``molab serve``), then each run's executions.
+    ``project_id`` keeps only that project's runs. A :meth:`Run.artifact_location` ``ValueError``
     sets ``location`` to ``None`` and the walk continues.
 
     Args:
@@ -1017,27 +1033,30 @@ def walk_artifacts(
     Returns:
         One :class:`ArtifactLocation` per Artifact record, in tree order.
     """
-    for project in workspace.list_projects():
-        if project_id is not None and project.id != project_id:
+    from .folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_PROJECT_KIND
+    from .run import Run
+    from .scope import as_folder, descendants
+
+    for run in descendants(as_folder(workspace), Run):
+        owner = run.ancestor_id(WORKSPACE_PROJECT_KIND)
+        if project_id is not None and owner != project_id:
             continue
-        for experiment in project.list_experiments():
-            for run in experiment.list_runs():
-                for execution in run.executions:
-                    execution_dir = str(run.execution_dir(execution.id))
-                    for artifact in execution.artifacts:
-                        try:
-                            location = run.artifact_location(execution.id, artifact)
-                        except ValueError:
-                            location = None
-                        yield ArtifactLocation(
-                            project_id=project.id,
-                            experiment_id=experiment.id,
-                            run_id=run.id,
-                            execution_id=execution.id,
-                            execution_dir=execution_dir,
-                            location=location,
-                            artifact=artifact,
-                        )
+        for execution in run.executions:
+            execution_dir = str(run.execution_dir(execution.id))
+            for artifact in execution.artifacts:
+                try:
+                    location = run.artifact_location(execution.id, artifact)
+                except ValueError:
+                    location = None
+                yield ArtifactLocation(
+                    project_id=owner,
+                    experiment_id=run.ancestor_id(WORKSPACE_EXPERIMENT_KIND),
+                    run_id=run.id,
+                    execution_id=execution.id,
+                    execution_dir=execution_dir,
+                    location=location,
+                    artifact=artifact,
+                )
 
 
 def scan_artifacts(workspace: Workspace) -> builtins.list[Artifact]:
@@ -1124,3 +1143,21 @@ __all__ = [
     "scan_asset_repositories",
     "walk_artifacts",
 ]
+
+
+class _Description(NamedTuple):
+    """What the file itself says about its bytes: media type and original name."""
+
+    media_type: str | None
+    metadata: dict[str, JSONValue]
+
+
+def _described(source: Path) -> _Description:
+    """Media type and file name, read off the source path. Nothing else is assumed."""
+    import mimetypes
+
+    if not source.is_file():
+        return _Description(media_type=None, metadata={})
+    return _Description(
+        media_type=mimetypes.guess_type(source.name)[0], metadata={"filename": source.name}
+    )

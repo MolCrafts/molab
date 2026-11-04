@@ -415,6 +415,112 @@ class TestCreateDoc:
         assert doc.record.year == 2020
         assert doc.record.doi == "10.1000/glass"
 
+    def test_roadmap_record_round_trips_on_the_note(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        from molab.workspace.refs import ref_of
+
+        ws, _exp, run = lab
+        with served(ws) as client:
+            plan = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Overview",
+                    "cls": "Plan",
+                    "body": "# Overview\n",
+                    "sources": [{"kind": "run", "ref": str(ref_of(run))}],
+                },
+            )
+            assert plan.status_code == 201, plan.text
+            plan_path = plan.json()["relPath"]
+            opened_plan = client.get("/api/knowledge/note", params={"path": plan_path})
+            assert opened_plan.status_code == 200, opened_plan.text
+            assert opened_plan.json()["record"] == {}
+
+            created = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Stages",
+                    "cls": "Roadmap",
+                    "body": "Order of the work.\n",
+                    "sources": [{"kind": "file", "ref": plan_path}],
+                    "record": {
+                        "stages": [
+                            {"id": "monomers", "title": "Fragments"},
+                            {
+                                "id": "equilibrate",
+                                "title": "Boxes",
+                                "depends_on": ["monomers"],
+                            },
+                        ]
+                    },
+                },
+            )
+            assert created.status_code == 201, created.text
+            assert created.json()["cls"] == "Roadmap"
+            path = created.json()["relPath"]
+            opened = client.get("/api/knowledge/note", params={"path": path})
+        assert opened.status_code == 200, opened.text
+        stages = opened.json()["record"]["stages"]
+        assert stages[0]["id"] == "monomers"
+        assert stages[1]["depends_on"] == ["monomers"]
+        text = (Path(str(ws.root)) / path).read_text(encoding="utf-8")
+        assert "knowledges/knowledges" not in text
+        assert plan_path.rsplit("/", 1)[-1] in text
+
+    def test_roadmap_without_stages_is_422(self, served: ServedFactory, lab: RunFixture) -> None:
+        from molab.workspace.refs import ref_of
+
+        ws, _exp, run = lab
+        with served(ws) as client:
+            plan = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Overview",
+                    "cls": "Plan",
+                    "sources": [{"kind": "run", "ref": str(ref_of(run))}],
+                },
+            )
+            assert plan.status_code == 201, plan.text
+            response = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Stages",
+                    "cls": "Roadmap",
+                    "sources": [{"kind": "file", "ref": plan.json()["relPath"]}],
+                    "record": {},
+                },
+            )
+        assert response.status_code == 422, response.text
+
+    def test_file_source_must_stay_inside_the_workspace(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            escaped = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Stages",
+                    "cls": "Roadmap",
+                    "sources": [{"kind": "file", "ref": "../secret.md"}],
+                    "record": {"stages": [{"id": "a", "title": "A"}]},
+                },
+            )
+            missing = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Stages",
+                    "cls": "Roadmap",
+                    "sources": [{"kind": "file", "ref": "knowledges/missing.md"}],
+                    "record": {"stages": [{"id": "a", "title": "A"}]},
+                },
+            )
+        assert escaped.status_code == 422, escaped.text
+        assert "inside this workspace" in escaped.text
+        assert missing.status_code == 422, missing.text
+        assert "not a file" in missing.text
+
 
 class TestEmbedDoc:
     """``embed_doc``: one typed link from a document to a live entity."""
@@ -961,3 +1067,95 @@ class TestExportNotebook:
         embeds = json.loads(archive.read("embeds.json"))
         idea = next(row for row in embeds if row["path"] == "knowledges/idea.md")
         assert any(card["id"] == run.id for card in idea["cards"])
+
+
+class TestDelegationRecordRoutes:
+    """Create a Delegation over HTTP, read its record, replace it with ``ifMatch``."""
+
+    @staticmethod
+    def _create(client: TestClient, exp: Experiment, host: str) -> dict[str, object]:
+        response = client.post(
+            "/api/knowledge/doc",
+            json={
+                "name": "Cooling study",
+                "cls": "Delegation",
+                "hostPath": host,
+                "createdBy": "tack",
+                "sources": [{"kind": "experiment", "ref": exp.id}],
+                "record": {
+                    "goal": "Is Tg rate-dependent?",
+                    "scope": f"molab:experiment/{exp.id}",
+                    "actions": ["read", "start_execution"],
+                },
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    def test_create_get_and_replace(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, exp, _run = lab
+        host = _experiment_host(ws, exp)
+        with served(ws) as client:
+            created = self._create(client, exp, host)
+            assert created["cls"] == "Delegation"
+            path = created["relPath"]
+            got = client.get("/api/knowledge/doc/record", params={"path": path})
+            assert got.status_code == 200, got.text
+            record = got.json()["record"]
+            assert record["goal"] == "Is Tg rate-dependent?"
+            replaced = client.patch(
+                "/api/knowledge/doc/record",
+                params={"path": path},
+                json={
+                    "record": {**record, "state": "waiting"},
+                    "ifMatch": got.json()["digest"],
+                    "body": "## Status\n\nwaiting\n",
+                },
+            )
+            assert replaced.status_code == 200, replaced.text
+            assert replaced.json()["record"]["state"] == "waiting"
+            assert replaced.json()["digest"] != got.json()["digest"]
+            stale = client.patch(
+                "/api/knowledge/doc/record",
+                params={"path": path},
+                json={"record": record, "ifMatch": got.json()["digest"]},
+            )
+            assert stale.status_code == 409, stale.text
+        text = (Path(str(ws.root)) / path).read_text(encoding="utf-8")
+        assert "created_by: tack" in text
+        assert "## Status" in text
+
+    def test_invalid_record_is_422(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, exp, _run = lab
+        with served(ws) as client:
+            created = self._create(client, exp, _experiment_host(ws, exp))
+            response = client.patch(
+                "/api/knowledge/doc/record",
+                params={"path": created["relPath"]},
+                json={"record": {"goal": "g", "scope": "s", "state": "sleeping"}},
+            )
+        assert response.status_code == 422, response.text
+
+    def test_create_without_goal_is_422(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, exp, _run = lab
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Empty",
+                    "cls": "Delegation",
+                    "sources": [{"kind": "experiment", "ref": exp.id}],
+                    "record": {"actions": ["read"]},
+                },
+            )
+        assert response.status_code == 422, response.text
+
+    def test_note_record_cannot_be_replaced(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            response = client.patch(
+                "/api/knowledge/doc/record",
+                params={"path": "knowledges/idea.md"},
+                json={"record": {"x": 1}},
+            )
+        assert response.status_code == 422, response.text

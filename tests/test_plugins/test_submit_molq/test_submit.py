@@ -67,7 +67,7 @@ _FAKE_REF = {
 _JOB_ID = encode_job_ref(_FAKE_REF)
 
 
-def _install_fake_submitor(
+def _install_fake_molq(
     monkeypatch: pytest.MonkeyPatch,
     run: Run,
     *,
@@ -251,7 +251,7 @@ class TestSubmitHandler:
     ) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
         monkeypatch.chdir(tmp_path)
-        spy = _install_fake_submitor(monkeypatch, run)
+        spy = _install_fake_molq(monkeypatch, run)
 
         _handler()(None, run, experiment, project)
 
@@ -272,7 +272,7 @@ class TestSubmitHandler:
     ) -> None:
         """An x86 login node submitting to aarch64 GPUs names the node's python."""
         _ws, project, experiment, run = _make_run(tmp_path)
-        spy = _install_fake_submitor(monkeypatch, run)
+        spy = _install_fake_molq(monkeypatch, run)
         handler = make_submit_handler(
             scheduler="local",
             cluster="local",
@@ -288,7 +288,7 @@ class TestSubmitHandler:
 
     def test_no_uuid_execution_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
-        _install_fake_submitor(monkeypatch, run)
+        _install_fake_molq(monkeypatch, run)
 
         _handler()(None, run, experiment, project)
 
@@ -298,7 +298,7 @@ class TestSubmitHandler:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
-        _install_fake_submitor(monkeypatch, run)
+        _install_fake_molq(monkeypatch, run)
 
         _handler()(None, run, experiment, project)
 
@@ -314,7 +314,7 @@ class TestSubmitHandler:
         _ws, project, experiment, run = _make_run(tmp_path)
         run._create_execution()
         run.cancel("e01")
-        spy = _install_fake_submitor(monkeypatch, run)
+        spy = _install_fake_molq(monkeypatch, run)
 
         _handler()(None, run, experiment, project)
 
@@ -330,7 +330,7 @@ class TestSubmitHandler:
         _ws, project, experiment, run = _make_run(tmp_path)
         run._create_execution()
         run.cancel("e01")
-        spy = _install_fake_submitor(monkeypatch, run)
+        spy = _install_fake_molq(monkeypatch, run)
 
         with pytest.raises(ValueError):
             _handler()(None, run, experiment, project, execution_id="e01")
@@ -342,7 +342,7 @@ class TestSubmitHandler:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
-        spy = _install_fake_submitor(monkeypatch, run)
+        spy = _install_fake_molq(monkeypatch, run)
 
         with pytest.raises(KeyError):
             _handler()(None, run, experiment, project, execution_id="e09")
@@ -356,7 +356,7 @@ class TestSubmitHandler:
     ) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
         run._create_execution()
-        spy = _install_fake_submitor(monkeypatch, run)
+        spy = _install_fake_molq(monkeypatch, run)
 
         with pytest.raises(ValueError):
             _handler()(None, run, experiment, project)
@@ -368,7 +368,7 @@ class TestSubmitHandler:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         ws, project, experiment, run = _make_run(tmp_path)
-        _install_fake_submitor(monkeypatch, run, submit_error=RuntimeError("boom"))
+        _install_fake_molq(monkeypatch, run, submit_error=RuntimeError("boom"))
 
         with pytest.raises(RuntimeError, match="boom"):
             _handler()(None, run, experiment, project)
@@ -388,7 +388,7 @@ class TestSubmitHandler:
         _ws, project, experiment, run = _make_run(tmp_path)
         transport = RecordingTransport(upload_error=OSError("down"))
         monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _t: transport)
-        spy = _install_fake_submitor(monkeypatch, run)
+        spy = _install_fake_molq(monkeypatch, run)
 
         with pytest.raises(OSError):
             _handler(_remote_target())(None, run, experiment, project)
@@ -403,7 +403,7 @@ class TestSubmitHandler:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
-        _install_fake_submitor(monkeypatch, run)
+        _install_fake_molq(monkeypatch, run)
 
         def fail_update(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("late")
@@ -427,7 +427,7 @@ class TestSubmitHandler:
                 "e01", executor={"kind": "local", "host": "h", "pid": 9}
             )
 
-        spy = _install_fake_submitor(monkeypatch, run, on_submit=worker_starts)
+        spy = _install_fake_molq(monkeypatch, run, on_submit=worker_starts)
 
         _handler()(None, run, experiment, project)
 
@@ -455,7 +455,7 @@ class TestSubmitHandler:
             repo.start("e01", executor={"kind": "local", "host": "h", "pid": 9})
             repo.seal("e01", ExecutionStatus.SUCCEEDED)
 
-        spy = _install_fake_submitor(monkeypatch, run, on_submit=worker_starts_and_seals)
+        spy = _install_fake_molq(monkeypatch, run, on_submit=worker_starts_and_seals)
         handler = _handler()
 
         handler(None, run, experiment, project)
@@ -481,7 +481,7 @@ class TestSubmitHandler:
         def interrupted() -> None:
             raise KeyboardInterrupt
 
-        _install_fake_submitor(monkeypatch, run, on_submit=interrupted)
+        _install_fake_molq(monkeypatch, run, on_submit=interrupted)
 
         with pytest.raises(KeyboardInterrupt):
             _handler()(None, run, experiment, project)
@@ -513,7 +513,7 @@ class RefreshSpy:
     queried: list[str] = field(default_factory=list)
 
 
-def _install_refreshing_submitor(
+def _install_refreshing_molq(
     monkeypatch: pytest.MonkeyPatch,
     *,
     state: str = "queued",
@@ -553,7 +553,7 @@ def _submit_local(
 ) -> tuple[Workspace, Project, Run]:
     """Submit e01 through the real handler (local target) and return the run."""
     ws, project, experiment, run = _make_run(tmp_path)
-    spy = _install_fake_submitor(monkeypatch, run)
+    spy = _install_fake_molq(monkeypatch, run)
     _handler()(None, run, experiment, project)
     assert _submitted_record(spy).id == "e01"
     assert run.execution("e01").executor["job_id"] == _JOB_ID
@@ -569,7 +569,7 @@ def _submit_remote(
     ws.add_target(target)
     transport = RecordingTransport()
     monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _t: transport)
-    spy = _install_fake_submitor(monkeypatch, run)
+    spy = _install_fake_molq(monkeypatch, run)
     _handler(target)(None, run, experiment, project)
     assert _submitted_record(spy).id == "e01"
     assert run.execution("e01").executor["target"] == "hpc"
@@ -588,7 +588,7 @@ class TestReconcileSubmission:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
-        spy = _install_refreshing_submitor(monkeypatch, state=state)
+        spy = _install_refreshing_molq(monkeypatch, state=state)
 
         returned = reconcile_submission(run, "e01")
 
@@ -602,14 +602,14 @@ class TestReconcileSubmission:
         assert returned.record == e01
         assert returned.error is None
 
-    def test_rebuilds_submitor_from_recorded_executor(
+    def test_rebuilds_the_job_from_recorded_executor(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
         executor = run.execution("e01").executor
-        spy = _install_refreshing_submitor(monkeypatch, state="running")
+        spy = _install_refreshing_molq(monkeypatch, state="running")
 
         reconcile_submission(run, "e01")
 
@@ -623,7 +623,7 @@ class TestReconcileSubmission:
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
         before = _record_bytes(run, "e01")
-        spy = _install_refreshing_submitor(monkeypatch, state=state)
+        spy = _install_refreshing_molq(monkeypatch, state=state)
 
         returned = reconcile_submission(run, "e01")
 
@@ -640,7 +640,7 @@ class TestReconcileSubmission:
 
         ws, project, run = _submit_local(monkeypatch, tmp_path)
         _repository(ws, project, run).start("e01")
-        spy = _install_refreshing_submitor(monkeypatch, state="failed")
+        spy = _install_refreshing_molq(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
@@ -659,7 +659,7 @@ class TestReconcileSubmission:
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
         run.cancel("e01")
         before = _record_bytes(run, "e01")
-        spy = _install_refreshing_submitor(monkeypatch, state="failed")
+        spy = _install_refreshing_molq(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
@@ -677,7 +677,7 @@ class TestReconcileSubmission:
         _ws, _project, _experiment, run = _make_run(tmp_path)
         run._create_execution()
         before = _record_bytes(run, "e01")
-        spy = _install_refreshing_submitor(monkeypatch, state="failed")
+        spy = _install_refreshing_molq(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
@@ -694,7 +694,7 @@ class TestReconcileSubmission:
         _ws, _project, _experiment, run = _make_run(tmp_path)
         run._create_execution(executor={"backend": "molq", "target": None})
         before = _record_bytes(run, "e01")
-        spy = _install_refreshing_submitor(monkeypatch, state="failed")
+        spy = _install_refreshing_molq(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
@@ -709,7 +709,7 @@ class TestReconcileSubmission:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
-        spy = _install_refreshing_submitor(monkeypatch, state="failed")
+        spy = _install_refreshing_molq(monkeypatch, state="failed")
 
         first = reconcile_submission(run, "e01")
         after_first = _record_bytes(run, "e01")
@@ -728,7 +728,7 @@ class TestReconcileSubmission:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         run, transport = _submit_remote(monkeypatch, tmp_path)
-        spy = _install_refreshing_submitor(monkeypatch, state="failed")
+        spy = _install_refreshing_molq(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
@@ -749,7 +749,7 @@ class TestReconcileSubmission:
         transport.texts["/executions/e01/execution.json"] = json.dumps(
             {"schema_version": 4, **run.execution("e01").model_dump(mode="json")}
         )
-        _install_refreshing_submitor(monkeypatch, state="failed")
+        _install_refreshing_molq(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
@@ -780,7 +780,7 @@ class TestReconcileSubmission:
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
         before = _record_bytes(run, "e01")
-        _install_refreshing_submitor(monkeypatch, refresh_error=refresh_error)
+        _install_refreshing_molq(monkeypatch, refresh_error=refresh_error)
         capsys.readouterr()
 
         returned = reconcile_submission(run, "e01")
@@ -811,7 +811,7 @@ class TestReconcileOutcome:
         ws, project, run = _submit_local(monkeypatch, tmp_path)
         _repository(ws, project, run).start("e01")
         before = _record_bytes(run, "e01")
-        spy = _install_refreshing_submitor(monkeypatch, state="failed")
+        spy = _install_refreshing_molq(monkeypatch, state="failed")
 
         outcome = reconcile_submission(run, "e01")
 
@@ -827,7 +827,7 @@ class TestReconcileOutcome:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
-        _install_refreshing_submitor(monkeypatch, state="failed")
+        _install_refreshing_molq(monkeypatch, state="failed")
 
         outcome = reconcile_submission(run, "e01")
 
@@ -854,7 +854,7 @@ class TestReconcileOutcome:
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
         before = _record_bytes(run, "e01")
-        _install_refreshing_submitor(monkeypatch, refresh_error=refresh_error)
+        _install_refreshing_molq(monkeypatch, refresh_error=refresh_error)
         capsys.readouterr()
 
         outcome = reconcile_submission(run, "e01")
@@ -875,7 +875,7 @@ class TestReconcileOutcome:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
-        _install_refreshing_submitor(monkeypatch, refresh_error=TypeError("a bug"))
+        _install_refreshing_molq(monkeypatch, refresh_error=TypeError("a bug"))
 
         with pytest.raises(TypeError, match="a bug"):
             reconcile_submission(run, "e01")
@@ -885,7 +885,7 @@ def test_unknown_submission_is_not_sealed_or_automatically_repeated(monkeypatch,
     from molq import MolqError
 
     _, project, experiment, run = _make_run(tmp_path)
-    spy = _install_fake_submitor(
+    spy = _install_fake_molq(
         monkeypatch,
         run,
         submit_error=MolqError("OUTCOME_UNKNOWN", "Lost response", outcome="unknown"),
@@ -907,7 +907,7 @@ def test_reconcile_uses_the_recorded_destination_and_stops_after_uncertain_trans
     run, transport = _submit_remote(monkeypatch, tmp_path)
     ws = run.experiment.project.workspace
     ws.remove_target("hpc")
-    _install_refreshing_submitor(monkeypatch, state="succeeded")
+    _install_refreshing_molq(monkeypatch, state="succeeded")
     seen = []
 
     def uncertain_download(*args: object, **_kwargs: object):

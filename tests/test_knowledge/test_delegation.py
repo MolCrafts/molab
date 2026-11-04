@@ -1,0 +1,228 @@
+"""Delegation: a supervised, resumable work record stored as knowledge."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from molab.knowledge import Delegation, DelegationRecord
+from molab.knowledge.concepts import _product
+from molab.knowledge.delegation import DELEGATION_ACTIONS, parse_delegation
+from molab.knowledge.knowledge_item import SourceRef
+from molab.knowledge.record import (
+    RecordConflictError,
+    digest_of,
+    has_record,
+    record_of,
+    replace_record,
+)
+from molab.knowledge.validate import known_classes
+from molab.knowledge.write import write_knowledge
+from molab.workspace import Workspace
+
+
+def _record(**over: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "goal": "Find whether sequence order changes conductivity",
+        "scope": "molab:project/p1",
+        "actions": ["read", "create_run", "start_execution"],
+        "budget": {"worker_usd": 5.0, "executions": 4},
+    }
+    return {**base, **over}
+
+
+@pytest.fixture
+def ws(tmp_path: Path) -> Workspace:
+    workspace = Workspace(tmp_path / "ws", name="lab")
+    workspace.materialize()
+    return workspace
+
+
+def _write(ws: Workspace, record: dict[str, object]) -> Delegation:
+    project = ws.add_project("p")
+    return write_knowledge(  # ty: ignore[invalid-return-type]
+        project,
+        name="Sequence study",
+        of=Delegation,
+        sources=[SourceRef.of(project)],
+        created_by="tack",
+        text="# Sequence study\n",
+        record=record,
+    )
+
+
+class TestDelegationRecord:
+    def test_defaults_are_a_fresh_open_research_delegation(self) -> None:
+        record = parse_delegation(_record())
+        assert record.kind == "research"
+        assert record.state == "open"
+        assert record.spent.executions == 0
+        assert record.waits == () and record.attempts == ()
+
+    def test_unknown_action_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="invalid Delegation record"):
+            parse_delegation(_record(actions=["read", "rm_rf"]))
+
+    def test_unknown_field_is_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            DelegationRecord.model_validate({**_record(), "mystery": 1})
+
+    def test_repeated_wait_ids_are_rejected(self) -> None:
+        wait = {"id": "w1", "target": "molab:experiment/e/run/r"}
+        with pytest.raises(ValueError, match="wait ids repeat"):
+            parse_delegation(_record(waits=[wait, wait]))
+
+    def test_common_keys_are_ignored(self) -> None:
+        record = parse_delegation({**_record(), "class": "Delegation", "tags": ["x"]})
+        assert record.goal.startswith("Find")
+
+    def test_action_set_is_closed(self) -> None:
+        assert "delegate_worker" in DELEGATION_ACTIONS
+        assert "start_execution" in DELEGATION_ACTIONS
+
+
+class TestDelegationDocument:
+    def test_is_a_known_class(self) -> None:
+        assert "Delegation" in known_classes()
+        assert _product("Delegation") is Delegation
+
+    def test_write_and_read_back(self, ws: Workspace) -> None:
+        doc = _write(ws, _record())
+        assert Path(str(doc.path)).name == "sequence-study.md"
+        reopened = Delegation(doc.path)
+        assert reopened.record().goal.startswith("Find")  # ty: ignore[unresolved-attribute]
+        assert reopened.sources, "the bound scope is the source edge"
+
+    def test_create_requires_goal_and_scope(self, ws: Workspace) -> None:
+        with pytest.raises(ValueError, match="goal and its scope"):
+            _write(ws, {"actions": ["read"]})
+
+    def test_create_rejects_invalid_record(self, ws: Workspace) -> None:
+        with pytest.raises(ValueError, match="invalid Delegation record"):
+            _write(ws, _record(state="sleeping"))
+
+    def test_create_rejects_planning_fields(self, ws: Workspace) -> None:
+        with pytest.raises(ValueError, match="does not store"):
+            _write(ws, _record(items=[]))
+
+    def test_partial_rewrite_is_validated_against_stored_record(self, ws: Workspace) -> None:
+        doc = _write(ws, _record())
+        project = ws.add_project("p")
+        write_knowledge(
+            project,
+            name="Sequence study",
+            of=Delegation,
+            sources=[SourceRef.of(project)],
+            created_by="tack",
+            text="",
+            record={"state": "waiting"},
+        )
+        assert Delegation(doc.path).record().state == "waiting"  # ty: ignore[unresolved-attribute]
+        with pytest.raises(ValueError):
+            write_knowledge(
+                project,
+                name="Sequence study",
+                of=Delegation,
+                sources=[SourceRef.of(project)],
+                created_by="tack",
+                text="",
+                record={"state": "sleeping"},
+            )
+
+
+class TestReplaceRecord:
+    def test_replace_drops_omitted_keys_and_keeps_common_ones(self, ws: Workspace) -> None:
+        doc = _write(ws, _record(acceptance=["n >= 3 seeds"]))
+        before = digest_of(doc)
+        new = {k: v for k, v in _record(state="waiting").items() if k != "budget"}
+        after = replace_record(doc, new, if_match=before)
+        assert after != before
+        stored = record_of(doc)
+        assert stored["state"] == "waiting"
+        assert "acceptance" not in stored and "budget" not in stored
+        front = doc.frontmatter()
+        assert front["class"] == "Delegation" and front["created_by"] == "tack"
+        assert doc.read().startswith("# Sequence study")
+
+    def test_stale_digest_is_a_conflict(self, ws: Workspace) -> None:
+        doc = _write(ws, _record())
+        with pytest.raises(RecordConflictError):
+            replace_record(doc, _record(), if_match="0" * 64)
+
+    def test_invalid_record_writes_nothing(self, ws: Workspace) -> None:
+        doc = _write(ws, _record())
+        before = digest_of(doc)
+        with pytest.raises(ValueError):
+            replace_record(doc, _record(state="sleeping"))
+        assert digest_of(doc) == before
+
+    def test_body_is_replaced_in_the_same_write(self, ws: Workspace) -> None:
+        doc = _write(ws, _record())
+        replace_record(doc, _record(), body="## Status\n\nwaiting on e01\n")
+        assert doc.read().startswith("## Status")
+
+    def test_note_has_no_record(self, ws: Workspace) -> None:
+        from molab.knowledge import Note
+
+        note = Note(Path(str(ws.root)) / "knowledges" / "idea")
+        note.write("# idea\n")
+        assert not has_record(note)
+        with pytest.raises(TypeError):
+            replace_record(note, {"x": 1})
+
+
+class TestMilestoneRecord:
+    def test_a_milestone_status_is_part_of_its_record(self, ws: Workspace) -> None:
+        from molab.knowledge import Milestone, Plan
+
+        project = ws.add_project("p")
+        plan = write_knowledge(
+            project,
+            name="Plan",
+            of=Plan,
+            sources=[SourceRef.of(project)],
+            created_by="t",
+            text="# P",
+        )
+        milestone = write_knowledge(
+            project,
+            name="Done",
+            of=Milestone,
+            sources=[SourceRef.of(project)],
+            created_by="t",
+            text="",
+            cite=[(plan, "derived_from")],
+            record={"stage": "s1", "criterion": "c", "status": "open"},
+        )
+        assert record_of(milestone)["status"] == "open"
+        replace_record(milestone, {"stage": "s1", "criterion": "c", "status": "met"})
+        assert milestone.frontmatter()["status"] == "met"
+        assert record_of(milestone)["status"] == "met"
+
+
+class TestDelegationLifecycleFields:
+    def test_blocked_with_questions_amendments_and_writes(self) -> None:
+        record = parse_delegation(
+            _record(
+                state="blocked",
+                questions=["Q1: the h-type bridge connectivity?"],
+                amendments=[
+                    {
+                        "at": "2026-11-03T16:00:00Z",
+                        "by": "roykid",
+                        "reason": "two runs were lost to a broken worker",
+                        "changes": {"budget": {"worker_runs": 10}},
+                    }
+                ],
+                writes=[{"key": "abc", "path": "knowledges/decision.md"}],
+            )
+        )
+        assert record.state == "blocked"
+        assert record.questions == ("Q1: the h-type bridge connectivity?",)
+        assert record.amendments[0].by == "roykid"
+        assert record.writes[0].path == "knowledges/decision.md"
+
+    def test_an_amendment_needs_a_reason(self) -> None:
+        with pytest.raises(ValueError):
+            parse_delegation(_record(amendments=[{"at": "t", "by": "me", "reason": ""}]))

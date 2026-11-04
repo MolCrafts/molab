@@ -8,6 +8,7 @@ import type { CacheStatusResponse } from '../models/CacheStatusResponse';
 import type { DirectoryCreateRequest } from '../models/DirectoryCreateRequest';
 import type { FileContentResponse } from '../models/FileContentResponse';
 import type { FileContentUpdateRequest } from '../models/FileContentUpdateRequest';
+import type { ServedValidationResponse } from '../models/ServedValidationResponse';
 import type { ServeScopeResponse } from '../models/ServeScopeResponse';
 import type { SyncRuleListResponse } from '../models/SyncRuleListResponse';
 import type { SyncRuleResponse } from '../models/SyncRuleResponse';
@@ -41,6 +42,36 @@ export class WorkspaceService {
             url: '/api/workspace/scope',
             cookies: {
                 'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Validate Served
+     * The layout and knowledge report, bounded by the serve root. Writes nothing.
+     *
+     * A served project, experiment or run is checked inside its enclosing
+     * workspace and only findings at or below it are returned. A node opened
+     * without its workspace cannot be checked (422).
+     * @param errorsOnly Skip the rules that can only warn.
+     * @param molabSession
+     * @returns ServedValidationResponse Successful Response
+     * @throws ApiError
+     */
+    public static validateServed(
+        errorsOnly: boolean = false,
+        molabSession?: (string | null),
+    ): CancelablePromise<ServedValidationResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspace/validate',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'errorsOnly': errorsOnly,
             },
             errors: {
                 422: `Validation Error`,
@@ -160,7 +191,7 @@ export class WorkspaceService {
      * Return a nested file tree rooted at the requested path.
      *
      * Routes through ``workspace.fs`` so remote workspaces (and the
-     * :class:`CachedRemoteFileSystem` mirror) work the same as local ones.
+     * :class:`CachedRemoteFS` mirror) work the same as local ones.
      *
      * With ``include=catalog``, file nodes that match a registered asset
      * are enriched with ``assetId``, ``assetKind``, ``producerRunId`` and
@@ -228,7 +259,7 @@ export class WorkspaceService {
      * Read a text file from the workspace.
      *
      * Routes through ``workspace.fs`` so remote workspaces (and the
-     * :class:`CachedRemoteFileSystem` mirror) take effect.
+     * :class:`CachedRemoteFS` mirror) take effect.
      * @param path Workspace-relative path to read
      * @param molabSession
      * @returns FileContentResponse Successful Response
@@ -257,7 +288,7 @@ export class WorkspaceService {
      * Read a binary file from the workspace.
      *
      * Routes through ``workspace.fs`` so remote workspaces (and the
-     * :class:`CachedRemoteFileSystem` mirror) take effect.
+     * :class:`CachedRemoteFS` mirror) take effect.
      * @param download Download as an attachment instead of previewing
      * @param path Workspace-relative path to read
      * @param molabSession

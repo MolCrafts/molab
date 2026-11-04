@@ -75,7 +75,7 @@ _GITIGNORE_HEAD = """\
 
 _GITIGNORE_BULK = """
 # Imported asset bytes: the version record is history, the payload is not.
-**/assets/*/payload
+**/assets/*/payload*
 
 # Trajectories, model weights, restarts, array dumps, archives.
 *.data

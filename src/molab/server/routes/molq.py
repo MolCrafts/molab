@@ -56,7 +56,7 @@ def list_destinations() -> DestinationsResponse:
 
 @router.get("/targets", response_model=MolqTargetListResponse)
 def list_targets() -> MolqTargetListResponse:
-    """List configured molq targets (one per profile in ``~/.molq/config.yaml``)."""
+    """List configured molq targets (one per cluster in the molq registry)."""
     try:
         targets = dashboard.list_targets()
     except FileNotFoundError as exc:

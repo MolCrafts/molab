@@ -1,6 +1,15 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@molcrafts/ui";
 import { useQuery } from "@tanstack/react-query";
-import { Archive, Download } from "lucide-react";
+import {
+  Archive,
+  Clock,
+  Download,
+  Import,
+  Minus,
+  Package,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 import { useState } from "react";
 import { assetsApi, assetVersionOrigin } from "@/api";
 import {
@@ -16,6 +25,7 @@ import {
   OverviewCanvas,
   OverviewList,
   OverviewSurface,
+  Tally,
 } from "@/app/components/entity";
 import { assetDetailQueryOptions, assetVersionsQueryOptions } from "@/app/state/entityQueries";
 import type { ScopedRendererProps } from "@/app/types";
@@ -175,35 +185,46 @@ export const AssetViewer = ({
                     title="Versions"
                     figure={ordered.length}
                     caption={
-                      latest
-                        ? `latest v${latest.version} · ${formatRelative(latest.createdAt)}`
-                        : undefined
+                      latest ? (
+                        <Tally
+                          icon={Clock}
+                          value={`v${latest.version} · ${formatRelative(latest.createdAt)}`}
+                          label={`Latest v${latest.version}, ${formatRelative(latest.createdAt)}`}
+                        />
+                      ) : undefined
                     }
                     onSelect={openVersions}
                     selectHint="Versions"
                     selectLabel={`${ordered.length} versions. Open the list`}
                   />
                   <Instrument
-                    title="Latest size"
+                    title="Size"
                     figure={latest ? formatBytes(latest.size) : "—"}
                     caption={
-                      sizeChange === null
-                        ? previous
-                          ? "size not recorded on the previous version"
-                          : "the first version"
-                        : `${sizeChange >= 0 ? "+" : ""}${sizeChange}% vs v${previous?.version}`
+                      sizeChange === null ? undefined : (
+                        <Tally
+                          icon={sizeChange > 0 ? TrendingUp : sizeChange < 0 ? TrendingDown : Minus}
+                          value={`${sizeChange > 0 ? "+" : ""}${sizeChange}%`}
+                          label={`${sizeChange > 0 ? "+" : ""}${sizeChange}% vs v${previous?.version}`}
+                        />
+                      )
                     }
                   />
                   <Instrument
                     title="Origin"
-                    figure={promoted}
-                    caption={`promoted from runs · ${imported} imported`}
+                    caption={
+                      <span className="flex items-center gap-6 text-title text-foreground">
+                        <Tally
+                          icon={Package}
+                          value={promoted}
+                          label={`${promoted} promoted from runs`}
+                        />
+                        <Tally icon={Import} value={imported} label={`${imported} imported`} />
+                      </span>
+                    }
                   />
                 </InstrumentStrip>
-                <GaugeSection
-                  title="Size by version"
-                  readout={sizeBars.length > 0 ? "click a version to open the list" : undefined}
-                >
+                <GaugeSection title="Size by version">
                   {sizeBars.length > 0 ? (
                     <CountBars
                       bars={sizeBars}

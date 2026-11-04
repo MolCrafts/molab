@@ -15,11 +15,10 @@ import {
   FlaskConical,
   Grid3x3,
   ListChecks,
-  ListPlus,
   MoreHorizontal,
+  PlayCircle,
   SlidersHorizontal,
   Trash2,
-  X,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { experimentsApi } from "@/api";
@@ -27,7 +26,6 @@ import { activeNeedsAuth, shouldShowFailure } from "@/api/errors";
 import { useCompareSet } from "@/app/compare";
 import { activeWorkspace, itemFromRunSummary } from "@/app/compare/entries";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
-import { CreateSweepDialog } from "@/app/components/CreateSweepDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
 import {
   ChoiceToggle,
@@ -42,6 +40,7 @@ import {
   OverviewSurface,
   StatusIcon,
   SweepMatrix,
+  Tally,
 } from "@/app/components/entity";
 import {
   paramGroup,
@@ -52,15 +51,19 @@ import { ExecutionOverview } from "@/app/dashboard/ExecutionOverview";
 import { useScopeRuns } from "@/app/dashboard/useScopeRuns";
 import { buildRunListActions, type RunListHandlers } from "@/app/entities/runListActions";
 import { countRunStatuses, formatDuration, formatScalar } from "@/app/renderers/dashboardData";
+import { ExperimentStructures } from "@/app/renderers/ExperimentStructures";
 import {
   buildExperimentWorkbenchData,
   experimentRunCompleteness,
 } from "@/app/renderers/entityWorkbenchData";
 import { sweepAxes, unrunValueCount } from "@/app/renderers/overview/gaugeData";
 import { ConstantsNote } from "@/app/renderers/overview/MarginNotes";
+import { WorkflowAttemptStatus } from "@/app/renderers/WorkflowAttemptStatus";
+import { SelectionActions } from "@/app/runs/SelectionActions";
 import { useRunMultiSelect } from "@/app/runs/useRunMultiSelect";
 import { experimentWorkflowLabel } from "@/app/state/api";
 import { useNavigationState } from "@/app/state/useNavigationState";
+import { SweepDialog } from "@/app/sweep/SweepDialog";
 import type { ExperimentView, RunSummary, ScopedRendererProps } from "@/app/types";
 import { toast } from "@/components/ui/toast";
 import {
@@ -169,7 +172,11 @@ export const ExperimentViewer = ({
   const setEntityTab = useCallback(
     (value: string) => {
       const experimentView: ExperimentView =
-        value === "workflow" || value === "runs" || value === "parameters" || value === "notebook"
+        value === "workflow" ||
+        value === "runs" ||
+        value === "parameters" ||
+        value === "notebook" ||
+        value === "products"
           ? value
           : "overview";
       setSelection({ objectType: "experiment", objectId: experimentId, experimentView });
@@ -543,10 +550,11 @@ export const ExperimentViewer = ({
       icon={FlaskConical}
       title={experiment.name}
       meta={
-        <span>
-          <span className="text-foreground">{runCountValue === null ? "—" : runCountValue}</span>{" "}
-          runs
-        </span>
+        <Tally
+          icon={PlayCircle}
+          value={runCountValue === null ? "—" : runCountValue}
+          label={`${runCountValue ?? "Unknown"} runs`}
+        />
       }
       actions={
         <>
@@ -590,9 +598,10 @@ export const ExperimentViewer = ({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <CreateSweepDialog
+          <SweepDialog
             projectId={projectId}
             experimentId={experimentId}
+            parameterSpace={experiment.parameterSpace}
             open={sweepOpen}
             onOpenChange={setSweepOpen}
             onCreated={() => {
@@ -615,6 +624,7 @@ export const ExperimentViewer = ({
           label: "Workflow",
           content: (
             <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
+              <WorkflowAttemptStatus runs={runs} />
               <InventoryCanvas fill className="min-h-0 flex-1 gap-0 space-y-0">
                 {hasWorkflowData && workflowViewer ? (
                   <div className="min-h-0 flex-1 overflow-hidden bg-canvas">{workflowViewer}</div>
@@ -635,6 +645,11 @@ export const ExperimentViewer = ({
           ),
         },
         {
+          value: "products",
+          label: "Structures",
+          content: <ExperimentStructures runs={runs} />,
+        },
+        {
           value: "runs",
           label: counts.total > 0 ? `Runs (${counts.total})` : "Runs",
           content: (
@@ -653,34 +668,15 @@ export const ExperimentViewer = ({
                       {multi.enabled ? "Done selecting" : "Select"}
                     </WorkbenchAction>
                     {multi.enabled && (
-                      <>
-                        <span className="text-label text-muted-foreground">
-                          {multi.selected.size} selected
-                        </span>
-                        <WorkbenchAction
-                          kind="secondary"
-                          size="compact"
-                          icon={<ListPlus aria-hidden />}
-                          type="button"
-                          disabled={multi.selected.size === 0 || !compareScope}
-                          deniedReason={
-                            compareScope ? null : "No served workspace to attribute these runs to."
-                          }
-                          onClick={addSelectedToCompare}
-                        >
-                          Add to selection
-                        </WorkbenchAction>
-                        <WorkbenchAction
-                          kind="ghost"
-                          size="compact"
-                          icon={<X aria-hidden />}
-                          type="button"
-                          disabled={multi.selected.size === 0}
-                          onClick={multi.clear}
-                        >
-                          Clear
-                        </WorkbenchAction>
-                      </>
+                      <SelectionActions
+                        runs={selectedRuns}
+                        compareDisabledReason={
+                          compareScope ? null : "No served workspace to attribute these runs to."
+                        }
+                        onCompare={addSelectedToCompare}
+                        onClear={multi.clear}
+                        onChanged={onRefresh}
+                      />
                     )}
                   </div>
                   <div className="min-h-0 flex-1 overflow-auto">

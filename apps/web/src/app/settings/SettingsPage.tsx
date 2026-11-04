@@ -6,8 +6,9 @@
  * (`components/settings`); panels keep their own data.
  */
 
-import { Cpu, Puzzle, Type, Users, Wifi } from "lucide-react";
+import { Cpu, History, Puzzle, Type, Users, Wifi } from "lucide-react";
 import { useAuth } from "@/app/auth";
+import { HistoryPanel } from "@/app/history/HistoryPanel";
 import { type SettingsNavEntry, SettingsSection, SettingsShell } from "@/components/settings";
 import { listSettingsSections, useWorkbenchGeneration } from "@/plugins/contributions/workbench";
 import { AppearancePanel } from "./AppearancePanel";
@@ -55,6 +56,22 @@ export function SettingsPage(): JSX.Element {
       content: (
         <SettingsSection id="compute-targets" title="Compute targets">
           <ComputeTargetsPanel />
+        </SettingsSection>
+      ),
+    },
+    {
+      id: "history",
+      label: "History",
+      group: "workspace",
+      groupLabel: "Workspace",
+      icon: <History className="size-icon-sm" aria-hidden />,
+      content: (
+        <SettingsSection
+          id="history"
+          title="History"
+          description="Facts recorded in the workspace git log."
+        >
+          <HistoryPanel />
         </SettingsSection>
       ),
     },

@@ -65,10 +65,11 @@ workspace_root/
         ├── knowledges/<name>.md
         └── runs/<key=value_…>/   ← directory name is the parameters
             ├── index.md          ← run record: logical definition only
+            ├── values/           ← every task input/output, stored once by content
             └── executions/e01/   ← one attempt; `e01` is its id
                 ├── execution.json
                 ├── alive         ← owner heartbeat is mtime
-                ├── workflow.json
+                ├── workflow.json ← per-node journal; cites values/ by ref
                 ├── artifacts/
                 ├── out/<task>/
                 └── jobs/

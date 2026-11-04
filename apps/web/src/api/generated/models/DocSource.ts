@@ -16,6 +16,7 @@ export namespace DocSource {
         ASSET = 'asset',
         PROJECT = 'project',
         REFERENCE = 'reference',
+        FILE = 'file',
     }
 }
 

@@ -15,7 +15,7 @@ The guide tells an agent to start at `./index.md`. Each `index.md` frontmatter i
 | try something quickly | `projects/<p>/experiments/<e>/scratch/` |
 | record a job that ran outside molab | `molab runs adopt P E RUN --product TASK=PATH --log FILE --job FILE --source FILE` |
 | read or write a record's narrative | `molab index show` / `molab index write --from FILE` |
-| write a knowledge document | `molab knowledge write NAME TEXT --on HOST --class CLASS --created-by AGENT` |
+| write a knowledge document | `molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --record JSON --created-by AGENT` |
 | rebuild the derived index blocks | `molab index sync` |
 | print into the run's record | `from molab import print` ([Tracking a Computation](tracking.md)) |
 | record training data | `ctx.metrics.scalar(...)` ([Tracking a Computation](tracking.md#metrics)) |
@@ -24,11 +24,17 @@ The guide tells an agent to start at `./index.md`. Each `index.md` frontmatter i
 
 ## The check
 
-`molab check` is the one place the rules live. The hooks in [molcrafts-harness](https://github.com/MolCrafts/molcrafts-harness) hold no rule of their own. They forward each event and act on molab's JSON verdict:
+`molab check` is the one place the rules live. The `molab` command must be on
+`PATH` for the hooks and for agents (`uv tool install molcrafts-molab`, or
+`uv tool install --editable` from a checkout); a hook that cannot find it lets
+the change through unchecked. The hooks in [molcrafts-harness](https://github.com/MolCrafts/molcrafts-harness) hold no rule of their own. They forward each event and act on molab's JSON verdict:
 
 - before a write: `molab check path PATH --op write|edit --content-file F --json`
+- before a shell command: `molab check command --command TEXT --cwd DIR --json`
 - when a session starts: `molab check tree DIR --snapshot <session> --json`
 - when it stops: `molab check tree DIR --since <session> --json`
+
+`check command` names the files a shell command would write and asks `check path` about each one. The command is not executed. A command the grammar cannot read is allowed, and the stop check sees what it wrote.
 
 `check path` refuses a write that molab owns: a change to a record's frontmatter, a new `index.md` record, a `<kind>.json` or `meta.json` record, an attempt's `execution.json`, logs, `source/`, `artifacts/`, `jobs/` or `checkpoints/`, or anything under `.molab/` or `.git/`. It also refuses a knowledge document without a known `class:` and a new file or directory at a level where that name is not legal. Every refusal names the molab command to use instead. Some writes are always allowed: `scratch/`, an attempt's `out/` and `work/`, `workflow.py`, `AGENTS.md`, `CLAUDE.md` and `.gitignore`. A solver's own `meta.json` or `run.json` under `out/` or `scratch/` counts as science payload, not as a record. An edit to a stray that already exists is allowed too, because that is old debt, not a new mess.
 
@@ -42,7 +48,7 @@ molab validate --update-baseline  # accept today's debt
 molab validate --new-only         # only what the baseline lacks
 ```
 
-Both `check` commands exit 0 whenever molab itself worked. The verdict's `allowed` field decides:
+The `check` commands exit 0 whenever molab itself worked. The verdict's `allowed` field decides:
 
 ```json
 {"in_workspace": true, "allowed": false, "rule": "index.frontmatter",

@@ -198,4 +198,24 @@ describe("execution status + error propagation", () => {
     expect(byId.get("task_a")?.data.error).toBeUndefined();
     expect(byId.get("task_c")?.data.error).toBeUndefined();
   });
+
+  it("keeps the values a task returned", () => {
+    const ir = parseTaskGraphIr(
+      JSON.stringify({
+        task_configs: [
+          {
+            task_id: "build_fragment",
+            task_type: "fn",
+            status: "completed",
+            outputs: { real_formula: "C9H10Br", pdb: "/tmp/executions/e03/out/mol.pdb" },
+          },
+        ],
+        links: [],
+      }),
+    );
+    expect(ir?.task_configs[0]?.outputs).toEqual({
+      real_formula: "C9H10Br",
+      pdb: "/tmp/executions/e03/out/mol.pdb",
+    });
+  });
 });

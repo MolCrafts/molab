@@ -146,7 +146,7 @@ def _demo(monkeypatch: pytest.MonkeyPatch, snaps: list[dict]) -> None:
     _install(
         monkeypatch,
         _Molq(
-            [{"name": "demo", "id": "demo-id", "scheduler": "shell", "target_root": "/tmp/molq"}],
+            [{"name": "demo", "id": "demo-id", "scheduler": "shell"}],
             {"demo": snaps},
         ),
     )
@@ -163,7 +163,6 @@ class TestListTargets:
         assert target.name == "demo"
         assert target.scheduler == "shell"
         assert target.cluster_name == "demo-id"
-        assert target.jobs_dir == "/tmp/molq"
         assert target.healthy is True
 
     def test_active_jobs_counts_non_terminal(self, monkeypatch: pytest.MonkeyPatch):
@@ -189,13 +188,11 @@ class TestListTargets:
                         "name": "demo",
                         "id": "demo-id",
                         "scheduler": "shell",
-                        "target_root": "/tmp/molq",
                     },
                     {
                         "name": "down",
                         "id": "down-id",
                         "scheduler": "slurm",
-                        "target_root": "/scratch",
                     },
                 ],
                 {"demo": []},

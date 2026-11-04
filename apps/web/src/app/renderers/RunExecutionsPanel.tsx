@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Network, TriangleAlert } from "lucide-react";
-import { type JSX, type ReactNode, useMemo } from "react";
+import { type JSX, type ReactNode, useMemo, useState } from "react";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 import {
   CopyButton,
@@ -18,6 +18,9 @@ import {
   preferredFailureOutput,
 } from "@/app/renderers/run/executionFailure";
 import { RunExecutionOutputs } from "@/app/renderers/run/RunExecutionOutputs";
+import { TaskProductList } from "@/app/renderers/run/TaskProductList";
+import { taskProducts } from "@/app/renderers/run/taskProducts";
+import { PruneDialog } from "@/app/runs/PruneDialog";
 import { groupForStatus } from "@/app/runs/statusGroups";
 import { executionJournalQueryOptions, journalRefetchInterval } from "@/app/state/entityQueries";
 import type { ExecutionRecordSummary, RunSummary, WorkflowSummary } from "@/app/types";
@@ -194,6 +197,13 @@ export const RunExecutionsPanel = ({
       : "Failed to load execution workflow"
     : null;
   const graphLoading = journal.isLoading;
+  const [pinned, setPinned] = useState<{ executionId: string; path: string } | null>(null);
+  const pinnedPath =
+    pinned && selected && pinned.executionId === selected.executionId ? pinned.path : null;
+  const products = useMemo(
+    () => (graph && selected ? taskProducts(graph.task_configs, selected.executionId) : []),
+    [graph, selected],
+  );
   const taskFailure = failedTask(graph);
   const headline = selected
     ? failureHeadline({ status: selected.status, error: selected.error, task: taskFailure })
@@ -231,10 +241,13 @@ export const RunExecutionsPanel = ({
           aria-label="Executions"
           className="flex min-h-0 flex-col border-b border-border lg:border-r lg:border-b-0"
         >
-          <h2 className="flex shrink-0 items-baseline gap-2 border-b border-border px-3 py-2 text-body font-medium text-foreground">
+          <h2 className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-body font-medium text-foreground">
             Executions
             <span className="font-mono text-micro font-normal text-muted-foreground">
               {history.length}
+            </span>
+            <span className="ml-auto">
+              <PruneDialog run={run} onPruned={onPromoted} />
             </span>
           </h2>
           <ul className="min-h-0 flex-1 overflow-auto">
@@ -337,6 +350,15 @@ export const RunExecutionsPanel = ({
                 </p>
               ) : null}
 
+              <TaskProductList
+                products={products}
+                activePath={pinnedPath}
+                onOpen={(path) => {
+                  if (!selected) return;
+                  setPinned({ executionId: selected.executionId, path });
+                }}
+              />
+
               <div className="grid min-h-[32rem] flex-1 grid-rows-[minmax(16rem,1fr)_minmax(16rem,1fr)] lg:min-h-[16rem] lg:grid-cols-2 lg:grid-rows-1">
                 <section
                   aria-label="Workflow"
@@ -380,7 +402,7 @@ export const RunExecutionsPanel = ({
                   <div className="min-h-0 flex-1">
                     <RunExecutionOutputs
                       fill
-                      preferred={failureSelection}
+                      preferred={pinnedPath ? { kind: "file", path: pinnedPath } : failureSelection}
                       outputs={outputs}
                       error={logsError}
                       projectId={run.projectId}

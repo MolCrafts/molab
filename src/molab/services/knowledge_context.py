@@ -16,9 +16,34 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from molab.knowledge import Finding, Knowledge, Literature, Note, Observation, Plan, Report
+from molab.knowledge import (
+    Delegation,
+    Finding,
+    Knowledge,
+    Literature,
+    Milestone,
+    Note,
+    Observation,
+    Plan,
+    Report,
+    Roadmap,
+    Todo,
+)
 from molab.knowledge.search import extract_title
 from molab.workspace import ContextFocus, WorkspaceContext
+
+_CONTEXT_CLASSES = (
+    Note,
+    Literature,
+    Report,
+    Finding,
+    Plan,
+    Roadmap,
+    Todo,
+    Milestone,
+    Observation,
+    Delegation,
+)
 
 if TYPE_CHECKING:
     from molab.workspace import Workspace
@@ -61,7 +86,7 @@ def project_knowledge(workspace: Workspace) -> list[KnowledgeRef]:
     """
     rows: list[KnowledgeRef] = []
     for concept in Knowledge(workspace.root, fs=workspace.fs).walk():
-        if isinstance(concept, Note | Literature | Report | Finding | Plan | Observation):
+        if isinstance(concept, _CONTEXT_CLASSES):
             name = concept.name
             rows.append(
                 KnowledgeRef(
@@ -92,5 +117,10 @@ def context_with_knowledge(
     Returns:
         A :class:`KnowledgeContext`. Callers consume it as given.
     """
-    base = workspace.context(focus=focus)
+    from molab.workspace.workspace_context import assemble_workspace_context
+
+    # The assembly walks from whatever root it is given, so a served project,
+    # experiment or run gets its own subtree (``Workspace.context`` is the
+    # same call for a whole workspace).
+    base = assemble_workspace_context(workspace, focus=focus)
     return KnowledgeContext(**dict(base), knowledge=project_knowledge(workspace))

@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from .._graph_decl import TaskRegistration
     from ..compiled import CompiledWorkflow
     from ..protocols import JSONMapping
+    from .executors import SyncCaller
 
 
 # ── Dispatch sum type — "what to do after this task" ────────────────────────
@@ -310,9 +311,33 @@ async def run_task_body(
     # covers ``_promote_outputs`` too, so deferred markers name this task.
     try:
         with tracking.task_scope(name):
-            raw = await _invoke_body_with_ctx(
-                registration, task_ctx, inputs, effective_config or {}
-            )
+            if deps.executor_of(name) == "process":
+                from .process_dispatch import run_in_worker
+
+                raw = await run_in_worker(
+                    name,
+                    deps,
+                    state,
+                    task_ctx,
+                    inputs,
+                    effective_config or {},
+                    element=element,
+                    delivered=delivered,
+                )
+            else:
+                from .persistence import mark_task_status
+
+                raw = await _invoke_body_with_ctx(
+                    registration,
+                    task_ctx,
+                    inputs,
+                    effective_config or {},
+                    runner=deps.runners.get(deps.executor_of(name)),
+                    on_start=lambda: mark_task_status(
+                        deps.journal_dir, name, "running", started=True
+                    ),
+                    on_end=lambda: mark_task_status(deps.journal_dir, name, "running", ended=True),
+                )
             from .node_cache import _upstream_asset_ids
 
             try:
@@ -579,20 +604,43 @@ async def _call_batch_body(
     inputs: TaskInput,
     config: JSONMapping,
     depends_on: list[str],
+    runner: SyncCaller | None = None,
+    on_start: Callable[[], None] | None = None,
+    on_end: Callable[[], None] | None = None,
 ) -> TaskOutput:
     """Invoke a batch task body — sync or async — bound by name.
 
-    Async bodies are awaited in place. Sync bodies run in a worker thread
-    (``asyncio.to_thread``, mirroring ``promote._EntryTask``) so a blocking
-    body — pure computation, ``time.sleep``-style I/O — never stalls
-    same-level siblings sharing the event loop. A sync callable that returns
-    an awaitable (e.g. an un-marked coroutine factory) is still awaited,
-    preserving the promoted-callable semantics.
+    Async bodies are awaited in place. Sync bodies run through *runner* — the
+    task's ``thread`` or ``inline`` executor (:mod:`.executors`); without one,
+    in a worker thread (``asyncio.to_thread``) so a blocking body — pure
+    computation, ``time.sleep``-style I/O — never stalls same-level siblings
+    sharing the event loop. A sync callable that returns an awaitable (e.g.
+    an un-marked coroutine factory) is still awaited, preserving the
+    promoted-callable semantics.
     """
     if inspect.iscoroutinefunction(func):
-        return await _bound_call(func, task_ctx, inputs, config, depends_on)
+        if on_start is not None:
+            on_start()
+        try:
+            return await _bound_call(func, task_ctx, inputs, config, depends_on)
+        finally:
+            if on_end is not None:
+                on_end()
     args, kwargs = _bind_call_args(func, task_ctx, inputs, config, depends_on)
-    result = await asyncio.to_thread(func, *args, **kwargs)
+    if runner is None:
+
+        def timed_body() -> Any:  # noqa: ANN401
+            if on_start is not None:
+                on_start()
+            try:
+                return func(*args, **kwargs)
+            finally:
+                if on_end is not None:
+                    on_end()
+
+        result = await asyncio.to_thread(timed_body)
+    else:
+        result = await runner.call(func, args, kwargs, on_start, on_end)
     if inspect.isawaitable(result):
         return await result
     return result
@@ -627,8 +675,14 @@ async def _invoke_body_with_ctx(
     task_ctx: TaskContext[Any, TaskInput],
     inputs: TaskInput,
     config: JSONMapping,
+    *,
+    runner: SyncCaller | None = None,
+    on_start: Callable[[], None] | None = None,
+    on_end: Callable[[], None] | None = None,
 ) -> TaskOutput:
     """Dispatch a registered task's body against a *pre-built* TaskContext.
+
+    *on_start* is called when the body begins (see :meth:`SyncCaller.call`).
 
     ``registration.fn_or_class`` is the user-supplied object (Task / Actor
     instance, third-party Runnable / Streamable, or plain callable). No
@@ -642,21 +696,39 @@ async def _invoke_body_with_ctx(
     # may be declared sync or async (see _call_batch_body).
     if isinstance(body, Task):
         return await _call_batch_body(
-            body.execute, task_ctx, inputs, config, registration.depends_on
+            body.execute,
+            task_ctx,
+            inputs,
+            config,
+            registration.depends_on,
+            runner,
+            on_start,
+            on_end,
         )
 
     # OOP Actor subclass — drain the async generator (inputs bind by name).
     if isinstance(body, Actor):
+        if on_start is not None:
+            on_start()
         return await _drain_stream(body.run, task_ctx, inputs, config, registration.depends_on)
 
     # Third-party Runnable (anything with .execute) — protocol path.
     if isinstance(body, Runnable):
         return await _call_batch_body(
-            body.execute, task_ctx, inputs, config, registration.depends_on
+            body.execute,
+            task_ctx,
+            inputs,
+            config,
+            registration.depends_on,
+            runner,
+            on_start,
+            on_end,
         )
 
     # Third-party Streamable (anything with .run async generator).
     if isinstance(body, Streamable):
+        if on_start is not None:
+            on_start()
         return await _drain_stream(body.run, task_ctx, inputs, config, registration.depends_on)
 
     # Decorator-actor: async-generator function. ``is_actor=True`` is the
@@ -665,12 +737,16 @@ async def _invoke_body_with_ctx(
     # are in (the runtime check above is the actual guard).
     if getattr(registration, "is_actor", False) and callable(body):
         actor_fn = cast("Callable[..., AsyncIterator[TaskOutput]]", body)
+        if on_start is not None:
+            on_start()
         return await _drain_stream(actor_fn, task_ctx, inputs, config, registration.depends_on)
 
     # Decorator-task: plain function (sync or async) — bind params by name
     # (ctx optional).
     if callable(body):
-        return await _call_batch_body(body, task_ctx, inputs, config, registration.depends_on)
+        return await _call_batch_body(
+            body, task_ctx, inputs, config, registration.depends_on, runner, on_start, on_end
+        )
 
     raise TypeError(
         f"Task '{registration.name}' is neither Task / Actor / Runnable / "

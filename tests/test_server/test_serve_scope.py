@@ -36,9 +36,7 @@ def test_remote_display_uses_registry_name_without_changing_identity(
     from molab.server.workspace_targets import WorkspaceTarget, WorkspaceTargetRegistry
 
     with Molq(registry=tmp_path / "labels.db") as mq:
-        cluster = mq.clusters.register(
-            name="Arrhenius", scheduler="shell", target_root=str(tmp_path)
-        )
+        cluster = mq.clusters.register(name="Arrhenius", scheduler="shell")
         cluster_id = cluster.definition()["id"]
         registry_id = mq.rpc("molq.hello")["registry_id"]
         monkeypatch.setattr("molab.workspace.connection.get_client", lambda *_args: mq)
@@ -207,9 +205,7 @@ class TestServeScopeHttp:
         ws, project, experiment, _run, _beta, _open_at = client_at
         directory = str(project.resolve())
         with Molq(registry=tmp_path / "scoped-registry.db") as mq:
-            cluster = mq.clusters.register(
-                name="scoped", scheduler="shell", target_root=str(tmp_path)
-            )
+            cluster = mq.clusters.register(name="scoped", scheduler="shell")
             inner = RemoteFS(mq, cluster.name, directory)
             fs = CachedRemoteFS(inner, mirror_root=tmp_path / "mirror")
             opened = open_serve_root(directory, fs=fs)
@@ -280,9 +276,7 @@ class TestServeScopeHttp:
         _ws, project, experiment, _run, _beta, _open_at = client_at
         directory = str(project.resolve())
         with Molq(registry=tmp_path / "batch-workflow.db") as mq:
-            cluster = mq.clusters.register(
-                name="batch", scheduler="shell", target_root=str(tmp_path)
-            )
+            cluster = mq.clusters.register(name="batch", scheduler="shell")
             fs = CachedRemoteFS(
                 RemoteFS(mq, cluster.name, directory), mirror_root=tmp_path / "mirror"
             )
@@ -384,3 +378,204 @@ class TestServeScopeHttp:
             assert experiments.json()[0]["projectId"] == alpha.id
             # The copy keeps its project record; no workspace record is invented.
             assert "workspace.root" not in (alone / "index.md").read_text()
+
+
+class TestScopedFind:
+    """A served node resolves refs at or below itself, so sourced documents can be written."""
+
+    def test_project_root_writes_a_sourced_document(self, client_at: tuple) -> None:
+        _ws, alpha, experiment, run, _beta, open_at = client_at
+        with open_at(Path(str(alpha.resolve()))) as client:
+            for kind, ref in (
+                ("project", f"molab:project/{alpha.id}"),
+                ("experiment", f"molab:experiment/{experiment.id}"),
+                ("run", f"molab:experiment/{experiment.id}/run/{run.id}"),
+            ):
+                response = client.post(
+                    "/api/knowledge/doc",
+                    json={
+                        "name": f"From {kind}",
+                        "cls": "Report",
+                        "sources": [{"kind": kind, "ref": ref}],
+                    },
+                )
+                assert response.status_code == 201, response.text
+
+    def test_refs_outside_the_served_node_are_not_found(self, client_at: tuple) -> None:
+        from molab.server.deps.scope_root import ScopeRoot
+        from molab.workspace.errors import RefNotFoundError
+        from molab.workspace.scope import open_serve_root
+
+        _ws, alpha, experiment, run, beta, _open_at = client_at
+        root = ScopeRoot(open_serve_root(Path(str(experiment.resolve()))))
+        assert root.find(f"molab:experiment/{experiment.id}/run/{run.id}").id == run.id
+        with pytest.raises(RefNotFoundError):
+            root.find(f"molab:project/{beta.id}")
+        with pytest.raises(RefNotFoundError):
+            root.find(f"molab:project/{alpha.id}")
+        run_root = ScopeRoot(open_serve_root(Path(str(run.resolve()))))
+        assert run_root.find(f"molab:experiment/{experiment.id}/run/{run.id}").id == run.id
+        with pytest.raises(RefNotFoundError):
+            run_root.find(f"molab:experiment/{experiment.id}")
+
+
+class TestScopedKnowledgeListing:
+    """A served node lists the knowledge documents of itself and every host below it."""
+
+    def test_project_root_lists_documents_below_it(self, client_at: tuple) -> None:
+        from molab.knowledge import Note
+
+        _ws, alpha, experiment, run, beta, open_at = client_at
+        Note(alpha, "project note").write("# p\n")
+        Note(experiment, "experiment note").write("# e\n")
+        Note(run, "run note").write("# r\n")
+        Note(beta, "other project").write("# b\n")
+        with open_at(Path(str(alpha.resolve()))) as client:
+            response = client.get("/api/knowledge")
+        assert response.status_code == 200, response.text
+        names = {row["name"] for row in response.json()["notes"]}
+        assert {"project-note", "experiment-note", "run-note"} <= names
+        assert "other-project" not in names
+        assert all(not row["relPath"].endswith("index.md") for row in response.json()["notes"])
+
+
+class TestScopedRecordHistory:
+    def test_record_replacement_is_committed_at_the_workspace_root(self, client_at: tuple) -> None:
+        import subprocess
+
+        from molab.workspace.history import GitHistory
+
+        ws, alpha, _experiment, _run, _beta, open_at = client_at
+        assert GitHistory(str(ws.root)).init()
+        with open_at(Path(str(alpha.resolve()))) as client:
+            created = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Study",
+                    "cls": "Delegation",
+                    "sources": [{"kind": "project", "ref": f"molab:project/{alpha.id}"}],
+                    "record": {"goal": "g", "scope": f"molab:project/{alpha.id}"},
+                },
+            )
+            assert created.status_code == 201, created.text
+            path = created.json()["relPath"]
+            got = client.get("/api/knowledge/doc/record", params={"path": path}).json()
+            replaced = client.patch(
+                "/api/knowledge/doc/record",
+                params={"path": path},
+                json={"record": {**got["record"], "state": "waiting"}, "ifMatch": got["digest"]},
+            )
+            assert replaced.status_code == 200, replaced.text
+        log = subprocess.run(
+            ["git", "-C", str(ws.root), "log", "--format=%s"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert "knowledge.record_replaced" in log
+
+
+class TestServedValidation:
+    def _paper(self, host: object, name: str) -> None:
+        folder = Path(str(host.resolve())) / "knowledges"  # type: ignore[attr-defined]
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{name}.md").write_text(f"---\nclass: Literature\nname: {name}\n---\n")
+
+    def test_workspace_root_reports_everything(self, client_at: tuple) -> None:
+        ws, alpha, _experiment, _run, beta, open_at = client_at
+        self._paper(alpha, "a")
+        self._paper(beta, "b")
+        with open_at(Path(str(ws.root))) as client:
+            body = client.get("/api/workspace/validate").json()
+        paths = {
+            row["path"]
+            for row in body["violations"]
+            if row["rule"] == "knowledge.literature_metadata"
+        }
+        assert paths == {"projects/alpha/knowledges/a.md", "projects/beta/knowledges/b.md"}
+        assert body["ok"] is True and body["warningCount"] >= 2
+
+    def test_a_served_project_sees_only_itself(self, client_at: tuple) -> None:
+        ws, alpha, _experiment, _run, beta, open_at = client_at
+        self._paper(ws, "root")
+        self._paper(alpha, "a")
+        self._paper(beta, "b")
+        with open_at(Path(str(alpha.resolve()))) as client:
+            response = client.get("/api/workspace/validate")
+        assert response.status_code == 200, response.text
+        paths = {row["path"] for row in response.json()["violations"]}
+        assert "knowledges/a.md" in paths
+        assert not any("b.md" in path or "root.md" in path for path in paths)
+
+    def test_errors_only_skips_warnings(self, client_at: tuple) -> None:
+        ws, alpha, _experiment, _run, _beta, open_at = client_at
+        self._paper(alpha, "a")
+        with open_at(Path(str(ws.root))) as client:
+            body = client.get("/api/workspace/validate", params={"errorsOnly": "true"}).json()
+        assert body["warningCount"] == 0
+
+
+class TestScopedContext:
+    """``/api/workspace/context`` works from any served node and stays inside it."""
+
+    def test_each_served_level_gets_its_own_subtree(self, client_at: tuple) -> None:
+        ws, alpha, experiment, run, beta, open_at = client_at
+        cases = (
+            (Path(str(ws.root)), {alpha.id, beta.id}, 1),
+            (Path(str(alpha.resolve())), {alpha.id}, 1),
+            (Path(str(experiment.resolve())), set(), 1),
+            (Path(str(run.resolve())), set(), 1),
+        )
+        for directory, projects, runs in cases:
+            with open_at(directory) as client:
+                response = client.get("/api/workspace/context")
+            assert response.status_code == 200, (directory, response.text)
+            body = response.json()
+            assert {row["id"] for row in body["projects"]} == projects
+            assert [row["runId"] for row in body["recentRuns"]] == [run.id] * runs
+            assert body["workspace"]["root"] == str(directory)
+
+    def test_ids_above_the_boundary_are_not_exposed(self, client_at: tuple) -> None:
+        _ws, _alpha, experiment, run, _beta, open_at = client_at
+        with open_at(Path(str(experiment.resolve()))) as client:
+            body = client.get("/api/workspace/context").json()
+        assert body["experiments"][0]["projectId"] == ""
+        assert body["recentRuns"][0]["experimentId"] == experiment.id
+        assert body["recentRuns"][0]["projectId"] == ""
+        with open_at(Path(str(run.resolve()))) as client:
+            body = client.get("/api/workspace/context").json()
+        assert body["recentRuns"][0]["experimentId"] == ""
+
+
+class TestKnowledgeEditHistory:
+    def test_edits_meta_moves_and_deletes_are_committed(self, client_at: tuple) -> None:
+        import subprocess
+
+        from molab.workspace.history import GitHistory
+
+        ws, _alpha, _experiment, _run, _beta, open_at = client_at
+        assert GitHistory(str(ws.root)).init()
+        with open_at(Path(str(ws.root))) as client:
+            created = client.post("/api/knowledge/doc", json={"name": "Idea", "body": "# Idea\n"})
+            path = created.json()["relPath"]
+            assert (
+                client.put(
+                    "/api/knowledge/doc", params={"path": path}, json={"body": "# Idea v2\n"}
+                ).status_code
+                == 200
+            )
+            assert (
+                client.patch(
+                    "/api/knowledge/doc/meta", params={"path": path}, json={"status": "retracted"}
+                ).status_code
+                == 200
+            )
+            assert client.delete("/api/knowledge/doc", params={"path": path}).status_code == 200
+        log = subprocess.run(
+            ["git", "-C", str(ws.root), "log", "--format=%s"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for event in ("knowledge.edited", "knowledge.meta_changed", "knowledge.deleted"):
+            assert event in log, event

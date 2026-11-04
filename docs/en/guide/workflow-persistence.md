@@ -95,16 +95,30 @@ Use these to group, compare, and replay runs.
         └── runs/<key=value_…>/
             ├── run.json                  ← logical definition only
             │                                (params, definition_hash, revision links)
+            ├── values/<sha256>.json|.pkl ← every task input/output, stored once,
+            │                                shared by all attempts (a record, in git)
             └── executions/e01/           ← one attempt; `e01` is its id
                 ├── execution.json        ← status, ownership, evidence, error, seal
                 ├── alive                 ← owner heartbeat is mtime
-                ├── workflow.json         ← per-node status + outputs (resume seed)
+                ├── workflow.json         ← per-node journal: status + input/output refs
                 ├── artifacts/
                 ├── out/<task>/
                 └── run.log               ← the attempt's one log
 ```
 
-A run's `run.json` is the logical definition. Status lives on each attempt's `execution.json`; the owner heartbeat is the mtime of that attempt's `alive` file. Resume seeds from `executions/eNN/workflow.json`. There is no sidecar of hot state next to `run.json`.
+A run's `run.json` is the logical definition. Status lives on each attempt's `execution.json`; the owner heartbeat is the mtime of that attempt's `alive` file. There is no sidecar of hot state next to `run.json`.
+
+## Node Records
+
+After any attempt, molab knows what every task received and returned. Each task record in `executions/eNN/workflow.json` (journal schema 4) carries:
+
+- `input_refs` — written when the task **starts**, so a failed task keeps it: `{"upstream": {dep: ref}, "root": ref, "delivered": ref, "config": ref}` — each upstream output it consumed, its run parameters (root tasks), a trigger-delivered value, its effective config.
+- `output_ref` / `output_encoding` (`json` or `pickle`) / `output_preview` (pickled values) — on completion.
+- `queued_at` — when the engine launched the task; `started_at` / `finished_at` — the span the body itself ran, stamped by the executor (a task waiting for the inline lock or a busy pool is queued, not running), so the web app's timeline shows computing time.
+
+A ref is `sha256:<hex>`: the digest of the encoded value in the run's `values/` directory. JSON-safe values are stored as canonical JSON, anything else (a `molpy.Atomistic`, a `Frame`, …) is pickled. Values are deduplicated by content: an upstream's output and the downstream input it feeds are the same file, and two attempts that produce the same value share it. A value that can be neither JSON-encoded nor pickled is recorded as `output_unrecordable` with the reason; that node cannot be resumed or re-run from the record. `values/` is a record tracked in git; it unpickles on read, so load it only from workspaces you trust. Journals from older molab versions (inline `outputs`) are legacy: they are still displayed, but cannot seed a resume or a partial rerun — rerun those runs from the top.
+
+`molab.workflow.read_journal(run, "e01")` presents the journal with each JSON output resolved under `outputs` (pickled ones are flagged `outputs_pickled` beside their `output_preview`); `read_outputs(run, "e01")` returns every recorded output, pickled values included.
 
 All JSON files are written atomically (temp file + `os.rename`); structure is discovered by scanning directories, so you can move, inspect, or archive experiments independently without rewriting parent metadata.
 
@@ -112,10 +126,13 @@ All JSON files are written atomically (temp file + `os.rename`); structure is di
 
 A run that ended `failed` or `cancelled` can be re-executed on the **same** `run_id` in exactly two ways — there is no "clone into a new run" operation:
 
-- **`--resume`** creates a new Execution. Completed task outputs are seeded from the predecessor journal, and only unfinished nodes recompute.
+- **`--resume`** creates a new Execution. Every completed task is seeded from the output its predecessor recorded (pickled values included), and only unfinished nodes recompute; a failed node re-executes from the very inputs its record shows.
 - **`--rerun`** opens a *fresh* attempt (`eNN`): a new `ExecutionRecord`, executed from the top of the graph.
+- **`--rerun --task NAME`** (repeatable; `execute_run(wf, run, rerun=True, only=("NAME",))`, or `"tasks": [...]` on `POST …/executions`) re-executes just that task with the inputs the latest attempt recorded. Every other completed task is seeded from its record, and every task downstream of a selected one is journalled `skipped` (`reason: "not selected for this rerun"`) — it is not run. The selection is recorded on the Execution (`selected_tasks`) and in the journal header (`selected_tasks`, plus `seeded_from` naming the predecessor and ref of each seed). When an upstream the task needs has no usable recorded output (it failed, its value is missing, or its code changed since), the rerun is refused with an error naming that upstream; select it too, or rerun the whole workflow. A partial rerun also requires the predecessor's profile.
 
-`--rerun` interacts with the content-addressed cache. A rerun does not seed anything, but every task whose cache identity (code + config + upstream outputs + sweep params) is unchanged **may hit the cache** — a deterministic task that already succeeded can be served its previous output instead of recomputing. That is usually what you want; when it is not (say the task reads mutable external state the cache key cannot see), pass `--rerun --fresh` to bypass cache *reads* for that execution, forcing every node to genuinely re-execute while still writing fresh cache entries.
+Resume and partial rerun go through one seeding path (`molab.workflow.read_attempt_seeds`), and the seed gate applies to both: a task whose code, config or `dependent_params` changed — or whose upstream did — is not seeded.
+
+`--rerun` interacts with the content-addressed cache. A full rerun does not seed anything, but every task whose cache identity (code + config + upstream outputs + sweep params) is unchanged **may hit the cache** — a deterministic task that already succeeded can be served its previous output instead of recomputing. That is usually what you want; when it is not (say the task reads mutable external state the cache key cannot see), pass `--rerun --fresh` to bypass cache *reads* for that execution, forcing every node to genuinely re-execute while still writing fresh cache entries.
 
 Neither verb touches `pending` or `succeeded` runs, and a live `running` run must be cancelled first — retrying is always an explicit verb, never implicit.
 

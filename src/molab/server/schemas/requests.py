@@ -164,10 +164,50 @@ class ExecutionAttemptCreateRequest(ApiModel):
             "Recompute every task, ignoring cached node results. Always true for reproduce."
         ),
     )
-    target: str | None = None
-    dispatch: bool = Field(
-        default=False,
-        description="Submit the queued Execution after it is created.",
+    target: str = Field(
+        default="local",
+        min_length=1,
+        description=(
+            "Compute target the attempt is submitted to; the built-in ``local`` target "
+            "runs it on this machine. Every created attempt is submitted — an attempt "
+            "nothing will run is never created."
+        ),
+    )
+    request_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description=(
+            "Idempotency key. When an attempt of this Run was already created with "
+            "the same key, that attempt is returned and nothing new is created or "
+            "dispatched, so a caller that lost the response can retry safely."
+        ),
+    )
+    requested_by: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Software agent recorded as the attempt's creator (default: the UI).",
+    )
+    tasks: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        default=None,
+        description=(
+            "Rerun only these tasks (``mode`` must be ``rerun``): each executes with the "
+            "inputs the predecessor attempt recorded, every other completed task is seeded "
+            "from its record, and every task downstream of a selected one is skipped. "
+            "Omit to rerun every task."
+        ),
+    )
+    task_executor: Literal["thread", "process", "inline"] | None = Field(
+        default=None,
+        description=(
+            "How the attempt's task bodies run: worker threads (default), worker "
+            "processes, or inline on the engine thread. Overrides the workflow's and "
+            "each task's choice."
+        ),
+    )
+    max_workers: int | None = Field(
+        default=None, ge=1, description="Worker threads / processes at most."
     )
 
 

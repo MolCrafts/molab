@@ -416,7 +416,7 @@ export const POSITION_HEIGHT = 72;
 
 /**
  * Every finished run of the experiment on one duration axis, the run on the
- * page drawn larger, ringed and labelled. Siblings recede; hover names them,
+ * page drawn larger and ringed (its tooltip names it). Siblings recede; hover names them,
  * click opens them. `lane` stacks coincident dots.
  */
 export const positionSpec = (p: OverviewPalette, axis: DurationAxis): VegaLiteSpec => {
@@ -465,15 +465,6 @@ export const positionSpec = (p: OverviewPalette, axis: DurationAxis): VegaLiteSp
           y: { ...y, datum: 0 },
           fill: { field: "color", type: "nominal", scale: null, legend: null },
           tooltip,
-        },
-      },
-      {
-        transform: [{ filter: "datum.self" }],
-        mark: { type: "text", dy: -16, fontSize: 11, fontWeight: 500, color: p.ink },
-        encoding: {
-          x: { ...x, field: "seconds" },
-          y: { ...y, datum: 0 },
-          text: { value: "this run" },
         },
       },
     ],

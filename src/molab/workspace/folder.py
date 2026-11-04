@@ -41,6 +41,7 @@ from .fs import DirEntry, FileSystem, PathArg
 from .fs_local import LocalFS
 from .models import FolderMetadata
 from .naming import SCRATCH_CONTAINER
+from .timestamps import utc_now
 from .utils import slugify
 
 if TYPE_CHECKING:
@@ -215,6 +216,9 @@ class Folder:
     _not_found_error_cls: ClassVar[type[Exception]] = LookupError
     #: The record ``type`` a registered subclass writes (``workspace.project``).
     _entity_kind: ClassVar[str] = ""
+    #: ``(size, mtime)`` of the ``index.md`` this object was read from, set by
+    #: the parent's child cache; ``None`` until cached (see ``_cached_child``).
+    _cached_stamp: tuple[int, float] | None = None
 
     def __init__(
         self,
@@ -574,12 +578,12 @@ class Folder:
 
     def materialize(self) -> None:
         """Persist the record in ``index.md`` (creating the dir lazily)."""
-        self._metadata = self._metadata.model_copy(update={"updated_at": datetime.now()})
+        self._metadata = self._metadata.model_copy(update={"updated_at": utc_now()})
         self.write_meta()
 
     def save(self) -> None:
         """Bump ``updated_at`` and rewrite the record."""
-        self._metadata = self._metadata.model_copy(update={"updated_at": datetime.now()})
+        self._metadata = self._metadata.model_copy(update={"updated_at": utc_now()})
         self.write_meta()
 
     # ── Children ─────────────────────────────────────────────────────────
@@ -753,7 +757,7 @@ class Folder:
             )
         target_cls = type(child)
         slug = child._name
-        cached = self._children_cache.get(slug)
+        cached = self._cached_child(slug)
         if cached is not None and cached._kind == child._kind:
             # Cache/disk hits reconstruct through type(child), so the narrow
             # return type is truthful (add_folder is generic like get_folder).
@@ -761,7 +765,7 @@ class Folder:
         child_dir = target_cls.child_dir(self, slug)
         if self._disk().is_dir(child_dir):
             existing = target_cls.from_disk(child_dir, self)
-            self._children_cache[slug] = existing
+            self._remember(slug, existing)
             return cast("F", existing)
         child._parent = self
         child._root_path = None
@@ -770,8 +774,53 @@ class Folder:
         child.materialize()  # writes the index.md record and refreshes the index
         if read_type(self._disk(), child.resolve()) is None:
             child.write_meta()
-        self._children_cache[slug] = child
+        self._remember(slug, child)
         return child
+
+    # ── Child cache: a cache of the tree, never ahead of it ──────────────
+
+    def _record_stamp(self, child_dir: PathArg) -> tuple[int, float] | None:
+        """``(size, mtime)`` of *child_dir*'s ``index.md``, or ``None`` when absent."""
+        fs = self._disk()
+        try:
+            stat = fs.stat(fs.join(child_dir, INDEX_FILENAME))
+        except (FileNotFoundError, OSError):
+            return None
+        return (stat.size, stat.mtime)
+
+    def _remember(self, slug: str, child: Folder) -> None:
+        """Cache *child* under *slug* with the stamp of the record it reflects."""
+        child._cached_stamp = self._record_stamp(type(child).child_dir(self, slug))
+        self._children_cache[slug] = child
+
+    def _cached_child(self, slug: str) -> Folder | None:
+        """The cached child *slug*, reloaded when another process rewrote its record.
+
+        A long-lived process (``molab serve``) holds these objects while the
+        CLI, a worker or a hook rewrites ``index.md``. An unchanged stamp is a
+        hit. A changed one is read again: when the canonical record is the
+        same (only the derived index or the body moved, or this process wrote
+        it), the cached object stays, so callers keep one object per entity;
+        otherwise the fresh one replaces it. A vanished record drops it.
+        """
+        cached = self._children_cache.get(slug)
+        if cached is None:
+            return None
+        child_dir = type(cached).child_dir(self, slug)
+        stamp = self._record_stamp(child_dir)
+        if stamp is not None and stamp == cached._cached_stamp:
+            return cached
+        try:
+            fresh = type(cached).from_disk(child_dir, self)
+        except (FileNotFoundError, OSError, ValueError):
+            self._children_cache.pop(slug, None)
+            return None
+        if fresh._canonical_record() == cached._canonical_record():
+            cached._cached_stamp = stamp
+            return cached
+        fresh._cached_stamp = stamp
+        self._children_cache[slug] = fresh
+        return fresh
 
     def get_folder(self, name: str, *, cls: type[F]) -> F:
         """Resolve a child by its directory name, its display name, or its id.
@@ -792,14 +841,15 @@ class Folder:
         for candidate in (name, slugify(name)):
             if not candidate:
                 continue
-            cached = self._children_cache.get(candidate)
-            if isinstance(cached, cls):
-                return cached
+            if isinstance(self._children_cache.get(candidate), cls):
+                cached = self._cached_child(candidate)
+                if isinstance(cached, cls):
+                    return cached
             child_dir = cls.child_dir(self, candidate)
             if self._disk().is_dir(child_dir):
                 loaded = cls.from_disk(child_dir, self)
                 if isinstance(loaded, cls):
-                    self._children_cache[loaded._name] = loaded
+                    self._remember(loaded._name, loaded)
                     return loaded
         return self._child_by_id(name, cls=cls)
 
@@ -830,10 +880,11 @@ class Folder:
                 continue
             if not entry.is_dir:
                 continue
-            cached = self._children_cache.get(entry_name)
-            if isinstance(cached, cls):
-                out.append(cached)
-                continue
+            if isinstance(self._children_cache.get(entry_name), cls):
+                cached = self._cached_child(entry_name)
+                if isinstance(cached, cls):
+                    out.append(cached)
+                    continue
             entry_path = self._disk().join(container, entry_name)
             try:
                 loaded = cls.from_disk(entry_path, self)
@@ -842,7 +893,7 @@ class Folder:
             except (FileNotFoundError, OSError, ValueError):
                 continue
             if isinstance(loaded, cls):
-                self._children_cache[loaded._name] = loaded
+                self._remember(loaded._name, loaded)
                 out.append(loaded)
         return out
 
@@ -946,7 +997,7 @@ class Folder:
             update={
                 "id": target_id,
                 "name": new_name if new_name is not None else self._metadata.name,
-                "updated_at": datetime.now(),
+                "updated_at": utc_now(),
             }
         )
         # Before any resolve()-dependent write — entity subclasses derive their

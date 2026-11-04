@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from shutil import rmtree
+from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
-from molab.workspace.experiment import WORKFLOW_DOC_FILENAME, Experiment
+from molab.workspace.experiment import WORKFLOW_DOC_FILENAME, Experiment, _parameter_space
 from molab.workspace.folder import _registered_targets
 from molab.workspace.fs_cached import CachedRemoteFS
 from molab.workspace.scope import as_folder, entities, resolve_in_scope
@@ -20,9 +21,27 @@ from ..schemas import (
     ExperimentResponse,
     MessageResponse,
 )
+from ..schemas._wire import ApiModel
 from ..workflow_documents import compile_workflow_document
 
 router = APIRouter(prefix="/projects/{project_id}/experiments", tags=["experiments"])
+
+#: One request must not materialize an unbounded Cartesian product.
+_MAX_SWEEP_CELLS = 500
+
+
+class SweepSeedRequest(ApiModel):
+    """One axis name to the values that axis takes. Every value is one cell coordinate."""
+
+    axes: dict[str, list[Any]]
+
+
+class SweepSeedResponse(ApiModel):
+    """Runs created by this call. ``skipped`` cells already had a run."""
+
+    created: list[str]
+    skipped: int
+    cells: int
 
 
 @router.get("", response_model=list[ExperimentResponse])
@@ -169,6 +188,39 @@ def get_experiment_comparison(
         projectId=experiment.ancestor_id("workspace.project"),
         paramKeys=sorted(param_keys),
         runs=rows,
+    )
+
+
+@router.post("/{experiment_id}/sweep", response_model=SweepSeedResponse)
+def seed_experiment_sweep(
+    project_id: str,
+    experiment_id: str,
+    body: SweepSeedRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> SweepSeedResponse:
+    """Seed one pending run per grid cell. A cell that already exists is skipped.
+
+    This is :meth:`Experiment.seed`, not :meth:`Experiment.sweep`: the
+    experiment keeps the workflow it already has. Nothing is dispatched.
+    """
+    experiment = _experiment_in_scope(workspace, project_id, experiment_id)
+    try:
+        space = _parameter_space(body.axes)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    cells = len(space)
+    if cells == 0:
+        raise HTTPException(status_code=422, detail="Sweep has no cells.")
+    if cells > _MAX_SWEEP_CELLS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Sweep has {cells} cells. The limit is {_MAX_SWEEP_CELLS}.",
+        )
+    created = experiment.seed(space)
+    return SweepSeedResponse(
+        created=[run.id for run in created],
+        skipped=cells - len(created),
+        cells=cells,
     )
 
 

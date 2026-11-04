@@ -48,7 +48,7 @@ class TestSourceFile:
 
 
 class TestSourceManifest:
-    def test_naive_captured_at_is_read_as_utc(self) -> None:
+    def test_naive_captured_at_is_read_as_local_time(self) -> None:
         from molab.workspace.domain import SourceManifest
 
         manifest = SourceManifest(
@@ -56,8 +56,9 @@ class TestSourceManifest:
             locator="/abs/wf.py",
             captured_at=datetime(2026, 1, 1),  # naive on purpose
         )
+        # A naive stamp was written by datetime.now(): local time, converted.
         assert manifest.captured_at.tzinfo is UTC
-        assert manifest.captured_at == datetime(2026, 1, 1, tzinfo=UTC)
+        assert manifest.captured_at == datetime(2026, 1, 1).astimezone(UTC)
 
     def test_dir_key_is_rejected(self) -> None:
         from molab.workspace.domain import SourceManifest

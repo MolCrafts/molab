@@ -310,7 +310,13 @@ export type CoreObjectView = "overview" | "executions" | "logs" | "metrics" | "s
 /** Core views plus stable tab values contributed by independently loaded plugins. */
 export type ObjectView = CoreObjectView | (string & {});
 
-export type ExperimentView = "overview" | "workflow" | "runs" | "parameters" | "notebook";
+export type ExperimentView =
+  | "overview"
+  | "workflow"
+  | "runs"
+  | "parameters"
+  | "notebook"
+  | "products";
 export type ProjectView =
   | "overview"
   | "experiments"

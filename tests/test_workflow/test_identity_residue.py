@@ -90,7 +90,9 @@ class _Scan(ast.NodeVisitor):
         if _WORD.search(node.value) and node.value != "workflow_snapshot":
             self.hits.append(f"{self.path}:{node.lineno}:literal {node.value}")
         if node.value == "workflow_snapshot":
-            self.snapshot_keys.append(f"{self.path}:{node.lineno}:{'.'.join(self.stack)}")
+            # Pin the enclosing function, not a line: an edit above it must not
+            # break the test.
+            self.snapshot_keys.append(f"{self.path}:{'.'.join(self.stack)}")
 
 
 class TestIdentityResidue:
@@ -105,7 +107,7 @@ class TestIdentityResidue:
             scan.visit(tree)
             hits.extend(scan.hits)
             snapshots.extend(scan.snapshot_keys)
-        assert snapshots == [f"{_SRC / 'workspace' / 'run.py'}:250:compute_run_definition_hash"]
+        assert snapshots == [f"{_SRC / 'workspace' / 'run.py'}:compute_run_definition_hash"]
         assert hits == []
 
     def test_schema_lives_only_in_the_test_fixture(self) -> None:

@@ -9,5 +9,6 @@ export type NoteDetailResponse = {
     body: string;
     links: Array<string>;
     cards?: Array<EntityCard>;
+    record?: Record<string, any>;
 };
 

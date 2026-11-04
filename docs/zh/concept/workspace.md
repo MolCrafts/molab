@@ -44,10 +44,11 @@ workspace_root/
         ├── knowledges/<name>.md
         └── runs/<key=value_…>/   ← 目录名就是参数
             ├── index.md          ← 运行记录：只有逻辑定义
+            ├── values/           ← 每个任务的输入/输出，按内容只存一份
             └── executions/e01/   ← 一次尝试；`e01` 就是它的 id
                 ├── execution.json
                 ├── alive         ← 所有者心跳是 mtime
-                ├── workflow.json
+                ├── workflow.json ← 节点日志；按 ref 引用 values/
                 ├── artifacts/
                 ├── out/<task>/
                 └── jobs/

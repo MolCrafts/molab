@@ -77,6 +77,12 @@ describe("uniqueMolvisFiles", () => {
     expect(isMolvisOpenable(file("notes.txt"))).toBe(false);
   });
 
+  it("opens a parameterized monomer, not only a trajectory", () => {
+    expect(isMolvisOpenable(file("pbix-br.minimized.mol2"))).toBe(true);
+    expect(isMolvisOpenable(file("fragment.sdf"))).toBe(true);
+    expect(isMolvisOpenable(file("box.gro"))).toBe(true);
+  });
+
   it("leaves solver logs to molplot", () => {
     // Numbers over time are not a structure. Claiming them here would put the
     // same file behind two tabs, one of which cannot draw it.

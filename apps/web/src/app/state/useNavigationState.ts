@@ -48,7 +48,13 @@ const parseObjectView = (raw: string | null): ObjectView | undefined => {
 };
 
 const parseExperimentView = (raw: string | undefined): ExperimentView | undefined => {
-  if (raw === "workflow" || raw === "runs" || raw === "parameters" || raw === "notebook") {
+  if (
+    raw === "workflow" ||
+    raw === "runs" ||
+    raw === "parameters" ||
+    raw === "notebook" ||
+    raw === "products"
+  ) {
     return raw;
   }
   return undefined;

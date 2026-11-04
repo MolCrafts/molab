@@ -70,7 +70,7 @@ assert doc.read().startswith("# Analysis Notes")
 assert Note(experiment, "Analysis Notes").path == doc.path
 ```
 
-## 六个类
+## 文档类
 
 每个类都落成一个 markdown 文件；`class:` frontmatter 标出是哪一个：
 
@@ -80,11 +80,17 @@ assert Note(experiment, "Analysis Notes").path == doc.path
 | `Literature` | `class: Literature` | 一条文献记录；书目字段在 frontmatter 里，PDF 只记路径，从不拷贝 |
 | `Report` | `class: Report` | 成文分析，包括失败 Run 的分析 |
 | `Finding` | `class: Finding` | 收获的科学结论 |
-| `Plan` | `class: Plan` | 实验或项目的计划书 |
+| `Plan` | `class: Plan` | 计划总述：问题、范围、约束 |
+| `Roadmap` | `class: Roadmap` | 有序阶段，以及每个阶段对应哪个 experiment |
+| `Todo` | `class: Todo` | 工作项及其状态 |
+| `Milestone` | `class: Milestone` | 一个检查点：它关闭的阶段，以及关闭条件 |
 | `Observation` | `class: Observation` | 记录的观察或既定选择 |
+| `Delegation` | `class: Delegation` | 一项有边界、可恢复的受监督工作：作用域、目标、授权动作、预算与消耗、验收与停止条件、等待、worker 尝试 |
 
-`Report`、`Finding`、`Plan`、`Observation` 在构造时至少需要一个 `SourceRef` —— 它们
+`Report`、`Finding`、`Plan`、`Roadmap`、`Todo`、`Milestone`、`Observation` 在构造时至少需要一个 `SourceRef` —— 它们
 是有出处的文档；`Note` 与 `Literature` 不需要。
+
+Plan、Roadmap、Todo、Milestone 是一次战役的四份文档，各自只做一件事。Plan 不列阶段。Roadmap 不列工作项。Todo 不定义阶段顺序。Milestone 不列具体工作。后三份引用 Plan。`campaign_of(plan)` 读回这一组；`check_campaign` 检查每条 todo 和 milestone 点名的阶段确实在路线图上。
 
 ## 交叉引用才是粘合机制
 

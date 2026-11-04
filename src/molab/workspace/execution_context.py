@@ -436,6 +436,14 @@ class ExecutionContext:
         return self._execution_dir
 
     @property
+    def values_dir(self) -> Path:
+        """The run's recorded-value store, as ``Run.values_dir`` lays it out.
+
+        Where the workflow engine writes the values its node journal cites.
+        """
+        return self.run.values_dir()
+
+    @property
     def predecessor(self) -> str | None:
         """Selected predecessor for rerun/resume/reproduce provenance."""
         return self._state.based_on_execution_id if self._state is not None else None

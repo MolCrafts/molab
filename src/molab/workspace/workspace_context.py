@@ -29,7 +29,12 @@ from pydantic import BaseModel
 
 from molab._typing import JSONValue
 
+from .experiment import Experiment
+from .folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_PROJECT_KIND
+from .project import Project
+from .run import Run
 from .run_heartbeat import is_alive_stale
+from .scope import as_folder, descendants, display_name
 
 if TYPE_CHECKING:
     from .workspace import Workspace
@@ -179,72 +184,75 @@ def assemble_workspace_context(
     running_runs: list[RunRef] = []
     flags: list[HealthFlag] = []
 
-    for project in workspace.list_projects():
+    folder = as_folder(workspace)
+    for project in descendants(folder, Project):
         projects.append(ProjectRef(id=project.id, name=project.name))
-        for experiment in project.list_experiments():
-            experiments.append(
-                ExperimentRef(
-                    id=experiment.id,
-                    name=experiment.name,
-                    project_id=project.id,
-                    parameter_space=dict(experiment.parameter_space),
+    for experiment in descendants(folder, Experiment):
+        experiments.append(
+            ExperimentRef(
+                id=experiment.id,
+                name=experiment.name,
+                project_id=experiment.ancestor_id(WORKSPACE_PROJECT_KIND),
+                parameter_space=dict(experiment.parameter_space),
+            )
+        )
+        if experiment.workflow_kind is not None:
+            workflows.append(WorkflowRef(experiment_id=experiment.id, name=experiment.name))
+    for run in descendants(folder, Run):
+        # Ids above the serve boundary are not exposed: they read "" (a client
+        # routes with "-" there).
+        experiment_id = run.ancestor_id(WORKSPACE_EXPERIMENT_KIND)
+        project_id = run.ancestor_id(WORKSPACE_PROJECT_KIND)
+        executions = run.executions
+        latest = executions[-1] if executions else None
+        err = latest.error if latest else None
+        err_text = (
+            f"{err.get('type', 'Error')}: {err.get('message', '')}" if err is not None else None
+        )
+        status = run.status_label
+        started = min(
+            (e.started_at for e in executions if e.started_at is not None),
+            default=None,
+        )
+        ref = RunRef(
+            run_id=run.id,
+            experiment_id=experiment_id,
+            project_id=project_id,
+            status=status,
+            config_hash=run.metadata.definition_hash,
+            started_at=started,
+            finished_at=latest.finished_at if latest else None,
+            current_execution_id=latest.id if latest else None,
+        )
+        run_refs.append(ref)
+        run_ids.add(run.id)
+        if run.is_retryable:
+            failed_runs.append(ref)
+            # Say WHY, not just that it failed — the captured error is the
+            # one signal a user needs to act (integration.md §1.4 "no
+            # silent invalid state").
+            reason = f": {err_text}" if err_text else ""
+            flags.append(
+                HealthFlag(
+                    kind="failed_run",
+                    ref=run.id,
+                    detail=f"run {run.id} is {status} (retryable){reason}",
                 )
             )
-            if experiment.workflow_kind is not None:
-                workflows.append(WorkflowRef(experiment_id=experiment.id, name=experiment.name))
-            for run in experiment.list_runs():
-                executions = run.executions
-                latest = executions[-1] if executions else None
-                err = latest.error if latest else None
-                err_text = (
-                    f"{err.get('type', 'Error')}: {err.get('message', '')}"
-                    if err is not None
-                    else None
-                )
-                status = run.status_label
-                started = min(
-                    (e.started_at for e in executions if e.started_at is not None),
-                    default=None,
-                )
-                ref = RunRef(
-                    run_id=run.id,
-                    experiment_id=experiment.id,
-                    project_id=project.id,
-                    status=status,
-                    config_hash=run.metadata.definition_hash,
-                    started_at=started,
-                    finished_at=latest.finished_at if latest else None,
-                    current_execution_id=latest.id if latest else None,
-                )
-                run_refs.append(ref)
-                run_ids.add(run.id)
-                if run.is_retryable:
-                    failed_runs.append(ref)
-                    # Say WHY, not just that it failed — the captured error is the
-                    # one signal a user needs to act (integration.md §1.4 "no
-                    # silent invalid state").
-                    reason = f": {err_text}" if err_text else ""
-                    flags.append(
-                        HealthFlag(
-                            kind="failed_run",
-                            ref=run.id,
-                            detail=f"run {run.id} is {status} (retryable){reason}",
-                        )
+        # Any live attempt (queued / running / finalizing) counts. The
+        # heartbeat check targets that attempt; a queued one has no
+        # ``alive`` yet, and a missing ``alive`` is never stale.
+        active_id = run.execution_id
+        if active_id is not None:
+            running_runs.append(ref)
+            if is_alive_stale(run, active_id):
+                flags.append(
+                    HealthFlag(
+                        kind="stale_running",
+                        ref=run.id,
+                        detail=f"run {run.id} is {status} but its heartbeat is stale",
                     )
-                # Any live attempt (queued / running / finalizing) counts. The
-                # heartbeat check targets that attempt; a queued one has no
-                # ``alive`` yet, and a missing ``alive`` is never stale.
-                active_id = run.execution_id
-                if active_id is not None:
-                    running_runs.append(ref)
-                    if is_alive_stale(run, active_id):
-                        flags.append(
-                            HealthFlag(
-                                kind="stale_running",
-                                ref=run.id,
-                                detail=f"run {run.id} is {status} but its heartbeat is stale",
-                            )
-                        )
+                )
 
     recent_runs = sorted(run_refs, key=_run_sort_key, reverse=True)
 
@@ -286,12 +294,14 @@ def assemble_workspace_context(
                 )
             )
 
+    host = folder.asset_host()
+    targets = getattr(getattr(host, "metadata", None), "targets", None) or []
     return WorkspaceContext(
         workspace=WorkspaceRef(
-            id=workspace.id,
-            name=workspace.name,
+            id=str(folder.metadata.id),
+            name=display_name(folder),
             root=root,
-            targets=[t.name for t in workspace.metadata.targets],
+            targets=[t.name for t in targets],
         ),
         focus=focus,
         projects=projects,

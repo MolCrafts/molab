@@ -20,7 +20,8 @@ from molab.server.routes import run as run_routes
 from molab.server.schemas.requests import RunHarvestRequest
 from molab.workflow import Workflow, WorkflowCompiler
 from molab.workspace import Experiment, Run, Workspace
-from molab.workspace.domain import Artifact, ExecutionMode
+from molab.workspace.domain import Artifact, ExecutionMode, ExecutionStatus
+from molab.workspace.history import AgentRef
 from molab.workspace.models import ComputeTarget
 from molab.workspace.targets import add_target
 from tests.support.records import read_record, write_record
@@ -105,6 +106,30 @@ class _SubmitRecorder:
         execution_id: str | None = None,
     ) -> None:
         type(self).calls.append(execution_id)
+
+
+_REAL_DISPATCH = run_routes._dispatch_to_molq
+
+
+_REAL_START_LOCALLY = run_routes._start_locally
+
+
+@pytest.fixture(autouse=True)
+def dispatched(monkeypatch: pytest.MonkeyPatch) -> _DispatchRecorder:
+    """Every created attempt is submitted; record it instead of starting it.
+
+    A local-target attempt is recorded under the target name ``local``.
+    """
+    recorder = _DispatchRecorder()
+    monkeypatch.setattr(run_routes, "_dispatch_to_molq", recorder)
+
+    def start_locally(run, execution_id: str) -> None:
+        recorder.calls.append(
+            ("local", execution_id, [(e.id, e.status.value) for e in run.executions])
+        )
+
+    monkeypatch.setattr(run_routes, "_start_locally", start_locally)
+    return recorder
 
 
 @pytest.fixture
@@ -279,7 +304,7 @@ class TestCreateExecution:
         assert body["mode"] == "initial"
         assert body["status"] == "queued"
         assert "submit_cwd" in body["environment"]
-        assert body["executor"] == {"backend": "molq", "target": None}
+        assert body["executor"] == {"backend": "local", "target": "local"}
         assert [e.status.value for e in run.executions] == ["queued"]
 
     def test_create_records_profile_keys(
@@ -295,8 +320,33 @@ class TestCreateExecution:
         assert {"profile", "config", "config_hash", "submit_cwd"} <= set(environment)
         assert "python" not in environment
         assert "host" not in environment
-        assert body["executor"] == {"backend": "molq", "target": None}
+        assert body["executor"] == {"backend": "local", "target": "local"}
         assert run.execution("e01").environment == environment
+
+    def test_resume_after_a_dead_owner_reaps_it_first(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        """A running attempt whose same-host owner died is sealed, then resumed."""
+        import os
+        import platform
+
+        ws, exp, run = fresh_run
+        repo = run._execution_repository()
+        state = repo.create(
+            mode=ExecutionMode.INITIAL,
+            created_by=AgentRef(id="t", type="person", name="t"),
+            executor={"kind": "local", "host": platform.node(), "pid": 2**22 - 7},
+        )
+        repo.start(state.id)
+        with pytest.raises(ProcessLookupError):
+            os.kill(2**22 - 7, 0)
+        with served(ws) as client:
+            response = client.post(f"{_run_url(exp, run)}/executions", json={"mode": "resume"})
+        assert response.status_code == 201, response.text
+        assert response.json()["mode"] == "resume"
+        dead = run.execution(state.id)
+        assert dead.status is ExecutionStatus.FAILED
+        assert dead.error is not None and dead.error["type"] == "ZombieRun"
 
     def test_initial_after_existing_attempt_is_422(
         self, served: ServedFactory, terminal_run: RunFixture
@@ -343,6 +393,60 @@ class TestCreateExecution:
         assert response.status_code == 201, response.text
         assert run.execution("e02").bypass_cache is False
 
+    def test_tasks_record_a_partial_rerun(
+        self, served: ServedFactory, failed_run: RunFixture
+    ) -> None:
+        ws, exp, run = failed_run
+        with served(ws) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"mode": "rerun", "basedOnExecutionId": "e01", "tasks": ["b", "b"]},
+            )
+        assert response.status_code == 201, response.text
+        assert response.json()["selectedTasks"] == ["b"]
+        assert run.execution("e02").selected_tasks == ("b",)
+
+    def test_tasks_default_to_every_task(
+        self, served: ServedFactory, failed_run: RunFixture
+    ) -> None:
+        ws, exp, run = failed_run
+        with served(ws) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"mode": "rerun", "basedOnExecutionId": "e01"},
+            )
+        assert response.status_code == 201, response.text
+        assert response.json()["selectedTasks"] == []
+        assert run.execution("e02").selected_tasks == ()
+
+    def test_tasks_outside_a_rerun_are_422(
+        self, served: ServedFactory, failed_run: RunFixture
+    ) -> None:
+        ws, exp, run = failed_run
+        with served(ws) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"mode": "resume", "basedOnExecutionId": "e01", "tasks": ["b"]},
+            )
+        assert response.status_code == 422, response.text
+        assert [e.id for e in run.executions] == ["e01"]
+
+    def test_task_executor_is_recorded(self, served: ServedFactory, failed_run: RunFixture) -> None:
+        ws, exp, run = failed_run
+        with served(ws) as client:
+            refused = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"mode": "rerun", "taskExecutor": "gpu"},
+            )
+            response = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"mode": "rerun", "taskExecutor": "process", "maxWorkers": 3},
+            )
+        assert response.status_code == 201, response.text
+        assert run.execution("e02").executor["task_executor"] == "process"
+        assert run.execution("e02").executor["task_max_workers"] == 3
+        assert refused.status_code == 422
+
     def test_openapi_declares_bypass_cache(self) -> None:
         from molab.server.app import create_app
 
@@ -383,7 +487,7 @@ class TestCreateExecution:
         with served(ws) as client:
             response = client.post(
                 f"{_run_url(exp, run)}/executions",
-                json={"target": "hpc", "dispatch": True},
+                json={"target": "hpc"},
             )
         assert response.status_code == 201, response.text
         assert recorder.calls == [("hpc", "e01", [("e01", "queued")])]
@@ -398,7 +502,7 @@ class TestCreateExecution:
         with served(ws, raise_server_exceptions=False) as client:
             response = client.post(
                 f"{_run_url(exp, run)}/executions",
-                json={"target": "hpc", "dispatch": True},
+                json={"target": "hpc"},
             )
         assert response.status_code == 500
         [execution] = run.executions
@@ -408,12 +512,21 @@ class TestCreateExecution:
         assert execution.error["type"] == "RuntimeError"
         assert execution.error["message"] == "scheduler down"
 
-    def test_dispatch_without_target_is_422(
+    def test_an_attempt_without_a_target_is_submitted_locally(
+        self, served: ServedFactory, fresh_run: RunFixture, dispatched: _DispatchRecorder
+    ) -> None:
+        ws, exp, run = fresh_run
+        with served(ws) as client:
+            response = client.post(f"{_run_url(exp, run)}/executions", json={})
+        assert response.status_code == 201, response.text
+        assert dispatched.calls == [("local", "e01", [("e01", "queued")])]
+
+    def test_an_unknown_target_creates_nothing(
         self, served: ServedFactory, fresh_run: RunFixture
     ) -> None:
         ws, exp, run = fresh_run
         with served(ws) as client:
-            response = client.post(f"{_run_url(exp, run)}/executions", json={"dispatch": True})
+            response = client.post(f"{_run_url(exp, run)}/executions", json={"target": "nowhere"})
         assert response.status_code == 422, response.text
         assert run.executions == []
 
@@ -423,7 +536,9 @@ class TestCreateExecution:
         fresh_run: RunFixture,
         echo_document: dict[str, object],
         submit_recorder: type[_SubmitRecorder],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        monkeypatch.setattr(run_routes, "_dispatch_to_molq", _REAL_DISPATCH)
         ws, exp, run = fresh_run
         _add_hpc_target(ws)
         with served(ws) as client:
@@ -434,7 +549,7 @@ class TestCreateExecution:
             assert put.status_code == 200, put.text
             response = client.post(
                 f"{_run_url(exp, run)}/executions",
-                json={"target": "hpc", "dispatch": True},
+                json={"target": "hpc"},
             )
         assert response.status_code == 201, response.text
         assert submit_recorder.calls == [response.json()["id"]]
@@ -500,7 +615,7 @@ class TestDispatchToMolq:
             name="hpc", registry_id="reg", cluster_id="hpc", scratch_root="/scratch"
         )
 
-        run_routes._dispatch_to_molq(target, run)
+        _REAL_DISPATCH(target, run)
 
         assert _MolqRecorder.calls == [None]
 
@@ -518,7 +633,7 @@ class TestDispatchToMolq:
         )
 
         with pytest.raises(HTTPException) as excinfo:
-            run_routes._dispatch_to_molq(target, run)
+            _REAL_DISPATCH(target, run)
 
         assert excinfo.value.status_code == 422
         detail = str(excinfo.value.detail)
@@ -915,3 +1030,109 @@ class TestGetRunExecution:
         assert "read_journal(" in source
         assert "workflow.json" not in source
         assert "read_versioned_json" not in source
+
+
+class TestExecutionRequestKey:
+    """``requestKey`` makes attempt creation idempotent per Run."""
+
+    def test_same_key_returns_the_same_attempt(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        body = {"requestKey": "tack:d1:w1", "requestedBy": "tack"}
+        with served(ws) as client:
+            first = client.post(f"{_run_url(exp, run)}/executions", json=body)
+            second = client.post(f"{_run_url(exp, run)}/executions", json=body)
+        assert first.status_code == 201, first.text
+        assert second.status_code == 201, second.text
+        assert first.json()["id"] == second.json()["id"] == "e01"
+        assert first.json()["executor"]["request_key"] == "tack:d1:w1"
+        assert len(run.executions) == 1
+        assert run.executions[0].created_by.id == "tack"
+
+    def test_different_keys_create_new_attempts(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        with served(ws) as client:
+            client.post(f"{_run_url(exp, run)}/executions", json={"requestKey": "a"})
+            second = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"requestKey": "b", "mode": "rerun", "basedOnExecutionId": "e01"},
+            )
+        # e01 is still queued, so a rerun is refused; the key never hides that.
+        assert second.status_code in (201, 422), second.text
+        if second.status_code == 201:
+            assert second.json()["id"] == "e02"
+
+
+class TestLocalAttemptRunsForReal:
+    """No stand-ins: a local attempt is a detached worker that finishes on its own."""
+
+    def test_a_local_attempt_reaches_a_terminal_state(
+        self,
+        served: ServedFactory,
+        fresh_run: RunFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import time
+
+        monkeypatch.setattr(run_routes, "_start_locally", _REAL_START_LOCALLY)
+        ws, exp, run = fresh_run
+        with served(ws) as client:
+            exp.bind_workflow("document", document=_CONSTANT_ADD)
+            created = client.post(f"{_run_url(exp, run)}/executions", json={})
+            assert created.status_code == 201, created.text
+            assert created.json()["executor"]["backend"] == "local"
+            url = f"{_run_url(exp, run)}/executions/{created.json()['id']}"
+            deadline = time.monotonic() + 90
+            status = "queued"
+            while time.monotonic() < deadline:
+                status = client.get(url).json()["status"]
+                if status in {"succeeded", "failed", "cancelled"}:
+                    break
+                time.sleep(0.5)
+        attempt = Path(str(run.run_dir)) / "executions" / created.json()["id"]
+        log = attempt / "jobs" / "worker.log"
+        assert status == "succeeded", log.read_text() if log.exists() else "no worker.log"
+        assert not (attempt / "worker.log").exists(), (
+            "worker output is scheduler evidence, under jobs/"
+        )
+        from molab.workspace import Workspace
+
+        assert not [
+            issue
+            for issue in Workspace(ws.root).validate().violations
+            if "worker.log" in str(issue)
+        ], "molab's own validate must not call the worker's log a stray"
+
+    def test_a_worker_that_cannot_start_seals_the_attempt_failed(
+        self,
+        served: ServedFactory,
+        fresh_run: RunFixture,
+        echo_document: dict[str, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A document whose task type only this test process knows cannot start in a worker."""
+        import time
+
+        monkeypatch.setattr(run_routes, "_start_locally", _REAL_START_LOCALLY)
+        ws, exp, run = fresh_run
+        with served(ws) as client:
+            put = client.put(
+                f"/api/projects/{exp.project.id}/experiments/{exp.id}/workflow",
+                json={"document": echo_document},
+            )
+            assert put.status_code == 200, put.text
+            created = client.post(f"{_run_url(exp, run)}/executions", json={})
+            assert created.status_code == 201, created.text
+            url = f"{_run_url(exp, run)}/executions/{created.json()['id']}"
+            deadline = time.monotonic() + 90
+            body: dict[str, object] = {"status": "queued"}
+            while time.monotonic() < deadline:
+                body = client.get(url).json()
+                if body["status"] != "queued":
+                    break
+                time.sleep(0.5)
+        assert body["status"] == "failed"
+        assert "Unknown task_type" in str(body["error"])

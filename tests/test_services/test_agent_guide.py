@@ -87,6 +87,15 @@ class TestRender:
             assert callable(getattr(BufferedMetrics, method)), line
             assert f"| {task} | `{line}` |" in block
 
+    def test_code_is_offered_only_as_a_workflow(self, ws: Workspace) -> None:
+        """The guide's path for computation is a workflow run by molab; it does not
+        steer agents to plain scripts tracked from outside."""
+        block = render_agent_guide(ws)
+        assert "| Execute a workflow | `molab run workflow.py` |" in block
+        assert "plain script" not in block
+        assert "from molab import track" not in block
+        assert "molab runs adopt PROJECT EXPERIMENT RUN --from DIR" not in block
+
     def test_the_block_is_derived_from_the_layout_constants(self, ws: Workspace) -> None:
         block = render_agent_guide(ws)
         assert block.startswith(BEGIN_MARKER) and block.rstrip().endswith(END_MARKER)
@@ -100,6 +109,9 @@ class TestRender:
             assert f"{directory.name}/" in block
         assert "index.children[].path" in block
         assert "molab validate --new-only" in block
+        assert "### Tools" in block
+        assert "molplot for figures" in block
+        assert "report that gap and continue" in block
 
 
 class TestSplice:

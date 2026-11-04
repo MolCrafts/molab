@@ -45,7 +45,7 @@ class WorkflowRecoveryError(WorkflowError):
 
 def _locator_of(experiment: Experiment) -> str | None:
     """The code locator, used only when ``workflow_kind`` is ``code``."""
-    entrypoint = getattr(getattr(experiment, "metadata", None), "workflow_entrypoint", None)
+    entrypoint = getattr(experiment, "entrypoint", None)
     if isinstance(entrypoint, str) and entrypoint:
         return entrypoint
     return None

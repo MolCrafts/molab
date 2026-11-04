@@ -117,7 +117,7 @@ def _rank_of_class(cls: type[Folder]) -> int:
     return rank(kind)
 
 
-def descendants(root: Folder, cls: type[Folder]) -> list[Folder]:
+def descendants[F: Folder](root: Folder, cls: type[F]) -> list[F]:
     """*cls* nodes at or below *root*, one container level at a time."""
     from molab.workspace.experiment import Experiment
     from molab.workspace.project import Project
@@ -127,7 +127,7 @@ def descendants(root: Folder, cls: type[Folder]) -> list[Folder]:
         return [root]
     if _rank_of_class(cls) < rank(root):
         return []
-    chain = (Project, Experiment, Run)
+    chain: tuple[type[Folder], ...] = (Project, Experiment, Run)
     level: list[Folder] = [root]
     here = rank(root)
     for step in chain:
@@ -138,7 +138,7 @@ def descendants(root: Folder, cls: type[Folder]) -> list[Folder]:
             nxt.extend(child for child in node.list_folders(cls=step) if isinstance(child, step))
         level = nxt
         if step is cls:
-            return level
+            return [node for node in level if isinstance(node, cls)]
     return []
 
 

@@ -17,11 +17,12 @@ Tests never *read* the journal to assert anything — they observe seeding
 through the public API (``WorkflowResult.outputs``) or through files the
 workflow itself wrote.
 
-The helper targets the schema-v3 journal: ``task_configs[]`` entries keyed by
-``task_id`` carrying ``status`` / ``outputs`` / ``snapshot_key``. A legacy
-document-level ``outputs`` map, if present, is rewritten too. ``snapshot_key``
-and the header ``workflow_digest`` are left untouched, so the seed gate still
-accepts the poisoned value as a valid seed.
+The helper targets the schema-v4 journal: ``task_configs[]`` entries keyed by
+``task_id`` carrying ``status`` / ``output_ref`` / ``snapshot_key``, the refs
+pointing into the run's value store ``<run_dir>/values/``. The sentinel is
+written into that store and the record's ``output_ref`` repointed at it.
+``snapshot_key`` and the header ``workflow_digest`` are left untouched, so the
+seed gate still accepts the poisoned value as a valid seed.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from pathlib import Path
 
 from molab._typing import JSONValue
 from molab.atomicio import atomic_write_json
+from molab.workflow._engine.values import ValueStore
 
 
 def poison_node_output(
@@ -45,7 +47,8 @@ def poison_node_output(
     *task_id* — poisoning a node that never completed would silently prove
     nothing.
     """
-    path = Path(run_dir) / "executions" / execution_id / "workflow.json"
+    run_dir = Path(run_dir)
+    path = run_dir / "executions" / execution_id / "workflow.json"
     document = json.loads(path.read_text(encoding="utf-8"))
     tasks = document.get("task_configs", [])
     record = next(
@@ -60,9 +63,9 @@ def poison_node_output(
     )
     if record is None:
         raise LookupError(f"{path} has no completed record for task {task_id!r}")
-    record["outputs"] = value
-    record.pop("outputs_lossy", None)
-    outputs = document.get("outputs")
-    if isinstance(outputs, dict) and task_id in outputs:
-        outputs[task_id] = value
+    ref, encoding = ValueStore(run_dir / "values").put_encoded(value)
+    for key in ("output_ref", "output_encoding", "output_preview", "output_unrecordable"):
+        record.pop(key, None)
+    record["output_ref"] = ref
+    record["output_encoding"] = encoding
     atomic_write_json(path, document)

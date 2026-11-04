@@ -485,6 +485,16 @@ class TrackedMetrics(_MetricsFront):
                 return None
             return records
 
+    def keep_task_records(self, name: str, records: Iterable[MetricRecord]) -> None:
+        """Keep records task *name* wrote elsewhere (a worker process) for the node cache.
+
+        They are already in the WAL — the worker appended them — so nothing
+        is written; they are only kept, as if written here in the task's
+        scope (the :data:`TASK_RECORD_CAP` applies).
+        """
+        for record in records:
+            self._capture(name, record)
+
     def replay(self, records: Iterable[MetricRecord], *, replayed_from: str) -> int:
         """Append recorded events again, each tagged ``replayed_from``.
 

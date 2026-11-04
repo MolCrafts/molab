@@ -61,27 +61,27 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
     ),
     (
         "Write a knowledge document",
-        "molab knowledge write NAME TEXT --on HOST --class CLASS --created-by AGENT",
-    ),
-    (
-        "Record a script's offline tracking directory",
-        "molab runs adopt PROJECT EXPERIMENT RUN --from DIR [--params '{...}']",
+        "molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --record JSON --created-by AGENT",
     ),
     ("Import external data", "molab asset import TITLE PATH --project PROJECT"),
     ("Empty old scratch entries", "molab scratch clean --older-than 7d"),
     ("Rebuild every derived index block", "molab index sync"),
     ("Ask whether a write is legal", "molab check path PATH --op write --json"),
+    (
+        "Ask whether a shell command's writes are legal",
+        "molab check command --command COMMAND --cwd DIR --json",
+    ),
     ("Check your changes before finishing", "molab validate --new-only"),
 )
 
 #: ``(what you want to do, the Python line that does it)``, rendered in the
 #: same table after :data:`AGENT_COMMANDS`. Every name imported here exists
-#: at the top level of ``molab`` (pinned by a test).
+#: at the top level of ``molab`` (pinned by a test). Computation is offered
+#: only as a workflow (``molab run``); ``molab.track()`` stays an API for code
+#: molab does not run, not a path the guide steers agents to.
 AGENT_PYTHON: Final[tuple[tuple[str, str], ...]] = (
     # D92: copied into the current execution's stdout.log / stderr.log.
     ("Print into the run's record", "from molab import print"),
-    # D94: a plain script or child process gets the same surface.
-    ("Track a plain script or child process", "from molab import track"),
 )
 
 #: ``(what you want to do, the call that does it)`` on the ``ctx`` molab hands
@@ -123,6 +123,7 @@ def _layout() -> str:
         PROJECT_CONTAINER,
         RUN_CONTAINER,
         SCRATCH_CONTAINER,
+        VALUE_CONTAINER,
         WORKFLOW_SCRIPT_FILENAME,
         execution_slug,
     )
@@ -141,6 +142,10 @@ def _layout() -> str:
         (f"        ├── {SCRATCH_CONTAINER}/", "quick tests only; disposable, gitignored"),
         (f"        └── {RUN_CONTAINER}/<key=value_…>/", "directory name = the run's parameters"),
         (f"            ├── {INDEX_FILENAME}", "run record (parameters) + attempt list"),
+        (
+            f"            ├── {VALUE_CONTAINER}/<sha256>.json|.pkl",
+            "every task input/output, stored once (molab's; journals cite them by ref)",
+        ),
         (f"            └── {EXECUTION_CONTAINER}/{execution_slug(1)}/", "one attempt"),
         (f"                ├── {EXECUTION_RECORD_FILENAME}", "the attempt record (molab's)"),
         ("                ├── run.log, traceback.txt", "the attempt's log and failure"),
@@ -186,6 +191,14 @@ def render_agent_guide(ws: Workspace) -> str:
         "which the molcrafts-harness hooks call before each write and when a session "
         "ends.",
         "",
+        "### Tools",
+        "",
+        "Prefer the MolCrafts tool that owns the step: molpy for structure, force "
+        "fields and trajectories, molplot for figures, molvis for molecules, molq for "
+        "jobs, and molab for this workspace. Reading, searching, editing, git, "
+        "interpreters, package managers, and tests stay available. When a MolCrafts "
+        "API for a step is missing, report that gap and continue the rest of the task.",
+        "",
         "### Find your way",
         "",
         "Start at `./index.md`. Its YAML frontmatter has an `index:` block: follow "
@@ -222,7 +235,7 @@ def render_agent_guide(ws: Workspace) -> str:
         "### Knowledge documents",
         "",
         f"A document is `<level>/{KNOWLEDGE_CONTAINER}/<slug>.md` whose frontmatter "
-        "names one of six classes (`class:`). Write them with `molab knowledge write`.",
+        "names one class (`class:`). The table is the set. Write them with `molab knowledge write`.",
         "",
         _knowledge_classes(),
         "",

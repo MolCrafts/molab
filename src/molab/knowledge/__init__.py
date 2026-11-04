@@ -13,16 +13,19 @@ the class (``class: Finding``), the rest is the narrative. Path is identity::
     note.write("# Cooling\n")
     Note("/data/group/wiki/cooling.md")
 
-The six subclasses are ``Note``, ``Literature``, ``Report``, ``Finding``,
-``Plan``, ``Observation``. Failure analysis is a Report; harvest of a scientific
-outcome is a Finding.
+The subclasses are ``Note``, ``Literature``, ``Report``, ``Finding``,
+``Plan``, ``Roadmap``, ``Todo``, ``Milestone``, ``Observation``, and
+``Delegation``. A Plan
+is the campaign overview; Roadmap, Todo, and Milestone are the other three
+planning documents and cite that Plan. Failure analysis is a Report; harvest
+of a scientific outcome is a Finding.
 
 A path, or a **host plus a name**: ``Note(experiment, "Tg Cooling")`` derives
 ``<experiment>/knowledges/tg-cooling.md`` (and the host's own disk) without
 touching disk. ``.path`` is that file. The base class does not construct a
 subclass, and it has no ``folder`` or ``parse`` method.
 
-What lives here: the Knowledge handle, the six classes, ``SourceRef``, typed
+What lives here: the Knowledge handle, the document classes, ``SourceRef``, typed
 edges, BM25F retrieval, named wiki sources, and the read-only Zotero importer.
 Construct the document you mean: ``Note(host, name)``,
 ``Finding(host, name, sources=...)``. ``Finding.harvest(run, ...)`` and
@@ -44,17 +47,23 @@ cannot supply a git history or an id simply observes nothing.
 
 from .concept import Knowledge
 from .concepts import (
+    Delegation,
     Finding,
     Literature,
+    Milestone,
     Note,
     Observation,
     Plan,
     Report,
+    Roadmap,
+    Todo,
 )
+from .delegation import DelegationRecord
 from .edges import Edge, EdgeRole
 from .errors import KnowledgeNotFoundError
 from .knowledge_item import SourceKind, SourceRef
 from .parts import GeneratedPart, GeneratedParts
+from .planning import Campaign, PlanningDocument, campaign_of, check_campaign
 from .reference_meta import ReferenceMeta
 from .search import (
     SearchHit,
@@ -70,6 +79,9 @@ from .sources import (
 from .zotero import ZoteroItem
 
 __all__ = [
+    "Campaign",
+    "Delegation",
+    "DelegationRecord",
     "Edge",
     "EdgeRole",
     "Finding",
@@ -80,17 +92,23 @@ __all__ = [
     "KnowledgeScope",
     "KnowledgeSourceStore",
     "Literature",
+    "Milestone",
     "Note",
     "Observation",
     "Plan",
+    "PlanningDocument",
     "ReferenceMeta",
     "Report",
+    "Roadmap",
     "SearchHit",
     "SearchResult",
     "SourceKind",
     "SourceNotFoundError",
     "SourceRef",
     "SourcedHit",
+    "Todo",
     "WikiSource",
     "ZoteroItem",
+    "campaign_of",
+    "check_campaign",
 ]

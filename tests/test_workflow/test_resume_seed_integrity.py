@@ -3,8 +3,9 @@
 A resumed attempt (``run.start(mode=RESUME, predecessor=…)``) seeds
 completed-node outputs from its predecessor's journal. The runtime's one seed
 gate verifies every seed against the ``based_on`` journal before the new
-attempt's journal is opened: a seed survives only when its task's code,
-``dependent_params`` and fidelity match AND every upstream is itself verified.
+attempt's journal is opened: a seed survives only when its task's code and
+``dependent_params`` match, its output was recorded, AND every upstream is
+itself verified. A pickled (non-JSON) output is a valid seed.
 The ``execute(seed_outputs=…)`` fail-fast on unknown names is pinned here too.
 """
 
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -20,9 +22,9 @@ from molab.workflow import (
     Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
+    read_attempt_seeds,
     read_journal,
     read_outputs,
-    read_resume_seeds,
 )
 from molab.workspace import Workspace
 from molab.workspace.domain import ExecutionMode
@@ -73,12 +75,17 @@ def c(b: int) -> int:
 
 
 class _Opaque:
-    """A non-JSON-safe output (stored through the lossy rendering)."""
+    """A non-JSON-safe but picklable output (stored pickled)."""
 
 
 def opaque() -> object:
     _bump("opaque")
     return _Opaque()
+
+
+def unpicklable() -> object:
+    _bump("opaque")
+    return threading.Lock()
 
 
 def after(opaque: object) -> str:
@@ -91,6 +98,10 @@ def after(opaque: object) -> str:
 def step() -> str:
     _bump("step")
     return "computed"
+
+
+def read_resume_seeds(run, based_on: str, compiled) -> dict:
+    return dict(read_attempt_seeds(run, based_on, compiled).outputs)
 
 
 def _chain(a_body=a_v1, b_body=b_v1):
@@ -136,7 +147,8 @@ class TestResumeSeedIntegrity:
         (record,) = [t for t in doc["task_configs"] if t["task_id"] == "a"]
         assert record["status"] == "completed"
         assert record["snapshot_key"] == compiled.snapshots["a"].key
-        assert "outputs_lossy" not in record
+        assert record["output_encoding"] == "json"
+        assert record["outputs"] == 1
 
     def test_intact_seed_skips_body(self, tmp_path: Path) -> None:
         run = _run(tmp_path)
@@ -177,8 +189,8 @@ class TestResumeSeedIntegrity:
         assert _COUNTERS["b"] == 2
         assert result.outputs["b"] == 12
 
-    def test_lossy_seed_recomputed(self, tmp_path: Path) -> None:
-        wf = Workflow(name="lossy")
+    def test_pickled_seed_skips_body(self, tmp_path: Path) -> None:
+        wf = Workflow(name="pickled")
         wf.add(opaque, name="opaque")
         wf.add(after, name="after", depends_on=["opaque"])
         compiled = WorkflowCompiler().compile(wf)
@@ -186,10 +198,28 @@ class TestResumeSeedIntegrity:
         _failed_e01(run, compiled)
         doc = read_journal(run, "e01")
         (record,) = [t for t in doc["task_configs"] if t["task_id"] == "opaque"]
-        assert record["outputs_lossy"] is True
+        assert record["outputs_pickled"] is True
+        seeds = read_resume_seeds(run, "e01", compiled)
+        assert isinstance(seeds["opaque"], _Opaque)
+
+        result = _resume(run, compiled, seeds)
+
+        assert result.status == "succeeded"
+        assert _COUNTERS["opaque"] == 1
+
+    def test_unrecordable_seed_recomputed(self, tmp_path: Path) -> None:
+        wf = Workflow(name="unrecordable")
+        wf.add(unpicklable, name="opaque")
+        wf.add(after, name="after", depends_on=["opaque"])
+        compiled = WorkflowCompiler().compile(wf)
+        run = _run(tmp_path)
+        _failed_e01(run, compiled)
+        doc = read_journal(run, "e01")
+        (record,) = [t for t in doc["task_configs"] if t["task_id"] == "opaque"]
+        assert "picklable" in record["output_unrecordable"]
         assert read_resume_seeds(run, "e01", compiled) == {}
 
-        result = _resume(run, compiled, {"opaque": record["outputs"]})
+        result = _resume(run, compiled, {"opaque": "anything"})
 
         assert result.status == "succeeded"
         assert _COUNTERS["opaque"] == 2

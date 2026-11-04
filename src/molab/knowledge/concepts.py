@@ -1,4 +1,4 @@
-"""The six knowledge classes: one markdown file each.
+"""Knowledge classes: one markdown file each.
 
 A :class:`Note` and a :class:`Literature` are ``knowledges/<name>.md`` files.
 Frontmatter holds the structured fields; the narrative holds the links.
@@ -7,6 +7,7 @@ Frontmatter holds the structured fields; the narrative holds the links.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar
 
@@ -19,6 +20,8 @@ from .reference_meta import ReferenceMeta
 if TYPE_CHECKING:
     from molab._typing import JSONValue
     from molab.workspace.run import Run
+
+    from .planning import MilestoneRecord
 
 NOTE_KIND = "note.note"
 REFERENCE_KIND = "reference.reference"
@@ -197,11 +200,143 @@ class Finding(_SourcedKnowledge):
 
 
 class Plan(_SourcedKnowledge):
-    """The experiment or project plan book."""
+    """Campaign overview: the question, the scope, and the constraints.
+
+    A Plan does not list stages, todos, or milestone criteria. Those are
+    :class:`Roadmap`, :class:`Todo`, and :class:`Milestone` documents that
+    cite this Plan.
+    """
+
+    PLANNING_ROLE: ClassVar[str] = "overview"
+    FOREIGN_FIELDS: ClassVar[frozenset[str]] = frozenset({"stages", "items", "criterion", "status"})
+
+    def planning_role(self) -> str:
+        """This document is the overview."""
+        return self.PLANNING_ROLE
+
+    def planning_fields(self) -> dict[str, object]:
+        """A Plan's record is its narrative. It has no planning fields."""
+        return {}
+
+
+class Roadmap(_SourcedKnowledge):
+    """Ordered stages of a campaign, and which experiment each stage is.
+
+    ``stages`` in the frontmatter is the whole record. A Roadmap does not
+    store todos or completion criteria.
+    """
+
+    PLANNING_ROLE: ClassVar[str] = "roadmap"
+    FOREIGN_FIELDS: ClassVar[frozenset[str]] = frozenset({"items", "criterion", "status"})
+
+    def planning_role(self) -> str:
+        """This document is the roadmap."""
+        return self.PLANNING_ROLE
+
+    def stages(self) -> tuple[object, ...]:
+        """The stages in frontmatter order."""
+        from .planning import parse_stages
+
+        return parse_stages(self.frontmatter().get("stages", []))
+
+    def planning_fields(self) -> dict[str, object]:
+        """The stage list, and nothing else."""
+        return {"stages": self.stages()}
+
+
+class Todo(_SourcedKnowledge):
+    """Work items and their status. Not the stage order, and not a criterion."""
+
+    PLANNING_ROLE: ClassVar[str] = "todo"
+    FOREIGN_FIELDS: ClassVar[frozenset[str]] = frozenset({"stages", "criterion"})
+
+    def planning_role(self) -> str:
+        """This document is the todo list."""
+        return self.PLANNING_ROLE
+
+    def items(self) -> tuple[object, ...]:
+        """The work items in frontmatter order."""
+        from .planning import parse_items
+
+        return parse_items(self.frontmatter().get("items", []))
+
+    def planning_fields(self) -> dict[str, object]:
+        """The item list, and nothing else."""
+        return {"items": self.items()}
+
+
+class Milestone(_SourcedKnowledge):
+    """One checkpoint: the roadmap stage it closes, and the criterion.
+
+    A Milestone does not list the work that meets the criterion.
+    """
+
+    PLANNING_ROLE: ClassVar[str] = "milestone"
+    FOREIGN_FIELDS: ClassVar[frozenset[str]] = frozenset({"stages", "items"})
+
+    def planning_role(self) -> str:
+        """This document is one milestone."""
+        return self.PLANNING_ROLE
+
+    def stage(self) -> str:
+        """The roadmap stage id this checkpoint closes."""
+        return str(self._milestone().stage)
+
+    def criterion(self) -> str:
+        """What must be true for this checkpoint to be met."""
+        return str(self._milestone().criterion)
+
+    def status(self) -> str:
+        """``open``, ``met``, or ``missed``."""
+        return str(self._milestone().status)
+
+    def planning_fields(self) -> dict[str, object]:
+        """Stage, criterion, and status. Not the work items."""
+        record = self._milestone()
+        return {"stage": record.stage, "criterion": record.criterion, "status": record.status}
+
+    def _milestone(self) -> MilestoneRecord:
+        from .planning import parse_milestone
+
+        return parse_milestone(self.frontmatter())
 
 
 class Observation(_SourcedKnowledge):
     """A recorded observation or standing choice."""
+
+
+class Delegation(_SourcedKnowledge):
+    """One bounded, resumable piece of supervised work.
+
+    The frontmatter record (:class:`~molab.knowledge.delegation.DelegationRecord`)
+    holds the scope, goal, authorized actions, budget and spend, acceptance and
+    stop conditions, open waits and worker attempts. The source is the scope
+    the delegation is bound to. A supervising agent writes it; molab validates
+    and stores it, so the work survives the agent that did it.
+    """
+
+    FOREIGN_FIELDS: ClassVar[frozenset[str]] = frozenset({"stages", "items", "criterion"})
+
+    def record(self) -> object:
+        """The validated :class:`~molab.knowledge.delegation.DelegationRecord`."""
+        from .delegation import parse_delegation
+
+        return parse_delegation(self.frontmatter())
+
+    @classmethod
+    def check_record(
+        cls,
+        record: Mapping[str, object] | None,
+        *,
+        existing: Mapping[str, object] | None,
+    ) -> None:
+        """Validate a write's record merged over the stored one."""
+        from .delegation import check_delegation_record
+
+        crossed = sorted(set(record or {}) & cls.FOREIGN_FIELDS)
+        if crossed:
+            raise ValueError(f"Delegation does not store {crossed}")
+        check_delegation_record(record, existing=existing)
 
 
 #: The one class-name → Knowledge subclass table on the knowledge side. The
@@ -213,7 +348,11 @@ _PRODUCTS: dict[str, type[Concept]] = {
     "Report": Report,
     "Finding": Finding,
     "Plan": Plan,
+    "Roadmap": Roadmap,
+    "Todo": Todo,
+    "Milestone": Milestone,
     "Observation": Observation,
+    "Delegation": Delegation,
 }
 
 
@@ -221,7 +360,7 @@ def _product(name: str) -> type[Concept]:
     """The document class *name* spells. Does not construct it.
 
     Raises:
-        ValueError: *name* is not one of the six classes. The message lists them.
+        ValueError: *name* is not a knowledge class. The message lists them.
     """
     if name in _PRODUCTS:
         return _PRODUCTS[name]
@@ -235,8 +374,8 @@ def _open_document(path: PathArg, *, fs: FileSystem | None = None) -> Concept:
 
     A ``.md`` / ``.mdx`` path is opened as written. A suffix-less path is the
     same file with ``.md`` appended. A directory is not a document. An unknown
-    ``class`` opens as :class:`Note`. This function lives beside the six
-    classes. :class:`~molab.knowledge.concept.Concept` does not construct them.
+    ``class`` opens as :class:`Note`. This function lives beside the classes.
+    :class:`~molab.knowledge.concept.Concept` does not construct them.
 
     Raises:
         KnowledgeNotFoundError: The file is absent.
@@ -306,8 +445,11 @@ __all__ = [
     "REFERENCE_KIND",
     "Finding",
     "Literature",
+    "Milestone",
     "Note",
     "Observation",
     "Plan",
     "Report",
+    "Roadmap",
+    "Todo",
 ]

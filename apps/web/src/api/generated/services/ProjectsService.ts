@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { AssetImportRequest } from '../models/AssetImportRequest';
 import type { AssetVersionResponse } from '../models/AssetVersionResponse';
 import type { ManagedAssetResponse } from '../models/ManagedAssetResponse';
 import type { MessageResponse } from '../models/MessageResponse';
@@ -131,6 +132,39 @@ export class ProjectsService {
             query: {
                 'limit': limit,
             },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Import Project Asset
+     * Import a workspace file as a project asset — the same verb as ``molab asset import``.
+     *
+     * 422 when the path is not a file inside the served directory, or the
+     * semantic type's metadata is incomplete.
+     * @param projectId
+     * @param requestBody
+     * @param molabSession
+     * @returns ManagedAssetResponse Successful Response
+     * @throws ApiError
+     */
+    public static importProjectAsset(
+        projectId: string,
+        requestBody: AssetImportRequest,
+        molabSession?: (string | null),
+    ): CancelablePromise<ManagedAssetResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/projects/{project_id}/assets',
+            path: {
+                'project_id': projectId,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: `Validation Error`,
             },
@@ -360,6 +394,42 @@ export class ProjectsService {
             query: {
                 'limit': limit,
             },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Import Project Asset
+     * Import a workspace file as a project asset — the same verb as ``molab asset import``.
+     *
+     * 422 when the path is not a file inside the served directory, or the
+     * semantic type's metadata is incomplete.
+     * @param projectId
+     * @param ws
+     * @param requestBody
+     * @param molabSession
+     * @returns ManagedAssetResponse Successful Response
+     * @throws ApiError
+     */
+    public static importProjectAssetWs(
+        projectId: string,
+        ws: string,
+        requestBody: AssetImportRequest,
+        molabSession?: (string | null),
+    ): CancelablePromise<ManagedAssetResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspaces/{ws}/projects/{project_id}/assets',
+            path: {
+                'project_id': projectId,
+                'ws': ws,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: `Validation Error`,
             },

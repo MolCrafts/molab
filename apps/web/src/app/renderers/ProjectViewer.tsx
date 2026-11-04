@@ -7,6 +7,7 @@ import {
   FlaskConical,
   FolderKanban,
   Play,
+  PlayCircle,
   Trash2,
   Workflow,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import {
   InventoryCanvas,
   OverviewSurface,
   StatusDistribution,
+  Tally,
 } from "@/app/components/entity";
 import {
   attentionRuns,
@@ -55,6 +57,7 @@ import {
   WorkbenchRetryAction,
 } from "@/components/workbench";
 import { formatDateTime } from "@/lib/datetime";
+import { PlanProgress } from "@/plugins/knowledge/PlanProgress";
 
 type ProjectRendererProps = ScopedRendererProps<
   "projects" | "experiments" | "runs" | "workflows" | "assets" | "workspaces"
@@ -441,13 +444,17 @@ export const ProjectViewer = ({
         title={project.name}
         meta={
           <>
-            <span>
-              <span className="text-foreground">{experimentCountValue}</span> experiments
-            </span>
+            <Tally
+              icon={FlaskConical}
+              value={experimentCountValue}
+              label={`${experimentCountValue} experiments`}
+            />
             {completeness.runCount !== null ? (
-              <span>
-                <span className="text-foreground">{completeness.runCount}</span> runs
-              </span>
+              <Tally
+                icon={PlayCircle}
+                value={completeness.runCount}
+                label={`${completeness.runCount} runs`}
+              />
             ) : null}
           </>
         }
@@ -460,6 +467,13 @@ export const ProjectViewer = ({
             content: (
               <OverviewSurface>
                 <DashboardCanvas className="px-4 py-6 sm:px-8 sm:py-8">
+                  <PlanProgress
+                    onOpenExperiment={(name) => {
+                      const match = projectExperiments.find((item) => item.name === name);
+                      if (match) navigateToExperiment(match.id);
+                    }}
+                    onOpenDoc={(path) => setSelection({ objectType: "knowledge", objectId: path })}
+                  />
                   {activityState(
                     executionCounts.total === 0 ? (
                       <div className="max-w-xl">

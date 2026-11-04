@@ -35,7 +35,7 @@ from .folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_RUN_KIND, Folder, regis
 from .fs import PathArg
 from .fs_local import LocalFS
 from .models import FolderMetadata, RunMetadata, RunStatus
-from .naming import RUN_CONTAINER, run_slug
+from .naming import RUN_CONTAINER, VALUE_CONTAINER, run_slug
 
 if TYPE_CHECKING:
     from .experiment import Experiment
@@ -128,6 +128,10 @@ class RunWorkflowExecutor(Protocol):
         fresh: bool = False,
         checkpoint: str | None = None,
         execution_id: str | None = None,
+        resume_from: Run | None = None,
+        only: Sequence[str] = (),
+        executor: str | None = None,
+        max_workers: int | None = None,
     ) -> object: ...
 
     async def aexecute(
@@ -140,6 +144,10 @@ class RunWorkflowExecutor(Protocol):
         fresh: bool = False,
         checkpoint: str | None = None,
         execution_id: str | None = None,
+        resume_from: Run | None = None,
+        only: Sequence[str] = (),
+        executor: str | None = None,
+        max_workers: int | None = None,
     ) -> object: ...
 
     def read_outputs(self, run: Run, execution_id: str) -> dict[str, TaskOutput]:
@@ -753,6 +761,7 @@ class Run(Folder):
         executor: dict[str, JSONValue] | None = None,
         created_by: AgentRef | None = None,
         source_entrypoint: PathArg | None = None,
+        selected_tasks: Sequence[str] = (),
     ) -> Execution:
         """Record a new QUEUED attempt carrying its creation-time facts only.
 
@@ -788,6 +797,8 @@ class Run(Folder):
             created_by: Who creates the attempt; defaults to this process.
             source_entrypoint: The workflow script to capture. ``None``
                 captures nothing and leaves ``source`` unset.
+            selected_tasks: The tasks a partial ``rerun`` re-executes; empty
+                means every task. Only valid with ``rerun``.
 
         Returns:
             The QUEUED record as written.
@@ -812,6 +823,7 @@ class Run(Folder):
             executor=executor,
             created_by=created_by,
             source_entrypoint=source_entrypoint,
+            selected_tasks=selected_tasks,
         )
 
     def adopt_execution(
@@ -955,6 +967,7 @@ class Run(Folder):
         executor: dict[str, JSONValue] | None = None,
         created_by: AgentRef | None = None,
         source_entrypoint: PathArg | None = None,
+        selected_tasks: Sequence[str] = (),
     ) -> Execution:
         """Record a new QUEUED attempt carrying its creation-time facts only.
 
@@ -1020,6 +1033,8 @@ class Run(Folder):
             created_by: Who creates the attempt; defaults to this process.
             source_entrypoint: The workflow script to capture; ``None``
                 captures nothing and leaves ``source`` unset.
+            selected_tasks: The tasks a partial ``rerun`` re-executes; empty
+                means every task. Only valid with ``rerun``.
 
         Returns:
             The QUEUED record as written.
@@ -1067,6 +1082,7 @@ class Run(Folder):
             environment={**profile_environment, **extra},
             bypass_cache=bypass_cache,
             source=manifest,
+            selected_tasks=selected_tasks,
         )
         if manifest is None:
             return self._bound(state)
@@ -1130,6 +1146,20 @@ class Run(Folder):
         if execution_id in {"", ".", ".."} or "/" in execution_id or "\\" in execution_id:
             raise ValueError(f"not an execution id: {execution_id!r}")
         return Path(self._execution_repository().execution_dir(execution_id))
+
+    def values_dir(self) -> Path:
+        """This run's recorded-value store: ``<run_dir>/values``.
+
+        Shared by every attempt of the run. The workflow engine writes each
+        task's inputs and outputs there once, content-addressed
+        (``<sha256-hex>.json`` / ``.pkl``), and the node journals cite them
+        by ref. A record, tracked in git like the journals. Pure path
+        arithmetic; nothing is created.
+
+        Returns:
+            The directory as a :class:`pathlib.Path`.
+        """
+        return Path(self._disk().join(str(self.run_dir), VALUE_CONTAINER))
 
     def products_dir(self, task: str, *, execution_id: str | None = None) -> Path:
         """Where *task* wrote its products: ``executions/<id>/out/<task>``.
@@ -1222,6 +1252,10 @@ class Run(Folder):
         rerun: bool = False,
         fresh: bool = False,
         checkpoint: str | None = None,
+        resume_from: Run | None = None,
+        only: Sequence[str] = (),
+        executor: str | None = None,
+        max_workers: int | None = None,
     ) -> object:
         """Execute *workflow* against this run in one step and return the result.
 
@@ -1244,7 +1278,13 @@ class Run(Folder):
         (``--rerun --fresh``); a ``succeeded`` run and a live ``running`` run
         always refuse (done is done; cancel first). A task failure raises
         ``molab.workflow.RunFailedError`` (the failed state is persisted;
-        never silent).
+        never silent). ``only=("task",)`` with ``rerun=True`` re-executes just
+        those tasks with the inputs their predecessor recorded
+        (``--rerun --task``); their downstream tasks are skipped.
+        ``executor`` (``"thread"`` / ``"process"`` / ``"inline"``) and
+        ``max_workers`` choose how task bodies run for this attempt
+        (``molab run --executor`` / ``--max-workers``); the run's choice wins
+        over the task's and the workflow's.
 
         Must be called from sync code; inside a running event loop use
         :meth:`aexecute`. Delegates through the :func:`set_run_executor`
@@ -1257,6 +1297,10 @@ class Run(Folder):
             rerun=rerun,
             fresh=fresh,
             checkpoint=checkpoint,
+            resume_from=resume_from,
+            only=only,
+            executor=executor,
+            max_workers=max_workers,
         )
 
     async def aexecute(
@@ -1268,6 +1312,10 @@ class Run(Folder):
         rerun: bool = False,
         fresh: bool = False,
         checkpoint: str | None = None,
+        resume_from: Run | None = None,
+        only: Sequence[str] = (),
+        executor: str | None = None,
+        max_workers: int | None = None,
     ) -> object:
         """Async variant of :meth:`execute` — same semantics, awaitable.
 
@@ -1282,6 +1330,10 @@ class Run(Folder):
             rerun=rerun,
             fresh=fresh,
             checkpoint=checkpoint,
+            resume_from=resume_from,
+            only=only,
+            executor=executor,
+            max_workers=max_workers,
         )
 
     # ── Sugar: ``with run as ctx:`` / ``async with run as ctx:`` ────────

@@ -375,6 +375,8 @@ def _create_dispatch_execution(
     profile_cfg: ProfileConfig,
     script: Path,
     submit_cwd: str,
+    selected_tasks: tuple[str, ...] = (),
+    task_executor: Mapping[str, JSONValue] | None = None,
 ) -> str:
     """Create the QUEUED Execution record one dispatched run will start.
 
@@ -382,8 +384,10 @@ def _create_dispatch_execution(
     ``initial`` attempt (only not-started runs are selected); ``--rerun``
     opens a ``rerun`` attempt based on the run's latest one; ``--resume``
     opens a ``resume`` attempt based on that same latest attempt. Completed
-    nodes are seeded later, from the predecessor's journal, by
-    ``execution.execute``.
+    nodes are seeded later, from the predecessor's recorded outputs, by
+    ``execution.execute``. ``--rerun --task NAME`` records the selection on
+    the attempt (``selected_tasks``): only those tasks execute, from the
+    inputs their predecessor recorded.
 
     Args:
         mol_run: The run about to be dispatched.
@@ -396,6 +400,9 @@ def _create_dispatch_execution(
         script: The defining script; recorded as ``environment.script`` and
             captured as the attempt's source entrypoint.
         submit_cwd: The directory ``molab run`` was invoked from.
+        selected_tasks: The tasks a partial ``--rerun`` re-executes.
+        task_executor: ``--executor`` / ``--max-workers`` as the record's
+            ``executor.task_executor`` / ``executor.task_max_workers``.
 
     Returns:
         The new attempt's id (``e01``, ``e02``, …).
@@ -428,6 +435,8 @@ def _create_dispatch_execution(
             profile_config=profile_cfg,
             environment={"script": str(entrypoint), "submit_cwd": submit_cwd},
             source_entrypoint=entrypoint,
+            selected_tasks=selected_tasks,
+            executor=dict(task_executor or {}),
         )
     except SourceCaptureError as exc:
         rprint(
@@ -448,6 +457,8 @@ def _execute_selected(
     fresh: bool,
     profile_cfg: ProfileConfig,
     submit_cwd: str,
+    selected_tasks: tuple[str, ...] = (),
+    task_executor: Mapping[str, JSONValue] | None = None,
 ) -> list[Run]:
     """Run *run_handler* over every selected run, with optional progress bar.
 
@@ -467,6 +478,8 @@ def _execute_selected(
         fresh: Record that each attempt bypasses the workflow node cache.
         profile_cfg: The profile each attempt runs under.
         submit_cwd: The directory ``molab run`` was invoked from.
+        selected_tasks: The tasks a partial ``--rerun`` re-executes.
+        task_executor: The task-executor facts each record carries.
 
     Returns:
         The runs that were handed to *run_handler*, in order.
@@ -481,6 +494,8 @@ def _execute_selected(
                 profile_cfg=profile_cfg,
                 script=script,
                 submit_cwd=submit_cwd,
+                selected_tasks=selected_tasks,
+                task_executor=task_executor,
             )
         except ValueError as exc:
             rprint(f"  [dim]- {exp.name}  {mol_run.name} (skipped — {exc})[/dim]")
@@ -542,6 +557,8 @@ def _dispatch_runs(
     show_progress: bool = False,
     fresh: bool = False,
     require_recoverable: bool = False,
+    selected_tasks: tuple[str, ...] = (),
+    task_executor: Mapping[str, JSONValue] | None = None,
 ) -> tuple[int, list[Run]]:
     """Select the runs of every bound experiment in *script* and dispatch them.
 
@@ -560,6 +577,8 @@ def _dispatch_runs(
         require_recoverable: Refuse, before any attempt is created, a run whose
             workflow another process could not rebuild (a scheduler worker
             re-imports the script; it cannot use this process's binding).
+        selected_tasks: The tasks a partial ``--rerun`` re-executes.
+        task_executor: The task-executor facts each record carries.
 
     Returns:
         ``(count, runs)``. Dry-run and select-only return the selected count.
@@ -617,6 +636,8 @@ def _dispatch_runs(
         fresh=fresh,
         profile_cfg=profile_cfg,
         submit_cwd=str(Path.cwd().resolve()),
+        selected_tasks=selected_tasks,
+        task_executor=task_executor,
     )
     dispatched_count = len(dispatched_runs)
     if not suppress_ok:
@@ -629,10 +650,12 @@ def _make_local_inprocess_handler() -> RunHandler:
     """Build the handler that executes one run in this process.
 
     The handler starts the QUEUED record the dispatcher created.
-    ``execute_run`` reads that record's config, ``bypass_cache`` and, for a
-    RESUME record, the predecessor journal. A failed attempt is persisted
-    and swallowed here so the rest of the batch still runs; the result
-    report reads the record afterwards.
+    ``execute_run`` reads that record's config, ``bypass_cache``, task
+    selection and, for a RESUME or partial RERUN record, the predecessor's
+    recorded values. A failed attempt is persisted and swallowed here so the
+    rest of the batch still runs; the result report reads the record
+    afterwards. An attempt that cannot start (for example a partial rerun
+    whose upstream has no recorded output) is sealed failed with the reason.
 
     Returns:
         A :class:`RunHandler`.
@@ -647,7 +670,11 @@ def _make_local_inprocess_handler() -> RunHandler:
         *,
         execution_id: str,
     ) -> None:
-        from molab.workflow import RunFailedError, compiled_workflow_for_experiment
+        from molab.workflow import (
+            RunFailedError,
+            RunNotExecutableError,
+            compiled_workflow_for_experiment,
+        )
         from molab.workflow.execute import execute_run
 
         spec = compiled_workflow_for_experiment(experiment)
@@ -655,6 +682,9 @@ def _make_local_inprocess_handler() -> RunHandler:
             execute_run(spec, mol_run, execution_id=execution_id)
         except RunFailedError:
             return
+        except (RunNotExecutableError, ValueError) as exc:
+            rprint(f"  [red]x[/red] {experiment.name}  {mol_run.name}: {exc}")
+            _fail_unstarted(mol_run, execution_id, exc)
 
     return _handler
 
@@ -695,8 +725,9 @@ def execute(
     ``python -m molab.cli execute <run_dir> --execution-id <eid>``. It starts
     the QUEUED record the submitter created — workflow via
     :func:`molab.workflow.compiled_workflow_for_run`, config / profile /
-    ``bypass_cache`` from the record; a RESUME record seeds completed nodes
-    from its ``based_on`` attempt. ``--config`` / ``--profile`` are refused,
+    ``bypass_cache`` / task selection from the record; a RESUME record seeds
+    completed nodes from its ``based_on`` attempt's recorded outputs, and a
+    partial RERUN record (``selected_tasks``) runs only its selected tasks. ``--config`` / ``--profile`` are refused,
     because the config that runs is the recorded one.
 
     Args:
@@ -730,6 +761,7 @@ def execute(
         spec = compiled_workflow_for_run(run_obj)
     except WorkflowRecoveryError as exc:
         rprint(f"[red]Error:[/red] {exc}")
+        _fail_unstarted(run_obj, execution_id, exc)
         raise typer.Exit(1) from exc
     default_binding_registry.bind(experiment, spec)
 
@@ -738,6 +770,7 @@ def execute(
         execute_run(spec, run_obj, execution_id=execution_id)
     except (RunNotExecutableError, ValueError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
+        _fail_unstarted(run_obj, execution_id, exc)
         raise typer.Exit(1) from None
     except RunFailedError:
         status = run_obj.execution(execution_id).status.value
@@ -749,6 +782,28 @@ def execute(
     rprint(
         f"[green]OK[/green] execute complete run={run_obj.id} "
         f"execution={execution_id} status={status}"
+    )
+
+
+def _fail_unstarted(run: Run, execution_id: str, exc: BaseException) -> None:
+    """Seal a still-QUEUED attempt FAILED with the reason it never started.
+
+    The worker is the only thing that would ever start it, so an attempt
+    left QUEUED here would wait forever. An attempt the worker already
+    started (or another process sealed) is left as it is.
+    """
+    from molab.workspace.domain import ExecutionStatus
+
+    try:
+        state = run.execution(execution_id)
+    except KeyError:
+        return
+    if state.status is not ExecutionStatus.QUEUED:
+        return
+    run._execution_repository().seal(
+        execution_id,
+        ExecutionStatus.FAILED,
+        error={"type": type(exc).__name__, "message": str(exc)},
     )
 
 
@@ -803,6 +858,8 @@ def _spawn_background_local_run(
     resume: bool,
     rerun: bool,
     fresh: bool = False,
+    selected_tasks: tuple[str, ...] = (),
+    extra_args: tuple[str, ...] = (),
 ) -> None:
     """Spawn a detached local ``molab run`` worker for long-running jobs."""
     log_dir = target_path / ".molab" / "background"
@@ -831,6 +888,9 @@ def _spawn_background_local_run(
         cmd.append("--rerun")
     if fresh:
         cmd.append("--fresh")
+    for name in selected_tasks:
+        cmd.extend(["--task", name])
+    cmd.extend(extra_args)
 
     with log_path.open("ab") as log:
         process = subprocess.Popen(
@@ -977,7 +1037,8 @@ def _report_local_results(dispatched: list[tuple[Run, str]], continue_verb: str 
                 rprint(f"    [dim]{detail}[/dim]")
         rprint(f"\n[red]FAILED[/red] {len(failed)} of {len(dispatched)} runs did not succeed.")
         rprint(
-            "[dim]Retry: molab run <script> --resume (continue) or --rerun (from the top).[/dim]"
+            "[dim]Retry: molab run <script> --resume (continue), --rerun --task NAME "
+            "(one node, from its recorded inputs) or --rerun (from the top).[/dim]"
         )
         raise typer.Exit(1)
     rprint(f"\n[green]OK[/green] {len(dispatched)} runs {verb}.")
@@ -991,6 +1052,8 @@ def _run_local_inprocess(
     target_path: Path,
     explicit_ws: bool,
     fresh: bool = False,
+    selected_tasks: tuple[str, ...] = (),
+    task_executor: Mapping[str, JSONValue] | None = None,
 ) -> None:
     """Execute the run plan in-process, with a progress bar.
 
@@ -1024,6 +1087,8 @@ def _run_local_inprocess(
         suppress_ok=True,
         show_progress=True,
         fresh=fresh,
+        selected_tasks=selected_tasks,
+        task_executor=task_executor,
     )
     _report_local_results(dispatched, continue_verb)
 
@@ -1044,6 +1109,8 @@ def _submit_to_scheduler(
     fresh: bool = False,
     worker_python: str | None = None,
     preamble: list[str] | None = None,
+    selected_tasks: tuple[str, ...] = (),
+    task_executor: Mapping[str, JSONValue] | None = None,
 ) -> None:
     """Submit the run plan through molq and report (or monitor) the result."""
     from molab.plugins.submit_molq.metadata import supported_schedulers
@@ -1081,6 +1148,8 @@ def _submit_to_scheduler(
         suppress_ok=True,
         fresh=fresh,
         require_recoverable=True,
+        selected_tasks=selected_tasks,
+        task_executor=task_executor,
     )
     if n == 0:
         verb = {"resume": "resumed", "rerun": "reran"}.get(continue_verb or "", "submitted")
@@ -1161,8 +1230,9 @@ def run(
             "--resume",
             help=(
                 "Open a new RESUME Execution based on each failed/cancelled run's "
-                "latest attempt; completed nodes are seeded from that attempt's "
-                "journal, the rest recompute. Mutually exclusive with --rerun."
+                "latest attempt; completed nodes are seeded from the outputs that "
+                "attempt recorded (values/), a failed node re-executes from the "
+                "inputs its record shows. Mutually exclusive with --rerun."
             ),
         ),
     ] = False,
@@ -1179,6 +1249,42 @@ def run(
             ),
         ),
     ] = False,
+    tasks: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--task",
+            help=(
+                "With --rerun: re-execute only this task (repeatable) with the inputs "
+                "the latest attempt recorded; every other completed task is seeded "
+                "from its record and every task downstream of a selected one is "
+                "skipped. Refused when an upstream the task needs has no usable "
+                "recorded output."
+            ),
+        ),
+    ] = None,
+    executor: Annotated[
+        str | None,
+        typer.Option(
+            "--executor",
+            help=(
+                "How task bodies run: thread (worker threads, the default), process "
+                "(worker processes — true parallelism and isolation; the workflow "
+                "must be defined at module level) or inline (one at a time on the "
+                "engine thread — debugging, thread-bound libraries). Overrides the "
+                "workflow's and each task's choice; recorded on the Execution."
+            ),
+            rich_help_panel="Execution Backend",
+        ),
+    ] = None,
+    max_workers: Annotated[
+        int | None,
+        typer.Option(
+            "--max-workers",
+            min=1,
+            help="Worker threads / processes at most (process: default CPU count).",
+            rich_help_panel="Execution Backend",
+        ),
+    ] = None,
     fresh: Annotated[
         bool,
         typer.Option(
@@ -1302,6 +1408,23 @@ def run(
             "(it bypasses cache reads for the new execution)."
         )
         raise typer.Exit(1)
+    from molab.workflow._engine.executors import EXECUTORS
+
+    if executor is not None and executor not in EXECUTORS:
+        rprint(f"[red]Error:[/red] --executor must be one of {', '.join(EXECUTORS)}.")
+        raise typer.Exit(1)
+    task_executor: dict[str, JSONValue] = {}
+    if executor is not None:
+        task_executor["task_executor"] = executor
+    if max_workers is not None:
+        task_executor["task_max_workers"] = max_workers
+    selected_tasks = tuple(dict.fromkeys(tasks or ()))
+    if selected_tasks and not rerun:
+        rprint(
+            "[red]Error:[/red] --task selects the tasks of a partial rerun and only "
+            "applies together with --rerun."
+        )
+        raise typer.Exit(1)
     continue_verb = "resume" if resume else ("rerun" if rerun else None)
 
     selected_target, selected_scheduler, is_local = _select_backend(
@@ -1327,6 +1450,11 @@ def run(
             resume=resume,
             rerun=rerun,
             fresh=fresh,
+            selected_tasks=selected_tasks,
+            extra_args=(
+                *(("--executor", executor) if executor else ()),
+                *(("--max-workers", str(max_workers)) if max_workers else ()),
+            ),
         )
         return
 
@@ -1348,6 +1476,8 @@ def run(
             target_path=target.path,
             explicit_ws=explicit_ws,
             fresh=fresh,
+            selected_tasks=selected_tasks,
+            task_executor=task_executor,
         )
         return
 
@@ -1367,6 +1497,8 @@ def run(
         fresh=fresh,
         worker_python=worker_python,
         preamble=preamble or [],
+        selected_tasks=selected_tasks,
+        task_executor=task_executor,
     )
 
 

@@ -13,11 +13,29 @@ caching and node-level persistence.
 and no verb it opens an ``INITIAL`` record. An existing attempt requires
 ``resume=True`` or ``rerun=True``. ``execution.execute`` starts a ``QUEUED``
 record someone else already created. ``resume=True`` opens a new ``RESUME``
-attempt and, when its ``config_hash`` matches the predecessor, seeds
-completed nodes from that predecessor's journal. ``rerun=True`` opens a new
-``RERUN`` attempt, including after success. ``fresh=True`` records
-``bypass_cache`` and requires ``rerun=True``. An active latest attempt must
-be cancelled first.
+attempt and, when its ``config_hash`` matches the predecessor, seeds every
+completed node from that predecessor's recorded output refs (pickled values
+included); a node that failed re-executes from the same seeded inputs its
+record shows. ``rerun=True`` opens a new ``RERUN`` attempt, including after
+success; with ``only=("task", ...)`` it is a **partial rerun**: the selection
+is recorded on the Execution (``selected_tasks``), exactly those tasks
+execute with the inputs their predecessor recorded, every other completed
+task is seeded from its record, and every task downstream of a selected one
+is journalled ``skipped``. A selected task whose upstream has no usable
+recorded output is refused (:class:`RunNotExecutableError` naming it).
+``fresh=True`` records ``bypass_cache`` and requires ``rerun=True``. An active
+latest attempt must be cancelled first.
+
+``executor=`` (``"thread"`` / ``"process"`` / ``"inline"``) and
+``max_workers=`` choose how every task body of the attempt runs; they are
+recorded on the Execution (``executor.task_executor`` /
+``executor.task_max_workers``) and a pre-created record's values are used
+when the call passes none.
+
+Resume and partial rerun share one seeding path,
+:func:`molab.workflow.read_attempt_seeds`, and both are driven by the
+record alone, so a pre-created QUEUED record (``molab run`` / the server /
+a scheduler worker) seeds exactly like an in-process call.
 
 Both doors meet at "start one QUEUED record":
 
@@ -51,12 +69,16 @@ from mollog import get_logger
 
 from molab.workspace.domain import Execution, ExecutionMode, ExecutionStatus
 
-from ._engine.persistence import read_resume_seeds
+from ._engine.executors import check_executor, check_max_workers
+from ._engine.persistence import AttemptSeeds, RecordedInputError, read_attempt_seeds
 from ._engine.runtime import WorkflowRuntime
 from .compiled import CompiledWorkflow
 from .compiler import Workflow, WorkflowCompiler
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from molab._typing import JSONValue
     from molab.profile import ProfileConfig
     from molab.workspace.run import Run, RunWorkflowExecutor
 
@@ -65,7 +87,15 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+#: ``Execution.executor`` key recording the run's task executor.
+TASK_EXECUTOR_KEY = "task_executor"
+
+#: ``Execution.executor`` key recording the run's worker cap.
+TASK_MAX_WORKERS_KEY = "task_max_workers"
+
 __all__ = [
+    "TASK_EXECUTOR_KEY",
+    "TASK_MAX_WORKERS_KEY",
     "RunFailedError",
     "RunNotExecutableError",
     "aexecute_run",
@@ -152,6 +182,8 @@ def _create_record(
     checkpoint_artifact_id: str | None,
     fresh: bool,
     profile_config: ProfileConfig | None,
+    only: Sequence[str] = (),
+    executor: dict[str, JSONValue] | None = None,
 ) -> Execution:
     """Allocate one QUEUED Execution. Workspace owns the predecessor rules.
 
@@ -161,6 +193,9 @@ def _create_record(
         checkpoint_artifact_id: Optional resume input, stored on the record.
         fresh: Recorded as ``bypass_cache``.
         profile_config: The profile written onto the record at creation.
+        only: Recorded as ``selected_tasks`` (a partial rerun).
+        executor: Creation-time executor facts (``task_executor`` /
+            ``task_max_workers``).
 
     Returns:
         The new QUEUED record.
@@ -174,6 +209,8 @@ def _create_record(
             checkpoint_artifact_id=checkpoint_artifact_id,
             bypass_cache=fresh,
             profile_config=profile_config,
+            selected_tasks=only,
+            executor=executor,
         )
     except ValueError as exc:
         raise RunNotExecutableError(str(exc)) from exc
@@ -210,36 +247,56 @@ def _config_hashes_disagree(record: Execution, prior: Execution) -> bool:
     return record.environment["config_hash"] != prior.environment["config_hash"]
 
 
-def _resume_seeds(
-    run: Run, record: Execution, compiled: CompiledWorkflow
-) -> dict[str, TaskOutput] | None:
-    """Seeds for a RESUME whose config matches its predecessor.
+def _attempt_seeds(run: Run, record: Execution, compiled: CompiledWorkflow) -> AttemptSeeds | None:
+    """What the attempt *record* takes from its predecessor's records.
 
-    A missing ``config_hash`` on either record, or two different values,
-    drops every seed. ``None == None`` matches: neither side named a profile.
+    The record decides: a ``RESUME`` seeds every completed node, a ``RERUN``
+    with ``selected_tasks`` runs just those (both through
+    :func:`read_attempt_seeds`); any other attempt seeds nothing. A missing
+    ``config_hash`` on either record, or two different values, drops every
+    seed of a RESUME and refuses a partial RERUN (its seeds would mix two
+    configs). ``None == None`` matches: neither side named a profile.
 
     Args:
         run: The run that holds both attempts.
-        record: The RESUME record about to start.
+        record: The attempt about to start.
         compiled: The workflow the seeds must still fit.
 
     Returns:
-        Verified seeds, or ``None`` when there is nothing to seed.
+        The seeds, or ``None`` when there is nothing to take.
+
+    Raises:
+        ValueError: The selection names a task the workflow does not have.
+        RunNotExecutableError: A partial rerun's config differs from its
+            predecessor's, or a selected task needs a recorded value the
+            predecessor cannot supply.
     """
     based_on = record.based_on_execution_id
-    if record.mode is not ExecutionMode.RESUME or not based_on:
+    selection = tuple(record.selected_tasks)
+    partial = record.mode is ExecutionMode.RERUN and bool(selection)
+    if not based_on or not (record.mode is ExecutionMode.RESUME or partial):
         return None
     prior = run.execution(based_on)
     if _config_hashes_disagree(record, prior):
         ours = record.environment.get("config_hash", "<missing>")
         theirs = prior.environment.get("config_hash", "<missing>")
+        if partial:
+            raise RunNotExecutableError(
+                f"partial rerun {record.id} of {list(selection)}: config_hash {ours!r} "
+                f"does not match predecessor {prior.id} config_hash {theirs!r}; its "
+                "recorded outputs were computed under another config — rerun with the "
+                "predecessor's profile, or rerun the whole workflow"
+            )
         logger.warning(
             f"RESUME Execution {record.id} drops every seed: config_hash {ours!r} "
             f"does not match predecessor {prior.id} config_hash {theirs!r}; "
             "不复用任何种子, 全部节点重新计算 (节点缓存照常)"
         )
         return None
-    return read_resume_seeds(run, based_on, compiled) or None
+    try:
+        return read_attempt_seeds(run, based_on, compiled, select=selection)
+    except RecordedInputError as exc:
+        raise RunNotExecutableError(str(exc)) from exc
 
 
 def _cancel_orphan(run: Run, execution_id: str) -> None:
@@ -262,6 +319,7 @@ def _check_verbs(
     fresh: bool,
     checkpoint: str | None,
     execution_id: str | None,
+    only: Sequence[str] = (),
 ) -> None:
     """Reject verb combinations before any record is created.
 
@@ -281,11 +339,40 @@ def _check_verbs(
         )
     if checkpoint is not None and not resume:
         raise ValueError("checkpoint is only valid with resume=True")
+    if only and not rerun:
+        raise ValueError(
+            "only=(...) selects tasks for a partial rerun and requires rerun=True "
+            "(mirroring `molab run --rerun --task NAME`)."
+        )
     if execution_id is not None and (resume or rerun or fresh or checkpoint is not None):
         raise ValueError(
             "execution_id selects an existing Execution; resume, rerun, fresh and "
             "checkpoint are creation-time facts and cannot be passed with it"
         )
+
+
+def _executor_facts(executor: str | None, max_workers: int | None) -> dict[str, JSONValue]:
+    """The ``Execution.executor`` keys recording a run's task-executor choice."""
+    facts: dict[str, JSONValue] = {}
+    if executor is not None:
+        facts[TASK_EXECUTOR_KEY] = executor
+    if max_workers is not None:
+        facts[TASK_MAX_WORKERS_KEY] = max_workers
+    return facts
+
+
+def _recorded_executor(
+    record: Execution, executor: str | None, max_workers: int | None
+) -> tuple[str | None, int | None]:
+    """The call's executor choice, else the one the record carries."""
+    recorded = record.executor or {}
+    if executor is None:
+        value = recorded.get(TASK_EXECUTOR_KEY)
+        executor = check_executor(value if isinstance(value, str) else None)
+    if max_workers is None:
+        value = recorded.get(TASK_MAX_WORKERS_KEY)
+        max_workers = check_max_workers(value if isinstance(value, int) else None)
+    return executor, max_workers
 
 
 def _raise_if_failed(run: Run, result: WorkflowResult) -> WorkflowResult:
@@ -306,7 +393,8 @@ def _raise_if_failed(run: Run, result: WorkflowResult) -> WorkflowResult:
     raise RunFailedError(
         f"run {run.id} failed — {detail} "
         f"(details: {where}; retry with resume=True to continue from the "
-        f"failed node, or rerun=True to re-execute from the top)",
+        f"failed node, rerun=True, only=(task,) to re-execute one node from its "
+        f"recorded inputs, or rerun=True to re-execute from the top)",
         result=result,
     )
 
@@ -321,6 +409,10 @@ async def aexecute_run(
     profile_config: ProfileConfig | None = None,
     checkpoint_artifact_id: str | None = None,
     execution_id: str | None = None,
+    resume_from: Run | None = None,
+    only: Sequence[str] = (),
+    executor: str | None = None,
+    max_workers: int | None = None,
 ) -> WorkflowResult:
     """Async form of :func:`execute_run` — same arguments, same result.
 
@@ -338,16 +430,25 @@ async def aexecute_run(
             With ``execution_id``, ``run.start`` checks it against the record.
         checkpoint_artifact_id: Optional checkpoint a new ``RESUME`` starts
             from. Only valid with ``resume=True``.
-        execution_id: Start this pre-created QUEUED attempt. Its config is
-            taken from the record. Mutually exclusive with the creation verbs.
+        execution_id: Start this pre-created QUEUED attempt. Its config and
+            task selection are taken from the record. Mutually exclusive with
+            the creation verbs.
+        only: With ``rerun=True``, re-execute just these tasks with the
+            inputs their predecessor recorded (recorded as the Execution's
+            ``selected_tasks``); their downstream tasks are skipped.
+        executor: How every task body runs (``"thread"`` / ``"process"`` /
+            ``"inline"``), overriding the tasks' and the workflow's choice.
+        max_workers: Worker threads / processes at most.
 
     Returns:
         The ``WorkflowResult`` — ``result.outputs`` maps task name to output.
 
     Raises:
         RunFailedError: A task failed (state persisted first).
-        RunNotExecutableError: Status outside the verb domain (see module doc).
-        ValueError: The keywords contradict each other.
+        RunNotExecutableError: Status outside the verb domain (see module
+            doc), or a partial rerun the predecessor's records cannot supply.
+        ValueError: The keywords contradict each other, or ``only`` names a
+            task the workflow does not have.
     """
     _check_verbs(
         resume=resume,
@@ -355,7 +456,10 @@ async def aexecute_run(
         fresh=fresh,
         checkpoint=checkpoint_artifact_id,
         execution_id=execution_id,
+        only=only,
     )
+    check_executor(executor, where="executor")
+    check_max_workers(max_workers)
     compiled = _ensure_compiled(workflow)
     created_here = execution_id is None
     record = (
@@ -365,13 +469,21 @@ async def aexecute_run(
             checkpoint_artifact_id=checkpoint_artifact_id,
             fresh=fresh,
             profile_config=profile_config,
+            only=only,
+            executor=_executor_facts(executor, max_workers),
         )
         if created_here
         else _queued_record(run, execution_id)
     )
+    executor, max_workers = _recorded_executor(record, executor, max_workers)
     entered = False
     try:
-        seeds = _resume_seeds(run, record, compiled)
+        seeds = _attempt_seeds(run, record, compiled)
+        if seeds is not None and resume_from is not None:
+            raise ValueError(
+                "resume_from hands another run's outputs to a fresh attempt; a resume "
+                "or partial rerun seeds from this run's own records"
+            )
         with run.start(
             profile_config,
             execution_id=record.id,
@@ -381,7 +493,10 @@ async def aexecute_run(
             result = await WorkflowRuntime().execute(
                 compiled,
                 run_context=ctx,  # ty: ignore[invalid-argument-type]
-                seed_outputs=seeds,
+                attempt_seeds=seeds,
+                resume_from=resume_from,
+                executor=executor,
+                max_workers=max_workers,
             )
     except BaseException:
         if created_here and not entered:
@@ -400,6 +515,10 @@ def execute_run(
     profile_config: ProfileConfig | None = None,
     checkpoint_artifact_id: str | None = None,
     execution_id: str | None = None,
+    resume_from: Run | None = None,
+    only: Sequence[str] = (),
+    executor: str | None = None,
+    max_workers: int | None = None,
 ) -> WorkflowResult:
     """Execute *workflow* against *run* in one step and return the result.
 
@@ -430,8 +549,19 @@ def execute_run(
         checkpoint_artifact_id: Optional checkpoint a new ``RESUME`` starts
             from. Only valid with ``resume=True``.
         execution_id: Start this pre-created QUEUED Execution instead of
-            allocating one. Its config is taken from the record. Mutually
-            exclusive with the creation-time verbs.
+            allocating one. Its config and task selection are taken from the
+            record. Mutually exclusive with the creation-time verbs.
+        only: With ``rerun=True``, a partial rerun: re-execute just these
+            tasks with the inputs their predecessor recorded; every other
+            completed task is seeded from its record and every task
+            downstream of a selected one is skipped. Recorded as the
+            Execution's ``selected_tasks``.
+        executor: How every task body runs — ``"thread"`` (worker threads),
+            ``"process"`` (worker processes) or ``"inline"`` (one at a time
+            on the engine thread) — overriding the tasks' and the workflow's
+            choice. Recorded on the Execution.
+        max_workers: Worker threads / processes at most (``process``
+            defaults to the CPU count).
 
     Returns:
         The ``WorkflowResult`` — ``result.outputs`` maps task name to output.
@@ -463,6 +593,10 @@ def execute_run(
             profile_config=profile_config,
             checkpoint_artifact_id=checkpoint_artifact_id,
             execution_id=execution_id,
+            resume_from=resume_from,
+            only=only,
+            executor=executor,
+            max_workers=max_workers,
         )
     )
 
@@ -496,6 +630,10 @@ class _WorkspaceRunExecutor:
         fresh: bool = False,
         checkpoint: str | None = None,
         execution_id: str | None = None,
+        resume_from: Run | None = None,
+        only: Sequence[str] = (),
+        executor: str | None = None,
+        max_workers: int | None = None,
     ) -> object:
         return execute_run(
             self._resolve(run, workflow),
@@ -505,6 +643,10 @@ class _WorkspaceRunExecutor:
             fresh=fresh,
             checkpoint_artifact_id=checkpoint,
             execution_id=execution_id,
+            resume_from=resume_from,
+            only=only,
+            executor=executor,
+            max_workers=max_workers,
         )
 
     @staticmethod
@@ -524,6 +666,10 @@ class _WorkspaceRunExecutor:
         fresh: bool = False,
         checkpoint: str | None = None,
         execution_id: str | None = None,
+        resume_from: Run | None = None,
+        only: Sequence[str] = (),
+        executor: str | None = None,
+        max_workers: int | None = None,
     ) -> object:
         return await aexecute_run(
             self._resolve(run, workflow),
@@ -533,6 +679,10 @@ class _WorkspaceRunExecutor:
             fresh=fresh,
             checkpoint_artifact_id=checkpoint,
             execution_id=execution_id,
+            resume_from=resume_from,
+            only=only,
+            executor=executor,
+            max_workers=max_workers,
         )
 
 

@@ -98,7 +98,7 @@ class ImportAssetCases:
         assert version.version == 1
         assert version.origin.kind == "import"
         assert version.origin.action == "copy"
-        assert version.origin.location == "assets/greeting/payload"
+        assert version.origin.location == "assets/greeting/payload.txt"
         assert version.origin.uri == str(src.resolve())
         assert version.origin.input_ids == ()
         assert version.content is not None
@@ -223,8 +223,8 @@ class ImportAssetCases:
         experiment = ws.add_project("p").add_experiment("e")
         asset = experiment.assets.import_asset("greeting", _src(tmp_path))
         version = experiment.assets.versions(asset.id)[0]
-        assert version.origin.location == "assets/greeting/payload"
-        payload = Path(experiment.experiment_dir) / "assets" / "greeting" / "payload"
+        assert version.origin.location == "assets/greeting/payload.txt"
+        payload = Path(experiment.experiment_dir) / "assets" / "greeting" / "payload.txt"
         assert payload.read_bytes() == HELLO
 
     def test_non_local_filesystem_raises_before_write(self, tmp_path: Path) -> None:

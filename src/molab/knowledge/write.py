@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from molab.workspace.folder import Folder
 
     from .concept import Concept
+    from .concepts import _SourcedKnowledge
     from .edges import EdgeRole
 
 _LOG = logging.getLogger(__name__)
@@ -75,10 +76,25 @@ def write_knowledge(
     from .location import _host_fs, _lookup_path, enclosing_workspace_root, host_of
 
     disk = fs if fs is not None else _host_fs(host)
-    if getattr(of, "REQUIRES_SOURCES", False):
-        item = of(host, name, sources=list(sources), fs=disk)  # ty: ignore[invalid-argument-type, unknown-argument]
+    from .concept import _record_as_dict
+    from .planning import check_planning_record
+
+    preview = _record_as_dict(record) if record is not None else None
+    sourced = _sourced_class(of)
+    if sourced is not None:
+        # A dummy source lets an existing file answer ``exists`` before the
+        # real source list is checked. It is never written.
+        probe = sourced(host, name, sources=list(sources) or [object()], fs=disk)  # ty: ignore[invalid-argument-type]
     else:
-        item = of(host, name, fs=disk)  # ty: ignore[invalid-argument-type]
+        probe = of(host, name, fs=disk)  # ty: ignore[invalid-argument-type]
+    check_planning_record(of, preview, creating=not probe.exists())
+    check_record = getattr(of, "check_record", None)
+    if check_record is not None:
+        check_record(preview, existing=probe.frontmatter() if probe.exists() else None)
+    if sourced is not None and not sources:
+        item = sourced(host, name, sources=list(sources), fs=disk)  # ty: ignore[invalid-argument-type]
+    else:
+        item = probe
     created = not item.exists()
     payload = _merged_record(record, created_by=created_by, name=name)
     if item.exists() and text == "":
@@ -103,6 +119,13 @@ def write_knowledge(
                 paths=paths,
             )
     return item
+
+
+def _sourced_class(of: type[Concept]) -> type[_SourcedKnowledge] | None:
+    """*of* as a sourced class (one whose constructor takes ``sources``), or ``None``."""
+    from .concepts import _SourcedKnowledge
+
+    return of if issubclass(of, _SourcedKnowledge) else None
 
 
 def normalize_sources(

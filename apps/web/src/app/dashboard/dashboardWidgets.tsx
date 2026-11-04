@@ -301,7 +301,7 @@ export const ActivityPanel = ({
 
   return (
     <section aria-label="Activity" className="min-w-0">
-      <header className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1 pb-3 text-label">
+      <header className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-1 pb-3 text-label">
         <h2 className="font-medium text-foreground">Activity</h2>
         <Tally
           icon={ArrowUp}

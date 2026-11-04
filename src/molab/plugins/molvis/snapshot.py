@@ -13,7 +13,7 @@ def render_png(frames: Sequence[Any], *, dataset_path: str) -> bytes:
     """Render *frames* via ``molvis.Molvis``. Frames are molpy Frames."""
     os.environ.setdefault("MOLVIS_HEADLESS", "1")
     try:
-        from molvis import Molvis  # ty: ignore[unresolved-import]
+        from molvis import Molvis
     except ImportError as exc:
         raise PreviewReaderError(dataset_path, "molvis is not installed") from exc
     try:

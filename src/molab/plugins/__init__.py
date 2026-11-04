@@ -50,7 +50,7 @@ class CapabilityNotAvailable(RuntimeError):
 
 
 _INSTALL_HINTS: dict[Capability, str] = {
-    Capability.GH: "Install with: pip install httpx",
+    Capability.GH: "Install with: pip install 'molcrafts-molab[gh]'",
 }
 
 

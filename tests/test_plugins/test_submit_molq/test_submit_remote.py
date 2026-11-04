@@ -1,7 +1,7 @@
 """SubmitHandler must route through the target's transport when one is set.
 
 Uses a fake transport that records every shell call + file op, plus a fake
-molq ``Submitor`` so we don't need a working SSH endpoint or a real worker
+molq client (``cluster(...).submit``) so we don't need a working SSH endpoint or a real worker
 subprocess.  The assertions cover the wiring — with-target vs no-target — not
 the worker behaviour, which is exercised by the molq suite.
 """
@@ -190,8 +190,8 @@ class TestSubmitHandler:
         transport = RecordingTransport()
         monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _t: transport)
 
-        captured_submitor: dict[str, Any] = {}
-        _install_fake_session(monkeypatch, run, captured_submitor)
+        captured_submit: dict[str, Any] = {}
+        _install_fake_session(monkeypatch, run, captured_submit)
 
         from molab.plugins.submit_molq.submit import make_submit_handler
 
@@ -218,13 +218,13 @@ class TestSubmitHandler:
 
         # The registered cluster is the handler default; the target's scheduler
         # is recorded on the attempt, not passed into molq.
-        assert captured_submitor["cluster"] == "hpc"
+        assert captured_submit["cluster"] == "hpc"
         assert run.execution("e01").executor["scheduler"] == "slurm"
         # The worker is told to chdir into the remote exec dir.
-        assert captured_submitor["submit_cwd"].startswith("/scratch/me/molab/")
-        assert "executions/" in captured_submitor["submit_cwd"]
+        assert captured_submit["submit_cwd"].startswith("/scratch/me/molab/")
+        assert "executions/" in captured_submit["submit_cwd"]
         # Argv points at the remote run dir, not the local one.
-        argv = captured_submitor["submit_argv"]
+        argv = captured_submit["submit_argv"]
         assert "molab.cli" in argv and "execute" in argv
         assert any(a.startswith("/scratch/me/molab/") for a in argv)
 

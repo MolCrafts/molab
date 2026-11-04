@@ -90,6 +90,9 @@ class SourceRef(BaseModel, frozen=True):
             raise TypeError(f"artifact_id is only valid on a Run, got {type(entity).__name__}")
         if isinstance(entity, Folder):
             return cls(kind="file", ref=str(entity.resolve()), span=span)
+        path = getattr(entity, "path", None)
+        if getattr(entity, "FILE_DOCUMENT", False) and path is not None:
+            return cls(kind="file", ref=str(path), span=span)
         raise TypeError(f"SourceRef.of cannot name a {type(entity).__name__}")
 
     @property

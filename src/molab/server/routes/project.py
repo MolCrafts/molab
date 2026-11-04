@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import Field
 
 from molab.fs.window import iter_file_chunks
 from molab.workspace.refs import InvalidRefError
 
 from ..dependencies import get_workspace
+from ..deps.served import active_served_key, assert_workspace_writable
 from ..exceptions import AssetNotFoundError, ProjectNotFoundError
 from ..schemas import (
     AssetVersionResponse,
@@ -17,6 +21,7 @@ from ..schemas import (
     ProjectCreateRequest,
     ProjectResponse,
 )
+from ..schemas._wire import ApiModel
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -70,6 +75,57 @@ def list_project_assets(
         ManagedAssetResponse.from_model(asset, len(project.assets.versions(asset.id)))
         for asset in project.assets.list()[:limit]
     ]
+
+
+class AssetImportRequest(ApiModel):
+    """Import a file already in the served workspace as a project asset."""
+
+    name: str = Field(..., min_length=1, description="Asset title.")
+    path: str = Field(..., min_length=1, description="Workspace-relative path of the file.")
+    action: Literal["copy", "reference"] = "copy"
+
+
+def _require_writable(request: Request) -> None:
+    """Reject a mutating request against a remote (read-only) served workspace."""
+    assert_workspace_writable(active_served_key() or "", request.method)
+
+
+@router.post(
+    "/{project_id}/assets",
+    response_model=ManagedAssetResponse,
+    status_code=201,
+    dependencies=[Depends(_require_writable)],
+)
+def import_project_asset(
+    project_id: str,
+    body: AssetImportRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ManagedAssetResponse:
+    """Import a workspace file as a project asset — the same verb as ``molab asset import``.
+
+    422 when the path is not a file inside the served directory.
+    """
+    from pathlib import Path as _LocalPath
+    from pathlib import PurePosixPath
+
+    pure = PurePosixPath(body.path)
+    if pure.is_absolute() or ".." in pure.parts:
+        raise HTTPException(422, f"{body.path!r} must be a path inside the served directory")
+    root = _LocalPath(str(workspace.root)).resolve()
+    source = (root / pure).resolve()
+    if not source.is_relative_to(root) or not source.is_file():
+        raise HTTPException(422, f"{body.path!r} is not a file in the served directory")
+    project = workspace.get_project(project_id)
+    try:
+        asset = project.data_assets.import_asset(
+            body.name,
+            source,
+            action=body.action,
+            meta={"role": "import"},
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return ManagedAssetResponse.from_model(asset, len(project.data_assets.versions(asset.id)))
 
 
 @router.get("/{project_id}/assets/{asset_id}", response_model=ManagedAssetResponse)

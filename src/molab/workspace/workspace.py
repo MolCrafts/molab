@@ -29,8 +29,10 @@ from .domain import AssetScope
 from .entity_record import INDEX_FILENAME, read_record, read_type
 from .errors import ProjectExistsError, ProjectNotFoundError
 from .folder import (
+    WORKSPACE_EXPERIMENT_KIND,
     WORKSPACE_PROJECT_KIND,
     WORKSPACE_ROOT_KIND,
+    WORKSPACE_RUN_KIND,
     Folder,
     register_entity_class,
 )
@@ -245,8 +247,25 @@ class Workspace(Folder):
         return Path(str(root)) / MOLAB_DIR
 
     @staticmethod
+    def is_node_dir(path: PathArg, *, fs: FileSystem | None = None) -> bool:
+        """Whether *path* is a project, experiment or run directory (its record says so).
+
+        A served node is such a directory: :meth:`list_hosts` walks it from its
+        own level down. Reads only the record head.
+        """
+        disk = fs if fs is not None else LocalFS()
+        try:
+            kind = read_type(disk, path)
+        except (OSError, ValueError):
+            return False
+        return kind in {WORKSPACE_PROJECT_KIND, WORKSPACE_EXPERIMENT_KIND, WORKSPACE_RUN_KIND}
+
+    @staticmethod
     def list_hosts(root: PathArg, *, fs: FileSystem | None = None) -> Iterator[Path]:
         """Yield *root*, then each project, experiment and run directory under it.
+
+        *root* may be a workspace root or a project / experiment directory (a
+        served node); the walk starts at the level whose container it holds.
 
         Callers pass a root from :meth:`enclosing_root` or a Workspace's
         ``root``. This method does not check that *root* is a workspace. It
@@ -277,14 +296,28 @@ class Workspace(Folder):
                 entry.name for entry in entries if entry.is_dir and not entry.name.startswith(".")
             )
 
-        for project_name in _child_dirs(disk.join(root_s, PROJECT_CONTAINER)):
-            project_path = disk.join(root_s, PROJECT_CONTAINER, project_name)
-            yield Path(project_path)
+        def _runs(experiment_path: str) -> Iterator[Path]:
+            for run_name in _child_dirs(disk.join(experiment_path, RUN_CONTAINER)):
+                yield Path(disk.join(experiment_path, RUN_CONTAINER, run_name))
+
+        def _experiments(project_path: str) -> Iterator[Path]:
             for experiment_name in _child_dirs(disk.join(project_path, EXPERIMENT_CONTAINER)):
                 experiment_path = disk.join(project_path, EXPERIMENT_CONTAINER, experiment_name)
                 yield Path(experiment_path)
-                for run_name in _child_dirs(disk.join(experiment_path, RUN_CONTAINER)):
-                    yield Path(disk.join(experiment_path, RUN_CONTAINER, run_name))
+                yield from _runs(experiment_path)
+
+        # The root's level is the container it holds: a served project or
+        # experiment is walked from its own level down, never above it.
+        projects = _child_dirs(disk.join(root_s, PROJECT_CONTAINER))
+        if projects:
+            for project_name in projects:
+                project_path = disk.join(root_s, PROJECT_CONTAINER, project_name)
+                yield Path(project_path)
+                yield from _experiments(project_path)
+        elif _child_dirs(disk.join(root_s, EXPERIMENT_CONTAINER)):
+            yield from _experiments(root_s)
+        else:
+            yield from _runs(root_s)
 
     def _read_entity_metadata(self) -> WorkspaceMetadata | None:
         """The workspace record on disk, or ``None`` when the root has none yet."""
@@ -520,7 +553,6 @@ class Workspace(Folder):
         from .errors import AmbiguousRefError, RefNotFoundError
         from .experiment import Experiment
         from .refs import MolabRef, parse_ref
-        from .run import Run
 
         parsed = parse_ref(ref) if isinstance(ref, str) else ref
         if parsed.asset_id is not None:
@@ -559,27 +591,7 @@ class Workspace(Folder):
                 parsed.experiment_id,
                 tuple(MolabRef(experiment_id=parsed.experiment_id) for _hit in experiments),
             )
-        experiment = experiments[0]
-        if parsed.run_id is None:
-            return experiment
-
-        run = experiment._child_by_id(parsed.run_id, cls=Run)
-        if run is None:
-            raise RefNotFoundError(parsed, "run", parsed.run_id)
-        if parsed.execution_id is None and parsed.artifact_id is None:
-            return run
-        if parsed.execution_id is not None:
-            for record in run.executions:
-                if record.id == parsed.execution_id:
-                    return record
-            raise RefNotFoundError(parsed, "execution", parsed.execution_id)
-        assert parsed.artifact_id is not None
-        for record in run.executions:
-            try:
-                return record.artifact(parsed.artifact_id)
-            except KeyError:
-                continue
-        raise RefNotFoundError(parsed, "artifact", parsed.artifact_id)
+        return resolve_below_experiment(experiments[0], parsed)
 
     def folder_at(self, path: PathArg) -> Folder | None:
         """The workspace, project, experiment or run whose directory is *path*.
@@ -745,3 +757,39 @@ class Workspace(Folder):
         if kind is not None and kind != WORKSPACE_PROJECT_KIND:
             return []
         return list(self.list_projects())
+
+
+def resolve_below_experiment(
+    experiment: Experiment, parsed: MolabRef
+) -> Experiment | Run | Execution | Artifact:
+    """Finish resolving *parsed* once its experiment is found.
+
+    Shared by :meth:`Workspace.find` and a served scope's ``find``: the run,
+    execution and artifact segments resolve the same way wherever the walk
+    started.
+
+    Raises:
+        RefNotFoundError: A run, execution or artifact segment names nothing.
+    """
+    from .errors import RefNotFoundError
+    from .run import Run
+
+    if parsed.run_id is None:
+        return experiment
+    run = experiment._child_by_id(parsed.run_id, cls=Run)
+    if run is None:
+        raise RefNotFoundError(parsed, "run", parsed.run_id)
+    if parsed.execution_id is None and parsed.artifact_id is None:
+        return run
+    if parsed.execution_id is not None:
+        for record in run.executions:
+            if record.id == parsed.execution_id:
+                return record
+        raise RefNotFoundError(parsed, "execution", parsed.execution_id)
+    assert parsed.artifact_id is not None
+    for record in run.executions:
+        try:
+            return record.artifact(parsed.artifact_id)
+        except KeyError:
+            continue
+    raise RefNotFoundError(parsed, "artifact", parsed.artifact_id)

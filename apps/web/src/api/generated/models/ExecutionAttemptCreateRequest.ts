@@ -18,6 +18,14 @@ export type ExecutionAttemptCreateRequest = {
      * Submit the queued Execution after it is created.
      */
     dispatch?: boolean;
+    /**
+     * Idempotency key. When an attempt of this Run was already created with the same key, that attempt is returned and nothing new is created or dispatched, so a caller that lost the response can retry safely.
+     */
+    requestKey?: (string | null);
+    /**
+     * Software agent recorded as the attempt's creator (default: the UI).
+     */
+    requestedBy?: (string | null);
 };
 export namespace ExecutionAttemptCreateRequest {
     export enum mode {

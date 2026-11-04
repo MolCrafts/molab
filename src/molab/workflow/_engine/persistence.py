@@ -2,16 +2,20 @@
 
 Every persisting execution writes one journal, :data:`JOURNAL_NAME`
 (``workflow.json``), into the directory the workspace hands the runtime —
-``run_context.execution_dir``. The workflow layer never composes that path;
-the workspace owns the layout and supplies the directory and its
-``FileSystem``.
+``run_context.execution_dir``. The values the journal cites live in the run's
+value store (:mod:`.values`), the directory the workspace hands out as
+``run_context.values_dir`` / ``run.values_dir()``. The workflow layer never
+composes either path.
 
-**Header** (schema :data:`JOURNAL_SCHEMA_VERSION` = 3, the workflow layer's
+**Header** (schema :data:`JOURNAL_SCHEMA_VERSION` = 4, the workflow layer's
 own version, unrelated to ``MOLAB_SCHEMA_VERSION``): the compiled IR expanded
 at the top level (``task_configs`` + ``links`` and the IR's own keys), then
 ``schema_version``, ``execution_id``, ``workflow_digest``
 (:attr:`CompiledWorkflow.workflow_digest`), ``workflow_name``,
-``based_on_execution_id``, ``started_at`` and ``finished_at``. The two
+``based_on_execution_id``, ``selected_tasks`` (``null`` when the attempt runs
+every task, else the tasks a partial rerun re-executes), ``seeded_from``
+(``{task: {"execution_id", "ref"}}`` — the predecessor record each seeded
+task's output came from), ``started_at`` and ``finished_at``. The two
 timestamps are the **engine-run window**, not the attempt window: the
 attempt's times live on the Execution record (``execution.json``). There is
 no top-level ``status`` / ``outputs`` / ``error`` — an attempt's status
@@ -19,10 +23,30 @@ belongs to ``execution.json`` alone.
 
 **Body**: ``task_configs[]`` records keyed by ``task_id`` carry ``status``
 (``pending`` / ``running`` / ``completed`` / ``failed`` / ``skipped``),
-``outputs`` (JSON-rendered), ``outputs_lossy`` (the original was not
-JSON-safe, so the stored value is a truncated rendering), ``error``,
-``started_at`` / ``finished_at``, and — on completion — ``snapshot_key``
-(``TaskSnapshot.key``) and ``dependent_params_hash``.
+``error``, ``reason`` (why a task was ``skipped``), ``queued_at`` (when the
+engine launched it), ``started_at`` / ``finished_at`` (the span the body itself
+ran, stamped by the executor — a task waiting for the inline lock or a pool
+worker is queued, not running), ``executor`` (``thread`` / ``process`` / ``inline``) and
+``worker_pid`` (the process the body ran in), and:
+
+* ``input_refs`` — written when the task starts, so a failed task keeps it:
+  ``{"upstream": {dep: ref}, "root": ref, "delivered": ref, "config": ref}``
+  (keys present when the task received that input: each declared upstream it
+  consumed, its engine-injected root inputs = run params, a trigger-delivered
+  value, its effective config). ``inputs_unrecordable`` maps a slot to why it
+  could not be stored.
+* ``output_ref`` / ``output_encoding`` (``json`` / ``pickle``) /
+  ``output_preview`` (pickled values only, a short ``repr``) — on completion;
+  ``output_unrecordable`` says why there is none for a value that could not
+  be stored.
+* ``snapshot_key`` (``TaskSnapshot.key``) and ``dependent_params_hash`` — on
+  completion; ``seeded_from`` (predecessor id) when the output was seeded.
+
+Values are never inlined: a ref names the bytes in the value store, so an
+upstream output and the downstream input it feeds are stored once. A journal
+of an older schema (inline ``outputs``) is **legacy**: it is still served by
+:func:`read_journal` as written, but :func:`read_outputs` and seeding ignore it
+(a warning says so) — such an attempt cannot be resumed or partially rerun.
 
 **Flush contract.** The runtime opens the journal with
 :func:`open_execution_document` (written synchronously); from then on the
@@ -36,18 +60,28 @@ directory of the executing host and go through
 :class:`~molab.workspace.file_store.FileStore` (atomic put).
 
 **Readers** (:func:`read_journal` / :func:`read_outputs` /
-:func:`read_resume_seeds`) take a workspace ``Run`` and read through the
+:func:`read_attempt_seeds`) take a workspace ``Run`` and read through the
 workspace's ``FileSystem``, so they work on a remote workspace too.
+:func:`read_journal` presents each record's value for the web app: ``outputs``
+resolved from the store for a JSON value, ``outputs_pickled: true`` (beside the
+stored ``output_preview``) for a pickled one.
 
-**The seed gate** (:func:`_verify_seeds`) is the one place a resume seed is
-trusted. A seed survives only when its task is *verified*: its record is
-``completed`` and not lossy, its ``snapshot_key`` and ``dependent_params_hash``
-equal the live task's, and every upstream is itself verified (or never fired
-in the predecessor — ``pending`` / ``skipped``, e.g. an unchosen branch). The
-rule is transitive, so a changed upstream drops every seed downstream of it.
-Fast path: when the journal's ``workflow_digest`` equals the live digest, no
-record is lossy and every seed has a ``completed`` record, the seeds are kept
-without the full evaluation — equal digests imply equal per-task keys.
+**Seeding** has one path, :func:`read_attempt_seeds`, used by both a RESUME
+(every completed task with a usable recorded output is a seed, pickled values
+included; a failed task re-executes with the inputs its record shows) and a
+partial RERUN (``select``: the selected tasks execute, every other completed
+task is a seed, everything downstream of a selection is excluded).
+
+**The seed gate** (:func:`_verify_seeds`) is the one place a seed is trusted.
+A seed survives only when its task is *verified*: its record is ``completed``
+with a usable recorded output, its ``snapshot_key`` and
+``dependent_params_hash`` equal the live task's, and every upstream is itself
+verified (or never fired in the predecessor — ``pending`` / ``skipped``, e.g.
+an unchosen branch). The rule is transitive, so a changed upstream drops every
+seed downstream of it. Fast path: when the journal's ``workflow_digest``
+equals the live digest, no record is unusable and every seed has a
+``completed`` record, the seeds are kept without the full evaluation — equal
+digests imply equal per-task keys.
 """
 
 from __future__ import annotations
@@ -56,18 +90,19 @@ import copy
 import json
 import os
 import threading
-from collections.abc import Callable, Iterator
-from datetime import datetime
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mollog import get_logger
 
 from ..._typing import JSONValue
+from ..types import BranchEdges
+from .values import ValueStore
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from molab.fs import FileSystem
     from molab.workspace.run import Run
 
@@ -81,8 +116,27 @@ _LOCK = threading.Lock()
 #: The journal's file name inside the execution directory.
 JOURNAL_NAME = "workflow.json"
 
-#: The journal's schema version (the workflow layer's own).
-JOURNAL_SCHEMA_VERSION = 3
+#: The journal's schema version (the workflow layer's own). 4: records cite
+#: values by ref into the run's value store; 3 and older inlined them.
+JOURNAL_SCHEMA_VERSION = 4
+
+#: The record keys describing a task's output (replaced together).
+OUTPUT_KEYS: tuple[str, ...] = (
+    "output_ref",
+    "output_encoding",
+    "output_preview",
+    "output_unrecordable",
+)
+
+#: The record keys describing a task's inputs (replaced together).
+INPUT_KEYS: tuple[str, ...] = ("input_refs", "inputs_unrecordable")
+
+#: ``reason`` of a task a partial rerun does not run.
+NOT_SELECTED_REASON = "not selected for this rerun"
+
+
+class RecordedInputError(LookupError):
+    """A partial rerun needs a recorded value the predecessor cannot supply."""
 
 
 def _put_journal(journal_dir: Path, doc: dict | list) -> None:
@@ -101,36 +155,7 @@ def _iter_dicts(value: JSONValue) -> Iterator[dict[str, JSONValue]]:
 
 
 def _now() -> str:
-    return datetime.now().isoformat()
-
-
-def _is_json_safe(value: Any) -> bool:  # noqa: ANN401
-    """True iff *value* round-trips through ``json.dumps`` without coercion."""
-    try:
-        json.dumps(value)
-    except (TypeError, ValueError):
-        return False
-    return True
-
-
-def _jsonable(value: Any) -> JSONValue:  # noqa: ANN401
-    """Return a compact JSON-safe representation of a task output.
-
-    LOSSY for non-JSON-safe values (truncated to 20 keys/items, remainder
-    str-ified). Callers persisting task outputs must record the fidelity
-    flag (see :func:`mark_task_status` ``outputs_lossy``) so the resume
-    seeding path never trusts a truncated value as a real task output.
-    """
-    try:
-        json.dumps(value)
-        return value
-    except (TypeError, ValueError):
-        pass
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in list(value.items())[:20]}
-    if isinstance(value, (list, tuple, set)):
-        return [_jsonable(v) for v in list(value)[:20]]
-    return str(value)
+    return datetime.now(UTC).isoformat()
 
 
 def _task_id(task: dict[str, JSONValue]) -> str | None:
@@ -175,34 +200,17 @@ def _records(doc: Mapping[str, JSONValue]) -> dict[str, dict[str, JSONValue]]:
     return records
 
 
-def _completed_outputs(
-    doc: Mapping[str, JSONValue] | None, execution_id: str | None
-) -> dict[str, TaskOutput]:
-    """``{task: output}`` for every ``completed`` record that carries ``outputs``.
-
-    A lossy record (``outputs_lossy``) is omitted with a warning: its value is
-    a truncated rendering, and seeding or returning it would corrupt whatever
-    consumes it.
-    """
-    if doc is None:
-        return {}
-    outputs: dict[str, TaskOutput] = {}
-    for task in _iter_dicts(doc.get("task_configs", [])):
-        if task.get("status") != "completed" or "outputs" not in task:
-            continue
-        name = _task_id(task)
-        if name is None:
-            continue
-        if task.get("outputs_lossy"):
-            logger.warning(
-                f"persisted output of task {name!r} in execution "
-                f"{execution_id!r} is lossy (the original value was not "
-                f"JSON-safe and was truncated for observability), so it is "
-                f"omitted; make the task return a JSON-safe value"
-            )
-            continue
-        outputs[name] = task["outputs"]
-    return outputs
+def _is_legacy(doc: Mapping[str, JSONValue], execution_id: str | None) -> bool:
+    """True (with a warning) for a journal older than refs-into-the-value-store."""
+    version = doc.get("schema_version")
+    if isinstance(version, int) and version >= JOURNAL_SCHEMA_VERSION:
+        return False
+    logger.warning(
+        f"journal of execution {execution_id!r} is legacy (schema {version!r}, values "
+        f"inline); its recorded outputs are not used — the attempt cannot be resumed "
+        f"or partially rerun, rerun it from the top"
+    )
+    return True
 
 
 def _workspace_fs(run: Run) -> FileSystem:
@@ -213,25 +221,98 @@ def _journal_path(run: Run, execution_id: str) -> Path:
     return run.execution_dir(execution_id) / JOURNAL_NAME
 
 
+def value_store(run: Run) -> ValueStore:
+    """The run's value store, read through the workspace ``FileSystem``."""
+    return ValueStore(run.values_dir(), fs=_workspace_fs(run))
+
+
+def _load_value(store: ValueStore, ref: str) -> tuple[bool, Any]:
+    """``(True, value)``, or ``(False, why)`` when *ref* cannot be loaded."""
+    try:
+        return True, store.get(ref)
+    except Exception as exc:  # missing file, corrupt bytes, unpicklable class …
+        return False, f"its recorded value {ref} cannot be loaded ({type(exc).__name__}: {exc})"
+
+
+def _current(doc: dict[str, JSONValue] | None, execution_id: str | None) -> dict | None:
+    """*doc* unless it is missing or legacy (a legacy journal is warned)."""
+    if doc is None or _is_legacy(doc, execution_id):
+        return None
+    return doc
+
+
+def _recorded_outputs(
+    doc: Mapping[str, JSONValue] | None,
+    store: ValueStore,
+) -> tuple[dict[str, TaskOutput], dict[str, str]]:
+    """``(outputs, unusable)`` of every ``completed`` record.
+
+    ``outputs`` maps each task whose ``output_ref`` loads to its value;
+    ``unusable`` maps each completed task whose output was not recorded
+    (``output_unrecordable``) or does not load to why. A completed record with
+    neither (a routing task) is in neither.
+    """
+    if doc is None:
+        return {}, {}
+    outputs: dict[str, TaskOutput] = {}
+    unusable: dict[str, str] = {}
+    for name, record in _records(doc).items():
+        if record.get("status") != "completed":
+            continue
+        ref = record.get("output_ref")
+        if isinstance(ref, str):
+            ok, value = _load_value(store, ref)
+            if ok:
+                outputs[name] = value
+            else:
+                unusable[name] = value
+        elif record.get("output_unrecordable"):
+            unusable[name] = f"its output could not be recorded ({record['output_unrecordable']})"
+    return outputs, unusable
+
+
 def read_journal(run: Run, execution_id: str) -> dict[str, JSONValue] | None:
-    """Read one attempt's node journal through the workspace ``FileSystem``.
+    """Read one attempt's node journal, presenting its recorded values.
+
+    Each record citing an ``output_ref`` gains ``outputs`` (the value, loaded
+    from the run's value store) when it is JSON, or ``outputs_pickled: true``
+    when it is pickled (the stored ``output_preview`` describes it; nothing is
+    unpickled here). A value that cannot be loaded gives ``outputs_missing``
+    with the reason. A legacy journal is returned as written.
 
     Args:
         run: The workspace run.
         execution_id: The attempt id (``e01``).
 
     Returns:
-        The journal document, or ``None`` when the attempt has no journal or
+        The presented journal, or ``None`` when the attempt has no journal or
         it is malformed / not a JSON object.
     """
-    return _load(_workspace_fs(run), _journal_path(run, execution_id))
+    doc = _load(_workspace_fs(run), _journal_path(run, execution_id))
+    if doc is None:
+        return None
+    version = doc.get("schema_version")
+    if not isinstance(version, int) or version < JOURNAL_SCHEMA_VERSION:
+        return doc
+    store = value_store(run)
+    for record in _records(doc).values():
+        ref = record.get("output_ref")
+        if not isinstance(ref, str):
+            continue
+        if record.get("output_encoding") == "pickle":
+            record["outputs_pickled"] = True
+            continue
+        ok, value = _load_value(store, ref)
+        record["outputs" if ok else "outputs_missing"] = value
+    return doc
 
 
 def read_outputs(run: Run, execution_id: str) -> dict[str, TaskOutput]:
     """Return the completed-node outputs one attempt recorded.
 
-    Only ``completed`` records carrying an ``outputs`` value count; lossy
-    records are omitted with a warning.
+    Every ``completed`` record whose ``output_ref`` loads from the run's value
+    store counts — pickled values included. A record whose value was not
+    recorded or does not load is omitted with a warning.
 
     Args:
         run: The workspace run.
@@ -240,34 +321,253 @@ def read_outputs(run: Run, execution_id: str) -> dict[str, TaskOutput]:
     Returns:
         ``{task_name: output}``; empty when there is no readable journal.
     """
-    return _completed_outputs(read_journal(run, execution_id), execution_id)
+    doc = _current(_load(_workspace_fs(run), _journal_path(run, execution_id)), execution_id)
+    outputs, unusable = _recorded_outputs(doc, value_store(run))
+    for name, why in unusable.items():
+        logger.warning(f"output of task {name!r} in execution {execution_id!r} omitted: {why}")
+    return outputs
 
 
-def read_resume_seeds(
-    run: Run, based_on_execution_id: str, compiled: CompiledWorkflow
-) -> dict[str, TaskOutput]:
-    """Return the predecessor's outputs that are safe to seed into *compiled*.
+@dataclass(frozen=True)
+class AttemptSeeds:
+    """What a new attempt takes from its predecessor's records.
 
-    The completed outputs of *based_on_execution_id*, filtered through the
-    transitive seed gate (see the module docstring).
+    Built only by :func:`read_attempt_seeds`; consumed by
+    ``WorkflowRuntime.execute(attempt_seeds=...)``.
+
+    Attributes:
+        based_on_execution_id: The predecessor attempt.
+        outputs: ``{task: value}`` seeds — the task is not re-executed.
+        records: ``{task: output fields}`` (``output_ref`` / ``output_encoding``
+            / ``output_preview``) of each seed, copied into the new journal so
+            a seed is never re-encoded.
+        selected: The tasks a partial rerun executes; ``()`` runs every task.
+        excluded: Tasks this attempt never launches (journalled ``skipped``).
+        delivered: ``{task: value}`` the trigger-delivered input a selected
+            task's record shows (it runs with no live trigger).
+        expected_inputs: ``{task: input_refs}`` the predecessor recorded for a
+            task this attempt executes; a different live input is warned.
+    """
+
+    based_on_execution_id: str
+    outputs: Mapping[str, TaskOutput] = field(default_factory=dict)
+    records: Mapping[str, Mapping[str, JSONValue]] = field(default_factory=dict)
+    selected: tuple[str, ...] = ()
+    excluded: frozenset[str] = frozenset()
+    delivered: Mapping[str, TaskOutput] = field(default_factory=dict)
+    expected_inputs: Mapping[str, Mapping[str, JSONValue]] = field(default_factory=dict)
+
+    def seeded_from(self) -> dict[str, JSONValue]:
+        """The journal header's ``seeded_from``: predecessor id + ref per seed."""
+        return {
+            name: {
+                "execution_id": self.based_on_execution_id,
+                "ref": self.records.get(name, {}).get("output_ref"),
+            }
+            for name in self.outputs
+        }
+
+
+def _downstream_of(selection: Sequence[str], ups: Mapping[str, set[str]]) -> set[str]:
+    """Every task reachable forward from *selection*, the selection excluded."""
+    children: dict[str, set[str]] = {}
+    for name, sources in ups.items():
+        for source in sources:
+            children.setdefault(source, set()).add(name)
+    seen: set[str] = set()
+    frontier = list(selection)
+    while frontier:
+        for child in children.get(frontier.pop(), ()):
+            if child not in seen:
+                seen.add(child)
+                frontier.append(child)
+    return seen - set(selection)
+
+
+def _why_not_seeded(
+    name: str,
+    records: Mapping[str, Mapping[str, JSONValue]],
+    unusable: Mapping[str, str],
+    reasons: Mapping[str, str],
+) -> str:
+    record = records.get(name)
+    if record is None:
+        return "the predecessor journal has no record of it"
+    if record.get("status") != "completed":
+        return f"its record is {record.get('status')!r}, not completed"
+    if name in unusable:
+        return unusable[name]
+    if not isinstance(record.get("output_ref"), str):
+        return "it recorded no output"
+    return reasons.get(name, "its record cannot be verified")
+
+
+def read_attempt_seeds(
+    run: Run,
+    based_on_execution_id: str,
+    compiled: CompiledWorkflow,
+    *,
+    select: Sequence[str] = (),
+) -> AttemptSeeds:
+    """The one seeding path: resolve a predecessor's records into seeds.
+
+    Every ``completed`` record of *based_on_execution_id* whose ``output_ref``
+    loads from the run's value store is a candidate (pickled values
+    included); candidates pass through the transitive seed gate. Without
+    *select* (a RESUME) the verified candidates are the seeds and every other
+    task executes — a task that failed re-executes from the same seeded
+    upstream values its record shows. With *select* (a partial RERUN) the
+    selected tasks execute, every verified non-selected task outside their
+    downstream is a seed, and every other task is excluded.
 
     Args:
         run: The workspace run.
         based_on_execution_id: The predecessor attempt.
         compiled: The workflow about to run.
+        select: The tasks a partial rerun executes.
 
     Returns:
-        The verified seeds; ``{}`` when the predecessor has no journal.
+        The :class:`AttemptSeeds`; no seeds when the predecessor has no
+        (current-schema) journal.
+
+    Raises:
+        ValueError: *select* names a task the workflow does not have.
+        RecordedInputError: A selected task needs an upstream (a declared
+            dependency, or the ``map_over`` of a parallel body) or a recorded
+            delivered input that the predecessor cannot supply.
     """
-    doc = read_journal(run, based_on_execution_id)
-    if doc is None:
-        return {}
-    return _verify_seeds(
-        doc,
-        _completed_outputs(doc, based_on_execution_id),
-        compiled,
-        execution_id=based_on_execution_id,
+    selection = tuple(dict.fromkeys(select))
+    registered = compiled.registration_by_name
+    unknown = [name for name in selection if name not in registered]
+    if unknown:
+        raise ValueError(
+            f"unknown task(s) {unknown} selected for rerun; the workflow has {sorted(registered)}"
+        )
+    doc = _current(
+        _load(_workspace_fs(run), _journal_path(run, based_on_execution_id)),
+        based_on_execution_id,
     )
+    store = value_store(run)
+    candidates, unusable = _recorded_outputs(doc, store)
+    records = _records(doc) if doc is not None else {}
+    reasons: dict[str, str] = {}
+    verified = (
+        _verify_seeds(
+            doc,
+            candidates,
+            compiled,
+            execution_id=based_on_execution_id,
+            unusable=unusable,
+            reasons=reasons,
+        )
+        if doc is not None
+        else {}
+    )
+
+    def _output_fields(name: str) -> dict[str, JSONValue]:
+        return {key: records[name][key] for key in OUTPUT_KEYS if key in records[name]}
+
+    def _inputs(names: Sequence[str]) -> dict[str, Mapping[str, JSONValue]]:
+        found: dict[str, Mapping[str, JSONValue]] = {}
+        for name in names:
+            refs = records.get(name, {}).get("input_refs")
+            if isinstance(refs, dict):
+                found[name] = refs
+        return found
+
+    if not selection:
+        # A branch task re-decides its route on resume: its recorded value
+        # alone cannot route (it carries no ``Next``), so it is not a seed.
+        verified = {
+            name: value
+            for name, value in verified.items()
+            if not isinstance(compiled.graph.out_edges.get(name), BranchEdges)
+        }
+        return AttemptSeeds(
+            based_on_execution_id=based_on_execution_id,
+            outputs=verified,
+            records={name: _output_fields(name) for name in verified},
+            expected_inputs=_inputs([name for name in registered if name not in verified]),
+        )
+
+    ups, _back, _order = _seed_upstreams(compiled)
+    downstream = _downstream_of(selection, ups)
+    seeds = {
+        name: value
+        for name, value in verified.items()
+        if name not in selection and name not in downstream
+    }
+    plan = compiled.graph
+    delivered: dict[str, TaskOutput] = {}
+    for name in selection:
+        needed = set(registered[name].depends_on)
+        par = plan.parallel_by_body.get(name)
+        if par is not None:
+            needed.add(par.map_over)
+        for upstream in sorted(needed - set(selection)):
+            if upstream not in seeds:
+                why = (
+                    "it is downstream of another selected task, so its recorded output "
+                    "may be stale and it is not run"
+                    if upstream in downstream
+                    else _why_not_seeded(upstream, records, unusable, reasons)
+                )
+                raise RecordedInputError(
+                    f"cannot rerun {name!r} from execution {based_on_execution_id}'s "
+                    f"record: upstream {upstream!r} has no usable recorded output ({why}); "
+                    f"select it too (--task {upstream}) or rerun the whole workflow"
+                )
+        value = _selected_delivered(name, records, store, plan, seeds, selection)
+        if value is not _NOTHING:
+            delivered[name] = value
+    excluded = frozenset(registered) - set(selection) - set(seeds)
+    return AttemptSeeds(
+        based_on_execution_id=based_on_execution_id,
+        outputs=seeds,
+        records={name: _output_fields(name) for name in seeds},
+        selected=selection,
+        excluded=excluded,
+        delivered=delivered,
+        expected_inputs=_inputs(selection),
+    )
+
+
+_NOTHING: Any = object()
+
+
+def _selected_delivered(
+    name: str,
+    records: Mapping[str, Mapping[str, JSONValue]],
+    store: ValueStore,
+    plan: Any,  # noqa: ANN401 - ExecutionPlan
+    seeds: Mapping[str, TaskOutput],
+    selection: Sequence[str],
+) -> Any:  # noqa: ANN401
+    """The trigger-delivered input a selected task runs with, or ``_NOTHING``.
+
+    Its record's ``input_refs.delivered`` when it shows one; otherwise, for a
+    task that never started, the seeded outputs of its trigger sources (the
+    values those edges carry). Sources inside the selection deliver live.
+    """
+    from .plan import START
+
+    refs = records.get(name, {}).get("input_refs")
+    if isinstance(refs, dict) and isinstance(refs.get("delivered"), str):
+        ok, value = _load_value(store, refs["delivered"])
+        if not ok:
+            raise RecordedInputError(
+                f"cannot rerun {name!r}: its recorded delivered input is unusable ({value})"
+            )
+        return value
+    if isinstance(refs, dict):
+        return _NOTHING  # it started and received no delivered value
+    sources = set(plan.in_sources.get(name, ())) - {START}
+    if sources & set(selection):
+        return _NOTHING  # a selected source delivers live
+    carried = {source: seeds[source] for source in sorted(sources) if source in seeds}
+    if not carried:
+        return _NOTHING
+    return next(iter(carried.values())) if len(carried) == 1 else carried
 
 
 # ── The seed gate ────────────────────────────────────────────────────────────
@@ -322,6 +622,8 @@ def _verify_seeds(
     compiled: CompiledWorkflow,
     *,
     execution_id: str | None,
+    unusable: Mapping[str, str] | None = None,
+    reasons: dict[str, str] | None = None,
 ) -> dict[str, TaskOutput]:
     """Keep only the seeds the predecessor journal *doc* can vouch for.
 
@@ -335,6 +637,11 @@ def _verify_seeds(
         seeds: ``{task: output}`` candidates.
         compiled: The workflow about to run.
         execution_id: The predecessor's id (for the warnings).
+        unusable: ``{task: why}`` for completed records whose recorded output
+            cannot be used (not recorded, or does not load); each fails its
+            own check, so everything downstream of it is dropped too.
+        reasons: Filled with ``{task: why}`` for every task that is not
+            verified, when given.
 
     Returns:
         The verified subset of *seeds*.
@@ -342,9 +649,11 @@ def _verify_seeds(
     if doc is None:
         return dict(seeds)
     records = _records(doc)
+    unusable = unusable or {}
     if (
         doc.get("workflow_digest") == compiled.workflow_digest
-        and not any(record.get("outputs_lossy") for record in records.values())
+        and not unusable
+        and not any(record.get("output_unrecordable") for record in records.values())
         and all(name in records and records[name].get("status") == "completed" for name in seeds)
     ):
         return dict(seeds)
@@ -354,7 +663,7 @@ def _verify_seeds(
     ups, back, order = _seed_upstreams(compiled)
     recurrent = compiled.graph.recurrent
 
-    reasons: dict[str, str] = {}
+    reasons = reasons if reasons is not None else {}
 
     def _own_failure(name: str) -> str | None:
         record = records.get(name)
@@ -362,8 +671,10 @@ def _verify_seeds(
             return "the persisted execution document has no record for it"
         if record.get("status") != "completed":
             return f"its persisted record is {record.get('status')!r}, not completed"
-        if record.get("outputs_lossy"):
-            return "its persisted output is lossy (original was not JSON-safe)"
+        if name in unusable:
+            return unusable[name]
+        if record.get("output_unrecordable"):
+            return f"its output could not be recorded ({record['output_unrecordable']})"
         persisted_key = record.get("snapshot_key")
         if not isinstance(persisted_key, str) or not persisted_key:
             return (
@@ -439,6 +750,8 @@ def _initial_document(
     execution_id: str,
     compiled: CompiledWorkflow | None,
     based_on_execution_id: str | None,
+    selected_tasks: Sequence[str] | None = None,
+    seeded_from: Mapping[str, JSONValue] | None = None,
 ) -> dict[str, JSONValue]:
     """Journal header. ``workflow_digest`` is its only identity; the spread IR has none."""
     header: dict[str, JSONValue] = {
@@ -447,6 +760,8 @@ def _initial_document(
         "workflow_digest": compiled.workflow_digest if compiled is not None else None,
         "workflow_name": compiled.name if compiled is not None else None,
         "based_on_execution_id": based_on_execution_id,
+        "selected_tasks": list(selected_tasks) if selected_tasks else None,
+        "seeded_from": dict(seeded_from or {}),
         "started_at": _now(),
         "finished_at": None,
     }
@@ -591,6 +906,8 @@ def open_execution_document(
     execution_id: str,
     compiled: CompiledWorkflow | None,
     based_on_execution_id: str | None = None,
+    selected_tasks: Sequence[str] | None = None,
+    seeded_from: Mapping[str, JSONValue] | None = None,
 ) -> None:
     """Begin a coalesced-writer lifecycle for one execution's journal.
 
@@ -606,7 +923,9 @@ def open_execution_document(
         return
     journal_dir = Path(journal_dir)
     path = journal_dir / JOURNAL_NAME
-    document = _initial_document(execution_id, compiled, based_on_execution_id)
+    document = _initial_document(
+        execution_id, compiled, based_on_execution_id, selected_tasks, seeded_from
+    )
     with _REGISTRY_LOCK:
         prior = _WRITERS.pop(path, None)
     if prior is not None:
@@ -668,22 +987,37 @@ def mark_task_status(
     task_name: str,
     status: str,
     *,
-    output: Any = None,  # noqa: ANN401
+    output: Mapping[str, JSONValue] | None = None,
+    inputs: Mapping[str, JSONValue] | None = None,
     error: str | None = None,
+    reason: str | None = None,
+    seeded_from: str | None = None,
     snapshot_key: str | None = None,
     dependent_params_hash: str | None = None,
+    runner: Mapping[str, JSONValue] | None = None,
+    started: bool = False,
+    ended: bool = False,
 ) -> None:
     """Update one task record and its adjacent links in the journal.
 
-    ``snapshot_key`` and ``dependent_params_hash`` are the task's identity at
-    completion; the seed gate compares them with the live workflow. A
-    non-JSON-safe output is stored through the lossy :func:`_jsonable`
-    rendering and flagged ``outputs_lossy``; such a value is never a seed.
+    *output* / *inputs* are record fields built by :mod:`.node_record`
+    (:data:`OUTPUT_KEYS` / :data:`INPUT_KEYS`); each, when given, replaces the
+    record's previous fields of its kind, so a loop iteration never leaves a
+    stale ref behind. ``snapshot_key`` and ``dependent_params_hash`` are the
+    task's identity at completion; the seed gate compares them with the live
+    workflow. *reason* says why a task is ``skipped``; *seeded_from* names the
+    predecessor a seeded output came from; *runner* (``executor`` /
+    ``worker_pid``) says how and where the body ran.
 
-    ``completed`` and ``failed`` flush synchronously; ``running`` is
-    coalesced (see :data:`WORKFLOW_JSON_MAX_STALENESS_S`). No-op when
-    *journal_dir* is ``None``.
+    ``completed``, ``failed`` and ``skipped`` flush synchronously;
+    ``running`` is coalesced (see :data:`WORKFLOW_JSON_MAX_STALENESS_S`).
+    No-op when *journal_dir* is ``None``.
     """
+
+    def _replace(task: dict[str, JSONValue], keys: tuple[str, ...], fields: Mapping) -> None:
+        for key in keys:
+            task.pop(key, None)
+        task.update(fields)
 
     def _apply(data: dict[str, JSONValue]) -> None:
         now = _now()
@@ -691,20 +1025,37 @@ def mark_task_status(
             if _task_id(task) == task_name:
                 task["status"] = status
                 if status == "running":
-                    task["started_at"] = task.get("started_at") or now
-                elif status in {"completed", "failed", "skipped"}:
-                    task["finished_at"] = now
-                if output is not None:
-                    lossy = not _is_json_safe(output)
-                    task["outputs"] = _jsonable(output)
-                    if lossy:
-                        task["outputs_lossy"] = True
+                    # Launched is not started: a task waiting for its turn
+                    # (inline, a full pool) is only queued. ``started`` comes
+                    # from the executor the moment the body begins, so the
+                    # recorded span is computing time.
+                    if ended:
+                        # The body returned; the engine records the outcome
+                        # when it next runs, which can be later (an inline
+                        # body blocks it). The span ends here.
+                        task["ended_at"] = now
                     else:
-                        task.pop("outputs_lossy", None)
+                        key = "started_at" if started else "queued_at"
+                        task[key] = task.get(key) or now
+                elif status in {"completed", "failed", "skipped"}:
+                    task["finished_at"] = task.pop("ended_at", None) or now
+                    # A body that never ran (a cache hit, a skip) still gets
+                    # a span: zero long, at its finish.
+                    task["started_at"] = task.get("started_at") or now
+                if output is not None:
+                    _replace(task, OUTPUT_KEYS, output)
+                if inputs is not None:
+                    _replace(task, INPUT_KEYS, inputs)
                 if snapshot_key is not None:
                     task["snapshot_key"] = snapshot_key
                 if dependent_params_hash is not None:
                     task["dependent_params_hash"] = dependent_params_hash
+                if seeded_from is not None:
+                    task["seeded_from"] = seeded_from
+                if reason is not None:
+                    task["reason"] = reason
+                if runner is not None:
+                    task.update(runner)
                 if error:
                     task["error"] = error
         for link in _iter_dicts(data.get("links", [])):
@@ -719,7 +1070,7 @@ def mark_task_status(
             ) and status == "failed":
                 link["status"] = "failed"
 
-    _mutate_document(journal_dir, _apply, flush=status in {"completed", "failed"})
+    _mutate_document(journal_dir, _apply, flush=status in {"completed", "failed", "skipped"})
 
 
 def mark_workflow_finished(journal_dir: Path | None, *, succeeded: bool) -> None:

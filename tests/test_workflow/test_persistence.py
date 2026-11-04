@@ -3,7 +3,7 @@
 The journal is ``executions/eNN/workflow.json``, written by the workflow layer
 into the directory the workspace hands it and read back through the
 workspace ``FileSystem``. The seed gate (``_verify_seeds``, reached here
-through ``read_resume_seeds``) keeps a predecessor's output only when that
+through ``read_attempt_seeds``) keeps a predecessor's output only when that
 task and every upstream of it are verified.
 """
 
@@ -23,17 +23,19 @@ from molab.workflow import (
     Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
+    read_attempt_seeds,
     read_journal,
     read_outputs,
-    read_resume_seeds,
 )
 from molab.workflow._engine import persistence
 from molab.workflow._engine.persistence import (
+    JOURNAL_SCHEMA_VERSION,
     close_execution_document,
     mark_task_status,
     mark_workflow_finished,
     open_execution_document,
 )
+from molab.workflow._engine.values import ValueStore
 from molab.workspace import Workspace
 from tests.support.counting_fs import CountingFileSystem
 from tests.support.journal import poison_node_output
@@ -138,6 +140,17 @@ def _rewrite(run, mutate, execution_id: str = "e01") -> None:
     path.write_text(json.dumps(doc))
 
 
+def read_resume_seeds(run, based_on: str, compiled) -> dict:
+    """The seeds a RESUME based on *based_on* takes (the one seeding path)."""
+    return dict(read_attempt_seeds(run, based_on, compiled).outputs)
+
+
+def _json_output(run, value) -> dict:
+    """Record fields for *value*, stored in *run*'s value store."""
+    ref, encoding = ValueStore(run.values_dir()).put_encoded(value)
+    return {"output_ref": ref, "output_encoding": encoding}
+
+
 def _record(doc: dict, name: str) -> dict:
     return next(t for t in doc["task_configs"] if t["task_id"] == name)
 
@@ -167,7 +180,7 @@ def _collect_warnings(fn):
 
 
 class TestOpenExecutionDocument:
-    def test_v3_header(self, tmp_path: Path) -> None:
+    def test_v4_header(self, tmp_path: Path) -> None:
         run = _run(tmp_path)
         compiled = _ab()
         result = _execute(run, compiled)
@@ -175,9 +188,11 @@ class TestOpenExecutionDocument:
 
         doc = read_journal(run, result.execution_id)
         assert doc is not None
-        assert doc["schema_version"] == 3
+        assert doc["schema_version"] == JOURNAL_SCHEMA_VERSION == 4
         assert doc["execution_id"] == "e01"
         assert doc["based_on_execution_id"] is None
+        assert doc["selected_tasks"] is None
+        assert doc["seeded_from"] == {}
         assert doc["workflow_digest"] == compiled.workflow_digest
         assert "workflow_id" not in doc
         assert doc["workflow_name"] == "ab"
@@ -215,18 +230,20 @@ class TestMarkTaskStatus:
                 on_disk = json.loads((journal_dir / "workflow.json").read_text())
                 assert _record(on_disk, "a")["status"] == "pending"
 
+                fields = _json_output(run, 1)
                 mark_task_status(
                     journal_dir,
                     "a",
                     "completed",
-                    output=1,
+                    output=fields,
                     snapshot_key="k",
                     dependent_params_hash="p",
                 )
                 on_disk = json.loads((journal_dir / "workflow.json").read_text())
                 record = _record(on_disk, "a")
                 assert record["status"] == "completed"
-                assert record["outputs"] == 1
+                assert record["output_ref"] == fields["output_ref"]
+                assert "outputs" not in record
                 assert record["snapshot_key"] == "k"
                 assert record["dependent_params_hash"] == "p"
             finally:
@@ -249,7 +266,27 @@ class TestMarkTaskStatus:
                 close_execution_document(journal_dir)
 
     def test_none_directory_is_a_no_op(self) -> None:
-        mark_task_status(None, "a", "completed", output=1)
+        mark_task_status(None, "a", "completed", output={"output_ref": "sha256:" + "0" * 64})
+
+    def test_task_times_are_aware_utc_like_the_execution_record(self, tmp_path: Path) -> None:
+        """The task timeline the web app draws lines up with execution.json (UTC)."""
+        from datetime import UTC, datetime
+
+        run = _run(tmp_path)
+        with run.start() as ctx:
+            journal_dir = run.execution_dir(ctx.id)
+            open_execution_document(journal_dir, execution_id=ctx.id, compiled=_ab())
+            try:
+                mark_task_status(journal_dir, "a", "running")
+                mark_task_status(journal_dir, "a", "completed")
+            finally:
+                close_execution_document(journal_dir)
+        doc = json.loads((journal_dir / "workflow.json").read_text())
+        record = _record(doc, "a")
+        for stamp in (record["started_at"], record["finished_at"], doc["started_at"]):
+            parsed = datetime.fromisoformat(stamp)
+            assert parsed.utcoffset() is not None and parsed.utcoffset().total_seconds() == 0, stamp
+            assert abs((datetime.now(UTC) - parsed).total_seconds()) < 60
 
 
 class TestMarkWorkflowFinished:
@@ -258,7 +295,7 @@ class TestMarkWorkflowFinished:
         with run.start() as ctx:
             journal_dir = run.execution_dir(ctx.id)
             open_execution_document(journal_dir, execution_id=ctx.id, compiled=_ab())
-            mark_task_status(journal_dir, "a", "completed", output=1)
+            mark_task_status(journal_dir, "a", "completed")
             mark_workflow_finished(journal_dir, succeeded=True)
         doc = json.loads((journal_dir / "workflow.json").read_text())
         assert doc["finished_at"] is not None
@@ -271,7 +308,7 @@ class TestMarkWorkflowFinished:
         with run.start() as ctx:
             journal_dir = run.execution_dir(ctx.id)
             open_execution_document(journal_dir, execution_id=ctx.id, compiled=_ab())
-            mark_task_status(journal_dir, "a", "completed", output=1)
+            mark_task_status(journal_dir, "a", "completed")
             mark_workflow_finished(journal_dir, succeeded=False)
         doc = json.loads((journal_dir / "workflow.json").read_text())
         assert doc["finished_at"] is not None
@@ -315,16 +352,25 @@ class TestReadJournal:
 
     def test_exported_from_molab_workflow(self) -> None:
         exported = set(molab.workflow.__all__)
-        assert {"read_journal", "read_outputs", "read_resume_seeds"} <= exported
+        assert {"read_journal", "read_outputs", "read_attempt_seeds", "AttemptSeeds"} <= exported
+        assert "read_resume_seeds" not in exported
         assert "compute_workflow_digest" in exported
 
 
-def _hand_journal(run, tasks: list[dict]) -> str:
+def _hand_journal(run, tasks: list[dict], *, schema_version: int = 4) -> str:
+    """Write a journal by hand; a task's ``value`` goes into the value store."""
     with run.start() as ctx:
         eid = ctx.id
+    records = []
+    for task in tasks:
+        record = {key: value for key, value in task.items() if key != "value"}
+        if "value" in task:
+            record.update(_json_output(run, task["value"]))
+        records.append(record)
     path = _journal_file(run, eid)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"schema_version": 3, "task_configs": tasks, "links": []}))
+    document = {"schema_version": schema_version, "task_configs": records, "links": []}
+    path.write_text(json.dumps(document))
     return eid
 
 
@@ -335,8 +381,8 @@ class TestReadOutputs:
         eid = _hand_journal(
             run,
             [
-                {"task_id": "a", "status": "completed", "outputs": 1},
-                {"task_id": "b", "status": status, "outputs": 2},
+                {"task_id": "a", "status": "completed", "value": 1},
+                {"task_id": "b", "status": status, "value": 2},
             ],
         )
         assert read_outputs(run, eid) == {"a": 1}
@@ -351,27 +397,37 @@ class TestReadOutputs:
         path.write_text(content)
         assert read_outputs(run, "e01") == {}
 
-    def test_omits_lossy_with_warning(self, tmp_path: Path) -> None:
+    def test_omits_unrecorded_and_missing_values_with_warning(self, tmp_path: Path) -> None:
         run = _run(tmp_path)
         eid = _hand_journal(
             run,
             [
-                {"task_id": "a", "status": "completed", "outputs": 1},
+                {"task_id": "a", "status": "completed", "value": 1},
                 {
                     "task_id": "model",
                     "status": "completed",
-                    "outputs": "<obj>",
-                    "outputs_lossy": True,
+                    "output_unrecordable": "Lock value is neither JSON-safe nor picklable",
                 },
+                {"task_id": "gone", "status": "completed", "output_ref": "sha256:" + "f" * 64},
             ],
         )
         outputs, messages = _collect_warnings(lambda: read_outputs(run, eid))
         assert outputs == {"a": 1}
-        assert any("'model'" in message and "lossy" in message for message in messages), messages
+        assert any("'model'" in m and "could not be recorded" in m for m in messages), messages
+        assert any("'gone'" in m and "cannot be loaded" in m for m in messages), messages
         # The reader serves read-back (Run.get_result / RunSet) as well as
         # resume seeding: its warning must not speak of resume (arch-own-03d).
         assert not any("resume" in m or "recomputed" in m for m in messages), messages
-        assert any("JSON-safe" in m for m in messages), messages
+
+    def test_legacy_inline_journal_is_ignored_with_warning(self, tmp_path: Path) -> None:
+        run = _run(tmp_path)
+        eid = _hand_journal(
+            run, [{"task_id": "a", "status": "completed", "outputs": 1}], schema_version=3
+        )
+        outputs, messages = _collect_warnings(lambda: read_outputs(run, eid))
+        assert outputs == {}
+        assert any("legacy" in m for m in messages), messages
+        assert read_journal(run, eid)["task_configs"][0]["outputs"] == 1
 
     def test_returns_poisoned_value(self, tmp_path: Path) -> None:
         run = _run(tmp_path)
@@ -431,7 +487,9 @@ class TestVerifySeeds:
         v1, v2 = _loop(check_v1), _loop(check_v2)
         assert v1.snapshots["acc"].key == v2.snapshots["acc"].key
         _execute(run, v1)
-        assert read_resume_seeds(run, "e01", v1) == {"acc": 2, "check": 2}
+        # ``check`` routes (continue / exit): a branch task re-decides its
+        # route on resume, so it is never a seed.
+        assert read_resume_seeds(run, "e01", v1) == {"acc": 2}
         assert read_resume_seeds(run, "e01", v2) == {}
 
     def test_fast_path_trusts_matching_digest(self, tmp_path: Path) -> None:
@@ -462,21 +520,35 @@ class TestWorkflowWriterContract:
         journal_dir = run.execution_dir(eid)
         path = journal_dir / "workflow.json"
         path.write_text(
-            json.dumps({"task_configs": [{"task_id": name, "status": "pending"}], "links": []})
+            json.dumps(
+                {
+                    "schema_version": JOURNAL_SCHEMA_VERSION,
+                    "task_configs": [{"task_id": name, "status": "pending"}],
+                    "links": [],
+                }
+            )
         )
         return eid, journal_dir
 
     def test_both_readers_return_the_written_output(self, tmp_path: Path) -> None:
         run = _run(tmp_path)
         eid, journal_dir = self._seed_pending_task(run, "train")
-        mark_task_status(journal_dir, "train", "completed", output={"loss": 0.5}, snapshot_key="k")
+        fields = _json_output(run, {"loss": 0.5})
+        mark_task_status(journal_dir, "train", "completed", output=fields, snapshot_key="k")
         assert read_outputs(run, eid) == {"train": {"loss": 0.5}}
         assert run.get_result("train", execution_id=eid) == {"loss": 0.5}
+        assert _record(read_journal(run, eid), "train")["outputs"] == {"loss": 0.5}
 
-    def test_lossy_output_is_offered_by_neither_reader(self, tmp_path: Path) -> None:
+    def test_unrecorded_output_is_offered_by_neither_reader(self, tmp_path: Path) -> None:
         run = _run(tmp_path)
         eid, journal_dir = self._seed_pending_task(run, "train")
-        mark_task_status(journal_dir, "train", "completed", output=object(), snapshot_key="k")
+        mark_task_status(
+            journal_dir,
+            "train",
+            "completed",
+            output={"output_unrecordable": "Lock value is neither JSON-safe nor picklable"},
+            snapshot_key="k",
+        )
         assert read_outputs(run, eid) == {}
         assert run.get_result("train", execution_id=eid) is None
 

@@ -1,4 +1,4 @@
-import { Workflow } from "lucide-react";
+import { Hash, Shapes, Workflow } from "lucide-react";
 import { useState } from "react";
 import {
   type CountBar,
@@ -15,6 +15,7 @@ import {
   OverviewSurface,
   type StatusCountRollup,
   SuccessDial,
+  Tally,
 } from "@/app/components/entity";
 import { groupForStatus } from "@/app/runs/statusGroups";
 import type { RendererProps } from "@/app/types";
@@ -112,7 +113,7 @@ const WorkflowOverviewBody = ({
       {summary ? <p className="max-w-[65ch] text-body text-muted-foreground">{summary}</p> : null}
       <InstrumentStrip label="Workflow gauges" lead={statuses.total > 0}>
         {statuses.total > 0 ? (
-          <Instrument title="Task state" inline>
+          <Instrument title="State" inline>
             <span className="flex min-w-0 items-center gap-4">
               <SuccessDial counts={statuses} />
               <DialLegend counts={statuses} unit={["task", "tasks"]} />
@@ -122,18 +123,32 @@ const WorkflowOverviewBody = ({
         <Instrument
           title="Tasks"
           figure={tasks.length}
-          caption={`${types.length} ${types.length === 1 ? "type" : "types"}`}
+          caption={
+            <Tally
+              icon={Shapes}
+              value={types.length}
+              label={`${types.length} task ${types.length === 1 ? "type" : "types"}`}
+            />
+          }
           onSelect={onOpenTasks}
           selectHint="Tasks"
           selectLabel={`${tasks.length} tasks. Open the list`}
         />
         <Instrument
-          title="Most common type"
+          title="Top type"
           figure={types[0]?.type ?? "—"}
-          caption={types[0] ? `${types[0].count} of ${tasks.length} tasks` : undefined}
+          caption={
+            types[0] ? (
+              <Tally
+                icon={Hash}
+                value={`${types[0].count}/${tasks.length}`}
+                label={`${types[0].count} of ${tasks.length} tasks`}
+              />
+            ) : undefined
+          }
         />
       </InstrumentStrip>
-      <GaugeSection title="Tasks by type" readout="click a type to list the tasks">
+      <GaugeSection title="Tasks by type">
         <CountBars bars={bars} label="Number of tasks of each type" onPick={onOpenTasks} />
       </GaugeSection>
     </OverviewCanvas>

@@ -33,6 +33,7 @@ from molab.workspace.schema_version import MOLAB_SCHEMA_VERSION
 from tests.test_workspace.asset_writer_cases import (
     ImportAssetCases,
     RegisterInPlaceCases,
+    _ws,
     record_dir,
 )
 
@@ -666,8 +667,8 @@ class TestAssetRepositoryVersions:
         assert version.version == 1
         assert isinstance(version.origin, ImportOrigin)
         assert version.origin.action == "copy"
-        # 05e restates 05c's assets/<asset_id>/payload: the directory is the slug.
-        assert version.origin.location == "assets/greeting/payload"
+        # The directory is the slug; a copied file keeps its extension.
+        assert version.origin.location == "assets/greeting/payload.txt"
         assert version.content is not None
         assert version.content.digest == HELLO_DIGEST
         assert version.content.size == 6
@@ -712,7 +713,7 @@ class TestAssetRepositoryPayloadPath:
         src.write_bytes(HELLO)
         asset = project.assets.import_asset("greeting", src, action="copy")
         resolved = Path(project.assets.payload_path(asset.id))
-        assert resolved == Path(project.project_dir) / "assets" / "greeting" / "payload"
+        assert resolved == Path(project.project_dir) / "assets" / "greeting" / "payload.txt"
         assert resolved.read_bytes() == HELLO
 
     def test_reference_resolves_to_the_source(self, project: Project, tmp_path: Path) -> None:
@@ -864,3 +865,16 @@ class TestAssetRepositoryUnmigrated:
         raw["schema_version"] = 1
         path.write_text(json.dumps(raw), encoding="utf-8")
         assert ws.assets.get(asset.id).id == asset.id
+
+
+class TestImportDescribesItsBytes:
+    def test_media_type_filename_and_extension_are_kept(self, tmp_path: Path) -> None:
+        ws = _ws(tmp_path)
+        project = ws.add_project("p")
+        src = tmp_path / "structures.pdf"
+        src.write_bytes(b"%PDF-1.4")
+        asset = project.assets.import_asset("Structures", src)
+        version = project.assets.versions(asset.id)[0]
+        assert version.origin.location == "assets/structures/payload.pdf"
+        assert version.media_type == "application/pdf"
+        assert version.metadata["filename"] == "structures.pdf"

@@ -141,6 +141,82 @@ def get_serve_scope(workspace=Depends(get_workspace)) -> ServeScopeResponse:  # 
     return _scope_payload(workspace)
 
 
+class ValidationRow(BaseModel):
+    """One finding; ``path`` is relative to the served directory."""
+
+    path: str
+    rule: str
+    detail: str
+    severity: str
+    hint: str
+
+
+class ServedValidationResponse(BaseModel):
+    """``molab validate`` for the served directory and what is below it."""
+
+    root: str
+    ok: bool
+    errorCount: int
+    warningCount: int
+    violations: list[ValidationRow]
+
+
+@router.get("/validate", response_model=ServedValidationResponse)
+def validate_served(
+    errors_only: Annotated[
+        bool, Query(alias="errorsOnly", description="Skip the rules that can only warn.")
+    ] = False,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ServedValidationResponse:
+    """The layout and knowledge report, bounded by the serve root. Writes nothing.
+
+    A served project, experiment or run is checked inside its enclosing
+    workspace and only findings at or below it are returned. A node opened
+    without its workspace cannot be checked (422).
+    """
+    from molab.services.workspace_check import check_workspace
+    from molab.workspace.workspace import Workspace
+
+    folder = as_folder(workspace)
+    host = folder if isinstance(folder, Workspace) else folder.asset_host()
+    if not isinstance(host, Workspace):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "the served directory has no enclosing workspace to validate against",
+        )
+    prefix = ""
+    scope: list[str] | None = None
+    if host is not folder:
+        prefix = PurePosixPath(str(folder.resolve())).relative_to(str(host.resolve())).as_posix()
+        # The validator scopes by project or experiment directory; a run is
+        # checked with its experiment and filtered back down below.
+        parts = prefix.split("/")
+        scope = ["/".join(parts[:4])] if len(parts) >= 4 else [prefix]
+    report = check_workspace(host, errors_only=errors_only, scope=scope)
+    rows = []
+    for item in report.violations:
+        if prefix and not (item.path == prefix or item.path.startswith(prefix + "/")):
+            continue
+        rel = (
+            item.path[len(prefix) + 1 :]
+            if prefix and item.path != prefix
+            else ("." if prefix else item.path)
+        )
+        rows.append(
+            ValidationRow(
+                path=rel, rule=item.rule, detail=item.detail, severity=item.severity, hint=item.hint
+            )
+        )
+    errors = sum(1 for row in rows if row.severity == "error")
+    return ServedValidationResponse(
+        root=str(folder.resolve()),
+        ok=errors == 0,
+        errorCount=errors,
+        warningCount=len(rows) - errors,
+        violations=rows,
+    )
+
+
 @router.get("/info", response_model=WorkspaceInfoResponse)
 def get_workspace_info(workspace=Depends(get_workspace)) -> WorkspaceInfoResponse:  # noqa: ANN001
     """Get workspace information."""

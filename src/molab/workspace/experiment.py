@@ -28,6 +28,7 @@ the same slug already exists, it is loaded and returned).
 from __future__ import annotations
 
 import json
+import posixpath
 from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
@@ -134,6 +135,49 @@ def _experiment_definition_hash(
             "workflow_document": folded,
         }
     )
+
+
+def _trial_space(params: object):  # noqa: ANN202
+    """The one-cell grid a trial runs before the rest of the sweep."""
+    from molab.param import GridSpace, ParamSpace
+
+    if params is None:
+        return GridSpace({})
+    if isinstance(params, ParamSpace):
+        try:
+            cell = next(iter(params))
+        except StopIteration as exc:
+            raise ValueError("trial needs a parameter space with at least one cell") from exc
+        return GridSpace({key: [value] for key, value in dict(cell).items()})
+    if not isinstance(params, dict):
+        raise TypeError(
+            f"trial params must be a grid dict or a ParamSpace, got {type(params).__name__}"
+        )
+    grid: dict[str, list[object]] = {}
+    for axis, values in params.items():
+        if not isinstance(values, list) or not values:
+            raise ValueError(f"trial params must map every axis to a non-empty list; got {axis!r}")
+        grid[axis] = [values[0]]
+    return GridSpace(grid)
+
+
+def _parameter_space(
+    params: ParamSpace | Mapping[str, JSONValue] | None,
+) -> ParamSpace:
+    """A grid of cells. A mapping must give every axis a list; a scalar fails."""
+    from molab.param import GridSpace, ParamSpace
+
+    if params is None or isinstance(params, ParamSpace):
+        return params if params is not None else GridSpace({})
+    grid = dict(params)
+    scalars = [axis for axis, values in grid.items() if not isinstance(values, list)]
+    if scalars:
+        raise ValueError(
+            f"sweep params must map every axis to a list of values; "
+            f"got a scalar for {', '.join(repr(a) for a in scalars)} — "
+            f"wrap it in a list (e.g. {scalars[0]!r}: [{grid[scalars[0]]!r}])."
+        )
+    return GridSpace({axis: values for axis, values in grid.items() if isinstance(values, list)})
 
 
 @register_entity_class
@@ -363,10 +407,35 @@ class Experiment(Folder):
     def entrypoint(self) -> str | None:
         """``"<file>:<qualname>"`` of a code workflow, or ``None`` when unbound.
 
-        Written when a code workflow is bound. A document workflow leaves this
+        The record stores a file inside the workspace relative to this
+        experiment, so the tree can move; this property resolves it against
+        the experiment's current directory. A document workflow leaves this
         empty and keeps its IR in :attr:`workflow_document`.
         """
-        return self._entity_metadata.workflow_entrypoint
+        locator = self._entity_metadata.workflow_entrypoint
+        if not locator or ":" not in locator:
+            return locator
+        source, qualname = locator.rsplit(":", 1)
+        if posixpath.isabs(source):
+            return locator
+        return f"{posixpath.normpath(posixpath.join(str(self.resolve()), source))}:{qualname}"
+
+    def _portable_locator(self, locator: str | None) -> str | None:
+        """*locator* with a file inside the workspace made relative to this experiment.
+
+        A file outside the workspace keeps its absolute path: it belongs to no
+        tree that could move with it.
+        """
+        if not locator or ":" not in locator:
+            return locator
+        source, qualname = locator.rsplit(":", 1)
+        if not posixpath.isabs(source):
+            return locator
+        root = posixpath.normpath(str(self.asset_host().resolve()))
+        target = posixpath.normpath(source)
+        if not target.startswith(root.rstrip("/") + "/"):
+            return locator
+        return f"{posixpath.relpath(target, str(self.resolve()))}:{qualname}"
 
     @property
     def target(self) -> str | None:
@@ -487,7 +556,9 @@ class Experiment(Folder):
         ) or (prev.workflow_kind == "document" and kind != "document")
         return {
             "workflow_kind": kind,
-            "workflow_entrypoint": None if kind == "document" else entrypoint,
+            "workflow_entrypoint": None
+            if kind == "document"
+            else self._portable_locator(entrypoint),
         }, revise
 
     def _stage_definition(
@@ -882,27 +953,9 @@ class Experiment(Folder):
         parameter-free run. *workflow* may be an uncompiled
         ``Workflow``; the workflow-layer executor compiles it.
         """
-        from molab.param import GridSpace, ParamSpace
-
         from .runset import RunSet
 
-        if params is None or isinstance(params, ParamSpace):
-            space: ParamSpace = params if params is not None else GridSpace({})
-        else:
-            grid = dict(params)
-            scalars = [axis for axis, values in grid.items() if not isinstance(values, list)]
-            if scalars:
-                raise ValueError(
-                    f"sweep params must map every axis to a list of values; "
-                    f"got a scalar for {', '.join(repr(a) for a in scalars)} — "
-                    f"wrap it in a list (e.g. {scalars[0]!r}: [{grid[scalars[0]]!r}])."
-                )
-            # Rebuild through the isinstance filter the guard above already
-            # proved exhaustive, so the axis type is carried, not asserted.
-            space = GridSpace(
-                {axis: values for axis, values in grid.items() if isinstance(values, list)}
-            )
-        runs = self._seed_missing_runs(space)
+        runs = self.seed(params)
         if _workflow_executor is None:
             raise RuntimeError(
                 "Experiment.sweep needs the workflow layer; `import molab` "
@@ -910,6 +963,70 @@ class Experiment(Folder):
             )
         _workflow_executor(self, workflow)
         return RunSet(runs, workflow=workflow)
+
+    def seed(
+        self,
+        params: ParamSpace | Mapping[str, JSONValue] | None = None,
+    ) -> list[Run]:
+        """Seed one run per grid cell. A cell that already exists is skipped.
+
+        Unlike :meth:`sweep`, this does not bind a workflow. The UI uses it
+        to fill a parameter grid on an experiment that already has one.
+        """
+        return self._seed_missing_runs(_parameter_space(params))
+
+    def trial(
+        self,
+        workflow: object,
+        params: ParamSpace | Mapping[str, JSONValue] | None = None,
+    ) -> Run:
+        """Seed the first cell of *params* and bind *workflow*.
+
+        The cell is the first value of every axis. :meth:`expand` seeds the
+        rest. The trial cell is the same run a later sweep would create for
+        those values, so expanding does not duplicate it.
+
+        Args:
+            workflow: Compiled workflow, or one the executor compiles.
+            params: A ``{axis: [values]}`` grid, or any parameter space.
+                ``None`` seeds the one parameter-free run.
+
+        Returns:
+            The trial run, whether this call created it or it already existed.
+
+        Raises:
+            ValueError: An axis is not a non-empty list, or the space is empty.
+            RuntimeError: The workflow layer is not loaded.
+        """
+        space = _trial_space(params)
+        cell = next(iter(space))
+        index = self._definition_index()
+        with self._batched_index():
+            run, _created = self._ensure_run(
+                dict(cell),
+                config_hash=None,
+                target=None,
+                inputs=(),
+                index=index,
+            )
+        if _workflow_executor is None:
+            raise RuntimeError(
+                "Experiment.trial needs the workflow layer; `import molab` "
+                "(not just `molab.workspace`) registers the executor."
+            )
+        _workflow_executor(self, workflow)
+        return run
+
+    def expand(
+        self,
+        workflow: object,
+        params: ParamSpace | Mapping[str, JSONValue] | None = None,
+    ) -> RunSet:
+        """Seed every cell of *params*. The trial cell is not duplicated.
+
+        This is :meth:`sweep`. The name is the step after :meth:`trial`.
+        """
+        return self.sweep(workflow, params)
 
     def runset(self) -> RunSet:
         """All existing runs as a :class:`~molab.workspace.runset.RunSet`.

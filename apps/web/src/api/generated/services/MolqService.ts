@@ -33,7 +33,7 @@ export class MolqService {
     }
     /**
      * List Targets
-     * List configured molq targets (one per profile in ``~/.molq/config.yaml``).
+     * List configured molq targets (one per cluster in the molq registry).
      * @param molabSession
      * @returns MolqTargetListResponse Successful Response
      * @throws ApiError

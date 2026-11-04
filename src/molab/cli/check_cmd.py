@@ -1,10 +1,10 @@
-"""``molab check {path,tree}`` — the questions an agent hook asks (D91).
+"""``molab check {path,command,tree}`` — the questions an agent hook asks (D91).
 
 The molcrafts-harness hooks hold no layout rule: they forward each file write
-to ``molab check path`` and each session start / stop to ``molab check tree``,
-and act on the JSON verdict. Both commands exit 0 whenever molab itself
-worked; the verdict's ``allowed`` decides. The rules live in
-:mod:`molab.services.workspace_check`.
+to ``molab check path``, each shell command to ``molab check command``, and
+each session start / stop to ``molab check tree``, and act on the JSON verdict.
+These commands exit 0 whenever molab itself worked; the verdict's ``allowed``
+decides. The rules live in :mod:`molab.services.workspace_check`.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import typer
 from molab.cli._common import rprint
 
 check_app = typer.Typer(
-    help="Ask whether a write, or the tree, keeps the workspace legal (agent hooks).",
+    help="Ask whether a write, a shell command, or the tree keeps the workspace legal (agent hooks).",
     no_args_is_help=True,
 )
 
@@ -67,6 +67,22 @@ def check_path(
             rprint(f"[red]Error:[/red] cannot read --content-file: {exc}")
             raise typer.Exit(1) from None
     _emit(_check(path, op, content), json_out)
+
+
+@check_app.command("command")
+def check_command_cmd(
+    command: Annotated[
+        str, typer.Option("--command", help="The shell command. It is not executed.")
+    ],
+    cwd: Annotated[
+        str, typer.Option("--cwd", help="The directory the command would run in.")
+    ] = ".",
+    json_out: Annotated[bool, typer.Option("--json", help="Print the verdict as JSON.")] = False,
+) -> None:
+    """Would the files this command writes keep the workspace legal?"""
+    from molab.services.workspace_check import check_command as _check
+
+    _emit(_check(command, cwd), json_out)
 
 
 @check_app.command("tree")

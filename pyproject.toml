@@ -39,14 +39,19 @@ dependencies = [
 
 [project.optional-dependencies]
 tensorboard = ["tensorboard>=2.15"]
-all = ["molcrafts-molab[tensorboard]"]
+# molab.plugins.gh (the optional GitHub capability) imports httpx.
+gh = ["httpx>=0.24"]
+# molab.plugins.molvis renders snapshots; headless renders without a display.
+molvis = ["molcrafts-molvis[headless]>=0.4.0"]
+all = ["molcrafts-molab[tensorboard,gh,molvis]"]
 dev = [
     "molcrafts-molab[all]",
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pytest-cov>=4.0",
     "pytest-mock>=3.10",
-    "httpx>=0.24",
+    # starlette's TestClient drives requests through httpx2.
+    "httpx2",
     "psutil>=5.9.0",
     # tests/test_workflow/test_codec.py validates the link schema; it used to
     # arrive only transitively, through the removed agent extra.
@@ -71,6 +76,7 @@ docs = [
 ]
 
 [tool.uv.sources]
+molcrafts-molvis = { path = "../molvis/python", editable = true }
 molcrafts-mollog = { path = "../mollog" }
 molcrafts-molcfg = { path = "../molcfg" }
 molcrafts-molq = { path = "../molq", editable = true }
@@ -144,6 +150,9 @@ ignore = [
 "src/molab/__init__.py" = ["F822"]
 # CLI entry-points use typer-style decorators with implicit return types.
 "src/molab/cli/**" = ["ANN201", "ANN202"]
+# Shell grammar ported from the harness. The public function is annotated;
+# the helpers keep the shape the path tests pin.
+"src/molab/services/command_paths.py" = ["ANN001", "ANN201", "ANN202", "ANN204", "PTH", "RUF021"]
 
 [tool.ruff.lint.flake8-annotations]
 # ANN401 (`Any` is not allowed) is in the default `ANN` selection.

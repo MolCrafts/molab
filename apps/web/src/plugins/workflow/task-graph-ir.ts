@@ -24,6 +24,12 @@ export interface TaskNodeJson {
   position?: TaskNodePosition;
   /** Static node configuration / inputs carried from the IR. */
   config?: Record<string, unknown>;
+  /**
+   * Values the task returned (`outputs` on the execution journal). Scalars
+   * such as a formula, and paths of files it wrote. Absent on a definition
+   * graph that has not run.
+   */
+  outputs?: Record<string, unknown>;
   /** Execution status (`pending` / `running` / `completed` / `failed` / `skipped`). */
   status?: string;
   /** When the engine journalled the task as running (`started_at`). Absent until it starts. */

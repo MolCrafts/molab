@@ -2,7 +2,7 @@
 
 ``runs adopt`` records a job that ran outside molab; ``index show|write``
 reads a record and writes its body; ``scratch clean`` empties old scratch;
-``agents sync`` writes the guide; ``check path|tree`` answer the hooks with
+``agents sync`` writes the guide; ``check path|command|tree`` answer the hooks with
 the JSON the harness reads.
 """
 
@@ -259,6 +259,37 @@ class TestCheckJson:
         outside = json.loads(_invoke("check", "path", "/nonexistent/x", "--json").stdout)
         assert outside["in_workspace"] is False and outside["allowed"] is True
         assert outside["root"] is None
+
+    def test_check_command_refusal_and_an_unparsed_allow(self, lab: Path, tmp_path: Path) -> None:
+        target = lab / "projects" / "alpha" / "experiments" / "sweep" / "plot.py"
+        refused = json.loads(
+            _invoke(
+                "check",
+                "command",
+                "--command",
+                f"mv /tmp/a.py {target}",
+                "--cwd",
+                str(lab),
+                "--json",
+            ).stdout
+        )
+        assert set(refused) == self.KEYS
+        assert refused["allowed"] is False
+        assert refused["rule"] == "layout.stray"
+        assert refused["root"] == os.path.realpath(lab)
+        allowed = json.loads(
+            _invoke(
+                "check",
+                "command",
+                "--command",
+                "mv 'unterminated",
+                "--cwd",
+                str(tmp_path),
+                "--json",
+            ).stdout
+        )
+        assert allowed["allowed"] is True
+        assert allowed["in_workspace"] is False
 
     def test_check_tree_snapshot_then_since(self, lab: Path) -> None:
         taken = json.loads(_invoke("check", "tree", str(lab), "--snapshot", "s1", "--json").stdout)

@@ -35,7 +35,9 @@ LOCAL_TARGET_NAME = "local"
 
 def _target_list(ws: object) -> list[ComputeTarget]:
     """Targets on *ws*, or on a real parent workspace when this node has none."""
-    current: object | None = ws
+    from .scope import as_folder
+
+    current: object | None = as_folder(ws)
     seen = 0
     while current is not None and seen < 8:
         metadata = getattr(current, "metadata", None)

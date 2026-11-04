@@ -44,6 +44,12 @@ class TestSweep:
         cells = {(r.parameters["lr"], r.parameters["batch"]) for r in rs}
         assert cells == {(0.1, 16), (0.1, 32), (0.2, 16), (0.2, 32)}
 
+    def test_seed_fills_cells_without_a_workflow(self, experiment) -> None:
+        created = experiment.seed({"lr": [0.1, 0.2], "batch": [16]})
+        assert len(created) == 2
+        assert experiment.seed({"lr": [0.1, 0.2], "batch": [16]}) == []
+        assert len(experiment.list_runs()) == 2
+
     def test_sweep_is_idempotent(self, experiment) -> None:
         compiled = WorkflowCompiler().compile(_build_wf())
         first = experiment.sweep(compiled, {"lr": [0.1, 0.2]})
@@ -62,6 +68,14 @@ class TestSweep:
         assert len(rs) == 1
         bound = default_binding_registry.for_experiment(experiment)
         assert bound is not None, "sweep must bind the (auto-)compiled workflow"
+
+    def test_trial_then_expand_adds_the_remaining_cells(self, experiment) -> None:
+        compiled = WorkflowCompiler().compile(_build_wf())
+        trial = experiment.trial(compiled, {"lr": [0.1, 0.2], "batch": [16, 32]})
+        assert trial.parameters == {"lr": 0.1, "batch": 16}
+        added = experiment.expand(compiled, {"lr": [0.1, 0.2], "batch": [16, 32]})
+        assert len(added) == 3
+        assert len(experiment.list_runs()) == 4
 
     def test_sweep_binds_workflow_for_cli_discovery(self, experiment) -> None:
         compiled = WorkflowCompiler().compile(_build_wf())

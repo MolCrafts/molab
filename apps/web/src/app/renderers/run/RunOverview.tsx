@@ -148,7 +148,7 @@ const Verdict = ({
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-1">{actions}</span>
       </div>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-label text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-label text-muted-foreground">
         {verdict.tasks.total > 0 ? (
           <Tally
             icon={ListChecks}
@@ -312,7 +312,7 @@ export const RunOverview = ({
             standing.place ? (
               <Tally
                 icon={standing.place === "=" ? Equal : Timer}
-                value={standing.place}
+                value={standing.place === "=" ? "" : standing.place}
                 label={standing.rank ?? ""}
               />
             ) : undefined

@@ -73,7 +73,7 @@ assert doc.read().startswith("# Analysis Notes")
 assert Note(experiment, "Analysis Notes").path == doc.path
 ```
 
-## The six classes
+## The classes
 
 Every class lands one markdown file; the `class:` frontmatter names which one:
 
@@ -83,11 +83,22 @@ Every class lands one markdown file; the `class:` frontmatter names which one:
 | `Literature` | `class: Literature` | A reference; bib fields in frontmatter, PDFs pointed at, never copied |
 | `Report` | `class: Report` | A written-up analysis, including a failed run's |
 | `Finding` | `class: Finding` | A harvested scientific outcome |
-| `Plan` | `class: Plan` | An experiment's or project's plan book |
+| `Plan` | `class: Plan` | Campaign overview: question, scope, constraints |
+| `Roadmap` | `class: Roadmap` | Ordered stages, and which experiment each stage is |
+| `Todo` | `class: Todo` | Work items and their status |
+| `Milestone` | `class: Milestone` | One checkpoint: the stage it closes and the criterion |
 | `Observation` | `class: Observation` | A recorded observation or standing choice |
+| `Delegation` | `class: Delegation` | One bounded, resumable piece of supervised work: scope, goal, authorized actions, budget and spend, acceptance and stop conditions, waits, worker attempts |
 
-`Report`, `Finding`, `Plan` and `Observation` require at least one `SourceRef`
-at construction — they are sourced documents; `Note` and `Literature` do not.
+`Report`, `Finding`, `Plan`, `Roadmap`, `Todo`, `Milestone`, and `Observation`
+require at least one `SourceRef` at construction — they are sourced documents;
+`Note` and `Literature` do not.
+
+Plan, Roadmap, Todo, and Milestone are one campaign and four jobs. A Plan does
+not list stages. A Roadmap does not list work items. A Todo does not define the
+stage order. A Milestone does not list the work. Roadmap, Todo, and Milestone
+cite the Plan. `campaign_of(plan)` reads that set; `check_campaign` checks that
+every todo and milestone names a stage the roadmap has.
 
 ## Cross-reference is what ties knowledge together
 
@@ -240,3 +251,27 @@ A knowledge document is `<host>/knowledges/<slug>.md`. Old directory layouts and
 - For the workspace the knowledge lands in, see [Workspace Model](../concept/workspace.md).
 - For the concrete Python API around records and assets, see [Workspace API](workspace-api.md).
 - For reusable data and provenance, see [Assets and Reproducibility](../concept/assets-and-reproducibility.md).
+
+## Delegations and structured records
+
+A `Delegation` is the record a supervising agent (for example Tack) keeps for one
+piece of work. Its frontmatter is validated by
+`molab.knowledge.delegation.DelegationRecord`: `kind`, `goal`, `scope` (a
+`molab:` ref), `actions` (a closed set: `read`, `create_experiment`,
+`create_run`, `start_execution`, `cancel_execution`, `write_knowledge`,
+`delegate_worker`), `budget` / `spent`, `acceptance`, `stop_conditions`,
+`state` (`open` / `waiting` / `paused` / `done` / `stopped`), `waits`,
+`attempts`, `supervisor`, and `current_plan`. Its source is the scope it is
+bound to.
+
+A document whose class owns a record (Delegation, Roadmap, Todo, Milestone)
+can have that record replaced whole over HTTP:
+
+- `GET /api/knowledge/doc/record?path=…` returns `{record, digest}`.
+- `PATCH /api/knowledge/doc/record?path=…` with `{record, ifMatch, body?}`
+  replaces it; a stale `ifMatch` answers 409, an invalid record 422. Each
+  replacement is a `knowledge.record_replaced` history commit.
+
+`POST …/runs/{run}/executions` accepts `requestKey` (idempotency: the same key
+returns the attempt already created) and `requestedBy` (the software agent
+recorded as the attempt's creator).
