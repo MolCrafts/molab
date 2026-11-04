@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
+    from .concept import Concept
     from .concepts import Milestone, Plan, Roadmap, Todo
 
 TodoStatus = Literal["open", "done", "blocked"]
@@ -186,32 +187,28 @@ class Campaign(BaseModel):
 
 
 def campaign_of(plan: Plan) -> Campaign:
-    """The planning documents in the Plan's directory that cite it.
+    """The planning documents that cite *plan*.
 
-    Other knowledge in that directory is ignored. A document that does not
-    link to the Plan is not part of the campaign.
+    The search is the enclosing workspace when the plan lives in one, and
+    the plan's own directory otherwise. A document that does not link to the
+    Plan is not part of the campaign. Other knowledge is ignored.
     """
-    from .concepts import Milestone, Roadmap, Todo, _open_document
+    from .concept import Knowledge
+    from .concepts import Milestone, Roadmap, Todo
+    from .location import enclosing_workspace_root
 
     disk = plan.fs
-    container = disk.dirname(str(plan.path))
     plan_path = Path(str(plan.path)).resolve()
+    root = enclosing_workspace_root(plan.path, fs=disk)
+    if root is not None:
+        documents = Knowledge(root, fs=disk).walk()
+    else:
+        documents = _documents_beside(plan)
     roadmaps: list[Roadmap] = []
     todos: list[Todo] = []
     milestones: list[Milestone] = []
-    try:
-        entries = disk.ls(container, A=True, l=True)
-    except OSError:
-        entries = []
-    for entry in sorted(entries, key=lambda item: item.name):
-        if entry.is_dir:
-            continue
-        path = disk.join(container, entry.name)
-        if Path(str(path)).resolve() == plan_path:
-            continue
-        try:
-            doc = _open_document(path, fs=disk)
-        except (OSError, ValueError):
+    for doc in documents:
+        if Path(str(doc.path)).resolve() == plan_path:
             continue
         if not _cites(doc, plan_path):
             continue
@@ -251,6 +248,27 @@ def check_campaign(campaign: Campaign) -> None:
             raise ValueError(
                 f"milestone {milestone.name!r} closes stage {stage!r}, which is not on the roadmap"  # ty: ignore[unresolved-attribute]
             )
+
+
+def _documents_beside(plan: Plan) -> list[Concept]:
+    """Documents in the plan's directory, when it is not inside a workspace."""
+    from .concepts import _open_document
+
+    disk = plan.fs
+    container = disk.dirname(str(plan.path))
+    found: list[Concept] = []
+    try:
+        entries = disk.ls(container, A=True, l=True)
+    except OSError:
+        return found
+    for entry in sorted(entries, key=lambda item: item.name):
+        if entry.is_dir:
+            continue
+        try:
+            found.append(_open_document(disk.join(container, entry.name), fs=disk))
+        except (OSError, ValueError):
+            continue
+    return found
 
 
 def _cites(doc: object, plan_path: Path) -> bool:

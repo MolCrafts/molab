@@ -94,7 +94,11 @@ class TestSummarizeEntity:
     def test_a_concept_projects_its_directory_name(self, note: Note) -> None:
         summary = summarize_entity(note)
 
-        assert (summary.id, summary.kind, summary.title) == ("my-note", "note.note", "My Note")
+        assert (summary.id, summary.kind, summary.title) == (
+            str(note.path),
+            "note.note",
+            "My Note",
+        )
 
     def test_a_reference_kind_title_comes_from_the_head(self, tmp_path: Path) -> None:
         document = Literature(tmp_path / "abstract-1")
@@ -103,7 +107,7 @@ class TestSummarizeEntity:
         summary = summarize_entity(document)
 
         assert (summary.id, summary.kind, summary.title) == (
-            "abstract-1",
+            str(document.path),
             "reference.reference",
             "Head Title",
         )
@@ -115,7 +119,7 @@ class TestSummarizeEntity:
         summary = summarize_entity(lit)
 
         assert (summary.id, summary.kind, summary.title) == (
-            "smith-2024",
+            str(lit.path),
             "reference.reference",
             "Smith 2024",
         )

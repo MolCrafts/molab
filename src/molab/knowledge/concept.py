@@ -183,7 +183,7 @@ class Concept:
 
     @property
     def path(self) -> Path:
-        """This Concept's directory — its identity."""
+        """This document's path. For a file document that path is the ``.md`` file."""
         return Path(self._path)
 
     @property
@@ -282,7 +282,9 @@ class Concept:
         for path in self._document_paths():
             try:
                 yield _open_document(path, fs=self._fs)
-            except KnowledgeNotFoundError:
+            except (KnowledgeNotFoundError, ValueError):
+                # Unknown class, or a path that is not a document. One bad
+                # file does not hide the rest of the tree.
                 continue
 
     def search(
@@ -311,7 +313,7 @@ class Concept:
             The ranked hits. Each entry path is relative to this handle and
             keeps the ``.md`` suffix. ``type`` is the Knowledge class name.
         """
-        from .concepts import _PRODUCTS, Note
+        from .concepts import _PRODUCTS
         from .frontmatter import split_frontmatter
         from .search import ConceptIndexEntry, extract_title, search_index
 
@@ -322,8 +324,11 @@ class Concept:
             if raw is None:
                 continue
             meta, body = split_frontmatter(raw)
-            class_name = str(meta.get("class") or "Note")
-            klass = _PRODUCTS.get(class_name, Note)
+            raw_class = meta.get("class")
+            class_name = raw_class if isinstance(raw_class, str) and raw_class else "Note"
+            if class_name not in _PRODUCTS:
+                continue
+            klass = _PRODUCTS[class_name]
             if isinstance(of, type) and not issubclass(klass, of):
                 continue
             tags_raw = meta.get("tags")
@@ -654,6 +659,7 @@ class Concept:
                 )
             if self._fs.is_file(self._path) and self._fs.read_text(self._path) == text:
                 return
+            self._accept_written_record(meta, creating=not self._fs.is_file(self._path))
             self._fs.mkdir(self._fs.dirname(self._path), parents=True, exist_ok=True)
             self._fs.atomic_write_text(self._path, text)
             return
@@ -688,12 +694,31 @@ class Concept:
         sources = list(getattr(self, "_sources", None) or [])
         existing_fm = self.frontmatter()
         merged = {**existing_fm, **extra}
+        self._accept_written_record(merged, creating=not self.exists())
         if narrative is None:
             narrative = self.read()
         parent = str(PurePosixPath(self._path).parent)
         self._fs.mkdir(parent, parents=True, exist_ok=True)
         body, _appended = append_source_links(narrative or "", sources, base_dir=parent)
         self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body))
+
+    def _accept_written_record(self, merged: Mapping[str, object], *, creating: bool) -> None:
+        """Refuse a record ``write_knowledge`` would refuse. Nothing is written yet."""
+        from pydantic import ValidationError
+
+        from .planning import check_planning_record
+        from .worker_report import check_worker_record
+
+        klass = type(self)
+        existing = None if creating else self.frontmatter()
+        check_record = getattr(klass, "check_record", None)
+        if callable(check_record):
+            check_record(dict(merged), existing=existing)
+        try:
+            check_planning_record(klass, merged, creating=creating)
+        except ValidationError as exc:
+            raise ValueError(f"invalid {klass.__name__} record: {exc}") from exc
+        check_worker_record(klass, merged, existing=existing)
 
     def links(self) -> list[Edge]:
         """The documents this one cites — typed markdown links in the narrative."""

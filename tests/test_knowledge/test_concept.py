@@ -1042,14 +1042,15 @@ class TestConceptOpen:
 
         assert type(_open_document(path)).__name__ == "Finding"
 
-    def test_an_unknown_class_opens_as_note(self, tmp_path: Path) -> None:
+    def test_an_unknown_class_is_not_opened(self, tmp_path: Path) -> None:
         from molab.knowledge.concepts import _open_document
 
         path = tmp_path / "knowledges" / "x.md"
         path.parent.mkdir()
         path.write_text("---\nclass: Widget\n---\n\n# X\n")
 
-        assert type(_open_document(path)).__name__ == "Note"
+        with pytest.raises(ValueError, match="Widget"):
+            _open_document(path)
 
     def test_a_suffixless_path_opens_the_markdown_file(self, tmp_path: Path) -> None:
         from molab.knowledge.concepts import _open_document

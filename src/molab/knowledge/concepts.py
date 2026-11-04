@@ -396,9 +396,13 @@ def _open_document(path: PathArg, *, fs: FileSystem | None = None) -> Concept:
     if text is None:
         raise KnowledgeNotFoundError(raw)
     meta, _body = split_frontmatter(text)
-    class_name = str(meta.get("class") or "Note")
-    klass = _PRODUCTS.get(class_name, Note)
-    return klass(raw, fs=disk)
+    raw_class = meta.get("class")
+    class_name = raw_class if isinstance(raw_class, str) and raw_class else "Note"
+    if class_name not in _PRODUCTS:
+        raise ValueError(
+            f"frontmatter class {class_name!r} is not one of {', '.join(sorted(_PRODUCTS))}"
+        )
+    return _PRODUCTS[class_name](raw, fs=disk)
 
 
 def _write_document(path: PathArg, text: str, *, fs: FileSystem | None = None) -> Concept:

@@ -150,6 +150,39 @@ class TestPlanningRoles:
         with pytest.raises(ValueError, match="missing"):
             check_campaign(campaign_of(plan))
 
+    def test_a_roadmap_on_another_host_is_part_of_the_campaign(self, tmp_path: Path) -> None:
+        ws = _lab(tmp_path)
+        plan = _overview(ws)
+        project = ws.add_project("poly")
+        write_knowledge(
+            project,
+            name="Stages",
+            of=Roadmap,
+            sources=[SourceRef.of(plan)],
+            created_by="test",
+            text="Order.\n",
+            record={"stages": [{"id": "monomers", "title": "Fragments"}]},
+        )
+
+        assert [stage.id for stage in campaign_of(plan).roadmaps[0].stages()] == ["monomers"]
+
+    def test_a_milestone_status_must_stay_legal(self, tmp_path: Path) -> None:
+        ws = _lab(tmp_path)
+        plan = _overview(ws)
+        milestone = write_knowledge(
+            ws,
+            name="Shown",
+            of=Milestone,
+            sources=[SourceRef.of(plan)],
+            created_by="test",
+            text="Evidence.\n",
+            record={"stage": "monomers", "criterion": "The pictures exist"},
+        )
+
+        with pytest.raises(ValueError, match="status"):
+            milestone.write(status="nope")
+        assert milestone.status() == "open"
+
     def test_a_roadmap_cycle_is_refused(self, tmp_path: Path) -> None:
         ws = _lab(tmp_path)
         with pytest.raises(ValueError, match="cycle"):

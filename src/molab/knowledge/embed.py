@@ -137,9 +137,9 @@ def summarize_entity(target: Concept | Folder | Asset) -> EntitySummary:
       kind), and ``title`` walks three branches: the reference-kind head title,
       a ``Literature``'s ``ReferenceMeta.title``, else the ``index.md`` H1 (else
       the directory name).
-    - A ``Concept``: the same projection, with two differences — a ``Concept``
-      *is* its path, so ``id`` is the directory name; and its narrative is read
-      at that path.
+    - A ``Concept``: the same projection, with two differences — ``id`` is the
+      document path, because that path is the document; and its narrative is
+      read at that path.
     - An ``Asset``: ``id`` is the asset id, ``kind`` is ``asset.kind``, and
       ``title`` is the asset title.
 
@@ -184,10 +184,10 @@ def summarize_entity(target: Concept | Folder | Asset) -> EntitySummary:
         if title is None:
             narrative = target.read() if isinstance(target, Concept) else target.read_index()
             title = extract_title(narrative) or target.name
-        # A Concept *is* its path, so its directory name is its id; a Folder
-        # carries an id in its entity record that is deliberately not the
-        # directory name (a run dir is ``seed=1``, not the run id).
-        entity_id = target.name if isinstance(target, Concept) else target.metadata.id
+        # A document's identity is its path. A Folder's id lives in its
+        # record and is deliberately not the directory name (a run dir is
+        # ``seed=1``, not the run id).
+        entity_id = str(target.path) if isinstance(target, Concept) else target.metadata.id
         return EntitySummary(id=entity_id, kind=kind, title=title)
     raise TypeError(
         f"summary target must be a Concept, Folder or Asset, got {type(target).__name__}"
