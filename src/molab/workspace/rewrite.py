@@ -100,11 +100,18 @@ def _rewrite_level(
         _delete_legacy(fs, directory)
         return
     source = _source(fs, directory, level_file)
+    had_revision = bool(_text(source.get("experiment_revision_id")))
+    had_hash = _text(source.get("definition_hash")) not in {"", "sha256:pending"}
     metadata = _build(model, source, kind=kind, fallback_name=fallback_name)
     if isinstance(metadata, ExperimentMetadata):
         metadata = _with_experiment_hash(fs, directory, metadata)
     elif isinstance(metadata, RunMetadata):
-        metadata = _with_run_hash(metadata, revision_id)
+        metadata = _with_run_hash(
+            metadata,
+            revision_id,
+            had_revision=had_revision,
+            had_hash=had_hash,
+        )
     write_record(fs, directory, canonical=_record_payload(metadata), lock_root=lock_root)
     _delete_legacy(fs, directory)
 
@@ -162,8 +169,25 @@ def _with_experiment_hash(
     return metadata.model_copy(update={"definition_hash": digest})
 
 
-def _with_run_hash(metadata: RunMetadata, revision_id: str) -> RunMetadata:
-    """A rewritten run cites the experiment revision just written."""
+def _with_run_hash(
+    metadata: RunMetadata,
+    revision_id: str,
+    *,
+    had_revision: bool,
+    had_hash: bool,
+) -> RunMetadata:
+    """Fill a missing revision citation or a missing definition hash.
+
+    A run that already has a hash keeps that hash and, when it also cited a
+    revision, that citation. Recomputing would drop the profile
+    ``config_hash``, which is not stored beside the hash. A legacy run with
+    no hash cites the experiment revision this rewrite just wrote.
+    """
+    if had_hash:
+        if had_revision:
+            return metadata
+        parent = revision_id or metadata.experiment_revision_id
+        return metadata.model_copy(update={"experiment_revision_id": parent})
     parent = revision_id or metadata.experiment_revision_id
     digest = compute_run_definition_hash(
         experiment_revision_id=parent,

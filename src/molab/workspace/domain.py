@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 
 from molab._typing import JSONValue
 
-from .history import AgentRef, EntityRef
+from .history import AgentRef
 from .timestamps import as_utc as _as_utc
 
 
@@ -77,51 +77,6 @@ class RunStatusSummary(BaseModel):
             not_started=not executions,
             by_status=counts,
         )
-
-
-class ExperimentRevision(BaseModel):
-    """Immutable scientific design snapshot referenced by every Run."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    id: str
-    experiment_id: str
-    revision: int
-    created_at: datetime
-    created_by: AgentRef
-    definition_hash: str
-    goal: str = ""
-    parameter_space: dict[str, JSONValue] = Field(default_factory=dict)
-    input_asset_ids: tuple[str, ...] = ()
-    workflow: dict[str, JSONValue] | None = None
-    metadata: dict[str, JSONValue] = Field(default_factory=dict)
-
-    @field_validator("created_at", mode="after")
-    @classmethod
-    def _utc(cls, value: datetime | None) -> datetime | None:
-        return _as_utc(value)
-
-
-class RunDefinition(BaseModel):
-    """Immutable logical computation identity."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    id: str
-    experiment_id: str
-    experiment_revision_id: str
-    created_at: datetime
-    created_by: AgentRef
-    definition_hash: str
-    parameters: dict[str, JSONValue] = Field(default_factory=dict)
-    input_asset_ids: tuple[str, ...] = ()
-    workflow_ref: EntityRef | None = None
-    target_hint: str | None = None
-
-    @field_validator("created_at", mode="after")
-    @classmethod
-    def _utc(cls, value: datetime | None) -> datetime | None:
-        return _as_utc(value)
 
 
 class EvidenceRef(BaseModel):
@@ -627,10 +582,8 @@ __all__ = [
     "Execution",
     "ExecutionMode",
     "ExecutionStatus",
-    "ExperimentRevision",
     "ImportAction",
     "ImportOrigin",
-    "RunDefinition",
     "RunStatusSummary",
     "SourceFile",
     "SourceManifest",

@@ -196,10 +196,10 @@ def apply_execution_prune(run: Run, plan: ExecutionPrunePlan) -> int:
     """Remove exactly the directories *plan* lists; return the removed count.
 
     Entries are applied in order. An entry with no ``dirs`` is skipped. For
-    every other entry, the attempt's seal is re-checked first. Then each
-    directory in ``entry.dirs`` that still exists is removed, and the sealed
+    every other entry, the attempt's seal is re-checked first. The sealed
     record is stamped with ``entry.dirs`` through
-    ``ExecutionRepository.mark_pruned``. The plan, not the disk, is the
+    ``ExecutionRepository.mark_pruned`` before any directory is removed, then
+    each directory that still exists is removed. The plan, not the disk, is the
     contract: a directory that vanished since planning is still recorded as
     pruned, but it is not counted. No record is deleted. ``execution.json`` is
     only updated with the stamp, and ``workflow.json``, ``run.log`` and
@@ -249,11 +249,15 @@ def apply_execution_prune(run: Run, plan: ExecutionPrunePlan) -> int:
                 f"Execution {entry.execution_id!r} of run {run.id!r} is not sealed; "
                 "refusing to remove its bulk"
             )
+        # Stamp first. A crash after the bytes are gone used to leave
+        # ``pruned_at`` empty, and the next plan saw no directories to stamp.
+        # ``mark_pruned`` unions names, so a later plan still deletes whatever
+        # is left and stamps it again.
+        repo.mark_pruned(entry.execution_id, entry.dirs)
         execution_dir = repo.execution_dir(entry.execution_id)
         for name in entry.dirs:
             path = fs.join(execution_dir, name)
             if fs.exists(path):
                 fs.rm(path, recursive=True)
                 removed_dirs += 1
-        repo.mark_pruned(entry.execution_id, entry.dirs)
     return removed_dirs

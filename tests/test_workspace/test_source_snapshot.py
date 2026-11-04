@@ -54,6 +54,26 @@ class TestSourceManifest:
         assert m.entrypoint == "entry.py"
         assert [f.name for f in m.files] == ["entry.py", "helper.py"]
 
+    def test_same_basename_in_two_packages_stays_two_files(self, tmp_path: Path) -> None:
+        from molab.workspace.source_snapshot import copy_sources, source_manifest
+
+        src = tmp_path / "src"
+        (src / "pkg").mkdir(parents=True)
+        (src / "other").mkdir()
+        _write(src / "pkg" / "__init__.py", "from ..other import X\n")
+        _write(src / "other" / "__init__.py", "X = 1\n")
+        _write(src / "entry.py", "import pkg\n")
+
+        manifest = source_manifest(src / "entry.py", now=_NOW)
+        names = [item.name for item in manifest.files]
+
+        assert "pkg/__init__.py" in names
+        assert "other/__init__.py" in names
+        assert len(names) == len(set(names))
+        copy_sources(manifest, tmp_path / "attempt")
+        assert (tmp_path / "attempt" / "source" / "pkg" / "__init__.py").is_file()
+        assert (tmp_path / "attempt" / "source" / "other" / "__init__.py").read_text() == "X = 1\n"
+
     def test_closure_is_transitive_and_excludes_non_local_imports(self, tmp_path: Path) -> None:
         from molab.workspace.source_snapshot import source_manifest
 

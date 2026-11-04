@@ -83,7 +83,7 @@ class RunRefResponse(ApiModel):
     experimentId: str
     projectId: str
     status: str
-    configHash: str | None = None
+    definitionHash: str | None = None
     startedAt: datetime | None = None
     finishedAt: datetime | None = None
     currentExecutionId: str | None = None
@@ -95,7 +95,7 @@ class RunRefResponse(ApiModel):
             experimentId=ref.experiment_id,
             projectId=ref.project_id,
             status=ref.status,
-            configHash=ref.config_hash,
+            definitionHash=ref.definition_hash,
             startedAt=ref.started_at,
             finishedAt=ref.finished_at,
             currentExecutionId=ref.current_execution_id,

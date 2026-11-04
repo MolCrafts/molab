@@ -83,13 +83,13 @@ def classify(run: Run) -> CancelPlan:
     return CancelPlan(kind="none", detail=reason)
 
 
-def try_cancel(run: Run, *, seal: bool = True) -> str | None:
+def try_cancel(run: Run) -> str | None:
     """Signal the live executor of *run*. Return ``None`` on success, a warning
     message otherwise. Never raises for caller-actionable reasons.
 
-    ``seal`` defaults to true for the tree monitor, which cancels and then
-    deletes. ``cancel_run`` passes ``seal=False``: the signal hook must not
-    seal, because ``cancel_run`` is the one function that flips the attempt.
+    This hook does not seal. :func:`molab.workspace.lifecycle_ops.cancel_run`
+    is the one function that flips the attempt, after it has reaped a dead
+    owner.
     """
     plan = classify(run)
     if plan.kind == "none":
@@ -99,21 +99,15 @@ def try_cancel(run: Run, *, seal: bool = True) -> str | None:
     if active is None:  # pragma: no cover — classify() guarantees an active Execution here
         return f"cannot cancel {run.id[:6]}: no active execution"
 
-    def _seal() -> None:
-        if seal:
-            run.cancel(active.id)
-
     if plan.kind == "local":
         pid = int(plan.detail)
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
-            # Already dead. The caller seals when it owns the status flip.
-            _seal()
+            # Already dead. The caller seals through cancel_run.
             return None
         except PermissionError:
             return f"cannot signal pid {pid}: permission denied"
-        _seal()
         return None
 
     # plan.kind == "molq"
@@ -131,5 +125,4 @@ def try_cancel(run: Run, *, seal: bool = True) -> str | None:
         get_client(ref["registry_id"]).job(ref).cancel()
     except MolqError as exc:
         return f"molq cancel failed for {run.id[:6]}: {exc}"
-    _seal()
     return None

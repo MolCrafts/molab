@@ -134,7 +134,16 @@ def test_cancel_uses_the_recorded_registry_and_job_ref(start_run, monkeypatch):
 
     assert try_cancel(run) is None
     assert calls == [ref["registry_id"], ref, "cancel"]
-    assert run.executions[-1].status == ExecutionStatus.CANCELLED
+    # The signal hook does not seal. A live heartbeat keeps the reaper from
+    # marking the attempt failed before cancel_run flips it.
+    assert run.executions[-1].status is not ExecutionStatus.CANCELLED
+    from molab.workspace.lifecycle_ops import cancel_run
+    from molab.workspace.run_heartbeat import touch_alive
+
+    attempt_id = run.executions[-1].id
+    touch_alive(run, attempt_id)
+    cancel_run(run)
+    assert run.execution(attempt_id).status is ExecutionStatus.CANCELLED
 
 
 def test_cancel_without_a_job_ref_does_not_guess_a_destination(start_run, monkeypatch):

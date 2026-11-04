@@ -123,19 +123,23 @@ class ImportAssetCases:
         assert not src.exists()
         assert Path(ws.assets.payload_path(asset.id)).read_bytes() == HELLO
 
-    def test_symlink_and_hardlink_store_no_content(self, tmp_path: Path) -> None:
+    def test_symlink_and_hardlink_record_the_bytes(self, tmp_path: Path) -> None:
+        from molab.workspace.artifact_repository import content_ref
+
         ws = _ws(tmp_path)
         link_src = _src(tmp_path, "link.txt")
         linked = ws.assets.import_asset("linked", link_src, action="symlink")
         link_version = ws.assets.versions(linked.id)[0]
         payload = Path(ws.assets.payload_path(linked.id))
         assert payload.is_symlink()
-        assert link_version.content is None
+        assert link_version.content is not None
+        assert link_version.content.digest == content_ref(ws.fs, link_src).digest
         hard_src = _src(tmp_path, "hard.txt")
         hard = ws.assets.import_asset("hard", hard_src, action="hardlink")
         hard_version = ws.assets.versions(hard.id)[0]
         hard_payload = Path(ws.assets.payload_path(hard.id))
-        assert hard_version.content is None
+        assert hard_version.content is not None
+        assert hard_version.content.digest == content_ref(ws.fs, hard_src).digest
         if hard_payload.stat().st_ino != hard_src.stat().st_ino:
             assert hard_payload.read_bytes() == hard_src.read_bytes()
 

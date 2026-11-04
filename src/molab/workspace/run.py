@@ -47,6 +47,7 @@ from .domain import (
     ACTIVE_EXECUTION_STATUSES,
     FAILED_EXECUTION_STATUSES,
     RESULT_SEMANTIC_TYPE,
+    TERMINAL_EXECUTION_STATUSES,
     Artifact,
     Execution,
     ExecutionMode,
@@ -76,16 +77,16 @@ __all__ = [
     "set_run_executor",
 ]
 
-#: The run statuses ``resume`` / ``rerun`` apply to — the single source of
-#: truth for the retryable domain (consumed by both the CLI and the server
-#: routes). The three verbs stay orthogonal: ``pending`` is plain run's job,
-#: ``succeeded`` is done, and a live ``running`` run must never get a second
-#: concurrent execution.
-RETRYABLE_STATUSES: frozenset[str] = frozenset({RunStatus.FAILED.value, RunStatus.CANCELLED.value})
+#: Statuses ``resume`` may open another attempt from. Built from the
+#: execution enum so ``interrupted`` is not a third outcome that the
+#: exported set forgets. ``pending`` is not an execution status: it is the
+#: label of a run that has no attempt yet, and plain ``run`` owns it.
+RETRYABLE_STATUSES: frozenset[str] = frozenset(status.value for status in FAILED_EXECUTION_STATUSES)
 
-#: Terminal statuses — a finished run carries a ``finished_at``.
+#: Statuses of a finished attempt. A run whose latest attempt is one of
+#: these has a ``finished_at``. ``queued`` and ``finalizing`` are not here.
 TERMINAL_STATUSES: frozenset[str] = frozenset(
-    {RunStatus.SUCCEEDED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}
+    status.value for status in TERMINAL_EXECUTION_STATUSES
 )
 
 
@@ -480,10 +481,12 @@ class Run(Folder):
         """Whether resume/rerun may open a new attempt.
 
         A live Execution (queued/running/finalizing) must not get a concurrent
-        sibling. Otherwise any failed/cancelled/interrupted attempt
-        (:attr:`has_failures`) makes the run retryable.
+        sibling. Otherwise any attempt whose status is in
+        :data:`RETRYABLE_STATUSES` makes the run retryable.
         """
-        return self.status_summary.active == 0 and self.has_failures
+        if self.status_summary.active != 0:
+            return False
+        return any(item.status.value in RETRYABLE_STATUSES for item in self.executions)
 
     @property
     def executions(self) -> list[Execution]:

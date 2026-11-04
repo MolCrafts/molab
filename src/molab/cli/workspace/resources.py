@@ -690,7 +690,7 @@ def run_cancel(
     from molab.workspace.lifecycle_ops import cancel_run as cancel_core
 
     def _signal(run: Run) -> str | None:
-        return try_cancel(run, seal=False)
+        return try_cancel(run)
 
     cancelled = 0
     errors = 0

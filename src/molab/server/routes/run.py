@@ -907,7 +907,7 @@ def cancel_execution(
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
     def _signal(target: Run) -> str | None:
-        return try_cancel(target, seal=False)
+        return try_cancel(target)
 
     try:
         cancel_run(run, signal_executor=_signal, execution_id=execution_id)

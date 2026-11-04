@@ -685,11 +685,13 @@ class TestAssetRepositoryVersions:
         assert content.kind == "directory"
         assert content.size == 3
 
-    def test_symlink_has_no_content(self, project: Project, tmp_path: Path) -> None:
+    def test_symlink_records_the_target_bytes(self, project: Project, tmp_path: Path) -> None:
         src = tmp_path / "hello.txt"
         src.write_bytes(HELLO)
         asset = project.assets.import_asset("link", src, action="symlink")
-        assert project.assets.versions(asset.id)[0].content is None
+        content = project.assets.versions(asset.id)[0].content
+        assert content is not None
+        assert content.digest == HELLO_DIGEST
 
     def test_consumed_ids(self, project: Project, tmp_path: Path) -> None:
         src = tmp_path / "hello.txt"

@@ -89,7 +89,7 @@ class RunRef(BaseModel, frozen=True):
     experiment_id: str
     project_id: str
     status: str
-    config_hash: str | None = None
+    definition_hash: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     current_execution_id: str | None = None
@@ -219,7 +219,7 @@ def assemble_workspace_context(
             experiment_id=experiment_id,
             project_id=project_id,
             status=status,
-            config_hash=run.metadata.definition_hash,
+            definition_hash=run.metadata.definition_hash,
             started_at=started,
             finished_at=latest.finished_at if latest else None,
             current_execution_id=latest.id if latest else None,

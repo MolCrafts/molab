@@ -83,6 +83,24 @@ def _hash_tree(fs: FileSystem, path: str) -> tuple[str, int]:
     return f"sha256:{hasher.hexdigest()}", size
 
 
+def _file_digest(fs: FileSystem, path: str) -> ContentRef:
+    """Hash a file in bounded ranges, so a download does not open it whole."""
+    hasher = hashlib.sha256()
+    size = 0
+    offset = 0
+    window = 256 * 1024
+    while True:
+        chunk = fs.read_range(path, offset, window)
+        if not chunk:
+            break
+        hasher.update(chunk)
+        size += len(chunk)
+        offset += len(chunk)
+        if len(chunk) < window:
+            break
+    return ContentRef(digest=f"sha256:{hasher.hexdigest()}", size=size, kind="file")
+
+
 def content_ref(fs: FileSystem, path: PathArg) -> ContentRef:
     """Identify bytes where they already live — no copy, no side store."""
     target = str(path)
@@ -506,11 +524,10 @@ class AssetRepository:
         try:
             if action != "reference":
                 self._materialize(source, Path(payload), action)
-            content = None
-            if action in ("copy", "move"):
-                content = content_ref(self.fs, payload)
-            elif action == "reference":
+            if action == "reference":
                 content = content_ref(self.fs, source)
+            else:
+                content = content_ref(self.fs, payload)
             asset, version = self._new_import(
                 name,
                 tags,
@@ -854,9 +871,9 @@ class AssetRepository:
                 raise KeyError(self._missing(asset_id))
         origin = chosen.origin
         if isinstance(origin, ImportOrigin):
-            if origin.location:
-                return self.fs.join(self.scope_dir, origin.location)
-            return origin.uri
+            path = self.fs.join(self.scope_dir, origin.location) if origin.location else origin.uri
+            self._require_digest(chosen, path)
+            return path
         qualified = parse_ref(origin.ref)
         from .run import Run
 
@@ -867,7 +884,32 @@ class AssetRepository:
                 MolabRef(experiment_id=qualified.experiment_id, run_id=qualified.run_id)
             ),
         )
-        return run.artifact_location(artifact.execution_id, artifact)
+        path = run.artifact_location(artifact.execution_id, artifact)
+        self._require_digest(chosen, path)
+        return path
+
+    def _require_digest(self, version: AssetVersion, path: str) -> None:
+        """Refuse a version whose bytes no longer match the recorded digest.
+
+        A version with no digest (a record written before link imports stored
+        one) is not checked. A readable file with a different digest is.
+        """
+        content = version.content
+        if content is None or not content.digest:
+            return
+        try:
+            current = (
+                content_ref(self.fs, path) if self.fs.is_dir(path) else _file_digest(self.fs, path)
+            )
+        except OSError as exc:
+            raise ValueError(
+                f"asset {version.asset_id} v{version.version} bytes are unreadable: {exc}"
+            ) from exc
+        if current.digest != content.digest:
+            raise ValueError(
+                f"asset {version.asset_id} v{version.version} bytes are {current.digest}, "
+                f"version recorded {content.digest}"
+            )
 
     # ── read ─────────────────────────────────────────────────────────────
 

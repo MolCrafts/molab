@@ -1,9 +1,9 @@
 """Zombie-Execution reaping (``molab.workspace.run_reaper.reap_zombie_run``).
 
-Same-host owners are pid-probed. Cross-host owners are reaped only when the
-per-Execution ``alive`` file exists and its mtime is older than 600.0 s; a
-missing ``alive`` is not stale. Reaping seals the stale active Execution as
-``failed`` and unlinks its ``alive``.
+A started attempt with a missing or stale ``alive`` file is reaped on every
+host. A queued attempt with no ``alive`` file has not claimed, so it is left
+alone. A same-host pid that is already dead is reaped too. Reaping seals the
+attempt as ``failed`` and unlinks its ``alive``.
 """
 
 from __future__ import annotations
@@ -78,9 +78,29 @@ class TestReapZombieRun:
         assert state.error["type"] == "ZombieRun"
         assert not _alive_path(run, execution_id).exists()
 
-    def test_cross_host_missing_alive_is_not_reaped(self, run) -> None:
+    def test_cross_host_running_without_alive_is_reaped(self, run) -> None:
         run.materialize()
         execution_id = _seed_running(run, pid=12345, host="hpc-login-01")
+        assert not _alive_path(run, execution_id).exists()
+        assert reap_zombie_run(run) is True
+        state = _repo(run).get(execution_id)
+        assert state.status is ExecutionStatus.FAILED
+        assert state.error is not None
+        assert state.error["type"] == "ZombieRun"
+
+    def test_cross_host_queued_without_alive_is_not_reaped(self, run) -> None:
+        run.materialize()
+        state = _repo(run).create(
+            mode=ExecutionMode.INITIAL,
+            created_by=_TEST_AGENT,
+            executor={"kind": "local", "host": "hpc-login-01"},
+        )
+        assert reap_zombie_run(run) is False
+        assert _repo(run).get(state.id).status is ExecutionStatus.QUEUED
+
+    def test_same_host_live_pid_without_alive_is_not_reaped(self, run) -> None:
+        run.materialize()
+        execution_id = _seed_running(run, pid=os.getpid(), host=platform.node())
         assert not _alive_path(run, execution_id).exists()
         assert reap_zombie_run(run) is False
         assert _repo(run).get(execution_id).status is ExecutionStatus.RUNNING

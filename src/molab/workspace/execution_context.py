@@ -639,8 +639,9 @@ class ExecutionContext:
             atexit.unregister(self._seal_at_exit)
             self._seal_at_exit_registered = False
         self._track_claim = False
+        # Stop touching, but leave the file until seal succeeds. A crash in
+        # the work below then still has a heartbeat the reaper can judge.
         self._stop_heartbeat()
-        self._remove_heartbeat()
         # Before the seal: it hashes stdout.log / stderr.log into the evidence,
         # so the digests must cover the final bytes.
         self._release_stdio()
@@ -658,6 +659,7 @@ class ExecutionContext:
             f"{datetime.now(UTC).isoformat()} execution finished status={status.value}"
         )
         self._executions.seal(self.id, status, error=self._failure)
+        self._remove_heartbeat()
         self._entered = False
         return False
 

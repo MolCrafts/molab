@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import builtins
 import hashlib
+import json
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -138,22 +139,12 @@ def _probe_span(fs: object, exec_dir: str) -> int:
 
 
 _ALLOWED_TRANSITIONS: dict[ExecutionStatus, frozenset[ExecutionStatus]] = {
-    ExecutionStatus.QUEUED: frozenset(
-        {
-            ExecutionStatus.RUNNING,
-            ExecutionStatus.FAILED,
-            ExecutionStatus.CANCELLED,
-            ExecutionStatus.INTERRUPTED,
-        }
-    ),
-    ExecutionStatus.RUNNING: frozenset(
-        {
-            ExecutionStatus.FINALIZING,
-            ExecutionStatus.CANCELLED,
-            ExecutionStatus.INTERRUPTED,
-        }
-    ),
-    ExecutionStatus.FINALIZING: TERMINAL_EXECUTION_STATUSES,
+    ExecutionStatus.QUEUED: frozenset({ExecutionStatus.RUNNING}),
+    ExecutionStatus.RUNNING: frozenset({ExecutionStatus.FINALIZING}),
+    # A terminal status is written by ``seal`` (and by ``adopt`` /
+    # ``merge_remote``), never by ``transition``. Those writers set
+    # ``sealed_at`` in the same update.
+    ExecutionStatus.FINALIZING: frozenset(),
     ExecutionStatus.SUCCEEDED: frozenset(),
     ExecutionStatus.FAILED: frozenset(),
     ExecutionStatus.CANCELLED: frozenset(),
@@ -175,7 +166,13 @@ _IDENTITY_FIELDS: frozenset[str] = frozenset(
 """Fields that say which attempt a record is; fixed by ``create``."""
 
 _CREATION_PROVENANCE_FIELDS: frozenset[str] = frozenset(
-    {"based_on_execution_id", "checkpoint_artifact_id", "bypass_cache", "source"}
+    {
+        "based_on_execution_id",
+        "checkpoint_artifact_id",
+        "bypass_cache",
+        "selected_tasks",
+        "source",
+    }
 )
 """Creation-time facts other than identity; written once, by ``create``."""
 
@@ -762,13 +759,21 @@ class ExecutionRepository:
     def _load_states(self, paths: builtins.list[str]) -> builtins.list[Execution]:
         from .fs_cached import CachedRemoteFS
 
+        loaded: dict[str, bytes | Exception] = {}
         if isinstance(self.fs, CachedRemoteFS) and paths:
-            self.fs.read_many(paths)
-        states = [
-            Execution.model_validate(read_versioned_json(path, fs=self.fs))
-            for path in sorted(paths)
-            if self.fs.exists(path)
-        ]
+            loaded = self.fs.read_many(paths)
+        states: list[Execution] = []
+        for path in sorted(paths):
+            if not self.fs.exists(path):
+                continue
+            blob = loaded.get(path)
+            if isinstance(blob, bytes):
+                document = json.loads(blob)
+                if isinstance(document, dict):
+                    document.pop("schema_version", None)
+                states.append(Execution.model_validate(document))
+            else:
+                states.append(Execution.model_validate(read_versioned_json(path, fs=self.fs)))
         return sorted(states, key=lambda item: item.seq)
 
     def summary(self) -> RunStatusSummary:

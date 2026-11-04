@@ -21,6 +21,8 @@ from pathlib import Path as _StdPath
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, ClassVar, Literal, TypeVar, cast, overload
 
+from pydantic import ValidationError
+
 from molab._typing import JSONValue
 from molab.path import Path
 
@@ -851,7 +853,24 @@ class Folder:
                 if isinstance(loaded, cls):
                     self._remember(loaded._name, loaded)
                     return loaded
+        by_name = self._child_by_display_name(name, cls=cls)
+        if by_name is not None:
+            return by_name
         return self._child_by_id(name, cls=cls)
+
+    def _child_by_display_name(self, label: str, *, cls: type[F]) -> F | None:
+        """The child of type *cls* whose record name is *label*, if any.
+
+        Directory slug and id are resolved first. A rename keeps the directory
+        and writes the new name only into the record, so this is how
+        ``experiment("moved")`` finds it. Runs have no display name separate
+        from the directory.
+        """
+        for child in self.list_folders(cls=cls):
+            recorded = getattr(child, "name", None)
+            if isinstance(recorded, str) and recorded == label and child._name != label:
+                return child
+        return None
 
     def _child_by_id(self, entity_id: str, *, cls: type[F]) -> F | None:
         """The child of type *cls* whose entity id is *entity_id*, if any.
@@ -889,6 +908,11 @@ class Folder:
             try:
                 loaded = cls.from_disk(entry_path, self)
             except UnmigratedLayoutError:
+                raise
+            except ValidationError:
+                # A record that does not match its model is the same failure
+                # ``list_runs`` raises. Skipping it here made the two scans
+                # disagree about which runs exist.
                 raise
             except (FileNotFoundError, OSError, ValueError):
                 continue

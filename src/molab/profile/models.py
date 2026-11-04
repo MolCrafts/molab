@@ -31,7 +31,7 @@ class ProfileConfig(Mapping[str, JSONValue]):
     - :attr:`name`: normalized profile name, or ``None`` when no profile
       was selected (``defaults`` only).
     - :meth:`content_hash`: deterministic hex digest of the merged data,
-      suitable for ``RunMetadata.config_hash``.
+      folded into a run's ``definition_hash`` when passed as ``config_hash``.
 
     The framework adds no semantic keys; every entry comes straight from
     the user's YAML / JSON.

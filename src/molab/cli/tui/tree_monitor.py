@@ -298,6 +298,35 @@ def _prepare_dialog(targets: list[TreeNode]) -> _DeleteDialog:
     return _DeleteDialog(targets=targets, plan_lines=lines)
 
 
+def _cancel_through_core(
+    run: Run,
+    warnings: list[str],
+    *,
+    execution_id: str | None = None,
+) -> bool:
+    """Signal, then seal through ``cancel_run``. False when the signal failed.
+
+    A dead owner is reaped inside ``cancel_run`` (``FAILED`` / ``ZombieRun``)
+    instead of this monitor sealing ``CANCELLED`` itself. ``ValueError`` after
+    a successful signal means the attempt was already terminal; the delete
+    may proceed.
+    """
+    from molab.workspace.lifecycle_ops import cancel_run
+
+    msg = try_cancel(run)
+    if msg is not None:
+        warnings.append(msg)
+        return False
+    try:
+        warning = cancel_run(run, execution_id=execution_id)
+    except ValueError as exc:
+        warnings.append(str(exc))
+        return True
+    if warning is not None:
+        warnings.append(warning)
+    return True
+
+
 def _execute_delete(dialog: _DeleteDialog) -> list[str]:
     """Run the dialog's plan.  Returns post-action warning messages."""
     warnings: list[str] = []
@@ -307,11 +336,8 @@ def _execute_delete(dialog: _DeleteDialog) -> list[str]:
             if node.kind == "run":
                 assert isinstance(node.ref, Run)
                 run = node.ref
-                if running:
-                    msg = try_cancel(run)
-                    if msg is not None:
-                        warnings.append(msg)
-                        continue  # do NOT delete if cancel failed
+                if running and not _cancel_through_core(run, warnings):
+                    continue  # do NOT delete if the signal failed
                 run.experiment.remove_run(run.id)
             elif node.kind == "execution":
                 assert (
@@ -321,11 +347,8 @@ def _execute_delete(dialog: _DeleteDialog) -> list[str]:
                 )
                 run = node.ref[0]
                 exec_id = node.ref[1]
-                if running:
-                    msg = try_cancel(run)
-                    if msg is not None:
-                        warnings.append(msg)
-                        continue
+                if running and not _cancel_through_core(run, warnings, execution_id=exec_id):
+                    continue
                 warnings.append(
                     f"execution {exec_id} kept: execution records are append-only; "
                     "prune its bulk with 'molab runs prune'"

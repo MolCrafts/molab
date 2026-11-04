@@ -137,6 +137,19 @@ class TestProjectWorkflowDocument:
         assert exp.workflow_kind == "document"
         assert exp.workflow_document == D1
 
+    def test_description_does_not_change_the_revision_or_fork_a_run(self, project) -> None:
+        exp = project.add_experiment("e", params={"lr": 1e-3})
+        revision_id = exp.metadata.revision_id
+        run = exp.ensure_run({"lr": 1e-3})
+
+        project.set_experiment("e", description="fixed the sentence")
+        exp = project.get_experiment("e")
+
+        assert exp.description == "fixed the sentence"
+        assert exp.metadata.revision == 1
+        assert exp.metadata.revision_id == revision_id
+        assert exp.ensure_run({"lr": 1e-3}).id == run.id
+
     def test_set_experiment_params_bumps_revision(self, project) -> None:
         project.add_experiment("e")
 

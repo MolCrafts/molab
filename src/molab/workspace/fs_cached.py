@@ -747,9 +747,18 @@ class CachedRemoteFS:
             key = self.resolve(path)
             mirror_path = self._mirror_for(key)
             entry = self._pinned_entry(key)
-            if entry is not None and entry.kind == "file" and self._local.exists(mirror_path):
+            # Attempt records change while a run is live. ``read_many`` still
+            # serves a pin that ``prime_execution_records`` just refreshed;
+            # a direct read fetches the remote bytes.
+            hot = self._hot_record(key)
+            if (
+                not hot
+                and entry is not None
+                and entry.kind == "file"
+                and self._local.exists(mirror_path)
+            ):
                 return self._local.read_bytes(mirror_path)
-            if entry is not None and entry.kind == "missing":
+            if not hot and entry is not None and entry.kind == "missing":
                 raise FileNotFoundError(key)
             # Strict reads always fetch content, including equal-size same-second changes.
         with self._lock:
@@ -1099,6 +1108,15 @@ class CachedRemoteFS:
             raise ValueError(f"unknown scope {scope!r}")
 
     # ── Internals ───────────────────────────────────────────────────────
+
+    def _hot_record(self, key: str) -> bool:
+        """``execution.json`` and ``alive`` are re-read from the remote.
+
+        ``read_many`` still serves a pin, which is how a just-primed attempt
+        list avoids a second transfer. A direct ``read_bytes`` does not.
+        """
+        name = key.rstrip("/").rsplit("/", 1)[-1]
+        return name in {"execution.json", "alive"}
 
     def _pinned_entry(self, key: str) -> _Entry | None:
         """Return a trusted local entry, or None if we must touch remote.

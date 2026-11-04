@@ -477,6 +477,29 @@ class Experiment(Folder):
         """
         return self.assets
 
+    def declared_runs(self) -> list[Run]:
+        """Runs whose parameters are the cell, not a legacy replica expansion.
+
+        A replica run written by ``molab run`` carries ``replica`` in its
+        parameters. Any other run is one a person or ``sweep`` added, and it
+        is the cell ``molab run`` dispatches. This is the only split between
+        those two shapes.
+        """
+        return [run for run in self.list_runs() if "replica" not in run.parameters]
+
+    def replica_cells(self) -> list[dict[str, JSONValue]]:
+        """One parameter cell per seed, for an experiment that has no declared runs.
+
+        Each cell is the experiment's parameters plus ``seed`` and ``replica``.
+        ``molab run`` looks these up with :meth:`find_run` (and the legacy id)
+        and creates a missing one with :meth:`ensure_run`. It does not invent
+        a second parameter shape.
+        """
+        return [
+            {**self.params, "seed": seed, "replica": index}
+            for index, seed in enumerate(self.get_seeds())
+        ]
+
     def get_seeds(self) -> list[int]:
         """Return replica seeds (length == ``n_replicas``)."""
         seeds = self._entity_metadata.seeds

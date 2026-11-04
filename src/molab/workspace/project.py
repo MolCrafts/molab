@@ -287,8 +287,10 @@ class Project(Folder):
         with a different document raises instead of dropping it.
         """
         slug = entity_slug(name, fallback=name)
-        if id is None and self.has_folder(slug, cls=Experiment):
+        existing = self._find_folder(name, Experiment) if id is None else None
+        if existing is None and id is None and self.has_folder(slug, cls=Experiment):
             existing = self.get_folder(slug, cls=Experiment)
+        if existing is not None:
             if workflow_document is None:
                 return existing
             if (
@@ -351,8 +353,11 @@ class Project(Folder):
     ) -> Experiment:
         """Update fields of an existing experiment and write to disk.
 
-        Field changes and a document bind share one revision stamp. An empty
-        update does not save.
+        A new revision is stamped only when the parameter space changes or
+        the workflow binding says the document changed. Description, tags,
+        replica counts, and the default target are saved without a new
+        revision, so runs that cite the current revision stay the same run.
+        An empty update does not save.
 
         Raises:
             ExperimentNotFoundError: Experiment missing.
@@ -372,7 +377,11 @@ class Project(Folder):
         if target is not None:
             _validate_target_registered(self, target)
             updates["default_target"] = target
-        field_changed = bool(updates)
+        revise = False
+        if "parameter_space" in updates and updates["parameter_space"] != dict(
+            exp.metadata.parameter_space
+        ):
+            revise = True
         if workflow_document is not None:
             bind_updates, bind_revise = exp._binding_updates(
                 "document", entrypoint=None, document=workflow_document
@@ -382,11 +391,11 @@ class Project(Folder):
             combined.update(bind_updates)
             exp._apply_definition(
                 combined,
-                revise=field_changed or bind_revise,
+                revise=revise or bind_revise,
                 document=workflow_document,
             )
         elif updates:
-            exp._apply_definition(updates, revise=field_changed)
+            exp._apply_definition(updates, revise=revise)
         return exp
 
     def del_experiment(self, name: str) -> None:

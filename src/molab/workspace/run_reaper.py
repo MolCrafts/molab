@@ -13,16 +13,14 @@ stale active Execution as ``FAILED`` — it never mutates the Run definition.
 
 Policy (CLAUDE.md, "Run status x verb selection"):
 
-* **Same host** — the Execution's recorded ``executor.host`` is probed
-  directly via ``executor.pid``; a dead pid means the owner crashed and the
-  Execution is reaped.
-* **Cross host** (molq / SLURM workers — the normal remote scenario) — no pid
-  probe is possible, so the Execution is reaped **only** when its per-Execution
-  ``alive`` file exists and the mtime is older than
-  :data:`~molab.workspace.run_heartbeat.HEARTBEAT_STALE_SECONDS`
-  (refreshed every ``HEARTBEAT_INTERVAL_SECONDS`` ≈ 30 s by the owning
-  worker). A fresh heartbeat, or no ``alive`` file at all, leaves the
-  Execution alone — never kill a possibly-live HPC job on guesswork.
+* **Not started** (``queued``, no ``alive`` yet) — left alone. A missing
+  heartbeat means the worker has not claimed the attempt.
+* **Started on another host** — a missing ``alive`` file means the owner is
+  gone. The file is deleted only after ``seal``. A file older than
+  :data:`~molab.workspace.run_heartbeat.HEARTBEAT_STALE_SECONDS` is stale on
+  every host.
+* **Same host** — a recorded ``executor.pid`` that is not alive is reaped. A
+  live pid is the owner even in the moment before the first touch.
 """
 
 from __future__ import annotations
@@ -65,13 +63,44 @@ def _executor_field(state: Execution, key: str) -> object | None:
     return None
 
 
+def _started(state: Execution) -> bool:
+    """Whether the owner has claimed this attempt.
+
+    ``start`` writes ``running`` before the first heartbeat touch. A queued
+    attempt has not claimed, so a missing ``alive`` file is not evidence
+    that it died.
+    """
+    return state.status in {ExecutionStatus.RUNNING, ExecutionStatus.FINALIZING}
+
+
+def _heartbeat_dead(state: Execution, run: Run) -> bool:
+    """A claimed attempt whose heartbeat is missing on another host, or stale.
+
+    On this machine a live pid is the owner, so a missing file in the moment
+    before the first touch does not reap it. A remote host that has already
+    claimed the attempt deletes ``alive`` only after ``seal``; no file means
+    that owner is gone.
+    """
+    if not _started(state):
+        return False
+    mtime = alive_mtime(run, state.id)
+    if mtime is None:
+        host = _executor_field(state, "host")
+        return isinstance(host, str) and host != platform.node()
+    return (time.time() - mtime) > HEARTBEAT_STALE_SECONDS
+
+
 def _owner_is_live(state: Execution, run: Run) -> bool:
+    if _heartbeat_dead(state, run):
+        return False
     host = _executor_field(state, "host")
     pid = _executor_field(state, "pid")
     if host == platform.node():
         # Same host: a recorded pid is probed directly; a missing pid means
         # the owner never claimed the attempt and it is treated as dead.
         return isinstance(pid, int) and pid > 0 and pid_alive(pid)
+    # Cross-host and not heartbeat-dead: a queued attempt with no file, or
+    # a started attempt with a fresh file.
     return not is_alive_stale(run, state.id)
 
 
@@ -85,11 +114,13 @@ def _build_reason(state: Execution, run: Run) -> str:
             "no longer alive.  Automatically marked FAILED."
         )
     mtime = alive_mtime(run, state.id)
-    age_s = int(time.time() - mtime) if mtime is not None else 0
+    if mtime is None:
+        heartbeat = "missing"
+    else:
+        heartbeat = f"{int(time.time() - mtime)}s old (threshold {int(HEARTBEAT_STALE_SECONDS)}s)"
     return (
         f"Execution {state.id} was left in 'running' state on host {host or '?'} "
-        f"(pid={pid or '?'}) and its alive heartbeat is {age_s}s old "
-        f"(threshold {int(HEARTBEAT_STALE_SECONDS)}s).  "
+        f"(pid={pid or '?'}) and its alive heartbeat is {heartbeat}.  "
         "Automatically marked FAILED."
     )
 

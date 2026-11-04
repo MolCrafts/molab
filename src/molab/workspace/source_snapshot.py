@@ -21,11 +21,9 @@ The workspace layer must not import upstream molab layers (see the layer DAG in
 CLAUDE.md / ``test_import_guard``); this module uses only the stdlib and
 workspace-local types.
 
-Scope (v1): first-party modules are flat siblings resolved as ``<root>/<name>.py``
-where ``root`` is the entrypoint's directory. Package subdirectories and
-namespace packages are out of scope; stdlib and third-party imports are ignored
-(they have no sibling file). This matches the flat-module layout of the molab
-consumer scripts (e.g. ``phase1.py`` importing ``eval_df`` / ``experiment``).
+A captured file's name is its path relative to the entrypoint's directory,
+so two modules that share a basename (``pkg/utils.py`` and ``other/utils.py``)
+stay two files under ``source/``. Stdlib and third-party imports are ignored.
 """
 
 from __future__ import annotations
@@ -80,6 +78,22 @@ def _relative_import_files(current: Path, node: ast.ImportFrom) -> list[Path]:
     return found
 
 
+def _capture_name(root: Path, src: Path) -> str:
+    """*src* relative to the entrypoint directory, as a POSIX path.
+
+    ``helper.py`` stays ``helper.py``. A relative import of ``pkg/utils.py``
+    stays ``pkg/utils.py``. A file outside that directory cannot be stored:
+    the copy lives under ``source/`` and must not escape it.
+    """
+    rel = Path(os.path.relpath(src.resolve(), root.resolve()))
+    if rel.is_absolute() or ".." in rel.parts:
+        raise SourceCaptureError(
+            f"source {src} is outside the entrypoint directory {root}; "
+            "it cannot be stored under source/"
+        )
+    return rel.as_posix()
+
+
 def _local_import_closure(entrypoint: Path) -> list[Path]:
     """Entrypoint + transitively-imported first-party modules.
 
@@ -112,9 +126,12 @@ def _local_import_closure(entrypoint: Path) -> list[Path]:
             elif isinstance(node, ast.ImportFrom) and node.level > 0:
                 relative.extend(_relative_import_files(current, node))
         for name in names:
-            candidate = (root / f"{name}.py").resolve()
-            if candidate.is_file() and candidate not in seen:
-                stack.append(candidate)
+            file = (root / f"{name}.py").resolve()
+            package = (root / name / "__init__.py").resolve()
+            if file.is_file() and file not in seen:
+                stack.append(file)
+            elif package.is_file() and package not in seen:
+                stack.append(package)
         for candidate in relative:
             if candidate.is_file() and candidate not in seen:
                 stack.append(candidate)
@@ -247,11 +264,17 @@ def source_manifest(entrypoint: PathArg, *, now: datetime | None = None) -> Sour
     if not path.is_file():
         raise FileNotFoundError(f"source entrypoint {str(entrypoint)!r} is not a file")
     files: list[SourceFile] = []
+    seen_names: set[str] = set()
+    root = path.parent
     for src in _local_import_closure(path):
+        name = _capture_name(root, src)
+        if name in seen_names:
+            raise SourceCaptureError(f"two source files would be stored as {name!r}")
+        seen_names.add(name)
         try:
-            files.append(SourceFile(name=src.name, sha256=_sha256(src)))
+            files.append(SourceFile(name=name, sha256=_sha256(src)))
         except OSError as exc:
-            raise SourceCaptureError(f"cannot read source {src.name!r}: {exc}") from exc
+            raise SourceCaptureError(f"cannot read source {name!r}: {exc}") from exc
     commit, dirty = _vcs_state(path.parent)
     return SourceManifest(
         entrypoint=path.name,
@@ -268,8 +291,8 @@ def copy_sources(
 ) -> None:
     """Copy the manifest's files into ``<execution_dir>/source/`` and verify them.
 
-    Each original is read from ``Path(manifest.locator).parent / name`` (the
-    v1 closure is flat siblings of the entrypoint, so that is complete),
+    Each original is read from ``Path(manifest.locator).parent / name``,
+    where *name* is the path relative to the entrypoint directory, and
     written through ``FileStore(execution_dir, fs=fs).put("source/<name>")``
     — so a local script reaches a remote workspace, and every write under a
     run goes through one FileStore — then read back and checked against the

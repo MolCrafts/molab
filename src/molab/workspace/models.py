@@ -19,7 +19,12 @@ from .timestamps import UtcDatetime, utc_now
 
 
 class RunStatus(StrEnum):
-    """Lifecycle state of a run.
+    """Words a run's latest attempt can show, plus ``pending``.
+
+    ``pending`` is the label when the run has no attempt yet. Every other
+    value is an :class:`~molab.workspace.domain.ExecutionStatus`. The
+    terminal and retryable sets live next to that enum; this list is not a
+    second, shorter vocabulary.
 
     Lives here (the workspace schema source of truth) rather than in
     ``run.py`` so the run-lifecycle collaborators can import it without a
@@ -28,10 +33,13 @@ class RunStatus(StrEnum):
     """
 
     PENDING = "pending"
+    QUEUED = "queued"
     RUNNING = "running"
+    FINALIZING = "finalizing"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
 
 
 # A Run does not store a workflow. The workflow is the experiment's property

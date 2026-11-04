@@ -7,7 +7,7 @@ export type RunRefResponse = {
     experimentId: string;
     projectId: string;
     status: string;
-    configHash?: (string | null);
+    definitionHash?: (string | null);
     startedAt?: (string | null);
     finishedAt?: (string | null);
     currentExecutionId?: (string | null);
