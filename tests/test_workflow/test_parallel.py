@@ -10,7 +10,7 @@ The primitive's contract:
 * The static graph stays static — exactly one task entry per registered task (no
   per-element growth); the runtime multiplexes call coroutines.
 * Per-element failures are captured into
-  :class:`molexp.workflow.ParallelExecutionError`; siblings still complete and
+  :class:`molab.workflow.ParallelExecutionError`; siblings still complete and
   their outputs are recorded.
 """
 
@@ -20,14 +20,14 @@ import asyncio
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     EdgeShapeError,
     ParallelExecutionError,
     UnknownTaskError,
-    WorkflowCompiler,
+    Workflow,
     WorkflowRuntime,
 )
-from molexp.workflow.types import Next
+from molab.workflow.types import Next
 
 
 class TestParallel:
@@ -38,7 +38,7 @@ class TestParallel:
         The fan-out width is decided at run time from ``state.results[map_over]``
         and never grows the compile-time task set.
         """
-        wf = WorkflowCompiler(name="no-per-elem-growth", entry="enumerate")
+        wf = Workflow(name="no-per-elem-growth", entry="enumerate")
 
         @wf.task
         async def enumerate(ctx) -> list[int]:
@@ -54,7 +54,7 @@ class TestParallel:
 
         wf.parallel(map_over="enumerate", body="square", join="sum_results", max_concurrency=2)
 
-        compiled = wf.compile()
+        compiled = (wf).compile()
 
         assert {t.name for t in compiled._tasks} == {"enumerate", "square", "sum_results"}, (
             f"Expected exactly 3 task entries, got {sorted(t.name for t in compiled._tasks)}"
@@ -63,7 +63,7 @@ class TestParallel:
     @pytest.mark.asyncio
     async def test_happy_path_maps_then_reduces(self) -> None:
         """Squarer + summer pipeline; ordered per-element list and reduced sum."""
-        wf = WorkflowCompiler(name="parallel-happy", entry="enumerate")
+        wf = Workflow(name="parallel-happy", entry="enumerate")
 
         @wf.task
         async def enumerate(ctx) -> list[int]:
@@ -79,7 +79,7 @@ class TestParallel:
 
         wf.parallel(map_over="enumerate", body="body", join="join", max_concurrency=3)
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert result.outputs["body"] == [1, 4, 9]
         assert result.outputs["join"] == 14
@@ -91,7 +91,7 @@ class TestParallel:
         Element 0 sleeps the longest; the recorded list MUST still be in
         iteration order, not completion order.
         """
-        wf = WorkflowCompiler(name="parallel-order", entry="enumerate")
+        wf = Workflow(name="parallel-order", entry="enumerate")
 
         @wf.task
         async def enumerate(ctx) -> list[float]:
@@ -109,7 +109,7 @@ class TestParallel:
 
         wf.parallel(map_over="enumerate", body="body", join="join", max_concurrency=5)
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert result.outputs["body"] == [0.05, 0.04, 0.03, 0.02, 0.01]
         assert result.outputs["join"] == [0.05, 0.04, 0.03, 0.02, 0.01]
@@ -123,7 +123,7 @@ class TestParallel:
         observed_max = 0
         lock = asyncio.Lock()
 
-        wf = WorkflowCompiler(name="parallel-throttle", entry="enumerate")
+        wf = Workflow(name="parallel-throttle", entry="enumerate")
 
         @wf.task
         async def enumerate(ctx) -> list[int]:
@@ -148,7 +148,7 @@ class TestParallel:
 
         wf.parallel(map_over="enumerate", body="body", join="join", max_concurrency=2)
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute((wf).compile())
         assert result.status == "succeeded"
         assert result.outputs["join"] == 5
         assert observed_max <= 2, f"Expected in-flight cap of 2, observed {observed_max}"
@@ -160,7 +160,7 @@ class TestParallel:
         """
         sibling_completions: list[int] = []
 
-        wf = WorkflowCompiler(name="parallel-failure", entry="enumerate")
+        wf = Workflow(name="parallel-failure", entry="enumerate")
 
         @wf.task
         async def enumerate(ctx) -> list[int]:
@@ -180,7 +180,7 @@ class TestParallel:
         wf.parallel(map_over="enumerate", body="body", join="join", max_concurrency=3)
 
         with pytest.raises(ParallelExecutionError) as exc_info:
-            await WorkflowRuntime().execute(wf.compile())
+            await WorkflowRuntime().execute((wf).compile())
 
         assert exc_info.value.body == "body"
         assert set(exc_info.value.failures.keys()) == {1}
@@ -191,7 +191,7 @@ class TestParallel:
 
     def test_rejects_unregistered_map_over(self) -> None:
         """An unregistered ``map_over`` task name → ``UnknownTaskError``."""
-        wf = WorkflowCompiler(name="bad-map-over", entry="body")
+        wf = Workflow(name="bad-map-over", entry="body")
 
         @wf.task
         async def body(ctx) -> int:
@@ -204,12 +204,12 @@ class TestParallel:
         wf.parallel(map_over="missing", body="body", join="join", max_concurrency=2)
 
         with pytest.raises(UnknownTaskError) as exc_info:
-            wf.compile()
+            (wf).compile()
         assert "missing" in str(exc_info.value)
 
     def test_rejects_body_shared_across_two_parallels(self) -> None:
         """Same ``body`` shared across two parallel decls → ``EdgeShapeError``."""
-        wf = WorkflowCompiler(name="parallel-of-parallel", entry="seed")
+        wf = Workflow(name="parallel-of-parallel", entry="seed")
 
         @wf.task
         async def seed(ctx) -> list[int]:
@@ -231,14 +231,14 @@ class TestParallel:
         wf.parallel(map_over="other_seed", body="shared_body", join="join", max_concurrency=2)
 
         with pytest.raises(EdgeShapeError) as exc_info:
-            wf.compile()
+            (wf).compile()
         assert "shared_body" in str(exc_info.value)
 
     def test_rejects_loop_until_reused_as_parallel_body(self) -> None:
         """A loop ``until`` task reused as a parallel ``body`` → ``EdgeShapeError``
         (a parallel-join and a loop-until cannot be fused onto the same task).
         """
-        wf = WorkflowCompiler(name="loop-parallel-collision", entry="seed")
+        wf = Workflow(name="loop-parallel-collision", entry="seed")
 
         @wf.task
         async def seed(ctx) -> list[int]:
@@ -257,13 +257,13 @@ class TestParallel:
         wf.parallel(map_over="seed", body="join", join="seed", max_concurrency=2)
 
         with pytest.raises(EdgeShapeError):
-            wf.compile()
+            (wf).compile()
 
     def test_rejects_body_with_extra_depends_on(self) -> None:
         """A body declared with extra ``depends_on`` beyond ``[map_over]`` →
         ``EdgeShapeError`` (parallel owns the wiring per D6).
         """
-        wf = WorkflowCompiler(name="body-extra-deps", entry="seed")
+        wf = Workflow(name="body-extra-deps", entry="seed")
 
         @wf.task
         async def seed(ctx) -> list[int]:
@@ -284,4 +284,4 @@ class TestParallel:
         wf.parallel(map_over="seed", body="body", join="join", max_concurrency=2)
 
         with pytest.raises(EdgeShapeError):
-            wf.compile()
+            (wf).compile()

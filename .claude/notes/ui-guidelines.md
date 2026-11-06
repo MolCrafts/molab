@@ -14,11 +14,11 @@ will never be rewritten.
 
 | | |
 |---|---|
-| Frontend root | `ui/` |
+| Frontend root | `apps/web/` |
 | Archetype | `workbench` |
 | Default theme | light, with a real dark theme |
-| Token layer | `ui/src/styles/tailwind.css` |
-| Last ladder stage applied | `motion` on `2026-07-27` (ladder complete); token/density hygiene on `2026-07-31` |
+| Token layer | `apps/web/src/styles/tailwind.css` |
+| Last ladder stage applied | `motion` on `2026-07-27` (ladder complete); token/density hygiene on `2026-07-31`; **`info` experiment** on `2026-08-09` (entity overviews) |
 
 ## Accent
 
@@ -47,7 +47,7 @@ Legacy shadcn aliases (`primary`, `success`, `destructive`, `info`,
 Scientific chart series palettes (including ΔF groups) use oklch
 categorical colors — not brand/status tokens.
 
-Stage 2 conformance is enforced across `ui/src/`: feature code contains no
+Stage 2 conformance is enforced across `apps/web/src/`: feature code contains no
 raw Tailwind palette utilities, arbitrary font sizes, off-scale
 margin/padding/gap values, multi-pixel borders, or unnamed shadows. Overlay
 scrims and the single overlay elevation are local semantic tokens. Version and
@@ -79,9 +79,14 @@ Declared frame in `AppShell` (every route renders into it):
   single-panel work-surface layout.
 - Runs reuses the declared `AppShell` inspector; it does not create a second
   fixed-width inspector inside the work surface.
-- Heartbeat sits at the left of the status line and click triggers the active
+- Heartbeat sits at the left of the status line; **click opens a connection-
+  status popover** (active workspace label/path, link state, remote index). It
+  does **not** trigger refresh — ContextBar and the left-panel list headers own
   refresh. Idle is neutral, an active refresh shows `Syncing…` in running blue,
   and completion gets one neutral 180ms acknowledgement.
+- Active served workspace identity is always visible: ContextBar chip next to
+  MolExp, and a mono subtitle under the Projects list header (even for a single
+  remote mount such as `Arrhenius:/home/…`).
 - Mobile: nav + the same stateful inspector become edge drawers; the status bar
   stays full-width.
 
@@ -99,7 +104,7 @@ Declared frame in `AppShell` (every route renders into it):
 | `WorkbenchOperationState` | Skeleton / live region | loading·empty·error·disabled·running·success |
 | Plan agent set | rail / deliverables / review | PlanOrchestrator UI |
 
-Live under `ui/src/components/workbench/`. Feature chrome uses
+Live under `apps/web/src/components/workbench/`. Feature chrome uses
 `WorkbenchAction*` and `WorkbenchTag`; base `Button variant=` and `Badge`
 remain implementation details of base or product/entity wrappers.
 
@@ -168,6 +173,53 @@ Stage 5 state conformance:
 - Presentation boundaries normalize wire aliases to the fixed Queued /
   Running / Completed / Failed / Cancelled vocabulary and status ramp.
 
+## Data loading
+
+- **TanStack Query is the only source of server state.** `app/state/queries/`
+  owns the client, the `qk` key factory and the invalidation map. No fetching
+  in `useEffect`, no server payloads parked in `useState`, no second cache.
+- **Mutations invalidate the keys they changed**, via a `useInvalidate()`
+  helper (`afterRunVerb`, `afterNoteMutation`, `afterExperimentDelete`, …).
+  A global refresh is not a refresh strategy: it collapses the navigator tree
+  the user just expanded and re-pays every request to show one changed row.
+- **`placeholderData: keepPreviousData` only within the same entity** —
+  re-filtering a list, paging, growing a log tail. Never across an entity
+  switch: run B's page must not render run A's logs under B's header.
+- **Never early-return a whole viewer behind a spinner** when the chrome can
+  render from cached list data. Title, status and breadcrumb come from the
+  row already in cache; only the detail region shows
+  `WorkbenchOperationState kind="loading"`. Every loading / final-empty /
+  error region is that component — no bespoke "Loading…" text.
+- **Initial loading is not final empty, and a failure is not `[]`.** A read
+  error keeps prior content visible and offers Retry; a slice that fails
+  surfaces its own error row rather than silently becoming an empty list.
+- **Hidden tabs do not poll.** `refetchIntervalInBackground: false` plus
+  TanStack's focus manager; `refetchInterval` is a function of the data, so a
+  terminal run cancels its own interval. Polling at all is the fallback for a
+  disconnected change stream (`useFallbackInterval`), not the default.
+- **Prefetch on intent** (`usePrefetchOnIntent`, 120 ms hover/focus delay) for
+  rows whose detail the user is about to open.
+- **Consult the size before fetching a file.** `lib/fileSizeGate.ts` decides
+  from the `sizeBytes` the tree already carries: full load up to 2 MiB,
+  otherwise a notice with the size and an explicit "load anyway" that pulls a
+  bounded 256 KiB window. A truncated view says so and is read-only — saving a
+  prefix back would destroy the rest of the file. Viewers must not discover a
+  multi-GB file by downloading it.
+- **Long trees are virtualized at 100 or more visible rows** (`flattenVisible` +
+  `@tanstack/react-virtual`, fixed 28 px rows). Below the threshold, and when
+  no scroll ancestor is found, every row renders. **Known trade-off: windowing
+  removes off-screen rows from the DOM, so Tab traversal and browser
+  find-in-page do not reach them.** The threshold keeps that confined to trees
+  where the alternative is thousands of DOM nodes; keep the traversal logic in
+  the pure flattener so it stays testable without a DOM.
+- **Heavy renderers are `React.lazy`** with a `WorkbenchOperationState`
+  fallback, and the workflow canvas is split below its own import so flowgram,
+  inversify and monaco stay out of the entry bundle — `bundle-split.test.ts`
+  fails if they come back.
+- The TanStack devtools launcher is **dev-only** (`__DEV__`, stripped from
+  `npm run build`) and is the one sanctioned floating surface — the no-floating-
+  cards rule under *Operation states* still holds for everything shipped.
+
 ## Motion
 
 Stage 6 motion conformance:
@@ -197,11 +249,14 @@ Regenerate with:
 
 ```bash
 .venv/bin/python scripts/dump_openapi.py
-cd ui && npm run generate:api   # includes patch-generated-api.mjs for JSONValue
+npm run generate:api   # root; includes patch-generated-api.mjs for JSONValue
 ```
 
+Run it after any route/schema change. `ui/` is an npm **workspace** member, so
+the binaries live in the repo-root `node_modules/.bin`.
+
 `PlanDetailResponse` tracks PlanOrchestrator fields from the live FastAPI
-schema. Do not hand-edit `ui/src/api/generated/`.
+schema. Do not hand-edit `apps/web/src/api/generated/`.
 
 ## Base primitives installed
 
@@ -221,7 +276,7 @@ plus workbench needs `tree`, `markdown`, `toast`, `thinking-block`,
 | Layout topology | Nav / work surface / inspector (+ plan rail) | IDE-shaped scientific workbench |
 | Information density | High, persistently visible chrome | Edit · configure · run is the dominant task |
 | Panel behavior | Fixed resizable side panels; mobile edge drawers | State survives layout changes |
-| Product component set | Local to `ui/` | Never import MolVis page components |
+| Product component set | Local to `apps/web/` | Never import MolVis page components |
 
 ## Known debt
 
@@ -241,9 +296,100 @@ headers are now opaque (`bg-background`).
 |---|---|---|
 | Two-line Jobs-table rows (~52px) sit above the 28–32px single-line target by design | density | 🟢 |
 | Dashboard-panel drag/remove chrome is hover-only (HTML5 DnD, no touch path) | states | 🟡 |
-| `ui/src/app/renderers/agent/inlineStructure.tsx` tail was reconstructed after the casing cleanup deleted the only copy (macOS case-insensitive FS); review the render block | — | 🟡 |
+| `apps/web/src/app/renderers/agent/inlineStructure.tsx` tail was reconstructed after the casing cleanup deleted the only copy (macOS case-insensitive FS); review the render block | — | 🟡 |
 
 New feature chrome should use the workbench product components rather than
 importing base action or tag primitives directly.
 
 <!-- mol:ui:end -->
+
+## Hierarchy nav & information design (2026-08-09)
+
+Canonical content rules for entity surfaces live in the mol plugin:
+
+`skills/ui/references/information-design.md`
+
+(loaded by `/mol:ui` stage `info` and by the `web-design` agent). This
+section records **MolExp-only** field homes and nav labels; do not fork
+the shared constitution here.
+
+### Navigator label
+
+- Left-rail view `projects` is labeled **Projects** (not Experiments). The tree
+  top level is Project → Experiment → Run; calling the rail "Experiments"
+  misnamed the middle tier as the section root.
+
+### Overview = dashboard, not inventory
+
+Overview tabs are **posture dashboards**, never a second inventory of the
+children that live on Experiments / Runs / Assets tabs.
+
+- Shell: `OverviewSurface` → `DashboardCanvas` (padded, max-width) —
+  air, not edge-to-edge lists.
+- Project: status donut + aggregate metrics.
+- Experiment: richer posture (status, duration, latest run, tasks) +
+  parameter **shadcn Table** + embedded **`WorkflowGraphViewer`** (same
+  component as the Workflow tab — not a text stub).
+- No “Needs attention” / action queues / mini entity lists on Overview.
+- Inventories: Experiments, Runs, Assets tabs own full-height `DataTable`.
+- Run overview: padded canvas + shadcn tables for params / results.
+
+### Entity tabs (MolVis-aligned)
+
+`EntityTabBar` matches MolVis `PanelTabStrip` **topology**: full-width band,
+equal flex columns, line underline + accent text for active. Labels are
+**text only** (no glyph strip) — MolExp is a workbench of named surfaces.
+
+Inventory tabs (Experiments / Runs / Assets / Executions / …) use
+`InventoryCanvas` (same air as Overview) + shadcn / `DataTable` — not card
+lists. Backend-specific run tabs (e.g. **Molq**) register via
+`registerEntityTabContribution` with optional `matches`; never hard-code
+“Scheduler” in core viewers.
+
+### Fact ownership (MolExp chrome)
+
+| Fact | Home | Not on center overview |
+|---|---|---|
+| Tree position / name | Left nav + breadcrumb | Identity card |
+| Lineage (project / experiment / workflow / plan) | Right inspector `RelatedPanel` → **Lineage** (`LINEAGE_RELATIONS`) | Parent crumbs, Related cards |
+| Scalar ids, config_hash, paths | Inspector **Details** (config may appear once truncated+copyable on Run MetaStrip) | Full identity wall |
+| Child status rollup | One `StatusInline` | Parallel StatCard grid of the same counts |
+| Live sync / toasts | Bottom status bar | Center toast stack |
+
+### Hierarchy priority (primary inventory)
+
+| Level | Primary fold content | Pattern notes |
+|---|---|---|
+| **Project** | Experiments table: name, run count, status distribution, workflow task count, updated | Portfolio `StatusInline`; counts in MetaStrip only if decision-bearing |
+| **Experiment** | Runs list/table: status, **varying** param preview, result preview, duration | Fixed params once (strip / constants), never repeated every row; full Runs tab for complete inventory |
+| **Run** | Error banner (if any) + Parameters \| Results property grids | MetaStrip for started/finished/duration/backend/attempts/assets; lineage only in inspector |
+
+### Scientific layers
+
+- **Varying parameters** → Experiment run columns (keys that differ across the set).
+- **Fixed parameters** → once above the table or inspector.
+- **Status** → row glyph + StatusInline; never brand accent as status.
+- **Results** → short mono preview on experiment list; full grid on Run.
+- **Artifacts** → count in MetaStrip; list on Assets / bottom Artifacts.
+
+### Agent procedure (before new overview UI)
+
+1. Name level (Project / Experiment / Run).
+2. Name page job (overview | detail tab | inspector | bottom).
+3. List ≤3 user questions.
+4. Assign every field to a chrome home (table above); demote the rest.
+5. Pick one primary structure (table / MetaStrip / property list) — never default to Card.
+6. Compose with the overview skeleton; audit for fact echo and vanity KPIs.
+
+`/mol:ui info` is the stage that restructures content against this contract
+without inventing a new visual language. Visual stages remain tokens →
+components → de-card → states → motion.
+
+### Info experiment applied (2026-08-09)
+
+| Surface | Change |
+|---|---|
+| Project overview | Dropped MetaStrip `id` + experiments count (table is inventory); kept state/updated/runs/success/assets |
+| Experiment overview | Dropped identity id, KPI `runs` count, Parameters wall, mini Workflow graph; fixed params as one constants strip; run rows prefer **varying** keys; workflow via strip trailing + Workflow tab |
+| Run overview | Hide zero-noise MetaStrip fields (default profile, single attempt, zero assets) |
+| Data | `varyingAxes` / `fixedAxes` on `ExperimentWorkbenchData` |

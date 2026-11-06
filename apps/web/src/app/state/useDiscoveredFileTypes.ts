@@ -1,0 +1,80 @@
+import { useEffect, useMemo, useState } from "react";
+import type { RunFilesResponse } from "@/api";
+import { runsApi } from "@/api";
+import type { SemanticObjectType } from "@/app/types";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
+import type { DiscoveredPlugin } from "@/lib/file-type-discovery";
+import { discoverPluginsForObject, flattenFileNodes } from "@/lib/file-type-discovery";
+import { usePluginPreferencesGeneration } from "@/lib/plugin-preferences";
+
+interface RunCoords {
+  projectId: string;
+  experimentId: string;
+  runId: string;
+  executionId: string;
+}
+
+interface UseDiscoveredFileTypesResult {
+  discovered: DiscoveredPlugin[];
+  /** The attempt's directory — what the discovered paths are relative to. */
+  executionDir: string | null;
+  loading: boolean;
+  error: string | null;
+}
+
+export const useDiscoveredFileTypesForRun = (
+  coords: RunCoords | null,
+  objectType: SemanticObjectType = "run",
+): UseDiscoveredFileTypesResult => {
+  const [response, setResponse] = useState<RunFilesResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!coords) {
+      setResponse(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    runsApi
+      .getRunFiles(coords.projectId, coords.experimentId, coords.runId, coords.executionId)
+      .then((value) => {
+        if (!cancelled) {
+          setResponse(value);
+        }
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          setError(reason instanceof Error ? reason.message : "Failed to load run files");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [coords]);
+
+  // File-type tabs are plugin contributions — refresh when the user toggles them.
+  const pluginPrefsGeneration = usePluginPreferencesGeneration();
+  const contributionGeneration = useContributionGeneration();
+
+  const discovered = useMemo(() => {
+    void pluginPrefsGeneration;
+    void contributionGeneration;
+    if (!response) {
+      return [];
+    }
+    const files = flattenFileNodes(response.nodes);
+    return discoverPluginsForObject(objectType, files);
+  }, [response, objectType, pluginPrefsGeneration, contributionGeneration]);
+
+  return { discovered, executionDir: response?.runDir ?? null, loading, error };
+};

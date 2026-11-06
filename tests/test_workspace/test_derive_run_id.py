@@ -1,13 +1,13 @@
 """Tests for ``derive_run_id`` — the content-addressed run-id helper.
 
-``derive_run_id`` (``molexp.workspace.utils``) canonicalizes a params dict to a
+``derive_run_id`` (``molab.workspace.utils``) canonicalizes a params dict to a
 deterministic, order-invariant, ``length``-char lowercase-hex id; identical
 params always map to the same id (run materialization is idempotent).
 """
 
 from __future__ import annotations
 
-from molexp.workspace.utils import derive_run_id
+from molab.workspace.utils import derive_run_id
 
 
 class TestDeriveRunId:

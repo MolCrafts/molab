@@ -1,6 +1,6 @@
 """A workflow executed with no workspace attached.
 
-Matches ``docs/getting-started/first-workflow.md``.
+Matches ``docs/en/getting-started/first-workflow.md``.
 
 The point of this example is that a workflow is independent of the workspace
 model: you can compile and execute one entirely in memory. Persistent runs,
@@ -13,13 +13,11 @@ Run directly::
 
 from __future__ import annotations
 
-import asyncio
-
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow
 
 
-async def main() -> None:
-    wf = WorkflowCompiler(name="first-workflow")
+def main() -> None:
+    wf = Workflow(name="first-workflow")
 
     @wf.task
     async def load() -> list[int]:
@@ -35,13 +33,11 @@ async def main() -> None:
     async def total(square: list[int]) -> int:
         return sum(square)
 
-    compiled = wf.compile()
-    result = await WorkflowRuntime().execute(compiled)
-
-    print(f"workflow_id: {compiled.workflow_id}")
+    print(f"hash: {wf.compile().workflow_hash}")
+    result = wf.run()
     print(f"status:      {result.status}")
     print(f"outputs:     {result.outputs}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

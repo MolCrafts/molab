@@ -1,0 +1,216 @@
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { defineConfig } from '@rsbuild/core';
+import { pluginReact } from '@rsbuild/plugin-react';
+import { RsdoctorRspackPlugin } from '@rsdoctor/rspack-plugin';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const useRsdoctor = process.env.RSDOCTOR === 'true';
+
+/**
+ * A sibling molpy WASM build (`molwasm/pkg`) wins when present so an
+ * unreleased parser can be tried locally. CI resolves the published
+ * `@molcrafts/molwasm` package.
+ */
+const resolveMolwasm = (): string => {
+  const local = path.resolve(__dirname, '../../../molpy/molwasm/pkg');
+  if (existsSync(path.join(local, 'package.json'))) {
+    return local;
+  }
+  return path.dirname(createRequire(import.meta.url).resolve('@molcrafts/molwasm/package.json'));
+};
+
+// Docs: https://rsbuild.rs/config/
+export default defineConfig(({ command }) => {
+  const useMock = command === 'dev' && process.env.MOLAB_USE_MOCK === 'true';
+
+  return {
+    plugins: [pluginReact()],
+    dev: {
+      // Compiling dynamic imports on demand rewrites module ids while the
+      // first page is still loading Project Overview and the project tree.
+      // The in-flight require then calls a factory that is no longer there.
+      lazyCompilation: false,
+    },
+    resolve: {
+      alias: {
+        '@molcrafts/molwasm': resolveMolwasm(),
+        // Sibling checkouts win. This tree has no `molcrafts-ui/packages/*`,
+        // so the published packages (and the in-repo markdown stand-in) are
+        // what the dev server actually resolves.
+        '@molcrafts/ui/file-tree': existsSync(
+          path.resolve(__dirname, '../../../molcrafts-ui/packages/ui/src/lib/file-tree.ts'),
+        )
+          ? path.resolve(__dirname, '../../../molcrafts-ui/packages/ui/src/lib/file-tree.ts')
+          : path.resolve(__dirname, '../../node_modules/@molcrafts/ui/dist/lib/file-tree.js'),
+        ...(existsSync(
+          path.resolve(__dirname, '../../../molcrafts-ui/packages/vega-lite/src/index.tsx'),
+        )
+          ? {
+              '@molcrafts/ui-vega-lite': path.resolve(
+                __dirname,
+                '../../../molcrafts-ui/packages/vega-lite/src/index.tsx',
+              ),
+            }
+          : {}),
+        ...(existsSync(path.resolve(__dirname, '../../../molcrafts-ui/packages/vega/src/index.tsx'))
+          ? {
+              '@molcrafts/ui-vega': path.resolve(
+                __dirname,
+                '../../../molcrafts-ui/packages/vega/src/index.tsx',
+              ),
+            }
+          : {}),
+        '@molcrafts/ui-markdown': path.resolve(__dirname, 'src/vendor/ui-markdown.tsx'),
+        react: path.resolve(__dirname, '../../node_modules/react'),
+        'react-dom': path.resolve(__dirname, '../../node_modules/react-dom'),
+        // Dynamic import("vega") inside the wrapper must use this app's copy.
+        // Resolve the entry file: the package does not export ./package.json.
+        vega: createRequire(import.meta.url).resolve('vega'),
+        'vega-lite': createRequire(import.meta.url).resolve('vega-lite'),
+        '@schemas': path.resolve(__dirname, '../../src/molab/schemas'),
+        '@molcrafts/molab-plugin/ui': path.resolve(__dirname, '../plugin/src/ui'),
+        '@molcrafts/molab-plugin/testing': path.resolve(__dirname, '../plugin/src/testing.ts'),
+        '@molcrafts/molab-plugin/externals': path.resolve(__dirname, '../plugin/src/externals.ts'),
+        '@molcrafts/molab-plugin': path.resolve(__dirname, '../plugin/src'),
+      },
+    },
+    tools: {
+      // flowgram's free-layout-editor uses inversify DI, which relies on legacy
+      // (stage-2) decorators + emitted decorator metadata at runtime. Enable the
+      // SWC transforms so the canvas core's DI wiring resolves in the bundle.
+      swc: {
+        jsc: {
+          parser: {
+            syntax: 'typescript',
+            tsx: true,
+            decorators: true,
+          },
+          transform: {
+            legacyDecorator: true,
+            decoratorMetadata: true,
+          },
+        },
+      },
+      rspack: {
+        // ``@molcrafts/molwasm`` is a wasm-pack *bundler*-target package: its JS
+        // does ``import * as wasm from "./molrs_bg.wasm"``. Without WebAssembly
+        // module support rspack leaves that import undefined, so molvis-core's
+        // ``Frame.frame_new`` is missing and trajectory rendering crashes.
+        experiments: { asyncWebAssembly: true },
+        plugins: [
+          ...(useRsdoctor
+            ? [
+                new RsdoctorRspackPlugin({
+                  disableClientServer: true,
+                  output: {
+                    mode: 'brief',
+                    options: { type: ['json'] },
+                  },
+                }),
+              ]
+            : []),
+        ],
+      },
+    },
+    splitChunks: {
+      cacheGroups: {
+        markdown: {
+          test: /[\\/]node_modules[\\/](?:katex|rehype-katex|remark-math|remark-gfm|react-markdown|micromark|mdast-|hast-|unified|vfile|property-information)[\\/]/,
+          name: 'lib-markdown',
+          chunks: 'async',
+          priority: 30,
+        },
+        molrs: {
+          test: /[\\/](?:node_modules[\\/]@molcrafts[\\/]molwasm|molpy[\\/]molwasm)[\\/]/,
+          name: 'lib-molrs',
+          chunks: 'async',
+          priority: 30,
+        },
+        babylon: {
+          test: /[\\/]node_modules[\\/]@babylonjs[\\/]/,
+          name: 'lib-babylon',
+          chunks: 'async',
+          priority: 30,
+        },
+        vega: {
+          test: /[\\/]node_modules[\\/](?:vega|vega-lite|vega-embed)[\\/]/,
+          name: 'lib-vega',
+          chunks: 'async',
+          priority: 20,
+        },
+        flowgram: {
+          test: /[\\/]node_modules[\\/]@flowgram\.ai[\\/]/,
+          name: 'lib-flowgram',
+          chunks: 'async',
+          priority: 20,
+        },
+        milkdown: {
+          test: /[\\/]node_modules[\\/](?:@milkdown|prosemirror-)[\\/]/,
+          name: 'lib-milkdown',
+          chunks: 'async',
+          priority: 20,
+        },
+        monaco: {
+          test: /[\\/]node_modules[\\/](?:monaco-editor|@monaco-editor)[\\/]/,
+          name: 'lib-monaco',
+          chunks: 'async',
+          priority: 20,
+        },
+        radix: {
+          test: /[\\/]node_modules[\\/]@radix-ui[\\/]/,
+          name: 'lib-radix',
+          // `all` pulls these modules into an initial chunk whose ids the
+          // dev server then rewrites while a lazy explorer is loading.
+          // The in-flight require calls a factory that is no longer there.
+          chunks: 'async',
+          priority: 10,
+        },
+      },
+    },
+    source: {
+      define: {
+        __USE_MOCK__: useMock,
+      },
+    },
+    server: {
+      // The engine and texlive-basic are a one-time local download (~125 MB,
+      // AGPL). Dev serves them; the production bundle does not copy them
+      // into the wheel.
+      publicDir: {
+        ignore: ["busytex/**"],
+      },
+      // Mock mode is self-contained. Leaving the Python proxy enabled there
+      // turns any intentionally unimplemented fixture into a noisy HPM
+      // connection error when no backend is running.
+      proxy: useMock
+        ? {}
+        : {
+            // API target for `npm run dev:api` / `molab serve --dev`.
+            // Prefer MOLAB_API_PORT (set by the Python CLI); do not pass
+            // --api-port on the rsbuild argv — CAC rejects unknown options.
+            '/api': {
+              target: `http://localhost:${process.env.MOLAB_API_PORT || '8000'}`,
+              changeOrigin: true,
+              // Soft remote (503 needs_auth) is a normal JSON body — do not
+              // log HPM connection errors for closed idle sockets.
+              onError(err, _req, res) {
+                // Only surface real proxy death; ignore ECONNRESET/EPIPE noise.
+                const code = (err as NodeJS.ErrnoException)?.code;
+                if (code === "ECONNRESET" || code === "EPIPE" || code === "ECONNREFUSED") {
+                  if (res && !res.headersSent) {
+                    res.writeHead(503, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: { code: "BACKEND", message: "offline" } }));
+                  }
+                  return;
+                }
+                console.warn("[proxy]", code || err.message);
+              },
+            },
+          },
+    },
+  };
+});

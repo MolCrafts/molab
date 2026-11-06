@@ -1,0 +1,1325 @@
+"""Execution creation, operational state, and sealing.
+
+One attempt is one directory — ``executions/e01``, ``executions/e02`` — and
+one file inside it, ``execution.json``, holds the whole attempt: status,
+executor, environment, emitted artifacts, evidence, error, and (once
+terminal) the seal. Nothing about an attempt is stored anywhere else.
+
+Lock order. Every read-modify-write of ``execution.json`` holds the
+per-execution *state* lock. ``seal`` additionally holds the per-execution
+*seal* lock, and always takes it first: seal -> state, never the reverse. No
+code path holds the state lock and then asks for the seal lock. Locks are
+``file_lock`` (flock / O_EXCL) and are not reentrant, so code already holding
+the state lock calls the lock-free ``_transition_locked`` kernel instead of
+``transition``. History (``_record``) runs outside the state lock, so git never
+blocks a writer of the record. ``merge_remote`` (folding a worker's record from
+another filesystem into the local one) follows the same seal -> state order.
+
+Sealed records are immutable. *Sealing* is how a finished attempt is frozen:
+``seal`` sets ``sealed_at`` and the terminal fields in one write, then history
+commits the record together with the run's asset slots, so a sealed attempt
+leaves a clean tree. After that there is one exception, ``_POST_SEAL_FIELDS``: the
+prune stamp ``pruned_at`` / ``pruned_dirs``, written only by ``mark_pruned``.
+Every other field is never rewritten after ``sealed_at``. *Pruning* deletes a
+sealed attempt's bulk directories (reproducible bytes such as ``out/``) to
+free disk space while keeping its record. The stamp is how the record says
+which directories are gone. ``mark_pruned`` takes only the state lock. It
+never needs the seal lock, because it refuses an unsealed record, and a
+sealed record cannot be sealed again.
+
+Creation-time vs start-time facts. ``create`` writes a QUEUED record with the
+facts known when the attempt is allocated (mode, predecessor, checkpoint,
+``bypass_cache``, ``source``, and the creator's ``environment`` / ``executor``).
+``start`` runs once, from QUEUED only, and adds the facts known when the
+attempt begins (host, python, platform, pid, ``workflow_hash``). It merges
+by adding missing keys and never overwrites a key the creator wrote.
+
+Immutable fields. ``_IMMUTABLE_FIELDS`` is the union of three named sets:
+``_IDENTITY_FIELDS`` (what the attempt is), ``_POST_SEAL_FIELDS`` (the prune
+stamp, written only by ``mark_pruned``) and ``_PROVENANCE_FIELDS`` (the
+creation-time and start-time facts). The union is composed, not copied, so a
+field added to any one set is refused automatically. ``transition`` refuses
+all of them, and is never the way into RUNNING: ``start`` is, and it is the
+only caller that hands start-time provenance to the transition kernel.
+``update_operational`` writes ``executor`` and nothing else, add-only and
+never a start-time key: a cluster scheduler's job id only exists once the job
+has been submitted, which is normally after creation and before start.
+Lifecycle fields (status, seal,
+evidence, artifacts) change only through their own verbs.
+"""
+
+from __future__ import annotations
+
+import builtins
+import hashlib
+import json
+import shutil
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
+from types import MappingProxyType
+from typing import cast
+
+from molab._typing import JSONValue
+
+from ._file_lock import file_lock
+from .asset_repository import content_ref
+from .domain import (
+    ACTIVE_EXECUTION_STATUSES,
+    TERMINAL_EXECUTION_STATUSES,
+    EvidenceRef,
+    Execution,
+    ExecutionMode,
+    ExecutionStatus,
+    RunStatusSummary,
+    SourceManifest,
+)
+from .execution_dirs import execution_dir_names, prunable_dirs
+from .fs import FileSystem, PathArg
+from .fs_local import LocalFS
+from .history import AgentRef, EntityRef, GitHistory, Relation
+from .naming import execution_slug
+from .run_heartbeat import ALIVE_NAME
+from .schema_version import read_versioned_json, write_versioned_json
+
+# Attempts are ``e01``, ``e02``, … with no gaps (the next id is max(seq) + 1).
+# Probing this many files in one ``read_many`` covers a normal run. A longer
+# history, or a directory whose names are not ``eNN``, is listed instead.
+_ATTEMPT_PROBE = 8
+
+
+def prime_execution_records(fs: FileSystem, run_dirs: Sequence[str]) -> None:
+    """Refresh attempt records for *run_dirs* in one remote batch.
+
+    Each run contributes its ``executions/`` directory plus ``execution.json``
+    for ``e01`` through one past the last attempt the pin already knows. One
+    ``read_many`` refreshes status and discovers a new attempt. A run with no
+    ``executions/`` directory is pinned missing and is not listed. A directory
+    that exists but has no ``e01`` is left for :meth:`ExecutionRepository.list`
+    to list, because a legacy attempt name would not appear in this probe.
+
+    Local filesystems are unchanged: the pin this fills belongs to
+    :class:`~molab.workspace.fs_cached.CachedRemoteFS`.
+    """
+    from .fs_cached import CachedRemoteFS
+
+    if not isinstance(fs, CachedRemoteFS) or not run_dirs:
+        return
+    paths: list[str] = []
+    for run_dir in run_dirs:
+        exec_dir = fs.join(run_dir, "executions")
+        paths.append(exec_dir)
+        span = _probe_span(fs, exec_dir)
+        for seq in range(1, span + 1):
+            paths.append(fs.join(exec_dir, execution_slug(seq), "execution.json"))
+    fs.read_many(paths, refresh=True)
+
+
+def _probe_span(fs: object, exec_dir: str) -> int:
+    """How many ``eNN`` files to re-read: one past the last pinned attempt."""
+    from .fs_cached import CachedRemoteFS
+
+    if not isinstance(fs, CachedRemoteFS):
+        return _ATTEMPT_PROBE
+    last = 0
+    for seq in range(1, _ATTEMPT_PROBE + 1):
+        kind = fs.pinned_kind(fs.join(exec_dir, execution_slug(seq), "execution.json"))
+        if kind == "file":
+            last = seq
+            continue
+        if kind == "missing":
+            return min(_ATTEMPT_PROBE, last + 1)
+        return _ATTEMPT_PROBE
+    return _ATTEMPT_PROBE
+
+
+_ALLOWED_TRANSITIONS: dict[ExecutionStatus, frozenset[ExecutionStatus]] = {
+    ExecutionStatus.QUEUED: frozenset({ExecutionStatus.RUNNING}),
+    ExecutionStatus.RUNNING: frozenset({ExecutionStatus.FINALIZING}),
+    # A terminal status is written by ``seal`` (and by ``adopt`` /
+    # ``merge_remote``), never by ``transition``. Those writers set
+    # ``sealed_at`` in the same update.
+    ExecutionStatus.FINALIZING: frozenset(),
+    ExecutionStatus.SUCCEEDED: frozenset(),
+    ExecutionStatus.FAILED: frozenset(),
+    ExecutionStatus.CANCELLED: frozenset(),
+    ExecutionStatus.INTERRUPTED: frozenset(),
+}
+
+_POST_SEAL_FIELDS: frozenset[str] = frozenset({"pruned_at", "pruned_dirs"})
+"""Fields of a sealed Execution that may still be written.
+
+The prune stamp is the single named exception to "sealed means immutable".
+``mark_pruned`` is the only writer of these keys, and it writes nothing else.
+``transition`` and ``update_operational`` both raise ``ValueError`` when an
+update names one of them, so the keys are never set on an open attempt.
+"""
+
+_IDENTITY_FIELDS: frozenset[str] = frozenset(
+    {"id", "seq", "run_id", "project_id", "mode", "created_at", "created_by"}
+)
+"""Fields that say which attempt a record is; fixed by ``create``."""
+
+_CREATION_PROVENANCE_FIELDS: frozenset[str] = frozenset(
+    {
+        "based_on_execution_id",
+        "bypass_cache",
+        "selected_tasks",
+        "source",
+    }
+)
+"""Creation-time facts other than identity; written once, by ``create``."""
+
+_START_PROVENANCE_FIELDS: frozenset[str] = frozenset({"environment", "workflow_hash", "started_at"})
+"""Start-time facts; ``start`` writes them (``environment`` merged, add-only).
+
+``environment`` is here, not in ``_CREATION_PROVENANCE_FIELDS``, because it
+grows at start: the creator's keys are compared key by key (a later record may
+add keys, never change or drop one), not as a whole value.
+"""
+
+_PROVENANCE_FIELDS: frozenset[str] = _CREATION_PROVENANCE_FIELDS | _START_PROVENANCE_FIELDS
+"""Creation-time and start-time facts; never written by an update verb.
+
+``create`` writes the creation-time ones and ``start`` the start-time ones
+(``started_at``, the merged ``environment``, ``workflow_hash``). ``seal``
+also writes one: an attempt sealed straight from QUEUED never started, so
+``seal`` fills ``started_at`` with ``created_at``.
+"""
+
+_IMMUTABLE_FIELDS: frozenset[str] = _IDENTITY_FIELDS | _POST_SEAL_FIELDS | _PROVENANCE_FIELDS
+"""Every field ``transition`` and ``update_operational`` refuse.
+
+Composed from the three named sets rather than listing their members, so a
+field added to any of them (for example a new post-seal field) is refused here
+too. ``executor`` is not in it. When molq (the plugin that submits an
+attempt to a cluster's batch-queue scheduler) hands the job over, the
+scheduler's job id appears only after submission and normally before start,
+so it is recorded afterwards with ``update_operational``.
+"""
+
+_OPERATIONAL_FIELDS: frozenset[str] = frozenset({"executor"})
+"""The only fields ``update_operational`` writes."""
+
+_START_TIME_KEYS: frozenset[str] = frozenset({"host", "pid", "python", "platform"})
+"""Keys known only when an attempt starts; a creator must never write them.
+
+``ExecutionRepository.start`` never overwrites a key already on the record, and
+``run_reaper`` reads ``executor.host`` before ``environment.host``. A creator
+that wrote ``host`` would pin the reaper to a machine the attempt never ran on,
+so ``update_operational`` refuses an ``executor`` update carrying any of them.
+The one definition; ``execution_context`` imports it from here.
+"""
+
+_CREATION_FIELDS: frozenset[str] = _IDENTITY_FIELDS | _CREATION_PROVENANCE_FIELDS
+"""Fields a remote record must share with the local one to be the same attempt.
+
+Composed from the named sets, so a field added to either is compared too.
+"""
+
+_LIFECYCLE_RANK: dict[ExecutionStatus, int] = {
+    ExecutionStatus.QUEUED: 0,
+    ExecutionStatus.RUNNING: 1,
+    ExecutionStatus.FINALIZING: 1,
+    **dict.fromkeys(TERMINAL_EXECUTION_STATUSES, 2),
+}
+"""How far along its lifecycle a status is; a merge may never move a record back."""
+
+_EVIDENCE_FILES = {
+    "runtime": "run.log",
+    "workflow": "workflow.json",
+    "stdout": "stdout.log",
+    "stderr": "stderr.log",
+    "traceback": "traceback.txt",
+}
+
+#: The two stdio evidence files of one attempt, by stream: what
+#: ``molab.print`` and ``ctx.log("stdout" | "stderr")`` append to through the
+#: current execution (D92). A view of ``_EVIDENCE_FILES``, so the names have
+#: one home and seal hashes exactly the files that were written.
+STDIO_FILES: Mapping[str, str] = MappingProxyType(
+    {stream: _EVIDENCE_FILES[stream] for stream in ("stdout", "stderr")}
+)
+
+#: The attempt's own log, ``executions/eNN/run.log`` (``ctx.log("run")``).
+RUN_LOG_FILENAME: str = _EVIDENCE_FILES["runtime"]
+
+#: The record file of one attempt, ``executions/eNN/execution.json``.
+EXECUTION_RECORD_FILENAME = "execution.json"
+
+#: Every file molab writes directly inside an attempt directory: the record,
+#: the owner heartbeat and the evidence files. Beside the declared attempt
+#: directories (``execution_dirs``) these are the only names an attempt holds.
+ATTEMPT_FILES: frozenset[str] = frozenset(
+    {
+        EXECUTION_RECORD_FILENAME,
+        ALIVE_NAME,
+        "metrics.mlp.jsonl",
+        *_EVIDENCE_FILES.values(),
+    }
+)
+
+
+def _resolve_predecessor(
+    mode: ExecutionMode,
+    prior: builtins.list[Execution],
+    based_on_execution_id: str | None,
+) -> Execution | None:
+    """The one predecessor rule shared by ``create`` and ``resolve_predecessor``.
+
+    Args:
+        mode: The requested mode.
+        prior: Every attempt of the run, ordered by ``seq``.
+        based_on_execution_id: The named predecessor; ``None`` means the latest.
+
+    Returns:
+        ``None`` for ``initial``; otherwise the terminal predecessor.
+
+    Raises:
+        ValueError: No attempt exists yet, or one is still active.
+        KeyError: The named predecessor does not exist.
+    """
+    if mode is ExecutionMode.INITIAL:
+        return None
+    if based_on_execution_id is None:
+        if not prior:
+            raise ValueError(f"{mode.value} Execution requires a prior attempt")
+        predecessor = prior[-1]
+    else:
+        found = {item.id: item for item in prior}.get(based_on_execution_id)
+        if found is None:
+            raise KeyError(f"predecessor Execution {based_on_execution_id!r} not found")
+        predecessor = found
+    active = [item.id for item in prior if item.status in ACTIVE_EXECUTION_STATUSES]
+    if active:
+        raise ValueError(
+            f"Execution {active[-1]} is still active; cancel it before creating "
+            f"a {mode.value} Execution"
+        )
+    return predecessor
+
+
+class ExecutionRepository:
+    """Own each Execution independently; never mutates Run history."""
+
+    def __init__(
+        self,
+        workspace_root: PathArg,
+        run_dir: PathArg,
+        *,
+        run_id: str,
+        project_id: str,
+        fs: FileSystem | None = None,
+        history: GitHistory | None = None,
+    ) -> None:
+        self.workspace_root = str(workspace_root)
+        self.run_dir = str(run_dir)
+        self.run_id = run_id
+        self.project_id = project_id
+        self.fs = fs or LocalFS()
+        self.history = history or GitHistory(self.workspace_root)
+
+    # ── layout ───────────────────────────────────────────────────────────
+
+    @property
+    def executions_dir(self) -> str:
+        return self.fs.join(self.run_dir, "executions")
+
+    def execution_dir(self, execution_id: str) -> str:
+        """An attempt's directory. Its id *is* its directory name (``e01``)."""
+        return self.fs.join(self.executions_dir, execution_id)
+
+    def state_path(self, execution_id: str) -> str:
+        return self.fs.join(self.execution_dir(execution_id), "execution.json")
+
+    # ── create ───────────────────────────────────────────────────────────
+
+    def create(
+        self,
+        *,
+        mode: ExecutionMode = ExecutionMode.INITIAL,
+        created_by: AgentRef,
+        based_on_execution_id: str | None = None,
+        executor: dict[str, JSONValue] | None = None,
+        environment: dict[str, JSONValue] | None = None,
+        bypass_cache: bool = False,
+        source: SourceManifest | None = None,
+        selected_tasks: Sequence[str] = (),
+    ) -> Execution:
+        """Allocate the next attempt after validating its mode rules.
+
+        This is the one place a run's ``eNN`` ids are allocated: the id is
+        always the next sequence slug and is never reused. The only caller in
+        ``src`` is ``Run._create_execution``. The record is written QUEUED with
+        its creation-time facts only. Every rule below is checked under the
+        create lock before anything is written, so a refused creation leaves
+        no file and no history commit.
+
+        Mode rules:
+            - No new attempt is created while any attempt of this run is
+              still active (queued / running / finalizing); cancel it first.
+            - A non-``initial`` mode needs a prior attempt. Without
+              *based_on_execution_id* the predecessor is the latest attempt;
+              either way it must be terminal, and ``based_on_execution_id``
+              is recorded as the resolved predecessor.
+            - ``initial``: only before any attempt exists, with no
+              predecessor and no checkpoint.
+            - ``rerun``: after any terminal predecessor, including a
+              succeeded one.
+            - ``resume``: the predecessor must not have succeeded. Task
+              outputs are seeded from the predecessor journal.
+            - ``reproduce``: the predecessor must have succeeded, and the
+              record always has ``bypass_cache=True`` whatever was passed.
+            - A task selection is valid only for ``rerun``.
+
+        Args:
+            mode: How this attempt relates to earlier ones.
+            created_by: The agent creating the attempt.
+            based_on_execution_id: The predecessor attempt; ``None`` means the
+                latest attempt for every mode but ``initial``.
+            executor: Creation-time executor facts (backend, target).
+            environment: Creation-time environment facts (profile, script).
+            bypass_cache: Whether the attempt ignores the workflow node cache;
+                forced to ``True`` for ``reproduce``.
+            source: The captured workflow source, if any.
+            selected_tasks: The tasks a partial ``rerun`` re-executes (empty:
+                every task). Names are checked against the workflow when the
+                attempt starts, not here.
+
+        Returns:
+            The QUEUED record as written.
+
+        Raises:
+            ValueError: ``mode`` and the predecessor / checkpoint disagree, a
+                non-``initial`` mode has no prior attempt, or an attempt of
+                this run is still active.
+            KeyError: The named predecessor, or the checkpoint within it, does
+                not exist.
+            FileExistsError: A record with the next id already exists (for
+                example a legacy directory of that name).
+        """
+        if mode is ExecutionMode.REPRODUCE:
+            bypass_cache = True
+        selection = tuple(dict.fromkeys(selected_tasks))
+        if selection and mode is not ExecutionMode.RERUN:
+            raise ValueError(
+                f"a task selection {list(selection)} is only valid for a rerun attempt, "
+                f"not {mode.value}"
+            )
+        self.fs.mkdir(self.executions_dir, parents=True, exist_ok=True)
+        with file_lock(self._create_lock()):
+            prior = self.list()
+            predecessor = self._validate_creation(
+                mode,
+                prior,
+                based_on_execution_id=based_on_execution_id,
+            )
+            now = datetime.now(UTC)
+            seq = max((item.seq for item in prior), default=0) + 1
+            state = Execution(
+                id=execution_slug(seq),
+                seq=seq,
+                run_id=self.run_id,
+                project_id=self.project_id,
+                mode=mode,
+                status=ExecutionStatus.QUEUED,
+                created_at=now,
+                created_by=created_by,
+                based_on_execution_id=predecessor.id if predecessor else None,
+                executor=executor or {},
+                environment=environment or {},
+                bypass_cache=bypass_cache,
+                source=source,
+                selected_tasks=selection,
+            )
+            if self.fs.exists(self.state_path(state.id)):
+                raise FileExistsError(f"Execution {state.id!r} already exists")
+            self._write_state(state)
+            self._record("ExecutionCreated", state, when=now)
+            return state
+
+    def adopt(
+        self,
+        *,
+        status: ExecutionStatus,
+        created_by: AgentRef,
+        started_at: datetime,
+        finished_at: datetime,
+        moves: Sequence[tuple[PathArg, str]] = (),
+        mode: ExecutionMode = ExecutionMode.INITIAL,
+        based_on_execution_id: str | None = None,
+        executor: dict[str, JSONValue] | None = None,
+        environment: dict[str, JSONValue] | None = None,
+        error: dict[str, JSONValue] | None = None,
+        digest: bool = True,
+    ) -> Execution:
+        """Record an attempt that already ran outside molab, sealed in one write.
+
+        The attempt ran under a scheduler or by hand, before this run existed
+        in a workspace. Its bytes are *moved* (renamed; same filesystem only)
+        into the next ``eNN``, and the record is written once, already sealed,
+        with the times the attempt really started and finished. Nothing is
+        ever QUEUED or RUNNING, so no reaper or dashboard sees a live attempt
+        that is not one.
+
+        Each move is ``(source, attempt-relative destination)``. The
+        destination's first component must be a declared attempt directory
+        (``out/nve``, ``jobs/slurm-1.out``) or an evidence file
+        (``run.log``). With *digest*, every moved path is hashed in place and
+        recorded as ``EvidenceRef(kind="adopted")``, so the record proves which
+        bytes it adopted. If any move or hash fails, every completed move is
+        renamed back and the attempt directory removed: a refused adoption
+        leaves the source as it was and writes no record.
+
+        A file worth citing is registered afterwards as an asset. This method
+        only moves bytes into the attempt.
+
+        Mode rules are ``create``'s.
+
+        Args:
+            status: The terminal status the attempt ended with.
+            created_by: Who adopts the attempt.
+            started_at: When the attempt started.
+            finished_at: When the attempt ended.
+            moves: ``(source, destination)`` pairs.
+            mode: How this attempt relates to earlier ones.
+            based_on_execution_id: The predecessor, when *mode* needs one.
+            executor: Executor facts (scheduler, job ids, host).
+            environment: Environment facts (python, package versions).
+            error: The failure, for a failed attempt.
+            digest: Whether to hash every moved path into the record.
+
+        Returns:
+            The sealed record as written.
+
+        Raises:
+            ValueError: *status* is not terminal, a destination is not inside
+                a declared attempt directory, or the mode rules refuse.
+            FileExistsError: A destination already exists.
+            FileNotFoundError: A source does not exist.
+            NotImplementedError: The workspace filesystem is not local.
+        """
+        if status not in TERMINAL_EXECUTION_STATUSES:
+            raise ValueError(f"cannot adopt an attempt in non-terminal status {status.value!r}")
+        if not isinstance(self.fs, LocalFS):
+            raise NotImplementedError("adopting an attempt moves local bytes; the disk is remote")
+        planned = [(Path(str(src)), _adopted_destination(dest)) for src, dest in moves]
+        for src, _dest in planned:
+            if not src.exists():
+                raise FileNotFoundError(f"cannot adopt {src}: it does not exist")
+        self.fs.mkdir(self.executions_dir, parents=True, exist_ok=True)
+        with file_lock(self._create_lock()):
+            prior = self.list()
+            predecessor = self._validate_creation(
+                mode,
+                prior,
+                based_on_execution_id=based_on_execution_id,
+            )
+            seq = max((item.seq for item in prior), default=0) + 1
+            slug = execution_slug(seq)
+            attempt = Path(self.execution_dir(slug))
+            if attempt.exists():
+                raise FileExistsError(f"Execution {slug!r} already exists")
+            attempt.mkdir(parents=True)
+            done: list[tuple[Path, Path]] = []
+            try:
+                adopted: list[EvidenceRef] = []
+                for src, dest in planned:
+                    target = attempt / dest
+                    if target.exists():
+                        raise FileExistsError(f"{dest} is adopted twice")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    src.rename(target)
+                    done.append((src, target))
+                    if digest and dest not in _EVIDENCE_FILES.values():
+                        content = content_ref(self.fs, target)
+                        adopted.append(
+                            EvidenceRef(
+                                kind="adopted",
+                                rel_path=dest,
+                                digest=content.digest,
+                                size=content.size,
+                            )
+                        )
+                now = datetime.now(UTC)
+                state = Execution(
+                    id=slug,
+                    seq=seq,
+                    run_id=self.run_id,
+                    project_id=self.project_id,
+                    mode=mode,
+                    status=status,
+                    created_at=started_at,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    created_by=created_by,
+                    based_on_execution_id=predecessor.id if predecessor else None,
+                    executor=executor or {},
+                    environment=environment or {},
+                    evidence=(*self._collect_evidence(slug), *adopted),
+                    error=error,
+                    sealed_at=now,
+                )
+                self._write_state(state)
+            except BaseException:
+                for src, target in reversed(done):
+                    src.parent.mkdir(parents=True, exist_ok=True)
+                    target.rename(src)
+                shutil.rmtree(attempt, ignore_errors=True)
+                raise
+        self._record("ExecutionAdopted", state, when=now)
+        return state
+
+    def resolve_predecessor(
+        self,
+        mode: ExecutionMode,
+        based_on_execution_id: str | None,
+    ) -> Execution | None:
+        """Resolve the attempt a new attempt of *mode* would be based on.
+
+        The one predecessor rule: ``create`` applies it under its lock, and
+        ``Run._create_execution`` applies it to inherit the predecessor's
+        config.
+
+        Args:
+            mode: The requested mode.
+            based_on_execution_id: The named predecessor; ``None`` means the
+                latest attempt.
+
+        Returns:
+            ``None`` for ``initial``; otherwise the terminal predecessor.
+
+        Raises:
+            ValueError: The run has no attempt yet, or an attempt of this run
+                (the predecessor included) is still active.
+            KeyError: The named predecessor does not exist.
+        """
+        return _resolve_predecessor(mode, self.list(), based_on_execution_id)
+
+    # ── read ─────────────────────────────────────────────────────────────
+
+    def get(self, execution_id: str) -> Execution:
+        path = self.state_path(execution_id)
+        if not self.fs.exists(path):
+            raise KeyError(f"Execution {execution_id!r} not found under Run {self.run_id!r}")
+        state = Execution.model_validate(read_versioned_json(path, fs=self.fs))
+        if state.run_id != self.run_id:
+            raise ValueError(f"Execution {execution_id!r} belongs to another Run")
+        return state
+
+    def list(self) -> builtins.list[Execution]:
+        from .fs_cached import CachedRemoteFS
+
+        if isinstance(self.fs, CachedRemoteFS):
+            pinned = self._pinned_attempt_paths()
+            if pinned is not None:
+                return self._load_states(pinned)
+        if not self.fs.exists(self.executions_dir):
+            return []
+        paths = [
+            self.fs.join(self.executions_dir, entry.name, "execution.json")
+            for entry in self.fs.ls(self.executions_dir, A=True, l=True)
+            if entry.is_dir
+        ]
+        return self._load_states(paths)
+
+    def _pinned_attempt_paths(self) -> builtins.list[str] | None:
+        """Attempt files the pin already proves, or ``None`` when it does not.
+
+        ``None`` means the caller must list ``executions/``. An empty list
+        means the directory is known to be absent. A contiguous ``e01``…
+        prefix that ends inside the probe window is complete: the next id is
+        never skipped. A directory with no ``e01`` can still hold a legacy
+        attempt name, so that case is listed once and then served from the
+        directory pin.
+        """
+        from .fs_cached import CachedRemoteFS
+
+        fs = self.fs
+        if not isinstance(fs, CachedRemoteFS):
+            return None
+        exec_dir = self.executions_dir
+        kind = fs.pinned_kind(exec_dir)
+        if kind is None:
+            return None
+        if kind == "missing":
+            return []
+        if kind != "dir":
+            return None
+        paths: builtins.list[str] = []
+        for seq in range(1, _ATTEMPT_PROBE + 1):
+            path = self.state_path(execution_slug(seq))
+            file_kind = fs.pinned_kind(path)
+            if file_kind is None:
+                return None
+            if file_kind == "missing":
+                if paths:
+                    return paths
+                return self._paths_from_listing()
+            if file_kind != "file":
+                return None
+            paths.append(path)
+        return self._paths_from_listing()
+
+    def _paths_from_listing(self) -> builtins.list[str] | None:
+        from .fs_cached import CachedRemoteFS
+
+        fs = self.fs
+        if not isinstance(fs, CachedRemoteFS):
+            return None
+        listing = fs.pinned_listing(self.executions_dir)
+        if listing is None:
+            return None
+        return [
+            self.fs.join(self.executions_dir, entry.name, "execution.json")
+            for entry in listing
+            if entry.is_dir
+        ]
+
+    def _load_states(self, paths: builtins.list[str]) -> builtins.list[Execution]:
+        from .fs_cached import CachedRemoteFS
+
+        loaded: dict[str, bytes | Exception] = {}
+        if isinstance(self.fs, CachedRemoteFS) and paths:
+            loaded = self.fs.read_many(paths)
+        states: list[Execution] = []
+        for path in sorted(paths):
+            if not self.fs.exists(path):
+                continue
+            blob = loaded.get(path)
+            if isinstance(blob, bytes):
+                document = json.loads(blob)
+                if isinstance(document, dict):
+                    document.pop("schema_version", None)
+                states.append(Execution.model_validate(document))
+            else:
+                states.append(Execution.model_validate(read_versioned_json(path, fs=self.fs)))
+        return sorted(states, key=lambda item: item.seq)
+
+    def summary(self) -> RunStatusSummary:
+        return RunStatusSummary.from_executions(self.list())
+
+    def record(self, execution_id: str) -> Execution | None:
+        """Return the attempt once sealed; ``None`` while it is still open."""
+        state = self.get(execution_id)
+        return state if state.sealed else None
+
+    # ── transition ───────────────────────────────────────────────────────
+
+    def start(
+        self,
+        execution_id: str,
+        *,
+        environment: dict[str, JSONValue] | None = None,
+        executor: dict[str, JSONValue] | None = None,
+        workflow_hash: str | None = None,
+    ) -> Execution:
+        """Start a QUEUED attempt exactly once, adding its start-time facts.
+
+        The read, the QUEUED check, the merge and the write all happen under
+        the attempt's state lock, so two processes starting the same attempt
+        (a scheduler requeue, a duplicate dispatch) cannot both succeed: the
+        second sees RUNNING and is refused. The history commit is recorded
+        after the lock is released.
+
+        Merge rule: ``environment`` and ``executor`` only add keys the record
+        does not already have. A key written at creation keeps its value, so a
+        starter cannot overwrite a creation-time fact. ``started_at`` is set to
+        the current UTC time and ``workflow_hash`` is written as given; both
+        are always unset on a QUEUED record, so nothing is overwritten.
+
+        Args:
+            execution_id: The attempt to start (``e01``).
+            environment: Start-time environment facts (host, python, platform, pid).
+            executor: Start-time executor facts (kind, host, pid).
+            workflow_hash: Digest of the compiled workflow this attempt runs
+                (``sha256:...``), stored as an opaque string. ``Run.start`` /
+                ``ExecutionContext`` forward it here.
+
+        Returns:
+            The RUNNING record as written.
+
+        Raises:
+            ValueError: The attempt is not QUEUED (already started, or sealed).
+            KeyError: No attempt ``execution_id`` exists under this Run.
+        """
+        with file_lock(self._state_lock(execution_id)):
+            current = self.get(execution_id)
+            if current.status is not ExecutionStatus.QUEUED:
+                raise ValueError(
+                    f"Execution {execution_id!r} is {current.status.value}, not queued; "
+                    "an Execution is started exactly once"
+                )
+            started = self._transition_locked(
+                execution_id,
+                ExecutionStatus.RUNNING,
+                updates={"executor": {**(executor or {}), **current.executor}},
+                provenance={
+                    "started_at": datetime.now(UTC),
+                    "environment": {**(environment or {}), **current.environment},
+                    "workflow_hash": workflow_hash,
+                },
+            )
+        self._record("ExecutionStarted", started, when=started.started_at)
+        return started
+
+    def transition(
+        self,
+        execution_id: str,
+        status: ExecutionStatus,
+        **updates: object,
+    ) -> Execution:
+        """Move the attempt to ``status`` under its state lock.
+
+        Never the way into RUNNING: ``start`` is, because it checks QUEUED
+        under the lock and merges the start-time facts without overwriting.
+
+        Args:
+            execution_id: The attempt to move (``e01``).
+            status: The target status; must be allowed from the current one,
+                and must not be RUNNING.
+            **updates: Extra fields written in the same record update; none
+                may be an identity, provenance or post-seal field.
+
+        Returns:
+            The record as written (unchanged when already in ``status``).
+
+        Raises:
+            ValueError: The transition is not allowed, ``status`` is RUNNING,
+                or ``updates`` names an immutable field (``_IMMUTABLE_FIELDS``).
+            KeyError: No attempt ``execution_id`` exists under this Run.
+        """
+        _refuse_immutable_updates(updates)
+        if status is ExecutionStatus.RUNNING:
+            raise ValueError(
+                f"cannot transition Execution {execution_id!r} to running; "
+                "use start(): an Execution is started exactly once"
+            )
+        with file_lock(self._state_lock(execution_id)):
+            return self._transition_locked(execution_id, status, updates=updates)
+
+    def _transition_locked(
+        self,
+        execution_id: str,
+        status: ExecutionStatus,
+        *,
+        updates: Mapping[str, object] | None = None,
+        provenance: Mapping[str, object] | None = None,
+    ) -> Execution:
+        """Lock-free transition kernel; the caller must hold the state lock.
+
+        Both field sets are explicit mappings, never ``**kwargs``, so a key in
+        ``updates`` can never bind to ``provenance``.
+
+        Args:
+            execution_id: The attempt to move (``e01``).
+            status: The target status; must be allowed from the current one.
+            updates: Extra fields written in the same record update; none may
+                be an identity, provenance or post-seal field.
+            provenance: Start-time provenance, merged in after the check on
+                ``updates``. Only ``start`` passes it.
+
+        Returns:
+            The record as written (unchanged when already in ``status``).
+
+        Raises:
+            ValueError: The transition is not allowed, or ``updates`` names an
+                immutable field (only ``start`` writes provenance and only
+                ``mark_pruned`` writes the prune stamp).
+        """
+        updates = updates or {}
+        _refuse_immutable_updates(updates)
+        current = self.get(execution_id)
+        if status == current.status:
+            return current
+        if status not in _ALLOWED_TRANSITIONS[current.status]:
+            raise ValueError(
+                f"invalid Execution transition: {current.status.value} -> {status.value}"
+            )
+        state = current.model_copy(update={**updates, **(provenance or {}), "status": status})
+        self._write_state(state)
+        return state
+
+    def update_operational(self, execution_id: str, **updates: object) -> Execution:
+        """Update the operational field of an unsealed attempt: ``executor``.
+
+        ``executor`` stays writable because a cluster scheduler's job id is
+        known only after the job is submitted, which is normally after
+        creation and before start. Every other field is refused:
+        ``_IMMUTABLE_FIELDS`` (identity, provenance, prune stamp) first, then
+        the lifecycle fields, which change only through ``start`` /
+        ``transition`` / ``seal``.
+
+        The ``executor`` merge is add-only: the written value is
+        ``{**updates["executor"], **current.executor}``, so a key already on
+        the record (the creator's ``backend`` / ``target``, a fast worker's
+        ``kind`` / ``host`` / ``pid``) keeps its value and only missing keys
+        are added. The read, the merge and the write all happen under the
+        attempt's state lock, the same lock ``start`` takes, so a worker
+        starting the attempt concurrently cannot lose its keys.
+
+        An ``executor`` update carrying a start-time key (``host`` / ``pid``
+        / ``python`` / ``platform``, ``_START_TIME_KEYS``) is refused: only
+        ``start`` writes those, and the reaper reads ``executor.host`` first.
+
+        Args:
+            execution_id: The attempt to update (``e01``).
+            **updates: The operational fields to write (``executor`` only).
+
+        Returns:
+            The record as written.
+
+        Raises:
+            ValueError: The attempt is sealed, ``updates`` names a field other
+                than ``executor``, or the ``executor`` update carries a
+                start-time key.
+            TypeError: The ``executor`` update is not a mapping.
+            KeyError: No attempt ``execution_id`` exists under this Run.
+        """
+        with file_lock(self._state_lock(execution_id)):
+            current = self.get(execution_id)
+            if current.sealed:
+                raise ValueError(f"Execution {execution_id!r} is sealed")
+            overlap = _IMMUTABLE_FIELDS.intersection(updates)
+            if overlap:
+                raise ValueError(
+                    f"cannot update Execution identity or provenance fields: {sorted(overlap)}"
+                )
+            lifecycle = sorted(set(updates) - _OPERATIONAL_FIELDS)
+            if lifecycle:
+                raise ValueError(
+                    "update_operational only updates executor; lifecycle fields change "
+                    f"through start/transition/seal: {lifecycle}"
+                )
+            merged: dict[str, object] = {}
+            if "executor" in updates:
+                executor = updates["executor"]
+                if not isinstance(executor, Mapping):
+                    raise TypeError(
+                        f"executor update must be a mapping, got {type(executor).__name__}"
+                    )
+                start_keys = sorted(_START_TIME_KEYS.intersection(executor))
+                if start_keys:
+                    raise ValueError(
+                        f"cannot write start-time executor keys {start_keys} through "
+                        "update_operational; only start() writes them"
+                    )
+                merged["executor"] = {**executor, **current.executor}
+            state = current.model_copy(update=merged)
+            self._write_state(state)
+            return state
+
+    def merge_remote(self, execution_id: str, document: Mapping[str, object]) -> Execution:
+        """Fold the record a worker wrote on another filesystem into this one.
+
+        ``document`` is the remote ``execution.json`` of the same attempt. Its
+        ``schema_version`` key is dropped (the ``read_versioned_json`` rule, no
+        version gate) and the rest validated as an ``Execution``.
+
+        Merge rule: the remote record wins for status, ``started_at`` /
+        ``finished_at``, ``environment``, artifacts, evidence, error and
+        ``sealed_at``. ``executor`` is merged with the local keys winning (the
+        scheduler job ids); keys only the worker knows (``kind`` / ``host`` /
+        ``pid``) are kept. The status only moves
+        forward, and the prune stamp is never taken from the remote record
+        (``mark_pruned`` is its one writer).
+
+        Creation-time environment rule: every key of the local
+        ``environment`` must be present in the remote one with an equal value.
+        The remote record may only add keys (the worker's start-time facts);
+        it can never replace ``config_hash`` / ``script`` / ``submit_cwd``.
+
+        Locks follow ``seal``: the seal lock for the whole call, the state
+        lock around the read-check-write, and history outside the state lock.
+
+        Args:
+            execution_id: The local attempt the remote record describes (``e01``).
+            document: The remote ``execution.json`` contents.
+
+        Returns:
+            The record as written; the unchanged local record when it was
+            already sealed (a sealed attempt is immutable, so a replayed merge
+            is a no-op).
+
+        Raises:
+            KeyError: No attempt ``execution_id`` exists locally; nothing is
+                created.
+            ValueError: The remote record is another attempt (a
+                ``_CREATION_FIELDS`` value differs); its status is behind the
+                local one (QUEUED < RUNNING / FINALIZING < terminal); it has
+                ``sealed_at`` with a non-terminal status; it carries a prune
+                stamp (``pruned_at`` / ``pruned_dirs``, written only by
+                ``mark_pruned``); or it rewrites or drops a creation-time
+                ``environment`` key. Nothing is written.
+            pydantic.ValidationError: ``document`` is not a valid ``Execution``.
+        """
+        remote = Execution.model_validate(
+            {key: value for key, value in document.items() if key != "schema_version"}
+        )
+        with file_lock(self._seal_lock(execution_id)):
+            with file_lock(self._state_lock(execution_id)):
+                current = self.get(execution_id)
+                if current.sealed:
+                    return current
+                mismatched = sorted(
+                    name
+                    for name in _CREATION_FIELDS
+                    if getattr(remote, name) != getattr(current, name)
+                )
+                if mismatched:
+                    raise ValueError(f"remote execution.json is not this attempt: {mismatched}")
+                if _LIFECYCLE_RANK[remote.status] < _LIFECYCLE_RANK[current.status]:
+                    raise ValueError(
+                        f"remote execution.json status {remote.status.value!r} is behind "
+                        f"local {current.status.value!r}"
+                    )
+                if remote.sealed_at is not None and (
+                    remote.status not in TERMINAL_EXECUTION_STATUSES
+                ):
+                    raise ValueError(
+                        "remote execution.json is sealed with non-terminal status "
+                        f"{remote.status.value!r}"
+                    )
+                if remote.pruned_at is not None or remote.pruned_dirs:
+                    raise ValueError(
+                        "remote execution.json carries a prune stamp; only mark_pruned "
+                        "writes pruned_at / pruned_dirs"
+                    )
+                rewritten = [
+                    key
+                    for key, value in current.environment.items()
+                    if key not in remote.environment or remote.environment[key] != value
+                ]
+                if rewritten:
+                    raise ValueError(
+                        "remote execution.json rewrites creation-time environment: "
+                        f"{sorted(rewritten)}"
+                    )
+                merged = remote.model_copy(
+                    update={
+                        "executor": {**remote.executor, **current.executor},
+                        "pruned_at": current.pruned_at,
+                        "pruned_dirs": current.pruned_dirs,
+                    }
+                )
+                self._write_state(merged)
+            if not merged.sealed:
+                return merged
+            self._record("ExecutionSealed", merged, when=merged.sealed_at)
+            return merged
+
+    # ── seal ─────────────────────────────────────────────────────────────
+
+    def seal(
+        self,
+        execution_id: str,
+        status: ExecutionStatus,
+        *,
+        error: dict[str, JSONValue] | None = None,
+        declaration_diff: dict[str, JSONValue] | None = None,
+    ) -> Execution:
+        """Freeze the attempt in place, then record the fact in history.
+
+        Takes the seal lock, then the state lock (fixed order), so the
+        read-modify-write of the record cannot interleave with
+        ``add_artifact`` / ``add_observed_inputs`` / ``update_operational``:
+        a racing writer either lands before the seal reads the record, or is
+        refused afterwards because the record is sealed. History is recorded
+        after the state lock is released.
+        """
+        with file_lock(self._seal_lock(execution_id)):
+            with file_lock(self._state_lock(execution_id)):
+                sealed, newly_sealed = self._seal_locked(
+                    execution_id,
+                    status,
+                    error=error,
+                    declaration_diff=declaration_diff,
+                )
+            if not newly_sealed:
+                return sealed
+            self._record("ExecutionSealed", sealed, when=sealed.sealed_at)
+            return sealed
+
+    def _seal_locked(
+        self,
+        execution_id: str,
+        status: ExecutionStatus,
+        *,
+        error: dict[str, JSONValue] | None = None,
+        declaration_diff: dict[str, JSONValue] | None = None,
+    ) -> tuple[Execution, bool]:
+        """Seal kernel; the caller must hold the seal lock and the state lock.
+
+        Returns:
+            The sealed record, and whether this call sealed it (``False`` when
+            it was already sealed).
+        """
+        if status not in TERMINAL_EXECUTION_STATUSES:
+            raise ValueError(f"cannot seal non-terminal status {status.value!r}")
+        current = self.get(execution_id)
+        if current.sealed:
+            return current, False
+        if current.status is ExecutionStatus.QUEUED and status in {
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.INTERRUPTED,
+        }:
+            finalizing = current
+        elif current.status is ExecutionStatus.RUNNING:
+            finalizing = self._transition_locked(execution_id, ExecutionStatus.FINALIZING)
+        elif current.status is ExecutionStatus.FINALIZING:
+            finalizing = current
+        else:
+            raise ValueError(f"cannot seal Execution in status {current.status.value!r}")
+
+        finished_at = datetime.now(UTC)
+        sealed = finalizing.model_copy(
+            update={
+                "status": status,
+                "started_at": finalizing.started_at or finalizing.created_at,
+                "finished_at": finished_at,
+                "evidence": tuple(self._collect_evidence(execution_id)),
+                "declaration_diff": declaration_diff or {},
+                "error": error,
+                "sealed_at": finished_at,
+            }
+        )
+        self._write_state(sealed)
+        return sealed, True
+
+    # ── post-seal ────────────────────────────────────────────────────────
+
+    def mark_pruned(self, execution_id: str, dirs: Iterable[str]) -> Execution:
+        """Stamp a sealed attempt with the bulk directories pruned from it.
+
+        This method only records the prune. It deletes nothing, and the caller
+        (``molab.workspace.prune.apply_execution_prune``) removes the bytes.
+        It writes only ``_POST_SEAL_FIELDS``, under the state lock:
+        ``pruned_dirs`` becomes the sorted union of its previous value and
+        ``dirs``, and ``pruned_at`` becomes the current UTC time. Every other
+        field of the sealed record is left untouched. Once the record is
+        written, an ``ExecutionPruned`` fact is recorded in the workspace's git
+        history, outside the lock.
+
+        Args:
+            execution_id: The sealed attempt (``e01``).
+            dirs: Names of the execution directories that were removed. Each
+                must be the name of a directory declared ``prunable`` (see
+                ``molab.workspace.execution_dirs.prunable_dirs``).
+
+        Returns:
+            The record as written.
+
+        Raises:
+            ValueError: A name in ``dirs`` is not a prunable execution
+                directory (checked first, before the record is read), or the
+                attempt is not sealed.
+            KeyError: No attempt ``execution_id`` exists under this Run.
+        """
+        dirs = tuple(dirs)
+        allowed = {d.name for d in prunable_dirs()}
+        refused = sorted(set(dirs) - allowed)
+        if refused:
+            raise ValueError(
+                f"not prunable execution dir(s) {refused!r}; prunable: {sorted(allowed)}"
+            )
+        with file_lock(self._state_lock(execution_id)):
+            current = self.get(execution_id)
+            if not current.sealed:
+                raise ValueError(
+                    f"Execution {execution_id!r} is not sealed; only a sealed attempt is pruned"
+                )
+            update: dict[str, object] = {
+                "pruned_dirs": tuple(sorted(set(current.pruned_dirs) | set(dirs))),
+                "pruned_at": datetime.now(UTC),
+            }
+            state = current.model_copy(update=update)
+            self._write_state(state)
+        self._record("ExecutionPruned", state, when=state.pruned_at)
+        return state
+
+    # ── internals ────────────────────────────────────────────────────────
+
+    def _create_lock(self) -> Path:
+        return self._lock_dir() / f"{self.run_id}.create.lock"
+
+    def _state_lock(self, execution_id: str) -> Path:
+        return self._lock_dir() / f"{self.run_id}.{execution_id}.state.lock"
+
+    def _seal_lock(self, execution_id: str) -> Path:
+        return self._lock_dir() / f"{self.run_id}.{execution_id}.seal.lock"
+
+    def _lock_dir(self) -> Path:
+        path = Path(self.workspace_root) / ".molab" / "locks"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _record(self, event: str, state: Execution, *, when: datetime | None) -> str | None:
+        relations = [
+            Relation(predicate="realizationOf", object=EntityRef(id=state.run_id, type="run"))
+        ]
+        if state.based_on_execution_id:
+            relations.append(
+                Relation(
+                    predicate="wasInformedBy",
+                    object=EntityRef(
+                        id=f"{state.run_id}:{state.based_on_execution_id}", type="execution"
+                    ),
+                )
+            )
+        run_name = self.fs.basename(self.run_dir)
+        return self.history.record(
+            event,
+            subject=EntityRef(id=f"{state.run_id}:{state.id}", type="execution"),
+            agent=state.created_by,
+            relations=tuple(relations),
+            summary=f"{run_name} {state.id} {state.status.value}",
+            paths=(self.run_dir, *self._product_paths()),
+            occurred_at=when,
+        )
+
+    def _product_paths(self) -> tuple[str, ...]:
+        """This run's asset slots on the experiment, so a seal commits its products.
+
+        The concrete slot directories cover new and replaced products; the
+        prefix pathspec covers slots git still tracks that are gone from disk.
+        """
+        from .asset_repository import run_slot_prefix
+        from .naming import ASSET_CONTAINER
+
+        run_dir = str(self.run_dir)
+        prefix = run_slot_prefix(self.fs.basename(run_dir))
+        assets = self.fs.join(self.fs.dirname(self.fs.dirname(run_dir)), ASSET_CONTAINER)
+        if not self.fs.exists(assets):
+            return ()
+        slots = [
+            self.fs.join(assets, name)
+            for name in sorted(self.fs.ls(assets, A=True))
+            if name.startswith(prefix)
+        ]
+        return (*slots, self.fs.join(assets, f"{prefix}*"))
+
+    def _validate_creation(
+        self,
+        mode: ExecutionMode,
+        prior: builtins.list[Execution],
+        *,
+        based_on_execution_id: str | None,
+    ) -> Execution | None:
+        """Apply the mode rules of ``create`` to an already-normalized *mode*."""
+        if mode is ExecutionMode.INITIAL:
+            if prior:
+                raise ValueError("initial Execution is only valid before any attempt exists")
+            if based_on_execution_id:
+                raise ValueError("initial Execution cannot have a predecessor")
+            return None
+        predecessor = cast("Execution", _resolve_predecessor(mode, prior, based_on_execution_id))
+        if mode is ExecutionMode.RESUME and predecessor.status is ExecutionStatus.SUCCEEDED:
+            raise ValueError(
+                f"resume needs a predecessor that did not succeed; {predecessor.id} "
+                "succeeded (rerun or reproduce it instead)"
+            )
+        if mode is ExecutionMode.REPRODUCE and predecessor.status is not ExecutionStatus.SUCCEEDED:
+            raise ValueError("reproduce requires a succeeded predecessor")
+        return predecessor
+
+    def _collect_evidence(self, execution_id: str) -> builtins.list[EvidenceRef]:
+        execution_dir = self.execution_dir(execution_id)
+        result: list[EvidenceRef] = []
+        for kind, rel_path in _EVIDENCE_FILES.items():
+            path = self.fs.join(execution_dir, rel_path)
+            if not self.fs.is_file(path):
+                continue
+            hasher = hashlib.sha256()
+            size = 0
+            with self.fs.open(path, "rb") as handle:
+                while chunk := handle.read(1024 * 1024):
+                    hasher.update(chunk)
+                    size += len(chunk)
+            result.append(
+                EvidenceRef(
+                    kind=kind,
+                    rel_path=rel_path,
+                    digest=f"sha256:{hasher.hexdigest()}",
+                    size=size,
+                )
+            )
+        return result
+
+    def _write_state(self, state: Execution) -> None:
+        _write_execution(self.fs, self.state_path(state.id), state)
+        # Every record write (create, start, seal, adopt, prune, …) refreshes
+        # the run's own ``index.md`` attempt list — never its experiment's: a
+        # parent row carries no hot state. A failed refresh is only logged.
+        from .index_projection import refresh_run_index
+
+        refresh_run_index(self.fs, self.run_dir, lock_root=self.workspace_root)
+
+
+def list_executions(fs: FileSystem, run_dir: PathArg) -> builtins.list[Execution]:
+    """Every attempt record under *run_dir*, ordered by ``seq``. Reads only.
+
+    The read side of :meth:`ExecutionRepository.list` for a caller that has a
+    run directory but no run identity (the ``index.md`` projection).
+    """
+    return ExecutionRepository(run_dir, run_dir, run_id="", project_id="", fs=fs).list()
+
+
+def _adopted_destination(dest: str) -> str:
+    """Normalize an adopted path's attempt-relative destination, or refuse it.
+
+    Raises:
+        ValueError: *dest* is absolute, escapes the attempt, or does not start
+            with a declared attempt directory or an evidence file name.
+    """
+    rel = PurePosixPath(dest)
+    if rel.is_absolute() or ".." in rel.parts or not rel.parts:
+        raise ValueError(f"adopted destination must be attempt-relative: {dest!r}")
+    head = rel.parts[0]
+    if len(rel.parts) == 1 and head in {*_EVIDENCE_FILES.values(), "metrics.mlp.jsonl"}:
+        return rel.as_posix()
+    if len(rel.parts) > 1 and head in execution_dir_names():
+        return rel.as_posix()
+    raise ValueError(
+        f"adopted destination {dest!r} is neither inside a declared attempt directory "
+        f"({sorted(execution_dir_names())}) nor an evidence file ({sorted(_EVIDENCE_FILES.values())})"
+    )
+
+
+def _refuse_immutable_updates(updates: Mapping[str, object]) -> None:
+    """Refuse a transition update that names an immutable field.
+
+    Raises:
+        ValueError: ``updates`` names a post-seal field, or an identity or
+            provenance field.
+    """
+    post_seal = sorted(_POST_SEAL_FIELDS.intersection(updates))
+    if post_seal:
+        raise ValueError(f"cannot write post-seal fields in a transition: {post_seal}")
+    protected = sorted(_IMMUTABLE_FIELDS.intersection(updates))
+    if protected:
+        raise ValueError(
+            f"cannot write identity or provenance fields in a transition: {protected}; "
+            "only create() and start() write them"
+        )
+
+
+def _write_execution(fs: FileSystem, path: str | Path, state: Execution) -> None:
+    """Write one ``execution.json``, the only way that file is ever written.
+
+    Args:
+        fs: The filesystem the record lives on.
+        path: The record's path (``.../executions/e01/execution.json``).
+        state: The validated record; stamped with ``MOLAB_SCHEMA_VERSION``.
+    """
+    fs.mkdir(fs.dirname(path), parents=True, exist_ok=True)
+    write_versioned_json(path, state.model_dump(mode="json"), fs=fs)
+
+
+__all__ = [
+    "ATTEMPT_FILES",
+    "EXECUTION_RECORD_FILENAME",
+    "RUN_LOG_FILENAME",
+    "STDIO_FILES",
+    "ExecutionRepository",
+]

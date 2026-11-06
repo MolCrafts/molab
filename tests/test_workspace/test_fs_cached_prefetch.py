@@ -1,6 +1,6 @@
 """Prefetch walk: partial-failure semantics.
 
-A bad ``experiment.json`` read for one project must not abort the walk;
+A bad experiment ``index.md`` read for one project must not abort the walk;
 it must surface as a :class:`PrefetchWarning` while other projects still
 populate the cache.
 """
@@ -15,13 +15,15 @@ from typing import IO, Any
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.fs import StatResult
-from molexp.workspace.fs_cached import (
-    CachedRemoteFileSystem,
+from molab.fs import DirEntry
+from molab.fs.base import select_ls_entries, select_ls_names
+from molab.workspace import Workspace
+from molab.workspace.fs import StatResult
+from molab.workspace.fs_cached import (
+    CachedRemoteFS,
     prefetch_workspace_indices,
 )
-from molexp.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_local import LocalFS
 
 
 class _ScriptedFS:
@@ -113,15 +115,37 @@ class _ScriptedFS:
     def mkdir(self, path: str, *, parents: bool = True, exist_ok: bool = True) -> None:
         self.dirs.add(str(path))
 
-    def listdir(self, path: str) -> list[str]:
-        self.calls["listdir"] += 1
-        prefix = str(path).rstrip("/") + "/"
+    def ls(
+        self,
+        path: str,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: bool = False,  # noqa: E741
+    ) -> list[str] | list[DirEntry]:
+        self.calls["ls"] += 1
+        key = str(path).rstrip("/")
+        if key in self.files and key not in self.dirs:
+            raise NotADirectoryError(key)
+        prefix = key + "/"
         names: set[str] = set()
-        for k in (*self.files.keys(), *self.dirs):
-            if k.startswith(prefix):
-                tail = k[len(prefix) :]
-                names.add(tail.split("/", 1)[0])
-        return sorted(names)
+        for child in (*self.files, *self.dirs):
+            if child.startswith(prefix):
+                names.add(child[len(prefix) :].split("/", 1)[0])
+        if not l:
+            return select_ls_names(names, a=a, A=A)
+        entries = [
+            DirEntry(
+                name=name,
+                is_dir=any(
+                    item.startswith(prefix + name + "/") for item in (*self.files, *self.dirs)
+                )
+                or (prefix + name) in self.dirs,
+                is_file=(prefix + name) in self.files,
+            )
+            for name in names
+        ]
+        return select_ls_entries(entries, a=a, A=A)
 
     def glob(self, path: str, pattern: str) -> list[str]:
         return []
@@ -160,23 +184,24 @@ class _ScriptedFS:
 
 
 def _seed_workspace(fs: _ScriptedFS, root: str) -> None:
-    """Build a 2-project workspace; ``beta``'s ``experiment.json`` read errors.
+    """Build a 2-project workspace; ``beta``'s experiment ``index.md`` read errors.
 
-    Child names are discovered via ``listdir`` over the seeded child dirs —
-    the entity ``*.json`` (``workspace.json`` / ``project.json`` /
-    ``experiment.json`` / ``run.json``) is the sole truth source.  The
+    Child names are discovered via ``ls`` over the seeded child dirs —
+    each level's ``index.md`` record is the sole truth source.  The
     parent-path ``*.json`` is read only to warm the cache, so no separate
     children-index payload is seeded.
     """
-    fs.files[f"{root}/workspace.json"] = b'{"id":"ws","name":"ws"}'
+    fs.files[f"{root}/index.md"] = b'{"id":"ws","name":"ws"}'
 
-    fs.files[f"{root}/projects/alpha/project.json"] = b'{"id":"alpha","name":"alpha"}'
-    fs.files[f"{root}/projects/alpha/experiments/exp1/experiment.json"] = b'{"id":"exp1"}'
-    fs.files[f"{root}/projects/alpha/experiments/exp1/runs/r1/run.json"] = b'{"id":"r1"}'
+    fs.files[f"{root}/projects/alpha/index.md"] = b'{"id":"alpha","name":"alpha"}'
+    fs.files[f"{root}/projects/alpha/experiments/exp1/index.md"] = b'{"id":"exp1"}'
+    fs.files[f"{root}/projects/alpha/experiments/exp1/runs/r1/index.md"] = b'{"id":"r1"}'
 
-    # Beta exists but its experiment.json read raises a transport error.
-    fs.files[f"{root}/projects/beta/project.json"] = b'{"id":"beta","name":"beta"}'
-    fs.errors[f"{root}/projects/beta/experiment.json"] = ConnectionError("ssh dropped")
+    # Beta exists but its experiment index.md read raises a transport error.
+    fs.files[f"{root}/projects/beta/index.md"] = b'{"id":"beta","name":"beta"}'
+    # The experiment record under experiments/<id>/ — not a children index.
+    fs.errors[f"{root}/projects/beta/experiments/broken/index.md"] = ConnectionError("ssh dropped")
+    fs.files[f"{root}/projects/beta/experiments/broken/index.md"] = b'{"id":"broken"}'
 
 
 @pytest.fixture
@@ -184,27 +209,108 @@ def scripted(tmp_path: Path):
     fs = _ScriptedFS()
     root = "/scratch/me/workspace"
     _seed_workspace(fs, root)
-    cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+    cached = CachedRemoteFS(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
     # Synthesize a Workspace-shaped object with just the attributes prefetch needs.
-    ws = SimpleNamespace(root=root, _fs=cached)
+    ws = SimpleNamespace(root=root, fs=cached)
     return ws, cached, fs
 
 
 class TestPrefetchWorkspaceIndices:
     @pytest.mark.unit
+    def test_meta_mount_prefetch_is_renamed_off_the_knowledge_spelling(self):
+        """The helper serves ``index.md`` Concept mounts, so it is named for
+        them — the knowledge-shaped names are gone, built from
+        ``execution_dir_names`` as before."""
+        from molab.workspace import fs_cached
+
+        assert not hasattr(fs_cached, "_prefetch_knowledge_children")
+        assert "_KNOWLEDGE_SKIP_DEFAULT" not in vars(fs_cached)
+        assert hasattr(fs_cached, "_prefetch_meta_mounts")
+        assert not hasattr(fs_cached, "_META_MOUNT_SKIP")
+        assert "execution_dir_names" in vars(fs_cached)
+
+    @pytest.mark.unit
+    def test_meta_mount_skip_is_derived_at_call_time(self) -> None:
+        from molab.workspace import fs_cached
+        from molab.workspace.execution_dirs import ExecutionDir, register_execution_dir
+
+        register_execution_dir(
+            ExecutionDir(
+                name="late", purpose="registered after import", versioned=False, products=False
+            )
+        )
+        skip = fs_cached._meta_mount_skip()
+
+        assert "late" in skip
+        assert {"projects", "experiments", "runs", "executions"} <= skip
+        assert "zz-unregistered" not in skip
+        assert not hasattr(fs_cached, "_META_MOUNT_SKIP")
+
+    def test_index_file_names_are_entity_and_attempt_records(self) -> None:
+        from molab.workspace.fs_cached import INDEX_FILE_NAMES
+
+        assert {"index.md", "execution.json"} == INDEX_FILE_NAMES
+        assert 'invalidate(scope="indices")' in (INDEX_FILE_NAMES.__doc__ or "")
+
+    def test_prefetch_reads_attempt_records_and_no_children_index(self, tmp_path: Path) -> None:
+        from tests.support.counting_fs import CountingFileSystem
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
+        run_dir = Path(str(run.run_dir))
+        attempt = "0190f0e2-7c1a-7d4e-9b2a-3c4d5e6f7a8b"
+        (run_dir / "executions" / "e01").mkdir(parents=True)
+        (run_dir / "executions" / "e01" / "execution.json").write_text("{}\n", encoding="utf-8")
+        (run_dir / "executions" / attempt).mkdir()
+        (run_dir / "executions" / attempt / "execution.json").write_text("{}\n", encoding="utf-8")
+        (run_dir / "executions" / "notes.txt").write_text("stray\n", encoding="utf-8")
+        disk = CountingFileSystem(LocalFS())
+
+        warnings = prefetch_workspace_indices(SimpleNamespace(root=str(ws.root), fs=disk))
+
+        assert warnings == []
+        assert disk.for_basename("execution.json", "read_text") == 2
+        assert disk.for_basename("projects.json") == 0
+        assert disk.for_basename("experiments.json") == 0
+        assert disk.for_basename("runs.json") == 0
+        assert disk.for_basename("notes.txt") == 0
+
+    @pytest.mark.unit
+    def test_project_level_index_md_mounts_still_prefetch(self, tmp_path: Path):
+        """A Concept mount carrying an ``index.md`` record under a project
+        (an Agent mount, not a knowledge document) is still hydrated."""
+        fs = _ScriptedFS()
+        root = "/scratch/me/workspace"
+        fs.files[f"{root}/index.md"] = b"{}"
+        fs.files[f"{root}/projects/alpha/index.md"] = b'{"id":"alpha"}'
+        # An Agent mount: a child dir with an index.md record + narrative.
+        fs.files[f"{root}/projects/alpha/researcher/index.md"] = b"# researcher\n"
+        fs.dirs.add(f"{root}/projects/alpha/researcher")
+
+        cached = CachedRemoteFS(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        ws = SimpleNamespace(root=root, fs=cached)
+
+        warnings = prefetch_workspace_indices(ws)
+
+        assert warnings == [], warnings
+        cached_paths = cached.cached_paths()
+        assert any("projects/alpha/researcher/index.md" in k for k in cached_paths), cached_paths
+
+    @pytest.mark.unit
     def test_partial_failure_warns_but_healthy_projects_still_hydrate(self, scripted):
         """A single bad node surfaces a warning; the walk continues and the
-        healthy project's ``run.json`` is still hydrated into the cache."""
+        healthy project's run ``index.md`` is still hydrated into the cache."""
         ws, cached, _fs = scripted
         warnings = prefetch_workspace_indices(ws)
 
         bad_paths = [w.path for w in warnings]
-        assert "/scratch/me/workspace/projects/beta/experiment.json" in bad_paths
+        assert "/scratch/me/workspace/projects/beta/experiments/broken/index.md" in bad_paths
         assert any("ssh dropped" in w.reason for w in warnings), warnings
 
-        # Alpha's run.json was read despite beta failing.
+        # Alpha's run index.md was read despite beta failing.
         cached_paths = cached.cached_paths()
-        assert any("alpha/experiments/exp1/runs/r1/run.json" in k for k in cached_paths), (
+        assert any("alpha/experiments/exp1/runs/r1/index.md" in k for k in cached_paths), (
             cached_paths
         )
 
@@ -218,35 +324,29 @@ class TestPrefetchWorkspaceIndices:
         """
         fs = _ScriptedFS()
         root = "/scratch/me/workspace"
-        fs.files[f"{root}/workspace.json"] = b"{}"
-        # No project.json (children-index of projects) — but the directory has
-        # one child whose own project.json exists.
-        fs.files[f"{root}/projects/gamma/project.json"] = b'{"id":"gamma"}'
+        fs.files[f"{root}/index.md"] = b"{}"
+        # No projects.json children-index — but the directory has
+        # one child whose own index.md record exists.
+        fs.files[f"{root}/projects/gamma/index.md"] = b'{"id":"gamma"}'
         fs.dirs.add(f"{root}/projects")
         fs.dirs.add(f"{root}/projects/gamma")
 
-        cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", ttl_seconds=300)
-        ws = SimpleNamespace(root=root, _fs=cached)
+        cached = CachedRemoteFS(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        ws = SimpleNamespace(root=root, fs=cached)
 
         warnings = prefetch_workspace_indices(ws)
         # No warnings — missing children-index is normal for a fresh hierarchy.
         assert warnings == []
         cached_paths = cached.cached_paths()
-        assert any("projects/gamma/project.json" in k for k in cached_paths)
+        assert any("projects/gamma/index.md" in k for k in cached_paths)
 
     @pytest.mark.unit
-    def test_prefetch_reconstructs_tree_and_no_plural_index_files(self, tmp_path: Path):
-        """Full tree is prefetchable from entity ``*.json`` with no plural index.
+    def test_prefetch_reconstructs_tree_without_any_index(self, tmp_path: Path):
+        """The tree is the index: an ``index.md`` record inside each directory.
 
-        workspace-slim-02: the entity ``*.json`` is the sole truth source and
-        the catalog is the derived index.  After a real workspace materializes
-        a project → experiment → run and runs one execution, there must be *no*
-        bare-``pathlib`` plural container-index files (``projects.json`` /
-        ``experiments.json`` / ``runs.json`` / ``executions.json``) anywhere
-        under the root — and the navigation prefetch must still reconstruct the
-        full ``workspace → project → experiment → run`` tree over a cached
-        remote FS, sourcing names via ``self._fs`` (``listdir`` + per-child
-        entity metadata) rather than the deleted ``runs.json`` chain.
+        A parent's ``index:`` block is derived and never read to navigate, so
+        nothing can drift from disk. Prefetch still reconstructs the navigation
+        tree over a cached remote FS by walking the containers.
         """
         root = tmp_path / "ws"
         ws = Workspace(root=root, name="ws")
@@ -256,22 +356,28 @@ class TestPrefetchWorkspaceIndices:
         with run.start():
             pass
 
-        plural = {"projects.json", "experiments.json", "runs.json", "executions.json"}
-        stray = sorted(str(p) for p in root.rglob("*.json") if p.name in plural)
-        assert stray == [], f"plural container-index files must not exist: {stray}"
+        # No children index anywhere.
+        assert not list(root.rglob("projects.json"))
+        assert not list(root.rglob("experiments.json"))
+        assert not list(root.rglob("runs.json"))
+        assert not list(root.rglob("executions.json"))
+        # The record is the index.md on the entity's own directory.
+        assert not (root / "projects" / proj._name / "project.json").exists()
+        assert (root / "projects" / proj._name / "index.md").is_file()
+        assert (root / "projects" / proj._name / "experiments" / exp._name).is_dir()
 
         # Observe the prefetch through a fresh cached remote FS over the same disk.
-        cached = CachedRemoteFileSystem(
-            LocalFileSystem(), mirror_root=tmp_path / "mirror", ttl_seconds=300
-        )
-        nav = SimpleNamespace(root=str(root), _fs=cached)
+        cached = CachedRemoteFS(LocalFS(), mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        nav = SimpleNamespace(root=str(root), fs=cached)
         warnings = prefetch_workspace_indices(nav)
         assert warnings == [], warnings
 
         cached_paths = cached.cached_paths()
-        assert any(p.endswith("/workspace.json") for p in cached_paths), cached_paths
-        assert any(p.endswith("/projects/alpha/project.json") for p in cached_paths), cached_paths
-        assert any(p.endswith("/experiments/counter/experiment.json") for p in cached_paths), (
+        assert any(p.endswith("/index.md") for p in cached_paths), cached_paths
+        assert any(p.endswith(f"/projects/{proj._name}/index.md") for p in cached_paths), (
             cached_paths
         )
-        assert any("/runs/" in p and p.endswith("/run.json") for p in cached_paths), cached_paths
+        assert any(p.endswith(f"/experiments/{exp._name}/index.md") for p in cached_paths), (
+            cached_paths
+        )
+        assert any("/runs/" in p and p.endswith("/index.md") for p in cached_paths), cached_paths

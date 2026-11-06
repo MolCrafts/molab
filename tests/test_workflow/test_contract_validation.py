@@ -1,4 +1,4 @@
-"""Tests for :func:`molexp.workflow.contract.validate_workflow_contract`.
+"""Tests for :func:`molab.workflow.contract.validate_workflow_contract`.
 
 Each :class:`ValidationCheckId` member owns a positive (passes) and a negative
 (fails with the expected ``check_id`` / target / severity) case — one class per
@@ -8,8 +8,12 @@ the per-check severity override.
 
 from __future__ import annotations
 
-from molexp.workflow.contract import (
-    ArtifactDecl,
+import pydantic
+import pytest
+
+from molab.workflow.codec import default_codec
+from molab.workflow.contract import (
+    DeclaredFile,
     TaskInputSpec,
     TaskIO,
     TaskOutputSpec,
@@ -24,41 +28,41 @@ def _emitted_check_ids(report) -> set[ValidationCheckId]:  # type: ignore[no-unt
     return {issue.check_id for issue in report.issues}
 
 
-class TestUniqueArtifactPaths:
+class TestUniqueFilePaths:
     def test_passes_when_paths_distinct(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
-                    artifacts=(ArtifactDecl(path="a/x.json", produced_by="A"),),
+                    files=(DeclaredFile(path="a/x.json", produced_by="A"),),
                 ),
                 TaskIO(
                     task_id="B",
-                    artifacts=(ArtifactDecl(path="b/y.json", produced_by="B"),),
+                    files=(DeclaredFile(path="b/y.json", produced_by="B"),),
                 ),
             ),
         )
         rep = validate_workflow_contract(contract)
-        assert ValidationCheckId.unique_artifact_paths not in _emitted_check_ids(rep)
+        assert ValidationCheckId.unique_file_paths not in _emitted_check_ids(rep)
 
     def test_fails_on_duplicate_path(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
-                    artifacts=(ArtifactDecl(path="dup.json", produced_by="A"),),
+                    files=(DeclaredFile(path="dup.json", produced_by="A"),),
                 ),
                 TaskIO(
                     task_id="B",
-                    artifacts=(ArtifactDecl(path="dup.json", produced_by="B"),),
+                    files=(DeclaredFile(path="dup.json", produced_by="B"),),
                 ),
             ),
         )
         rep = validate_workflow_contract(contract)
-        assert ValidationCheckId.unique_artifact_paths in _emitted_check_ids(rep)
-        issue = next(i for i in rep.issues if i.check_id is ValidationCheckId.unique_artifact_paths)
+        assert ValidationCheckId.unique_file_paths in _emitted_check_ids(rep)
+        issue = next(i for i in rep.issues if i.check_id is ValidationCheckId.unique_file_paths)
         assert issue.target == "dup.json"
         assert issue.severity == "error"
         assert rep.ok is False
@@ -67,7 +71,7 @@ class TestUniqueArtifactPaths:
 class TestAcyclicDataEdges:
     def test_passes_on_dag(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -84,7 +88,7 @@ class TestAcyclicDataEdges:
 
     def test_fails_on_cycle(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -104,7 +108,7 @@ class TestAcyclicDataEdges:
 class TestEveryInputHasSource:
     def test_passes_when_all_inputs_have_source(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -121,7 +125,7 @@ class TestEveryInputHasSource:
 
     def test_fails_without_spec_when_source_none(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -141,11 +145,11 @@ class TestEveryInputHasSource:
 class TestProducedByResolves:
     def test_passes_when_produced_by_known_task(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
-                    artifacts=(ArtifactDecl(path="a.json", produced_by="A"),),
+                    files=(DeclaredFile(path="a.json", produced_by="A"),),
                 ),
             ),
         )
@@ -154,11 +158,11 @@ class TestProducedByResolves:
 
     def test_fails_on_unknown_task(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
-                    artifacts=(ArtifactDecl(path="a.json", produced_by="ghost"),),
+                    files=(DeclaredFile(path="a.json", produced_by="ghost"),),
                 ),
             ),
         )
@@ -172,7 +176,7 @@ class TestProducedByResolves:
 class TestOutputsMatchDownstreamInputs:
     def test_passes_when_names_align(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -189,7 +193,7 @@ class TestOutputsMatchDownstreamInputs:
 
     def test_warns_on_name_mismatch_but_report_stays_ok(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -217,28 +221,25 @@ class TestNoOrphanTasks:
 
     def test_no_op_without_spec(self) -> None:
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(TaskIO(task_id="phantom"),),
         )
         rep = validate_workflow_contract(contract, spec=None)
         assert ValidationCheckId.no_orphan_tasks not in _emitted_check_ids(rep)
 
     def test_passes_when_spec_set_matches_contract(self) -> None:
-        from molexp.workflow.compiler import WorkflowCompiler
-        from molexp.workflow.task import Task
+        from molab.workflow.compiler import Workflow
+        from molab.workflow.task import Task
 
         class Inert(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]
                 return None
 
         spec = (
-            WorkflowCompiler(name="wf")
-            .add(Inert(), name="A")
-            .add(Inert(), name="B", depends_on=["A"])
-            .compile()
-        )
+            Workflow(name="wf").add(Inert(), name="A").add(Inert(), name="B", depends_on=["A"])
+        ).compile()
         contract = WorkflowContract(
-            workflow_id=spec.workflow_id,
+            workflow_hash=spec.workflow_hash,
             task_io=(
                 TaskIO(task_id="A", outputs=(TaskOutputSpec(name="x", type="int"),)),
                 TaskIO(
@@ -251,22 +252,19 @@ class TestNoOrphanTasks:
         assert ValidationCheckId.no_orphan_tasks not in _emitted_check_ids(rep)
 
     def test_fails_when_spec_has_task_absent_from_contract(self) -> None:
-        from molexp.workflow.compiler import WorkflowCompiler
-        from molexp.workflow.task import Task
+        from molab.workflow.compiler import Workflow
+        from molab.workflow.task import Task
 
         class Inert(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]
                 return None
 
         spec = (
-            WorkflowCompiler(name="wf")
-            .add(Inert(), name="A")
-            .add(Inert(), name="B", depends_on=["A"])
-            .compile()
-        )
+            Workflow(name="wf").add(Inert(), name="A").add(Inert(), name="B", depends_on=["A"])
+        ).compile()
         # Contract is missing TaskIO for "B".
         contract = WorkflowContract(
-            workflow_id=spec.workflow_id,
+            workflow_hash=spec.workflow_hash,
             task_io=(TaskIO(task_id="A"),),
         )
         rep = validate_workflow_contract(contract, spec=spec)
@@ -281,7 +279,7 @@ class TestValidationReportAggregation:
         """A consumer promoting ``outputs_match_downstream_inputs`` to error
         severity flips ``report.ok`` to False."""
         contract = WorkflowContract(
-            workflow_id="workflow_00000000",
+            workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
@@ -301,3 +299,10 @@ class TestValidationReportAggregation:
         )
         rep = validate_workflow_contract(contract)
         assert rep.ok is False
+
+
+class TestDictToContract:
+    def test_dict_to_contract_rejects_workflow_id(self) -> None:
+        """A legacy ``workflow_id`` key is not a contract field."""
+        with pytest.raises(pydantic.ValidationError):
+            default_codec.dict_to_contract({"workflow_id": "workflow_00000000"})
