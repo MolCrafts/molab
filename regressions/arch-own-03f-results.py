@@ -32,8 +32,9 @@ import hashlib
 import sys
 import tempfile
 
-from molab.workspace import Workspace
 from molab.workspace.artifact_repository import ArtifactRepository
+
+from molab.workspace import Workspace
 from molab.workspace.domain import ExecutionMode
 
 _USER_BYTES = b'{"user": 1}'

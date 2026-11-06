@@ -27,7 +27,7 @@
     "@milkdown/react": "^7.22.1",
     "@molcrafts/molab-plugin": "*",
     "@molcrafts/molplot": "^0.1.6",
-    "@molcrafts/molwasm": "file:../../../molpy/molwasm/pkg",
+    "@molcrafts/molwasm": "^0.20.0",
     "@molcrafts/molvis-core": "file:../../../molvis/core",
     "@molcrafts/molvis-sketch": "file:../../../molvis/sketch",
     "@molcrafts/molvis-stage": "file:../../../molvis/stage",

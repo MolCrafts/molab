@@ -40,7 +40,7 @@ export const PlanProgress = ({
   if (campaigns.length === 0) return null;
 
   return (
-    <section aria-label="Plan progress" className="mb-8 space-y-5">
+    <section aria-label="Plan progress" className="mb-8 space-y-6">
       <h2 className="text-body font-medium text-foreground">Plan</h2>
       {campaigns.map((campaign) => (
         <div key={campaign.roadmapPath} className="space-y-2">
@@ -72,7 +72,7 @@ export const PlanProgress = ({
                 <span className="font-mono text-micro text-muted-foreground">{index + 1}</span>
                 <span className="min-w-0">
                   <span className="block text-body text-foreground">{stage.title}</span>
-                  <span className="mt-0.5 block text-label text-muted-foreground">
+                  <span className="mt-hairline block text-label text-muted-foreground">
                     {stage.experiment ? (
                       <button
                         type="button"

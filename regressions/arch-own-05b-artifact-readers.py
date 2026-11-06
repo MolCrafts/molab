@@ -7,11 +7,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from molab.workspace.artifact_repository import walk_artifacts
 
 from molab.server.app import create_app
 from molab.server.dependencies import set_workspace_path_override
 from molab.workspace import Workspace
-from molab.workspace.artifact_repository import walk_artifacts
 
 PAYLOAD = b'{"t": 1}\n'
 DIGEST = "sha256:1f0815cc7721e69167e468ea09127f28bc7fd819ffc4304d71f2095b50d89dda"

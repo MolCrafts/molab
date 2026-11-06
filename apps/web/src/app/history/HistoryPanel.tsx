@@ -109,7 +109,7 @@ export const HistoryPanel = (): JSX.Element => {
           {history.data.map((fact) => (
             <li
               key={`${fact.commit}-${fact.subjectId}-${fact.event}`}
-              className="grid gap-0.5 py-2"
+              className="grid gap-hairline py-2"
             >
               <div className="flex items-baseline justify-between gap-3">
                 <span className="text-body text-foreground">{fact.summary || fact.event}</span>

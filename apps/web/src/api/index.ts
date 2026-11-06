@@ -1,4 +1,4 @@
-export { assetsApi, assetOriginText } from "@/api/assets";
+export { assetOriginText, assetsApi } from "@/api/assets";
 export { catalogApi } from "@/api/catalog";
 export { experimentsApi } from "@/api/experiments";
 export { historyApi } from "@/api/history";

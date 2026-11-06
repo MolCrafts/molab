@@ -137,7 +137,7 @@ export const ExperimentStructures = ({ runs }: { runs: readonly RunSummary[] }):
                     type="button"
                     onClick={() => setPicked(row.key)}
                     className={cn(
-                      "flex w-full flex-col items-start rounded-none px-2 py-1.5 text-left",
+                      "flex w-full flex-col items-start rounded-none px-2 py-row-pad text-left",
                       row.key === active?.key
                         ? "bg-accent-muted text-accent-muted-foreground"
                         : "text-muted-foreground hover:bg-interactive hover:text-foreground",
