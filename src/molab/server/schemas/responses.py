@@ -21,9 +21,8 @@ from molab.workspace import (
 )
 from molab.workspace.domain import (
     ACTIVE_EXECUTION_STATUSES,
-    ArtifactOrigin,
     Asset,
-    AssetVersion,
+    ExecutionOrigin,
     ImportOrigin,
     RunStatusSummary,
 )
@@ -288,10 +287,8 @@ class ExecutionResponse(ApiModel):
     startedAt: str | None = None
     finishedAt: str | None = None
     basedOnExecutionId: str | None = None
-    checkpointArtifactId: str | None = None
     executor: dict[str, Any] = Field(default_factory=dict)
     environment: dict[str, Any] = Field(default_factory=dict)
-    artifactIds: list[str] = Field(default_factory=list)
     error: dict[str, Any] | None = None
     selectedTasks: list[str] = Field(
         default_factory=list,
@@ -333,6 +330,7 @@ class RunResponse(ApiModel):
     experimentId: str
     definitionHash: str
     experimentRevisionId: str
+    inputs: list[str] = Field(default_factory=list)
     statusSummary: RunStatusSummaryResponse
     created: str
     finished: str | None = None
@@ -399,10 +397,8 @@ class RunResponse(ApiModel):
                 startedAt=rec.started_at.isoformat() if rec.started_at else None,
                 finishedAt=rec.finished_at.isoformat() if rec.finished_at else None,
                 basedOnExecutionId=rec.based_on_execution_id,
-                checkpointArtifactId=rec.checkpoint_artifact_id,
                 executor=rec.executor,
                 environment=rec.environment,
-                artifactIds=list(rec.artifact_ids),
                 error=rec.error,
                 selectedTasks=list(rec.selected_tasks),
             )
@@ -422,6 +418,7 @@ class RunResponse(ApiModel):
             experimentId=run.ancestor_id(WORKSPACE_EXPERIMENT_KIND),
             definitionHash=run.metadata.definition_hash,
             experimentRevisionId=run.metadata.experiment_revision_id,
+            inputs=list(run.metadata.inputs),
             statusSummary=RunStatusSummaryResponse(
                 total=summary.total,
                 active=summary.active,
@@ -696,24 +693,6 @@ class RunFilesResponse(ApiModel):
     name under scratch is a half-written intermediate."""
 
 
-class ArtifactResponse(ApiModel):
-    id: str
-    executionId: str
-    runId: str
-    projectId: str
-    name: str
-    sourcePath: str
-    digest: str
-    size: int
-    contentKind: str
-    mediaType: str | None = None
-    semanticType: str | None = None
-    declarationId: str | None = None
-    inputEntityIds: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    createdAt: str
-
-
 class ExecutionEvidenceResponse(ApiModel):
     kind: str
     path: str
@@ -726,103 +705,67 @@ class ExecutionOutputsResponse(ApiModel):
     stdout: str | None = None
     stderr: str | None = None
     runtime: str | None = None
-    artifacts: list[ArtifactResponse] = Field(default_factory=list)
+    assets: list[ManagedAssetResponse] = Field(default_factory=list)
     evidence: list[ExecutionEvidenceResponse] = Field(default_factory=list)
     unregistered: list[RunFileNode] = Field(default_factory=list)
     results: dict[str, Any] = Field(default_factory=dict)
 
 
 class ManagedAssetResponse(ApiModel):
+    """One registered file."""
+
     id: str
-    projectId: str
+    projectId: str | None = None
     title: str
     createdAt: str
-    versionCount: int = 0
     ref: str
+    mediaType: str | None = None
+    digest: str
+    size: int
+    file: str
+    originKind: str
+    runId: str | None = None
+    executionId: str | None = None
+    task: str | None = None
+    uri: str | None = None
 
     @classmethod
-    def from_model(cls, asset: Asset, version_count: int) -> ManagedAssetResponse:
+    def from_model(cls, asset: Asset) -> ManagedAssetResponse:
         """Map a domain asset onto the wire.
 
         Args:
             asset: The asset. ``projectId`` comes from its scope.
-            version_count: How many versions the asset has.
 
         Returns:
             The response model.
         """
-        from molab.workspace.refs import ref_of
-
+        origin = asset.origin
+        run_id = execution_id = task = uri = None
+        if isinstance(origin, ExecutionOrigin):
+            run_id = origin.run_id
+            execution_id = origin.execution_id
+            task = origin.task
+        elif isinstance(origin, ImportOrigin):
+            uri = origin.uri
         return cls(
             id=asset.id,
-            projectId=asset.project_id or "",
+            projectId=asset.project_id,
             title=asset.title,
             createdAt=asset.created_at.isoformat(),
-            versionCount=version_count,
-            ref=str(ref_of(asset)),
-        )
-
-
-class AssetVersionResponse(ApiModel):
-    id: str
-    assetId: str
-    sourceArtifactId: str | None = None
-    originKind: Literal["artifact", "import"]
-    originRef: str | None = None
-    originUri: str | None = None
-    importAction: str | None = None
-    version: int
-    digest: str | None = None
-    size: int | None = None
-    contentKind: str | None = None
-    mediaType: str | None = None
-    semanticType: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    createdAt: str
-
-    @classmethod
-    def from_model(cls, version: AssetVersion) -> AssetVersionResponse:
-        """Map one asset version, including its origin, onto the wire.
-
-        Args:
-            version: The version record.
-
-        Returns:
-            The response model. Digest fields are ``None`` when the version
-            has no content reference.
-        """
-        origin = version.origin
-        content = version.content
-        origin_ref: str | None = None
-        origin_uri: str | None = None
-        import_action: str | None = None
-        if isinstance(origin, ArtifactOrigin):
-            origin_ref = origin.ref
-        elif isinstance(origin, ImportOrigin):
-            origin_uri = origin.uri
-            import_action = origin.action
-        return cls(
-            id=version.id,
-            assetId=version.asset_id,
-            sourceArtifactId=version.source_artifact_id,
+            ref=asset.ref,
+            mediaType=asset.media_type,
+            digest=asset.content.digest,
+            size=asset.content.size,
+            file=asset.file,
             originKind=origin.kind,
-            originRef=origin_ref,
-            originUri=origin_uri,
-            importAction=import_action,
-            version=version.version,
-            digest=None if content is None else content.digest,
-            size=None if content is None else content.size,
-            contentKind=None if content is None else content.kind,
-            mediaType=version.media_type,
-            semanticType=version.semantic_type,
-            metadata=dict(version.metadata),
-            createdAt=version.created_at.isoformat(),
+            runId=run_id,
+            executionId=execution_id,
+            task=task,
+            uri=uri,
         )
 
 
-class ArtifactPromotionResponse(ApiModel):
-    asset: ManagedAssetResponse
-    version: AssetVersionResponse
+ExecutionOutputsResponse.model_rebuild()
 
 
 # ── Experiment comparison ───────────────────────────────────────────────────
@@ -834,7 +777,7 @@ class ComparisonRunRow(ApiModel):
     runId: str
     definitionHash: str
     experimentRevisionId: str
-    inputAssetIds: list[str] = Field(default_factory=list)
+    inputs: list[str] = Field(default_factory=list)
     statusSummary: RunStatusSummaryResponse
     parameters: dict[str, Any] = Field(default_factory=dict)
     created: str

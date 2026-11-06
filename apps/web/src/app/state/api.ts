@@ -159,10 +159,8 @@ export const mapRuns = (
         startedAt: item.startedAt,
         finishedAt: item.finishedAt,
         basedOnExecutionId: null,
-        checkpointArtifactId: null,
         executor: item.schedulerJobId ? { scheduler_job_id: item.schedulerJobId } : {},
         environment: {},
-        artifactIds: [],
         error: null,
       }));
     const status = mapStatus(run);
@@ -184,6 +182,7 @@ export const mapRuns = (
       experimentId: run.experimentId || experimentId,
       definitionHash: run.definitionHash ?? "",
       experimentRevisionId: run.experimentRevisionId ?? "",
+      inputs: run.inputs ?? [],
       statusSummary: run.statusSummary ?? {
         total: executions.length,
         active: executions.filter((item) =>
@@ -210,10 +209,8 @@ export const mapRuns = (
         finishedAt: rec.finishedAt ?? null,
         status: rec.status,
         basedOnExecutionId: rec.basedOnExecutionId ?? null,
-        checkpointArtifactId: rec.checkpointArtifactId ?? null,
         executor: rec.executor ?? {},
         environment: rec.environment ?? {},
-        artifactIds: rec.artifactIds ?? [],
         error: rec.error ?? null,
       })),
       errorMessage:
@@ -247,9 +244,9 @@ export const mapAssets = (
         name: asset.title,
         kind: "asset",
         status: "active",
-        summary: `${asset.versionCount ?? 0} version${asset.versionCount === 1 ? "" : "s"}`,
+        summary: asset.originKind,
         updatedAt: asset.createdAt,
-        sizeBytes: null,
+        sizeBytes: asset.size,
         scopeKind: "project",
         projectId: asset.projectId || projectId,
         ref: asset.ref,

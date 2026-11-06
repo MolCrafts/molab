@@ -44,17 +44,17 @@ def _fail_then_retry(run: Run) -> None:
 
 
 class TestAssembleWorkspaceContext:
-    def test_projects_experiments_runs_and_artifacts_assembled_and_ordered(
+    def test_projects_experiments_runs_and_assets_assembled_and_ordered(
         self, tmp_path: Path
     ) -> None:
         ws = _ws(tmp_path)
         exp = ws.add_project("p").add_experiment("e", params={"lr": 1e-3})
         r1 = exp.add_run(params={"seed": 1})
         with r1.start() as ctx:
-            ctx.emit_artifact({"loss": 0.1}, name="m1.json")
+            ctx.register({"loss": 0.1}, title="m1.json")
         r2 = exp.add_run(params={"seed": 2})
         with r2.start() as ctx:
-            ctx.emit_artifact({"loss": 0.2}, name="m2.json")
+            ctx.register({"loss": 0.2}, title="m2.json")
         note = Note.mount(ws, "idea")
         note.write("# Idea\n\nnarrative\n")
 
@@ -64,7 +64,7 @@ class TestAssembleWorkspaceContext:
         assert [e.name for e in c.experiments] == ["e"]
         assert c.experiments[0].project_id == ws.get_project("p").id
         assert len(c.recent_runs) == 2
-        assert len(c.artifacts) >= 2
+        assert len(c.assets) >= 2
         assert "knowledge" not in c.model_dump()
         # recent_runs ordered by finished/started descending
         ts = [(rr.finished_at or rr.started_at) for rr in c.recent_runs]
@@ -85,7 +85,7 @@ class TestAssembleWorkspaceContext:
         assert c.recent_runs == []
         assert c.failed_runs == []
         assert c.running_runs == []
-        assert c.artifacts == []
+        assert c.assets == []
         assert c.stale_or_missing == []
 
     def test_focus_is_echoed_and_assembly_writes_nothing(self, tmp_path: Path) -> None:
@@ -102,11 +102,11 @@ class TestAssembleWorkspaceContext:
 
         rf = exp.add_run(params={"k": 1})
         with rf.start() as ctx:
-            ctx.emit_artifact(b"{}", name="ghost.json")
+            asset = ctx.register(b"{}", title="ghost.json")
             ctx.mark_failed("simulated failure")
-        record = Path(rf.execution_dir("e01")) / "execution.json"
+        record = Path(rf.experiment.assets.payload_path(asset.id)).parent / "asset.json"
         raw = json.loads(record.read_text(encoding="utf-8"))
-        raw["artifacts"][0]["run_id"] = "ghost-run"
+        raw["origin"]["run_id"] = "ghost-run"
         record.write_text(json.dumps(raw), encoding="utf-8")
 
         beat = datetime(2020, 1, 1, tzinfo=UTC)
@@ -124,7 +124,7 @@ class TestAssembleWorkspaceContext:
             kinds = {h.kind for h in c.stale_or_missing}
             assert "failed_run" in kinds
             assert "stale_running" in kinds
-            assert "orphan_artifact" in kinds
+            assert "orphan_asset" in kinds
             assert any(x.run_id == rf.id for x in c.failed_runs)
             assert any(x.run_id == rr.id for x in c.running_runs)
         finally:
@@ -168,15 +168,15 @@ class TestAssembleWorkspaceContext:
         assert bare.id not in ids
 
 
-class TestArtifactRowsIgnoreNamedAssets:
-    def test_emitted_ids_only_and_a_ghost_manifest_adds_nothing(self, tmp_path: Path) -> None:
+class TestAssetRowsIgnoreAGhostManifest:
+    def test_produced_and_imported_assets_appear(self, tmp_path: Path) -> None:
         ws = _ws(tmp_path)
         run = ws.add_project("p").add_experiment("e").add_run()
         with run.start() as ctx:
-            artifact = ctx.emit_artifact(b"{}", name="m.json")
+            produced = ctx.register(b"{}", title="m.json")
         source = tmp_path / "hello.txt"
         source.write_bytes(b"hello\n")
-        imported = ws.assets.import_asset("greeting", source, action="copy")
+        imported = ws.assets.import_asset("greeting", source)
         (Path(str(ws.root)) / "assets.json").write_text(
             '{"assets":[{"id":"ghost-manifest-asset"}]}',
             encoding="utf-8",
@@ -184,9 +184,13 @@ class TestArtifactRowsIgnoreNamedAssets:
 
         assembled = assemble_workspace_context(ws)
 
-        assert [row.asset_id for row in assembled.artifacts] == [artifact.id]
-        assert [row.execution_id for row in assembled.artifacts] == ["e01"]
-        assert imported.id not in {row.asset_id for row in assembled.artifacts}
+        by_id = {row.asset_id: row for row in assembled.assets}
+        assert produced.id in by_id
+        assert imported.id in by_id
+        assert by_id[produced.id].execution_id == "e01"
+        assert by_id[imported.id].execution_id is None
+        ids = [row.asset_id for row in assembled.assets]
+        assert ids.index(imported.id) < ids.index(produced.id)
         flagged = {flag.ref for flag in assembled.stale_or_missing}
         assert "ghost-manifest-asset" not in flagged
         assert imported.id not in flagged

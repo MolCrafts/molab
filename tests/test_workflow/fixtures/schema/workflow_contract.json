@@ -13,7 +13,7 @@
                     "type": "string",
                     "enum": [
                         "no_orphan_tasks",
-                        "unique_artifact_paths",
+                        "unique_file_paths",
                         "acyclic_data_edges",
                         "every_input_has_source",
                         "produced_by_resolves",

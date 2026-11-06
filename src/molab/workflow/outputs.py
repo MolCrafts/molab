@@ -1,24 +1,16 @@
-"""Output markers a task returns to surface run-scoped products.
+"""Output markers a task returns so the engine can register them.
 
-In the pure-task-context model a task writes its files to ``ctx.workdir`` and
-never touches the run. To promote one of those files (or a metric) to a
-**run-scoped** product the body returns a marker as one of its output values;
-the engine — which still holds the ``run_context`` — does the promotion:
+A task writes files under ``ctx.workdir`` and never touches the workspace.
+To register one of those files (or a metric) the body returns a marker as
+one of its output values. The engine, which still holds the execution,
+does the registration:
 
-* :class:`RegisterArtifact` is promoted by the engine via
-  ``RunContext.register_product`` into ``<run_dir>/artifacts/<name>``
-  and recorded in the asset catalog, so the UI (file tree, molvis preview,
-  lineage) discovers it. Driver / worker code that already holds a
-  ``RunContext`` should call ``register_product`` directly.
-* :class:`RegisterMetric` appends a scalar to the run's metrics WAL (densified
-  to Zarr on flush), so the Metrics view plots it.
+* :class:`RegisterAsset` is registered by the engine. The recorded value is
+  ``molab:asset/<id>``. A later task receives the file's path, resolved from
+  that ref at bind time. The journal keeps the ref.
+* :class:`RegisterMetric` appends a scalar to the attempt's metrics WAL.
 
-The marker is replaced in the recorded output by a plain value — the artifact's
-on-disk run path / the metric's number — so a downstream task that binds the
-key by name receives something usable, never the marker object.
-
-Example (the body stays pure — write under ``ctx.workdir``, publish
-with the same verbs as ``RunContext``)::
+Example::
 
     @wf.task
     async def export_lammps(ctx, system) -> dict:
@@ -27,7 +19,7 @@ with the same verbs as ``RunContext``)::
         out = ctx.workdir / "system.data"
         mp.io.write_lammps_data(out, system.to_frame())
         return {
-            "data_file": ctx.register_artifact(out, mime="chemical/x-lammps-data"),
+            "data_file": ctx.register(out, title="system", mime="chemical/x-lammps-data"),
             "n_atoms": ctx.register_metric("n_atoms", system.n_atoms),
         }
 """
@@ -37,30 +29,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["RegisterArtifact", "RegisterMetric"]
+__all__ = ["RegisterAsset", "RegisterMetric"]
 
 
 @dataclass(frozen=True)
-class RegisterArtifact:
-    """Promote a file the task wrote (under ``ctx.workdir``) to a run artifact.
+class RegisterAsset:
+    """Register a file the task wrote (under ``ctx.workdir``) as an asset.
 
     Attributes:
         path: The file the body wrote, typically under ``ctx.workdir``.
-        name: Filename under the run's ``artifacts/`` directory
-            (defaults to ``path.name``).
-        tags: Free-form metadata attached to the registered artifact.
-        mime: Optional MIME hint (e.g. ``"chemical/x-xyz"``).
-        asset: Project-asset title. When set, a body run also files the
-            artifact in the project asset library under this title. The
-            repository versions the one asset with that title, and the same
-            bytes do not add a version. ``None`` leaves it a run artifact.
+        title: Label of the asset. Identity is the content, not the title.
+        tags: Free-form metadata attached to the asset.
+        mime: Optional media type (e.g. ``"chemical/x-xyz"``).
     """
 
     path: Path
-    name: str | None = None
+    title: str
     tags: dict[str, str] | None = None
     mime: str | None = None
-    asset: str | None = None
 
 
 @dataclass(frozen=True)

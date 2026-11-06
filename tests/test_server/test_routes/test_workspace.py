@@ -61,7 +61,7 @@ class TestContextConsumesProjection:
             "recentRuns",
             "failedRuns",
             "runningRuns",
-            "artifacts",
+            "assets",
             "knowledge",
             "staleOrMissing",
         }
@@ -127,30 +127,31 @@ def _find_file(nodes: list[dict[str, object]], name: str) -> dict[str, object] |
 
 
 class TestListWorkspaceFiles:
-    def test_catalog_annotates_emitted_artifact(self, served, tmp_path: Path) -> None:
+    def test_catalog_annotates_registered_payload(self, served, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "ws", name="lab")
-        run = ws.add_project("p").add_experiment("e").add_run()
+        experiment = ws.add_project("p").add_experiment("e")
+        run = experiment.add_run()
         with run.start() as ctx:
-            src = ctx.get_dir("work") / "result.json"
-            src.write_bytes(b'{"t": 1}\n')
-            artifact = ctx.emit_artifact(src, name="result.json", metadata={"task_id": "sim"})
-        rel = Path(run.execution_dir("e01")).resolve().relative_to(Path(str(ws.root)).resolve())
+            asset = ctx.register(b'{"t": 1}\n', title="result.json", mime="application/json")
+        payload = Path(experiment.assets.payload_path(asset.id)).resolve()
+        parent = payload.relative_to(Path(str(ws.root)).resolve()).parent
         with served(ws) as client:
             response = client.get(
                 "/api/workspace/files",
-                params={"path": rel.as_posix(), "include": "catalog", "max_depth": 8},
+                params={"path": parent.as_posix(), "include": "catalog", "max_depth": 2},
             )
         assert response.status_code == 200, response.text
-        node = _find_file(response.json()["children"], "result.json")
+        node = _find_file(response.json()["children"], payload.name)
         assert node is not None
-        assert node["assetId"] == artifact.id
+        assert node["assetId"] == asset.id
         assert node["producerRunId"] == run.id
+        assert node["assetKind"] == "application/json"
 
     def test_catalog_annotates_imported_payload(self, served, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "ws", name="lab")
         source = tmp_path / "hello.txt"
         source.write_bytes(b"hello\n")
-        asset = ws.assets.import_asset("greeting", source, action="copy")
+        asset = ws.assets.import_asset("greeting", source)
         payload = Path(ws.assets.payload_path(asset.id))
         parent = payload.resolve().relative_to(Path(str(ws.root)).resolve())
         with served(ws) as client:
@@ -162,14 +163,14 @@ class TestListWorkspaceFiles:
         node = _find_file(response.json()["children"], payload.name)
         assert node is not None
         assert node["assetId"] == asset.id
-        assert node["assetKind"] == "asset"
+        assert node["assetKind"] == "text/plain"
         assert node["hasPreviewSidecar"] is False
 
     def test_info_counts_one_workspace_import(self, served, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "ws", name="lab")
         source = tmp_path / "hello.txt"
         source.write_bytes(b"hello\n")
-        ws.assets.import_asset("greeting", source, action="copy")
+        ws.assets.import_asset("greeting", source)
         with served(ws) as client:
             response = client.get("/api/workspace/info")
         assert response.status_code == 200, response.text

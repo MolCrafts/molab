@@ -8,13 +8,13 @@
  *   reproduce  — a succeeded predecessor; the request always bypasses the cache
  * An active predecessor (queued, pending, running, finalizing) enables nothing.
  *
- * Harvest is not a creation mode. It is available on succeeded, failed, and cancelled.
+ * Harvest is not a creation mode. It is available on every terminal status.
  */
 
 export const RETRYABLE_STATUSES = new Set(["failed", "cancelled"]);
 
 /** Terminal outcomes that may be interpreted into Knowledge. */
-export const HARVESTABLE_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+export const HARVESTABLE_STATUSES = new Set(["succeeded", "failed", "cancelled", "interrupted"]);
 
 export const TERMINAL_STATUSES = new Set([
   "succeeded",
@@ -137,11 +137,6 @@ export function bypassCacheFor(mode: ExecutionModeValue, requested: boolean): bo
 
 export function canHarvest(status: string): boolean {
   return HARVESTABLE_STATUSES.has(status.toLowerCase());
-}
-
-/** Failed-only domain for analyze_run_failure (cancelled needs force). */
-export function canAnalyzeFailure(status: string): boolean {
-  return status.toLowerCase() === "failed";
 }
 
 export function isTerminalStatus(status: string): boolean {

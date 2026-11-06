@@ -1,19 +1,10 @@
 /** Physical attempts and their products share the mock filesystem used by the explorer. */
 import { HttpResponse, http, type PathParams } from "msw";
-import type { ArtifactResponse } from "../../src/api/generated/models/ArtifactResponse";
 import type { ExecutionAttemptCreateRequest } from "../../src/api/generated/models/ExecutionAttemptCreateRequest";
 import type { ExecutionResponse } from "../../src/api/generated/models/ExecutionResponse";
+import type { ManagedAssetResponse } from "../../src/api/generated/models/ManagedAssetResponse";
 import type { RunFileNode } from "../../src/api/generated/models/RunFileNode";
-import {
-  createDirectory,
-  type FileNode,
-  getAssetVersions,
-  getFile,
-  getRun,
-  setAsset,
-  setRun,
-  writeFile,
-} from "../db";
+import { createDirectory, type FileNode, getFile, getRun, setRun, writeFile } from "../db";
 import { workspaceRoute } from "./workspaceRoute";
 
 const RUN = "/api/projects/:projectId/experiments/:experimentId/runs/:runId";
@@ -27,8 +18,8 @@ const findRun = (params: PathParams) => {
 };
 const missing = () => HttpResponse.json({ detail: "Run or execution not found" }, { status: 404 });
 
-/** The file payload is the single source for both tree nodes and registered Artifact metadata. */
-const artifactsFor = (runId: string, executionId: string): ArtifactResponse[] => {
+/** Files the showcase treats as registered. A checkpoint stays a path, not an asset. */
+const assetsFor = (runId: string, executionId: string): ManagedAssetResponse[] => {
   const run = getRun(runId);
   if (!run || !(run.executions ?? []).some((e) => e.id === executionId)) return [];
   return [
@@ -36,42 +27,36 @@ const artifactsFor = (runId: string, executionId: string): ArtifactResponse[] =>
       suffix: "metrics",
       path: "out/metrics.json",
       mediaType: "application/json",
-      semanticType: "metrics",
+      task: "analyze",
     },
     {
       suffix: "trajectory",
       path: "out/trajectory.xyz",
       mediaType: "chemical/x-xyz",
-      semanticType: "trajectory",
-    },
-    {
-      suffix: "checkpoint",
-      path: "checkpoints/state.json",
-      mediaType: "application/json",
-      semanticType: "checkpoint",
+      task: "simulate",
     },
   ].flatMap((item) => {
     const file = getFile(`${run.path}/executions/${executionId}/${item.path}`);
-    return file
-      ? [
-          {
-            id: `${executionId}-${item.suffix}`,
-            executionId,
-            runId,
-            projectId: run.projectId,
-            name: file.name,
-            sourcePath: item.path,
-            digest: `mock:${executionId}:${item.suffix}`,
-            size: file.size ?? 0,
-            contentKind: "file",
-            mediaType: item.mediaType,
-            semanticType: item.semanticType,
-            inputEntityIds: [],
-            metadata: { synthetic: true },
-            createdAt: run.created,
-          },
-        ]
-      : [];
+    if (!file) return [];
+    const id = `${executionId}-${item.suffix}`;
+    return [
+      {
+        id,
+        projectId: run.projectId,
+        title: file.name,
+        createdAt: run.created,
+        ref: `molab:asset/${id}`,
+        mediaType: item.mediaType,
+        digest: `sha256:mock-${id}`,
+        size: file.size ?? 0,
+        file: item.path,
+        originKind: "execution",
+        runId,
+        executionId,
+        task: item.task,
+        uri: null,
+      },
+    ];
   });
 };
 
@@ -106,18 +91,16 @@ export const executionHandlers = [
       id,
       runId: run.id,
       mode: body.mode ?? "initial",
-      status: body.dispatch === false ? "queued" : "running",
+      status: "running",
       createdAt,
-      startedAt: body.dispatch === false ? null : createdAt,
+      startedAt: createdAt,
       finishedAt: null,
       basedOnExecutionId: body.basedOnExecutionId ?? null,
-      checkpointArtifactId: body.checkpointArtifactId ?? null,
       executor: {
         backend: body.target === "hpc-slurm" ? "molq" : "local",
         target: body.target ?? "laptop",
       },
       environment: { mock: true },
-      artifactIds: [],
       error: null,
     };
     setRun({
@@ -152,8 +135,8 @@ export const executionHandlers = [
     const execution = run?.executions?.find((e) => e.id === params.executionId);
     if (!run || !execution) return missing();
     const root = `/${run.path}/executions/${execution.id}`;
-    const artifacts = artifactsFor(run.id, execution.id);
-    const registered = new Set(artifacts.map((a) => a.sourcePath));
+    const assets = assetsFor(run.id, execution.id);
+    const registered = new Set(assets.map((asset) => asset.file));
     const flatten = (node: FileNode): RunFileNode[] =>
       node.type === "folder" ? (node.children ?? []).flatMap(flatten) : [fileNodes(node, root)];
     const products = getFile(`${root}/out`);
@@ -162,7 +145,7 @@ export const executionHandlers = [
       stdout: getFile(`${root}/run.log`)?.content ?? null,
       stderr: getFile(`${root}/traceback.txt`)?.content ?? null,
       runtime: `Synthetic example · ${execution.executor?.target ?? "laptop"} · Python 3.13`,
-      artifacts,
+      assets,
       evidence: ["execution.json", "workflow.json", "run.log", "traceback.txt"].flatMap((path) => {
         const file = getFile(`${root}/${path}`);
         return file
@@ -245,64 +228,20 @@ export const executionHandlers = [
       message: "Synthetic execution cancelled",
     });
   }),
-  http.get(workspaceRoute(`${ATTEMPT}/artifacts/:artifactId/content`), ({ params }) => {
+  http.get(workspaceRoute(`${ATTEMPT}/assets/:assetId/content`), ({ params }) => {
     const run = findRun(params);
-    const artifact = artifactsFor(String(params.runId), String(params.executionId)).find(
-      (a) => a.id === params.artifactId,
+    const asset = assetsFor(String(params.runId), String(params.executionId)).find(
+      (item) => item.id === params.assetId,
     );
-    if (!run || !artifact) return missing();
-    const file = getFile(`${run.path}/executions/${params.executionId}/${artifact.sourcePath}`);
+    if (!run || !asset) return missing();
+    const file = getFile(`${run.path}/executions/${params.executionId}/${asset.file}`);
     return new HttpResponse(file?.content ?? "", {
       headers: {
-        "Content-Type": artifact.mediaType ?? "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${artifact.name}"`,
+        "Content-Type": asset.mediaType ?? "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${asset.title}"`,
       },
     });
   }),
-  http.post(
-    workspaceRoute(`${ATTEMPT}/artifacts/:artifactId/promote`),
-    async ({ params, request }) => {
-      const run = findRun(params);
-      const artifact = artifactsFor(String(params.runId), String(params.executionId)).find(
-        (a) => a.id === params.artifactId,
-      );
-      if (!run || !artifact) return missing();
-      const body = (await request.json()) as { title?: string; intoAssetId?: string };
-      const id = body.intoAssetId ?? `asset-${artifact.id}`;
-      const now = new Date().toISOString();
-      setAsset({
-        id,
-        projectId: run.projectId,
-        name: body.title ?? artifact.name,
-        title: body.title ?? artifact.name,
-        kind: "artifact",
-        scopeKind: "project",
-        scopeIds: [run.projectId],
-        path: artifact.sourcePath,
-        createdAt: now,
-        updatedAt: now,
-        producer: { run_id: run.id, executionId: String(params.executionId), inputs: [] },
-        tags: {},
-        extra: { size: artifact.size, mime: artifact.mediaType, sourceArtifactId: artifact.id },
-      });
-      writeFile(
-        `/managed-assets/${id}/payload`,
-        getFile(`${run.path}/executions/${params.executionId}/${artifact.sourcePath}`)?.content ??
-          "",
-      );
-      return HttpResponse.json(
-        {
-          id,
-          projectId: run.projectId,
-          title: body.title ?? artifact.name,
-          createdAt: now,
-          versionCount: getAssetVersions(id).length,
-          ref: `molab:project/${run.projectId}/asset/${id}`,
-        },
-        { status: 201 },
-      );
-    },
-  ),
   http.post(workspaceRoute(`${ATTEMPT}/molplot/ingest`), ({ params }) =>
     findRun(params) ? HttpResponse.json({ ingested: 51, warnings: [] }) : missing(),
   ),

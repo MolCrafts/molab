@@ -20,10 +20,8 @@ const attempt = (status: string, mode = "initial"): ExecutionRecordSummary => ({
   finishedAt: status === "running" ? null : "2026-03-01T12:48:00Z",
   status,
   basedOnExecutionId: null,
-  checkpointArtifactId: null,
   executor: {},
   environment: {},
-  artifactIds: [],
   error: status === "failed" ? { type: "RuntimeError", message: "CUDA out of memory" } : null,
 });
 

@@ -1,9 +1,8 @@
-"""Run-route HTTP contracts: executions, artifacts, harvest / analyze-failure."""
+"""Run-route HTTP contracts: executions, assets, and harvest."""
 
 from __future__ import annotations
 
 import inspect
-import json
 import re
 import sys
 from collections.abc import Callable, Iterator
@@ -20,7 +19,7 @@ from molab.server.routes import run as run_routes
 from molab.server.schemas.requests import RunHarvestRequest
 from molab.workflow import Workflow
 from molab.workspace import Experiment, Run, Workspace
-from molab.workspace.domain import Artifact, ExecutionMode, ExecutionStatus
+from molab.workspace.domain import Asset, ExecutionMode, ExecutionStatus
 from molab.workspace.history import AgentRef
 from molab.workspace.models import ComputeTarget
 from molab.workspace.targets import add_target
@@ -28,6 +27,14 @@ from tests.support.records import read_record, write_record
 
 ServedFactory = Callable[..., TestClient]
 RunFixture = tuple[Workspace, Experiment, Run]
+
+
+def _prose(body: str) -> str:
+    """The narrative. Trailing ``- [@…]`` lines are the source edges."""
+    lines = body.splitlines()
+    while lines and (not lines[-1].strip() or lines[-1].startswith("- [@")):
+        lines.pop()
+    return "\n".join(lines).strip()
 
 
 def _run_url(exp: Experiment, run: Run) -> str:
@@ -41,11 +48,11 @@ def _add_hpc_target(ws: Workspace) -> None:
     )
 
 
-def _emit_metrics(run: Run) -> Artifact:
-    """Open ``e01``, emit ``metrics.json`` into ``artifacts/`` and seal it succeeded."""
+def _emit_metrics(run: Run) -> Asset:
+    """Open ``e01``, register ``metrics.json``, and seal it succeeded."""
     with run.start() as ctx:
-        artifact = ctx.emit_artifact({"loss": 0.1}, name="metrics.json")
-    return artifact
+        asset = ctx.register({"loss": 0.1}, title="metrics.json")
+    return asset
 
 
 def _build_wf() -> Workflow:
@@ -60,18 +67,6 @@ def _build_wf() -> Workflow:
         return f"got {double}"
 
     return wf
-
-
-def _find_node(nodes: list[dict[str, object]], rel_path: str) -> dict[str, object] | None:
-    for node in nodes:
-        if node.get("relPath") == rel_path:
-            return node
-        children = node.get("children")
-        if isinstance(children, list):
-            found = _find_node(children, rel_path)
-            if found is not None:
-                return found
-    return None
 
 
 class _DispatchRecorder:
@@ -141,17 +136,11 @@ def submit_recorder(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[_SubmitRec
 
 
 class TestHarvestRunRoute:
-    def test_cls_literal_is_six_classes(self) -> None:
+    def test_cls_matches_harvest_targets(self) -> None:
+        from molab.knowledge.concepts import HARVEST_TARGETS
+
         field = RunHarvestRequest.model_fields["cls"]
-        values = set(get_args(field.annotation))
-        assert values == {
-            "Note",
-            "Literature",
-            "Report",
-            "Finding",
-            "Plan",
-            "Observation",
-        }
+        assert set(get_args(field.annotation)) == set(HARVEST_TARGETS)
         assert "kind" not in RunHarvestRequest.model_fields
 
     def test_plan_is_not_a_harvest_target(
@@ -164,7 +153,6 @@ class TestHarvestRunRoute:
                 json={"cls": "Plan", "narrative": "a plan is not a harvest"},
             )
         assert response.status_code == 422
-        assert "is not a harvest target" in str(response.json())
 
     def test_note_is_not_a_harvest_target(
         self, served: ServedFactory, terminal_run: RunFixture
@@ -176,7 +164,6 @@ class TestHarvestRunRoute:
                 json={"cls": "Note", "narrative": "a note is not a harvest"},
             )
         assert response.status_code == 422
-        assert "is not a harvest target" in str(response.json())
 
     def test_finding_harvests(self, served: ServedFactory, terminal_run: RunFixture) -> None:
         ws, exp, run = terminal_run
@@ -200,30 +187,31 @@ class TestHarvestRunRouteRedirect:
         assert "run.harvest(" not in src
 
 
-class TestAnalyzeRunFailureRoute:
-    def test_no_failure_analysis_identifier(self) -> None:
-        src = inspect.getsource(run_routes.analyze_run_failure_route)
-        assert "FailureAnalysis" not in src
-        assert "analyze_run_failure" in src
-        from molab.server.schemas import requests as reqs
+class TestFailureReportIsHarvest:
+    def test_there_is_no_analyze_failure_verb(self) -> None:
+        assert not hasattr(run_routes, "analyze_run_failure_route")
 
-        assert "FailureAnalysis" not in inspect.getsource(reqs.RunAnalyzeFailureRequest)
-
-    def test_analyze_writes_report(self, served: ServedFactory, failed_run: RunFixture) -> None:
+    def test_a_failed_run_harvests_a_report(
+        self, served: ServedFactory, failed_run: RunFixture
+    ) -> None:
         ws, exp, run = failed_run
         with served(ws) as client:
-            response = client.post(f"{_run_url(exp, run)}/analyze-failure", json={})
+            gone = client.post(f"{_run_url(exp, run)}/analyze-failure", json={})
+            response = client.post(
+                f"{_run_url(exp, run)}/harvest",
+                json={"cls": "Report", "narrative": "The box was smaller than the cutoff."},
+            )
+        assert gone.status_code == 404, gone.text
         assert response.status_code == 200, response.text
         item = next(
             i
             for i in __import__("molab.knowledge", fromlist=["Knowledge"]).Knowledge(ws.root).walk()
             if type(i) is Report
         )
-        # A Knowledge document is a file (``knowledges/<name>.md``), never a
-        # directory carrying a ``report.json`` head.
         assert item.path.is_file()
-        assert item.path.name == f"{item.name}.md"
-        assert item.name.startswith("failure-analysis-")
+        assert item.path.name == f"report-{run.id}.md"
+        assert _prose(item.read()) == "The box was smaller than the cutoff."
+        assert "unique-oom-marker" not in item.read()
 
 
 class TestCancelAndPruneUseTheCores:
@@ -644,7 +632,7 @@ class TestDispatchToMolq:
 
 
 class TestGetExecutionOutputs:
-    """``get_execution_outputs``: stdio, artifacts, evidence of one attempt."""
+    """``get_execution_outputs``: stdio, assets, evidence of one attempt."""
 
     def test_reports_sealed_evidence(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run
@@ -703,18 +691,19 @@ class TestGetExecutionOutputs:
         assert "results.json" not in source
         assert "read_versioned_json" not in inspect.getsource(run_routes)
 
-    def test_lists_emitted_artifacts(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+    def test_lists_registered_assets(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run
-        artifact = _emit_metrics(run)
+        asset = _emit_metrics(run)
         with served(ws) as client:
             response = client.get(f"{_run_url(exp, run)}/executions/e01/outputs")
         assert response.status_code == 200, response.text
-        assert [a["id"] for a in response.json()["artifacts"]] == [artifact.id]
+        assert [item["id"] for item in response.json()["assets"]] == [asset.id]
+        assert response.json()["assets"][0]["ref"] == asset.ref
 
     def test_lists_task_products_once(self, served: ServedFactory, fresh_run: RunFixture) -> None:
-        """A task's ``out/<task>/`` files are listed; a registered artifact is not repeated."""
+        """A task's ``out/<task>/`` files are listed; the registered payload is not."""
         ws, exp, run = fresh_run
-        artifact = _emit_metrics(run)
+        _emit_metrics(run)
         task_dir = run.path / "executions" / "e01" / "out" / "figures"
         task_dir.mkdir(parents=True)
         (task_dir / "fig1.png").write_bytes(b"\x89PNG")
@@ -723,7 +712,6 @@ class TestGetExecutionOutputs:
         assert response.status_code == 200, response.text
         listed = [node["relPath"] for node in response.json()["unregistered"]]
         assert listed == ["out/figures/fig1.png"]
-        assert artifact.path not in listed
 
 
 class TestExecutionLogs:
@@ -852,129 +840,31 @@ class TestExecutionLogs:
         }
 
 
-class TestDownloadArtifactContent:
-    """``download_artifact_content``: stream one emitted artifact's bytes."""
+class TestDownloadAssetContent:
+    """``download_asset_content``: stream one asset this attempt registered."""
 
-    def test_streams_emitted_artifact(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+    def test_streams_registered_asset(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run
-        artifact = _emit_metrics(run)
+        asset = _emit_metrics(run)
         with served(ws) as client:
-            response = client.get(
-                f"{_run_url(exp, run)}/executions/e01/artifacts/{artifact.id}/content"
-            )
+            response = client.get(f"{_run_url(exp, run)}/executions/e01/assets/{asset.id}/content")
         assert response.status_code == 200, response.text
-        on_disk = Path(run.run_dir) / "executions" / "e01" / "artifacts" / "metrics.json"
-        assert response.content == on_disk.read_bytes()
+        assert response.content == Path(run.asset_path(asset.id)).read_bytes()
 
-    def test_unknown_artifact_is_404(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+    def test_unknown_asset_is_404(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run
         _emit_metrics(run)
         with served(ws) as client:
-            response = client.get(f"{_run_url(exp, run)}/executions/e01/artifacts/missing/content")
+            response = client.get(f"{_run_url(exp, run)}/executions/e01/assets/missing/content")
         assert response.status_code == 404
 
     def test_foreign_attempt_is_404(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run
-        artifact = _emit_metrics(run)
+        asset = _emit_metrics(run)
         with run.start(mode=ExecutionMode.RERUN):
             pass
         with served(ws) as client:
-            response = client.get(
-                f"{_run_url(exp, run)}/executions/e02/artifacts/{artifact.id}/content"
-            )
-        assert response.status_code == 404
-
-
-class TestGetRunFiles:
-    """``get_run_files``: the attempt tree, enriched from ``execution.json``."""
-
-    def test_artifact_node_carries_artifact_id(
-        self, served: ServedFactory, fresh_run: RunFixture
-    ) -> None:
-        ws, exp, run = fresh_run
-        artifact = _emit_metrics(run)
-        with served(ws) as client:
-            response = client.get(f"{_run_url(exp, run)}/executions/e01/files")
-        assert response.status_code == 200, response.text
-        node = _find_node(response.json()["nodes"], "artifacts/metrics.json")
-        assert node is not None
-        assert node["assetId"] == artifact.id
-
-    def test_legacy_record_node_carries_artifact_id(
-        self, served: ServedFactory, fresh_run: RunFixture
-    ) -> None:
-        ws, exp, run = fresh_run
-        artifact = _emit_metrics(run)
-        state = run.execution_dir("e01") / "execution.json"
-        raw = json.loads(state.read_text(encoding="utf-8"))
-        raw["artifacts"][0]["path"] = (
-            (run.execution_dir("e01") / artifact.path).relative_to(Path(str(ws.root))).as_posix()
-        )
-        state.write_text(json.dumps(raw), encoding="utf-8")
-        with served(ws) as client:
-            response = client.get(f"{_run_url(exp, run)}/executions/e01/files")
-        assert response.status_code == 200, response.text
-        node = _find_node(response.json()["nodes"], "artifacts/metrics.json")
-        assert node is not None
-        assert node["assetId"] == artifact.id
-
-
-class TestPromoteArtifact:
-    """``promote_artifact``: an emitted artifact becomes a project asset version."""
-
-    def test_promote_creates_asset_version(
-        self, served: ServedFactory, fresh_run: RunFixture
-    ) -> None:
-        ws, exp, run = fresh_run
-        artifact = _emit_metrics(run)
-        with served(ws) as client:
-            response = client.post(
-                f"{_run_url(exp, run)}/executions/e01/artifacts/{artifact.id}/promote",
-                json={},
-            )
-        assert response.status_code == 201, response.text
-        body = response.json()
-        assert body["version"]["sourceArtifactId"] == artifact.id
-        assert body["version"]["digest"] == artifact.content.digest
-        assert body["asset"]["versionCount"] == 1
-
-    def test_promote_again_returns_the_same_asset(
-        self, served: ServedFactory, fresh_run: RunFixture
-    ) -> None:
-        ws, exp, run = fresh_run
-        artifact = _emit_metrics(run)
-        url = f"{_run_url(exp, run)}/executions/e01/artifacts/{artifact.id}/promote"
-        with served(ws) as client:
-            first = client.post(url, json={})
-            second = client.post(url, json={})
-        assert first.status_code == 201, first.text
-        assert second.status_code == 201, second.text
-        assert second.json()["asset"]["id"] == first.json()["asset"]["id"]
-        assert second.json()["version"]["id"] == first.json()["version"]["id"]
-        assert second.json()["asset"]["versionCount"] == 1
-
-    def test_promote_returns_origin(self, served: ServedFactory, fresh_run: RunFixture) -> None:
-        ws, exp, run = fresh_run
-        artifact = _emit_metrics(run)
-        with served(ws) as client:
-            response = client.post(
-                f"{_run_url(exp, run)}/executions/e01/artifacts/{artifact.id}/promote",
-                json={},
-            )
-        assert response.status_code == 201, response.text
-        version = response.json()["version"]
-        assert version["originKind"] == "artifact"
-        assert version["originRef"].startswith("molab:experiment/")
-        assert version["sourceArtifactId"] == artifact.id
-
-    def test_unknown_artifact_is_404(self, served: ServedFactory, fresh_run: RunFixture) -> None:
-        ws, exp, run = fresh_run
-        _emit_metrics(run)
-        with served(ws) as client:
-            response = client.post(
-                f"{_run_url(exp, run)}/executions/e01/artifacts/no-such-artifact/promote",
-                json={},
-            )
+            response = client.get(f"{_run_url(exp, run)}/executions/e02/assets/{asset.id}/content")
         assert response.status_code == 404
 
 

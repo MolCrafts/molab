@@ -12,8 +12,6 @@ export const assetKeys = {
   all: ["assets"] as const,
   detail: (projectId: string, assetId: string) =>
     [...assetKeys.all, getWorkspaceQueryScope(), projectId, assetId, "detail"] as const,
-  versions: (projectId: string, assetId: string) =>
-    [...assetKeys.all, getWorkspaceQueryScope(), projectId, assetId, "versions"] as const,
 };
 
 export const runKeys = {
@@ -91,7 +89,7 @@ export const runKeys = {
       experimentId,
       runId,
       executionId,
-      "artifacts",
+      "assets",
       artifactId,
       "content",
     ] as const,
@@ -157,12 +155,6 @@ export const assetDetailQueryOptions = (projectId: string, assetId: string) =>
     queryFn: () => assetsApi.getProjectAsset(projectId, assetId),
   });
 
-export const assetVersionsQueryOptions = (projectId: string, assetId: string) =>
-  queryOptions({
-    queryKey: assetKeys.versions(projectId, assetId),
-    queryFn: () => assetsApi.listVersions(projectId, assetId),
-  });
-
 export const executionJournalQueryOptions = (
   projectId: string,
   experimentId: string,
@@ -188,7 +180,7 @@ export const artifactContentQueryOptions = (
     queryKey: runKeys.artifactContent(projectId, experimentId, runId, executionId, artifactId),
     queryFn: async () =>
       artifactPreviewText(
-        await runsApi.getArtifactContent(projectId, experimentId, runId, executionId, artifactId),
+        await runsApi.getAssetContent(projectId, experimentId, runId, executionId, artifactId),
       ),
     staleTime: Number.POSITIVE_INFINITY,
   });

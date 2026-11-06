@@ -552,6 +552,26 @@ class Concept:
         self._fs.rm(self._path)
         _refresh_sections(self._fs, self._path)
 
+    def supersede_with(
+        self, successor: Concept, *, within: Concept | PathArg | None = None
+    ) -> list[str]:
+        """Delete this document and point every inbound link at *successor*.
+
+        Returns:
+            The documents whose links were rewritten.
+        """
+        self._require_document("supersede")
+        inbound = [
+            link
+            for link in self.backlinks(within=within)
+            if self._norm(link.source.path) != self._norm(successor.path)
+        ]
+        old = self._path
+        self._fs.rm(old)
+        _rewrite_inbound(inbound, old, str(successor.path))
+        _refresh_sections(self._fs, old)
+        return sorted({str(link.source.path) for link in inbound})
+
     def export(self) -> str:
         """This document's narrative, without frontmatter."""
         return self.read()

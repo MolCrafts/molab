@@ -10,7 +10,6 @@ unified workspace folder abstraction: ``kind`` is
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path as _LocalPath
 from typing import TYPE_CHECKING, Any, cast
 
@@ -24,13 +23,13 @@ if TYPE_CHECKING:
     from .fs import FileSystem
     from .workspace import Workspace
 
-from .artifact_repository import AssetRepository
+from .asset_repository import AssetRepository
 from .base import (
     _load_metadata,
     _reconstruct,
     _record_payload,
 )
-from .domain import Asset, AssetScope, ImportAction
+from .domain import Asset, AssetScope
 from .errors import (
     ExperimentNotFoundError,
     ProjectExistsError,
@@ -196,20 +195,12 @@ class Project(Folder):
 
     @property
     def assets(self) -> AssetRepository:
-        """Long-lived Project Asset registry and Artifact promotion API."""
+        """Assets owned by this project."""
         return AssetRepository(
             cast("Workspace", self.asset_host()),
             self.scope,
             self.project_dir,
         )
-
-    @property
-    def data_assets(self) -> AssetRepository:
-        """Alias of :attr:`assets`.
-
-        Kept because ``{scope}.data_assets.import_asset`` is a frozen CLAUDE.md contract.
-        """
-        return self.assets
 
     # ── Persistence ─────────────────────────────────────────────────────
 
@@ -253,15 +244,18 @@ class Project(Folder):
 
     def import_asset(
         self,
-        name: str,
+        title: str,
         src: str | _LocalPath,
-        action: ImportAction = "copy",
-        meta: dict[str, str] | None = None,
         *,
-        consumed: Sequence[str] | None = None,
+        media_type: str | None = None,
+        tags: dict[str, str] | None = None,
     ) -> Asset:
-        """Import a named asset into this project."""
-        return self.assets.import_asset(name, src, action, meta, consumed=consumed)
+        """Register outside bytes as an asset of this project.
+
+        The same bytes registered again return the existing asset. *title*
+        is a label, not an identity.
+        """
+        return self.assets.import_asset(title, src, media_type=media_type, tags=tags)
 
     # ── Experiment CRUD: add / get / set / del / list ─────────────────────
 

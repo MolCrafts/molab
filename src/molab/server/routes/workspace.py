@@ -394,45 +394,22 @@ def list_workspace_files(
     # (remote asset scans still work via the catalog API, not inline chips).
     asset_index_by_abs: dict[str, dict] = {}
     if "catalog" in include_set and isinstance(fs, LocalFS):
-        from molab.workspace.artifact_repository import scan_asset_repositories, walk_artifacts
-        from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
-
-        for loc in walk_artifacts(workspace):
-            if loc.location is None:
-                continue
-            try:
-                abs_path = Path(loc.location).resolve()
-            except OSError:
-                continue
-            task_id = loc.artifact.metadata.get("task_id")
-            asset_index_by_abs[str(abs_path)] = {
-                "assetId": loc.artifact.id,
-                "assetKind": loc.artifact.semantic_type or "artifact",
-                "producerRunId": loc.run_id,
-                "producerTaskId": task_id if isinstance(task_id, str) else None,
-                "hasPreviewSidecar": resolve_sidecar(abs_path) is not None,
-            }
+        from molab.workspace.asset_repository import scan_asset_repositories
+        from molab.workspace.domain import ExecutionOrigin
 
         for repository in scan_asset_repositories(workspace):
             for asset in repository.list():
                 try:
                     abs_path = Path(repository.payload_path(asset.id)).resolve()
-                except (OSError, KeyError, ValueError, RefNotFoundError, AmbiguousRefError):
+                except (OSError, KeyError, ValueError):
                     continue
-                key = str(abs_path)
-                sidecar = resolve_sidecar(abs_path) is not None
-                existing = asset_index_by_abs.get(key)
-                if existing is not None:
-                    existing["assetId"] = asset.id
-                    existing["assetKind"] = asset.kind
-                    existing["hasPreviewSidecar"] = sidecar
-                    continue
-                asset_index_by_abs[key] = {
+                origin = asset.origin
+                asset_index_by_abs[str(abs_path)] = {
                     "assetId": asset.id,
-                    "assetKind": asset.kind,
-                    "producerRunId": None,
-                    "producerTaskId": None,
-                    "hasPreviewSidecar": sidecar,
+                    "assetKind": asset.media_type or "asset",
+                    "producerRunId": origin.run_id if isinstance(origin, ExecutionOrigin) else None,
+                    "producerTaskId": origin.task if isinstance(origin, ExecutionOrigin) else None,
+                    "hasPreviewSidecar": resolve_sidecar(abs_path) is not None,
                 }
 
     # Single tree walk — same implementation as GET …/runs/{id}/files.

@@ -40,6 +40,7 @@ def write_knowledge(
     title: str = "",
     record: object | None = None,
     fs: FileSystem | None = None,
+    replaces: Sequence[PathArg] = (),
 ) -> Concept:
     """Write one document under *host*. The single create path.
 
@@ -47,8 +48,10 @@ def write_knowledge(
     path, or a bare ``Knowledge`` tree handle. ``Note`` and ``Literature`` need
     no sources. A sourced class still rejects an empty source list. An existing
     document rewritten with ``text=""`` keeps its body and merges frontmatter.
-    The first create inside a workspace records ``knowledge.created``; a history
-    failure never fails the write. The host's ``index.knowledges`` section (in its
+    Every write inside a workspace is one history commit (``knowledge.created``
+    or ``knowledge.rewritten``) that also carries the deletion of each
+    *replaces* document, so a superseded document leaves the tree instead of
+    piling up beside its successor. A history failure never fails the write. The host's ``index.knowledges`` section (in its
     ``index.md``) is rebuilt after the write.
 
     Args:
@@ -62,13 +65,16 @@ def write_knowledge(
         title: History summary. Falls back to *name*.
         record: Extra frontmatter, merged under ``created_by`` and ``name``.
         fs: Disk to write through. Defaults to the host's own disk.
+        replaces: Documents this one supersedes. Each is deleted after the
+            write; git keeps its text.
 
     Returns:
         The written document.
 
     Raises:
         TypeError: If *host* is not a recognised host.
-        ValueError: If *of* requires sources and *sources* is empty.
+        ValueError: If *of* requires sources and *sources* is empty, or a
+            *replaces* entry is not a knowledge document or is the written one.
     """
     from contextlib import suppress
 
@@ -99,6 +105,7 @@ def write_knowledge(
     else:
         item = probe
     created = not item.exists()
+    retired = _replaced_paths(replaces, item.path, disk)
     payload = _merged_record(record, created_by=created_by, name=name)
     if item.exists() and text == "":
         item.write(None, payload)
@@ -106,22 +113,45 @@ def write_knowledge(
         item.write(text, payload)
     root = enclosing_workspace_root(_lookup_path(host), fs=disk)
     _apply_cites(item, cite)
+    relinked: list[str] = []
+    for old in retired:
+        from .concepts import _open_document
+
+        relinked.extend(_open_document(old, fs=disk).supersede_with(item, within=root))
     refresh_section(item.path, fs=disk, root=root, known_root=True)
-    if created and root is not None:
+    if root is not None:
         with suppress(Exception):
             from molab.workspace.entity_record import INDEX_FILENAME
             from molab.workspace.history import EntityRef, GitHistory
 
             rel = Path(str(item.path)).relative_to(Path(str(root))).as_posix()
-            host_index = disk.join(str(host_of(item.path)), INDEX_FILENAME)
-            paths = (item.path, host_index) if disk.is_file(host_index) else (item.path,)
+            touched = [item.path, *retired, *relinked]
+            for path in (item.path, *retired):
+                host_index = disk.join(str(host_of(path)), INDEX_FILENAME)
+                if disk.is_file(host_index) and host_index not in touched:
+                    touched.append(host_index)
             GitHistory(str(root)).record(
-                "knowledge.created",
+                "knowledge.created" if created else "knowledge.rewritten",
                 subject=EntityRef(id=rel, type=type(item).__name__),
                 summary=title or name,
-                paths=paths,
+                paths=tuple(touched),
             )
     return item
+
+
+def _replaced_paths(replaces: Sequence[PathArg], written: PathArg, disk: FileSystem) -> list[str]:
+    """The documents *replaces* names, checked before anything is written."""
+    from .naming import is_knowledge_file
+
+    retired: list[str] = []
+    for raw in replaces:
+        path = str(raw)
+        if not disk.is_file(path) or not is_knowledge_file(disk.basename(path)):
+            raise ValueError(f"--replaces {path!r} is not a knowledge document")
+        if disk.resolve(path) == disk.resolve(str(written)):
+            raise ValueError(f"--replaces {path!r} is the document being written")
+        retired.append(path)
+    return retired
 
 
 def _sourced_class(of: type[Concept]) -> type[_SourcedKnowledge] | None:

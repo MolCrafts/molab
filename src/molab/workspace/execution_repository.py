@@ -16,9 +16,9 @@ blocks a writer of the record. ``merge_remote`` (folding a worker's record from
 another filesystem into the local one) follows the same seal -> state order.
 
 Sealed records are immutable. *Sealing* is how a finished attempt is frozen:
-it is two writes. ``seal`` sets ``sealed_at`` and the terminal fields, then,
-once history has committed, stamps ``sealed_commit`` exactly once, still under
-the seal lock. After that there is one exception, ``_POST_SEAL_FIELDS``: the
+``seal`` sets ``sealed_at`` and the terminal fields in one write, then history
+commits the record together with the run's asset slots, so a sealed attempt
+leaves a clean tree. After that there is one exception, ``_POST_SEAL_FIELDS``: the
 prune stamp ``pruned_at`` / ``pruned_dirs``, written only by ``mark_pruned``.
 Every other field is never rewritten after ``sealed_at``. *Pruning* deletes a
 sealed attempt's bulk directories (reproducible bytes such as ``out/``) to
@@ -60,18 +60,13 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import cast
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from molab._typing import JSONValue
-from molab.ids import generate_uuid7
 
 from ._file_lock import file_lock
-from .artifact_repository import RESERVED_ARTIFACT_DIR, ArtifactRepository, content_ref
+from .asset_repository import content_ref
 from .domain import (
     ACTIVE_EXECUTION_STATUSES,
-    RESULT_SEMANTIC_TYPE,
     TERMINAL_EXECUTION_STATUSES,
-    Artifact,
     EvidenceRef,
     Execution,
     ExecutionMode,
@@ -79,7 +74,7 @@ from .domain import (
     RunStatusSummary,
     SourceManifest,
 )
-from .execution_dirs import ARTIFACTS, execution_dir_names, prunable_dirs
+from .execution_dirs import execution_dir_names, prunable_dirs
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFS
 from .history import AgentRef, EntityRef, GitHistory, Relation
@@ -168,7 +163,6 @@ _IDENTITY_FIELDS: frozenset[str] = frozenset(
 _CREATION_PROVENANCE_FIELDS: frozenset[str] = frozenset(
     {
         "based_on_execution_id",
-        "checkpoint_artifact_id",
         "bypass_cache",
         "selected_tasks",
         "source",
@@ -257,29 +251,13 @@ EXECUTION_RECORD_FILENAME = "execution.json"
 #: the owner heartbeat and the evidence files. Beside the declared attempt
 #: directories (``execution_dirs``) these are the only names an attempt holds.
 ATTEMPT_FILES: frozenset[str] = frozenset(
-    {EXECUTION_RECORD_FILENAME, ALIVE_NAME, *_EVIDENCE_FILES.values()}
+    {
+        EXECUTION_RECORD_FILENAME,
+        ALIVE_NAME,
+        "metrics.mlp.jsonl",
+        *_EVIDENCE_FILES.values(),
+    }
 )
-
-
-class AdoptedArtifact(BaseModel):
-    """A file an adoption moves to ``artifacts/<name>`` and records as an Artifact.
-
-    ``ExecutionRepository.adopt(artifacts=…)`` takes these: the owner moves
-    the bytes, hashes them where they land and writes the Artifact into the
-    sealed record, so nothing else writes ``execution.json`` (D94).
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    source: str
-    """Where the bytes are now."""
-    name: str
-    """The Artifact's name; the bytes land at ``artifacts/<name>``."""
-    media_type: str | None = None
-    semantic_type: str | None = None
-    metadata: dict[str, JSONValue] = Field(default_factory=dict)
-    created_at: datetime | None = None
-    """When the artifact was produced; the attempt's finish by default."""
 
 
 def _resolve_predecessor(
@@ -333,7 +311,6 @@ class ExecutionRepository:
         project_id: str,
         fs: FileSystem | None = None,
         history: GitHistory | None = None,
-        artifacts: ArtifactRepository | None = None,
     ) -> None:
         self.workspace_root = str(workspace_root)
         self.run_dir = str(run_dir)
@@ -341,9 +318,6 @@ class ExecutionRepository:
         self.project_id = project_id
         self.fs = fs or LocalFS()
         self.history = history or GitHistory(self.workspace_root)
-        self.artifacts = artifacts or ArtifactRepository(
-            self.workspace_root, fs=self.fs, history=self.history
-        )
 
     # ── layout ───────────────────────────────────────────────────────────
 
@@ -366,7 +340,6 @@ class ExecutionRepository:
         mode: ExecutionMode = ExecutionMode.INITIAL,
         created_by: AgentRef,
         based_on_execution_id: str | None = None,
-        checkpoint_artifact_id: str | None = None,
         executor: dict[str, JSONValue] | None = None,
         environment: dict[str, JSONValue] | None = None,
         bypass_cache: bool = False,
@@ -393,12 +366,10 @@ class ExecutionRepository:
               predecessor and no checkpoint.
             - ``rerun``: after any terminal predecessor, including a
               succeeded one.
-            - ``resume``: the predecessor must not have succeeded. A
-              checkpoint is optional; when given it must be one of the
-              predecessor's artifacts.
+            - ``resume``: the predecessor must not have succeeded. Task
+              outputs are seeded from the predecessor journal.
             - ``reproduce``: the predecessor must have succeeded, and the
               record always has ``bypass_cache=True`` whatever was passed.
-            - A checkpoint is valid only for ``resume``.
             - A task selection is valid only for ``rerun``.
 
         Args:
@@ -406,7 +377,6 @@ class ExecutionRepository:
             created_by: The agent creating the attempt.
             based_on_execution_id: The predecessor attempt; ``None`` means the
                 latest attempt for every mode but ``initial``.
-            checkpoint_artifact_id: The checkpoint to resume from (``resume`` only).
             executor: Creation-time executor facts (backend, target).
             environment: Creation-time environment facts (profile, script).
             bypass_cache: Whether the attempt ignores the workflow node cache;
@@ -443,7 +413,6 @@ class ExecutionRepository:
                 mode,
                 prior,
                 based_on_execution_id=based_on_execution_id,
-                checkpoint_artifact_id=checkpoint_artifact_id,
             )
             now = datetime.now(UTC)
             seq = max((item.seq for item in prior), default=0) + 1
@@ -457,7 +426,6 @@ class ExecutionRepository:
                 created_at=now,
                 created_by=created_by,
                 based_on_execution_id=predecessor.id if predecessor else None,
-                checkpoint_artifact_id=checkpoint_artifact_id,
                 executor=executor or {},
                 environment=environment or {},
                 bypass_cache=bypass_cache,
@@ -484,7 +452,6 @@ class ExecutionRepository:
         environment: dict[str, JSONValue] | None = None,
         error: dict[str, JSONValue] | None = None,
         digest: bool = True,
-        artifacts: Sequence[AdoptedArtifact] = (),
     ) -> Execution:
         """Record an attempt that already ran outside molab, sealed in one write.
 
@@ -504,9 +471,8 @@ class ExecutionRepository:
         renamed back and the attempt directory removed: a refused adoption
         leaves the source as it was and writes no record.
 
-        Each of *artifacts* is moved the same way to ``artifacts/<name>`` and
-        recorded on the sealed record as an Artifact (its content hashed where
-        it landed), so the adopted attempt carries them like an emitted one.
+        A file worth citing is registered afterwards as an asset. This method
+        only moves bytes into the attempt.
 
         Mode rules are ``create``'s.
 
@@ -522,15 +488,13 @@ class ExecutionRepository:
             environment: Environment facts (python, package versions).
             error: The failure, for a failed attempt.
             digest: Whether to hash every moved path into the record.
-            artifacts: Files to record as Artifacts of the attempt.
 
         Returns:
             The sealed record as written.
 
         Raises:
             ValueError: *status* is not terminal, a destination is not inside
-                a declared attempt directory, an artifact name is reserved
-                (``_molab/``, the result type), or the mode rules refuse.
+                a declared attempt directory, or the mode rules refuse.
             FileExistsError: A destination already exists.
             FileNotFoundError: A source does not exist.
             NotImplementedError: The workspace filesystem is not local.
@@ -540,19 +504,7 @@ class ExecutionRepository:
         if not isinstance(self.fs, LocalFS):
             raise NotImplementedError("adopting an attempt moves local bytes; the disk is remote")
         planned = [(Path(str(src)), _adopted_destination(dest)) for src, dest in moves]
-        for item in artifacts:
-            if (
-                PurePosixPath(item.name).parts[:1] == (RESERVED_ARTIFACT_DIR,)
-                or item.semantic_type == RESULT_SEMANTIC_TYPE
-            ):
-                raise ValueError(
-                    "artifacts/_molab/ and semantic_type 'result' are reserved for molab"
-                )
-        promoted = [
-            (Path(item.source), _adopted_destination(f"{ARTIFACTS.name}/{item.name}"), item)
-            for item in artifacts
-        ]
-        for src in [*(src for src, _ in planned), *(src for src, _, _ in promoted)]:
+        for src, _dest in planned:
             if not src.exists():
                 raise FileNotFoundError(f"cannot adopt {src}: it does not exist")
         self.fs.mkdir(self.executions_dir, parents=True, exist_ok=True)
@@ -562,7 +514,6 @@ class ExecutionRepository:
                 mode,
                 prior,
                 based_on_execution_id=based_on_execution_id,
-                checkpoint_artifact_id=None,
             )
             seq = max((item.seq for item in prior), default=0) + 1
             slug = execution_slug(seq)
@@ -573,31 +524,6 @@ class ExecutionRepository:
             done: list[tuple[Path, Path]] = []
             try:
                 adopted: list[EvidenceRef] = []
-                recorded: list[Artifact] = []
-                for src, dest, item in promoted:
-                    target = attempt / dest
-                    if target.exists():
-                        raise FileExistsError(f"{dest} is adopted twice")
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    src.rename(target)
-                    done.append((src, target))
-                    recorded.append(
-                        Artifact(
-                            id=generate_uuid7(),
-                            execution_id=slug,
-                            run_id=self.run_id,
-                            project_id=self.project_id,
-                            name=item.name,
-                            content=content_ref(self.fs, target),
-                            created_at=item.created_at or finished_at,
-                            created_by=created_by,
-                            path=dest,
-                            source_path=dest,
-                            media_type=item.media_type,
-                            semantic_type=item.semantic_type,
-                            metadata=dict(item.metadata),
-                        )
-                    )
                 for src, dest in planned:
                     target = attempt / dest
                     if target.exists():
@@ -630,7 +556,6 @@ class ExecutionRepository:
                     based_on_execution_id=predecessor.id if predecessor else None,
                     executor=executor or {},
                     environment=environment or {},
-                    artifacts=tuple(recorded),
                     evidence=(*self._collect_evidence(slug), *adopted),
                     error=error,
                     sealed_at=now,
@@ -642,13 +567,8 @@ class ExecutionRepository:
                     target.rename(src)
                 shutil.rmtree(attempt, ignore_errors=True)
                 raise
-        commit = self._record("ExecutionAdopted", state, when=now)
-        if commit is None:
-            return state
-        with file_lock(self._state_lock(slug)):
-            stamped = self.get(slug).model_copy(update={"sealed_commit": commit})
-            self._write_state(stamped)
-        return stamped
+        self._record("ExecutionAdopted", state, when=now)
+        return state
 
     def resolve_predecessor(
         self,
@@ -920,27 +840,6 @@ class ExecutionRepository:
         self._write_state(state)
         return state
 
-    def add_observed_inputs(self, execution_id: str, entity_ids: tuple[str, ...]) -> Execution:
-        with file_lock(self._state_lock(execution_id)):
-            current = self.get(execution_id)
-            if current.sealed:
-                raise ValueError(f"Execution {execution_id!r} is sealed")
-            merged = tuple(dict.fromkeys((*current.observed_input_ids, *entity_ids)))
-            state = current.model_copy(update={"observed_input_ids": merged})
-            self._write_state(state)
-            return state
-
-    def add_artifact(self, execution_id: str, artifact: Artifact) -> Execution:
-        """Attach an emitted product to the attempt that produced it."""
-        with file_lock(self._state_lock(execution_id)):
-            current = self.get(execution_id)
-            if current.sealed:
-                raise ValueError(f"Execution {execution_id!r} is sealed")
-            kept = tuple(item for item in current.artifacts if item.id != artifact.id)
-            state = current.model_copy(update={"artifacts": (*kept, artifact)})
-            self._write_state(state)
-            return state
-
     def update_operational(self, execution_id: str, **updates: object) -> Execution:
         """Update the operational field of an unsealed attempt: ``executor``.
 
@@ -1021,8 +920,7 @@ class ExecutionRepository:
         ``finished_at``, ``environment``, artifacts, evidence, error and
         ``sealed_at``. ``executor`` is merged with the local keys winning (the
         scheduler job ids); keys only the worker knows (``kind`` / ``host`` /
-        ``pid``) are kept. The remote ``sealed_commit`` is always dropped: it
-        names a commit in the remote tree's history. The status only moves
+        ``pid``) are kept. The status only moves
         forward, and the prune stamp is never taken from the remote record
         (``mark_pruned`` is its one writer).
 
@@ -1032,9 +930,7 @@ class ExecutionRepository:
         it can never replace ``config_hash`` / ``script`` / ``submit_cwd``.
 
         Locks follow ``seal``: the seal lock for the whole call, the state
-        lock around the read-check-write, history outside the state lock, and
-        the ``sealed_commit`` stamp under a re-taken state lock on a fresh
-        read of the record.
+        lock around the read-check-write, and history outside the state lock.
 
         Args:
             execution_id: The local attempt the remote record describes (``e01``).
@@ -1102,7 +998,6 @@ class ExecutionRepository:
                 merged = remote.model_copy(
                     update={
                         "executor": {**remote.executor, **current.executor},
-                        "sealed_commit": None,
                         "pruned_at": current.pruned_at,
                         "pruned_dirs": current.pruned_dirs,
                     }
@@ -1110,14 +1005,8 @@ class ExecutionRepository:
                 self._write_state(merged)
             if not merged.sealed:
                 return merged
-            commit = self._record("ExecutionSealed", merged, when=merged.sealed_at)
-            if commit is None:
-                return merged
-            with file_lock(self._state_lock(execution_id)):
-                latest = self.get(execution_id)
-                stamped = latest.model_copy(update={"sealed_commit": commit})
-                self._write_state(stamped)
-            return stamped
+            self._record("ExecutionSealed", merged, when=merged.sealed_at)
+            return merged
 
     # ── seal ─────────────────────────────────────────────────────────────
 
@@ -1136,8 +1025,7 @@ class ExecutionRepository:
         ``add_artifact`` / ``add_observed_inputs`` / ``update_operational``:
         a racing writer either lands before the seal reads the record, or is
         refused afterwards because the record is sealed. History is recorded
-        after the state lock is released; the ``sealed_commit`` stamp re-takes
-        it and applies to a fresh read of the record.
+        after the state lock is released.
         """
         with file_lock(self._seal_lock(execution_id)):
             with file_lock(self._state_lock(execution_id)):
@@ -1149,14 +1037,8 @@ class ExecutionRepository:
                 )
             if not newly_sealed:
                 return sealed
-            commit = self._record("ExecutionSealed", sealed, when=sealed.sealed_at)
-            if commit is None:
-                return sealed
-            with file_lock(self._state_lock(execution_id)):
-                latest = self.get(execution_id)
-                stamped = latest.model_copy(update={"sealed_commit": commit})
-                self._write_state(stamped)
-            return stamped
+            self._record("ExecutionSealed", sealed, when=sealed.sealed_at)
+            return sealed
 
     def _seal_locked(
         self,
@@ -1285,17 +1167,6 @@ class ExecutionRepository:
                     ),
                 )
             )
-        if state.checkpoint_artifact_id:
-            relations.append(
-                Relation(
-                    predicate="used",
-                    object=EntityRef(id=state.checkpoint_artifact_id, type="artifact"),
-                )
-            )
-        relations.extend(
-            Relation(predicate="generated", object=EntityRef(id=artifact.id, type="artifact"))
-            for artifact in state.artifacts
-        )
         run_name = self.fs.basename(self.run_dir)
         return self.history.record(
             event,
@@ -1303,9 +1174,30 @@ class ExecutionRepository:
             agent=state.created_by,
             relations=tuple(relations),
             summary=f"{run_name} {state.id} {state.status.value}",
-            paths=(self.run_dir,),
+            paths=(self.run_dir, *self._product_paths()),
             occurred_at=when,
         )
+
+    def _product_paths(self) -> tuple[str, ...]:
+        """This run's asset slots on the experiment, so a seal commits its products.
+
+        The concrete slot directories cover new and replaced products; the
+        prefix pathspec covers slots git still tracks that are gone from disk.
+        """
+        from .asset_repository import run_slot_prefix
+        from .naming import ASSET_CONTAINER
+
+        run_dir = str(self.run_dir)
+        prefix = run_slot_prefix(self.fs.basename(run_dir))
+        assets = self.fs.join(self.fs.dirname(self.fs.dirname(run_dir)), ASSET_CONTAINER)
+        if not self.fs.exists(assets):
+            return ()
+        slots = [
+            self.fs.join(assets, name)
+            for name in sorted(self.fs.ls(assets, A=True))
+            if name.startswith(prefix)
+        ]
+        return (*slots, self.fs.join(assets, f"{prefix}*"))
 
     def _validate_creation(
         self,
@@ -1313,26 +1205,20 @@ class ExecutionRepository:
         prior: builtins.list[Execution],
         *,
         based_on_execution_id: str | None,
-        checkpoint_artifact_id: str | None,
     ) -> Execution | None:
         """Apply the mode rules of ``create`` to an already-normalized *mode*."""
         if mode is ExecutionMode.INITIAL:
             if prior:
                 raise ValueError("initial Execution is only valid before any attempt exists")
-            if based_on_execution_id or checkpoint_artifact_id:
-                raise ValueError("initial Execution cannot have a predecessor or checkpoint")
+            if based_on_execution_id:
+                raise ValueError("initial Execution cannot have a predecessor")
             return None
         predecessor = cast("Execution", _resolve_predecessor(mode, prior, based_on_execution_id))
-        if mode is ExecutionMode.RESUME:
-            if predecessor.status is ExecutionStatus.SUCCEEDED:
-                raise ValueError(
-                    f"resume needs a predecessor that did not succeed; {predecessor.id} "
-                    "succeeded (rerun or reproduce it instead)"
-                )
-            if checkpoint_artifact_id is not None:
-                predecessor.artifact(checkpoint_artifact_id)
-        elif checkpoint_artifact_id is not None:
-            raise ValueError("checkpoint is only valid for resume")
+        if mode is ExecutionMode.RESUME and predecessor.status is ExecutionStatus.SUCCEEDED:
+            raise ValueError(
+                f"resume needs a predecessor that did not succeed; {predecessor.id} "
+                "succeeded (rerun or reproduce it instead)"
+            )
         if mode is ExecutionMode.REPRODUCE and predecessor.status is not ExecutionStatus.SUCCEEDED:
             raise ValueError("reproduce requires a succeeded predecessor")
         return predecessor
@@ -1390,7 +1276,7 @@ def _adopted_destination(dest: str) -> str:
     if rel.is_absolute() or ".." in rel.parts or not rel.parts:
         raise ValueError(f"adopted destination must be attempt-relative: {dest!r}")
     head = rel.parts[0]
-    if len(rel.parts) == 1 and head in _EVIDENCE_FILES.values():
+    if len(rel.parts) == 1 and head in {*_EVIDENCE_FILES.values(), "metrics.mlp.jsonl"}:
         return rel.as_posix()
     if len(rel.parts) > 1 and head in execution_dir_names():
         return rel.as_posix()
@@ -1435,6 +1321,5 @@ __all__ = [
     "EXECUTION_RECORD_FILENAME",
     "RUN_LOG_FILENAME",
     "STDIO_FILES",
-    "AdoptedArtifact",
     "ExecutionRepository",
 ]

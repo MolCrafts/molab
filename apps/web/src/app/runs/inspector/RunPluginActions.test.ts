@@ -34,7 +34,7 @@ describe("RunPluginActions", () => {
       experimentName: "Experiment 1",
       definitionHash: "sha256:definition",
       experimentRevisionId: "revision-1",
-      inputAssetIds: [],
+      inputs: [],
       targetHint: "gpu",
       statusSummary: { total: 1, active: 1, notStarted: false, byStatus: { running: 1 } },
       parameters: {},
@@ -50,7 +50,6 @@ describe("RunPluginActions", () => {
           finishedAt: null,
           durationSeconds: null,
           basedOnExecutionId: null,
-          checkpointArtifactId: null,
           schedulerJobId: "1234",
           backend: "molq",
           backendMetadata: {

@@ -30,10 +30,8 @@ const run = (status: string, executionId?: string): RunSummary =>
             finishedAt: null,
             status,
             basedOnExecutionId: null,
-            checkpointArtifactId: null,
             executor: {},
             environment: {},
-            artifactIds: [],
             error: null,
           },
         ]

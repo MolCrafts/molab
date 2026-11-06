@@ -1,11 +1,9 @@
-"""Project asset routes: list, get, versions, and download via payload_path."""
+"""Project asset routes: list, get, import, and download via payload_path."""
 
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
-
-from molab.workspace.history import AgentRef
 
 HELLO = b"hello\n"
 
@@ -20,7 +18,7 @@ class TestListProjectAssets:
         project = _project_of(exp)
         src = tmp_path / "hello.txt"
         src.write_bytes(HELLO)
-        asset = project.assets.import_asset("raw", src, action="copy")
+        asset = project.assets.import_asset("raw", src)
         with served(ws) as client:
             response = client.get(f"/api/projects/{project.id}/assets")
         assert response.status_code == 200, response.text
@@ -34,57 +32,25 @@ class TestGetProjectAsset:
         project = _project_of(exp)
         src = tmp_path / "hello.txt"
         src.write_bytes(HELLO)
-        asset = project.assets.import_asset("raw", src, action="copy")
+        asset = project.assets.import_asset("raw", src)
         with served(ws) as client:
             response = client.get(f"/api/projects/{project.id}/assets/{asset.id}")
         assert response.status_code == 200, response.text
         assert response.json()["title"] == "raw"
 
 
-class TestListProjectAssetVersions:
-    def test_origin_kind_per_version(self, served, fresh_run, tmp_path: Path) -> None:
-        ws, exp, run = fresh_run
-        project = _project_of(exp)
-        with run.start() as ctx:
-            path = ctx.get_dir("work") / "hello.txt"
-            path.write_bytes(HELLO)
-            artifact = ctx.emit_artifact(path, name="hello.txt")
-        promoted, _version = project.assets.promote(
-            artifact, created_by=AgentRef(id="t", type="system")
-        )
-        src = tmp_path / "hello.txt"
-        src.write_bytes(HELLO)
-        copied = project.assets.import_asset("raw", src, action="copy")
-        with served(ws) as client:
-            promoted_body = client.get(f"/api/projects/{project.id}/assets/{promoted.id}/versions")
-            copied_body = client.get(f"/api/projects/{project.id}/assets/{copied.id}/versions")
-        assert promoted_body.status_code == 200, promoted_body.text
-        assert copied_body.status_code == 200, copied_body.text
-        assert promoted_body.json()[0]["originKind"] == "artifact"
-        assert copied_body.json()[0]["originKind"] == "import"
-
-
 class TestDownloadProjectAsset:
-    def test_promoted_and_copy_return_hello(self, served, fresh_run, tmp_path: Path) -> None:
-        ws, exp, run = fresh_run
+    def test_imported_asset_returns_hello(self, served, fresh_run, tmp_path: Path) -> None:
+        ws, exp, _run = fresh_run
         project = _project_of(exp)
-        with run.start() as ctx:
-            path = ctx.get_dir("work") / "hello.txt"
-            path.write_bytes(HELLO)
-            artifact = ctx.emit_artifact(path, name="hello.txt")
-        promoted, _version = project.assets.promote(
-            artifact, created_by=AgentRef(id="t", type="system")
-        )
         src = tmp_path / "hello.txt"
         src.write_bytes(HELLO)
-        copied = project.assets.import_asset("raw", src, action="copy")
+        copied = project.assets.import_asset("raw", src)
         with served(ws) as client:
-            promoted_body = client.get(f"/api/projects/{project.id}/assets/{promoted.id}/download")
             copied_body = client.get(f"/api/projects/{project.id}/assets/{copied.id}/download")
-        assert promoted_body.status_code == 200, promoted_body.text
-        assert promoted_body.content == HELLO
         assert copied_body.status_code == 200, copied_body.text
         assert copied_body.content == HELLO
+        assert copied.media_type == "text/plain"
 
     def test_directory_payload_is_404(self, served, fresh_run, tmp_path: Path) -> None:
         ws, exp, _run = fresh_run
@@ -92,7 +58,7 @@ class TestDownloadProjectAsset:
         folder = tmp_path / "bundle"
         folder.mkdir()
         (folder / "a.txt").write_bytes(b"ab")
-        asset = project.assets.import_asset("bundle", folder, action="copy")
+        asset = project.assets.import_asset("bundle", folder)
         with served(ws) as client:
             response = client.get(f"/api/projects/{project.id}/assets/{asset.id}/download")
         assert response.status_code == 404
@@ -104,27 +70,21 @@ class TestDownloadProjectAsset:
             response = client.get(f"/api/projects/{project.id}/assets/missing/download")
         assert response.status_code == 404
 
-    def test_duplicated_experiment_is_409(self, served, fresh_run) -> None:
+    def test_duplicated_experiment_id_is_not_downloaded(self, served, fresh_run) -> None:
         ws, exp, run = fresh_run
-        project = _project_of(exp)
         with run.start() as ctx:
-            path = ctx.get_dir("work") / "hello.txt"
-            path.write_bytes(HELLO)
-            artifact = ctx.emit_artifact(path, name="hello.txt")
-        promoted, _version = project.assets.promote(
-            artifact, created_by=AgentRef(id="t", type="system")
-        )
+            asset = ctx.register(HELLO, title="hello.txt")
         other = ws.add_project("other")
         src = Path(exp.experiment_dir)
         dest = Path(other.project_dir) / "experiments" / src.name
         shutil.copytree(src, dest)
         with served(ws, raise_server_exceptions=False) as client:
-            response = client.get(f"/api/projects/{project.id}/assets/{promoted.id}/download")
-        assert response.status_code == 409, response.text
-        error = response.json()["error"]
-        assert "detail" not in response.json()
-        assert error["code"] == "CONFLICT"
-        assert len(error["details"]["candidates"]) == 2
+            response = client.get(
+                f"/api/projects/{exp.project.id}/experiments/{exp.id}/runs/{run.id}"
+                f"/executions/e01/assets/{asset.id}/content"
+            )
+        assert response.status_code == 404, response.text
+        assert "more than one scope" in response.text
 
 
 class TestLegacyProjectAsset:
@@ -158,14 +118,13 @@ class TestLegacyProjectAsset:
 
 def test_asset_download_reads_bounded_ranges(served, fresh_run, tmp_path, monkeypatch):
     ws, exp, run = fresh_run
-    payload = b"\xff\x00" * 400000
+    project_payload = b"\xff\x00" * 400000
+    produced_payload = b"\x00\xff" * 400000
     source = tmp_path / "binary.dat"
-    source.write_bytes(payload)
-    asset = exp.project.assets.import_asset("binary", source, action="copy")
+    source.write_bytes(project_payload)
+    asset = exp.project.assets.import_asset("binary", source)
     with run.start() as ctx:
-        path = ctx.get_dir("work") / "binary.dat"
-        path.write_bytes(payload)
-        artifact = ctx.emit_artifact(path, name="binary.dat")
+        produced = ctx.register(produced_payload, title="binary.dat")
     ranges = []
     original = ws.fs.read_range
 
@@ -174,21 +133,20 @@ def test_asset_download_reads_bounded_ranges(served, fresh_run, tmp_path, monkey
         ranges.append(length)
         return original(path, offset, length)
 
-    open_original = ws.fs.open
-
-    def no_buffer(*args: object, **kwargs: object):
-        if len(args) < 2 or args[1] != "rb":
-            return open_original(*args, **kwargs)
-        raise AssertionError("download must not call open")
-
     monkeypatch.setattr(type(ws.fs), "read_range", staticmethod(bounded))
-    monkeypatch.setattr(type(ws.fs), "open", staticmethod(no_buffer))
     with served(ws) as client:
         urls = [
-            f"/api/projects/{exp.project.id}/assets/{asset.id}/download",
-            f"/api/projects/{exp.project.id}/experiments/{exp.id}/runs/{run.id}/executions/e01/artifacts/{artifact.id}/content",
+            (
+                f"/api/projects/{exp.project.id}/assets/{asset.id}/download",
+                project_payload,
+            ),
+            (
+                f"/api/projects/{exp.project.id}/experiments/{exp.id}/runs/{run.id}"
+                f"/executions/e01/assets/{produced.id}/content",
+                produced_payload,
+            ),
         ]
-        for url in urls:
+        for url, payload in urls:
             response = client.get(url)
             assert response.status_code == 200, response.text
             assert response.content == payload
@@ -211,9 +169,14 @@ class TestImportProjectAsset:
                 json={"name": "pbix-br", "path": "pbix-br.pdb"},
             )
         assert created.status_code == 201, created.text
-        version = project.data_assets.versions(created.json()["id"])[0]
-        assert version.origin.location.endswith("payload.pdb")
-        assert version.metadata == {"filename": "pbix-br.pdb"}
+        body = created.json()
+        assert body["title"] == "pbix-br"
+        assert body["ref"].startswith("molab:asset/")
+        assert body["digest"].startswith("sha256:")
+        assert body["file"].endswith("payload.pdb")
+        assert body["originKind"] == "import"
+        assert body["uri"].endswith("pbix-br.pdb")
+        assert "mediaType" in body
 
     def test_refuses_a_path_outside_the_served_directory(self, served, tmp_path) -> None:
         from molab.workspace import Workspace

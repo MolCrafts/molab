@@ -8,7 +8,6 @@ Contents:
 
 - :mod:`molab.services.operator_config` — the ``~/.molab/config.json``
   loader/saver (one source of truth for the path and the parsing).
-- :mod:`molab.services.run_failure` — failure analysis for a finished run.
 - :mod:`molab.services.auth` — filesystem users + sessions for
   ``molab serve`` HTTP auth (CLI ``molab auth`` and the server share it).
 - :mod:`molab.services.knowledge_context` — the document read-model and its producer.

@@ -143,8 +143,21 @@ def prune_runs(
         Path | None,
         typer.Option("--path", "-p", help="Workspace path (default: cwd)."),
     ] = None,
+    superseded: Annotated[
+        bool,
+        typer.Option(
+            "--superseded",
+            help=(
+                "Non-interactive: in every run, delete each attempt but the newest, with "
+                "its record, logs and the assets only it registered. One commit per run."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Interactively prune bulk directories of a run's executions; records are kept.
+
+    With ``--superseded`` the walk is replaced by one sweep of the workspace:
+    every run keeps only its newest attempt.
 
     Descends project → experiment → run → executions, letting the user
     pick at each step. After the run is picked, its zombie attempts are
@@ -156,12 +169,16 @@ def prune_runs(
     ``work/``, ``jobs/`` and ``checkpoints/``, which include solver logs and
     scheduler stdout/stderr. The records are kept. That means
     ``execution.json``, the node journal ``workflow.json``, ``run.log`` and
-    ``artifacts/``. Each pruned record is stamped ``pruned_at`` /
+    ``metrics.mlp.jsonl``. A registered asset lives outside the attempt.
+    Each pruned record is stamped ``pruned_at`` /
     ``pruned_dirs``.
     """
     from . import _common
 
     ws = _common.get_workspace(path)
+    if superseded:
+        _discard_superseded(ws)
+        return
 
     # Layer 1: project
     projects = ws.list_projects()
@@ -282,6 +299,27 @@ def prune_runs(
         f"{len(plan.entries)} execution(s); records are kept. "
         f"{remaining} record(s) remain."
     )
+
+
+def _discard_superseded(ws: object) -> None:
+    from molab.workspace import LivePruneRefusedError
+    from molab.workspace.prune import discard_superseded_attempts
+
+    refused = 0
+    for project in ws.list_projects():  # ty: ignore[unresolved-attribute]
+        for experiment in project.list_experiments():
+            for run in experiment.list_runs():
+                label = f"{experiment.metadata.name}/{run.path.name}"
+                try:
+                    dropped = discard_superseded_attempts(run)
+                except LivePruneRefusedError as exc:
+                    refused += 1
+                    rprint(f"  [yellow]skip[/yellow]  {label}: {exc}")
+                    continue
+                if dropped:
+                    rprint(f"  [green]OK[/green] {label}: discarded {', '.join(dropped)}")
+    if refused:
+        raise typer.Exit(1)
 
 
 def register(run_app: typer.Typer) -> None:

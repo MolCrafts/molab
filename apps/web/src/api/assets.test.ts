@@ -1,38 +1,23 @@
 import { describe, expect, it } from "@rstest/core";
-import { assetVersionOrigin } from "@/api/assets";
+import { assetOriginText } from "@/api/assets";
 
-describe("assetVersionOrigin", () => {
-  it("shows an artifact origin ref", () => {
+describe("assetOriginText", () => {
+  it("names the attempt and task that registered the file", () => {
     expect(
-      assetVersionOrigin({
-        originKind: "artifact",
-        originRef: "molab:experiment/e/run/r/artifact/a",
-        sourceArtifactId: "a",
+      assetOriginText({
+        originKind: "execution",
+        runId: "run-1",
+        executionId: "e01",
+        task: "simulate",
       }),
-    ).toBe("molab:experiment/e/run/r/artifact/a");
+    ).toBe("run-1 / e01 / simulate");
   });
 
-  it("falls back to the source artifact id", () => {
-    expect(
-      assetVersionOrigin({
-        originKind: "artifact",
-        originRef: null,
-        sourceArtifactId: "a",
-      }),
-    ).toBe("a");
-  });
-
-  it("shows an import as action and uri", () => {
-    expect(
-      assetVersionOrigin({
-        originKind: "import",
-        importAction: "copy",
-        originUri: "/data/qm9",
-      }),
-    ).toBe("copy: /data/qm9");
+  it("shows an import uri", () => {
+    expect(assetOriginText({ originKind: "import", uri: "/data/qm9" })).toBe("/data/qm9");
   });
 
   it("shows an em dash when nothing is known", () => {
-    expect(assetVersionOrigin({})).toBe("—");
+    expect(assetOriginText({})).toBe("—");
   });
 });

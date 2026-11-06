@@ -483,7 +483,7 @@ def _ref_card(workspace: Workspace, target: str) -> EntityCard:
     from molab.knowledge.concept import Concept
     from molab.knowledge.embed import summarize_entity
     from molab.server.schemas.responses import workspace_relative
-    from molab.workspace.domain import Artifact, Asset, Execution
+    from molab.workspace.domain import Asset, Execution
     from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
     from molab.workspace.folder import Folder
     from molab.workspace.refs import InvalidRefError, parse_ref
@@ -510,8 +510,6 @@ def _ref_card(workspace: Workspace, target: str) -> EntityCard:
         )
     if isinstance(entity, (Concept, Folder, Asset)):
         title = summarize_entity(entity).title
-    elif isinstance(entity, Artifact):
-        title = entity.name
     elif isinstance(entity, Execution):
         title = entity.id
     else:

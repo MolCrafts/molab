@@ -28,11 +28,11 @@ import pytest
 from molab._typing import JSONValue
 from molab.profile import ProfileConfig
 from molab.workspace import Run, Workspace
-from molab.workspace.artifact_repository import ArtifactRepository
+from molab.workspace.asset_repository import assets_produced_by
 from molab.workspace.domain import (
-    RESULT_SEMANTIC_TYPE,
     Execution,
     ExecutionMode,
+    ExecutionOrigin,
     ExecutionStatus,
 )
 from molab.workspace.execution_context import ExecutionContext
@@ -183,7 +183,6 @@ class TestExecutionContext:
         [
             ({"mode": ExecutionMode.RERUN}, "mode"),
             ({"predecessor": "e01"}, "predecessor"),
-            ({"checkpoint": "a"}, "checkpoint"),
             ({"bypass_cache": True}, "bypass_cache"),
         ],
     )
@@ -444,59 +443,88 @@ class _AliveRemoveFails(CountingFileSystem):
         self._wrap("rm", self._inner.rm)(path, *args, **kwargs)
 
 
-class TestExecutionContextEmitArtifact:
-    def test_second_emit_of_same_name_raises(self, run: Run) -> None:
+def _produced(run: Run, execution_id: str):
+    return assets_produced_by(run.experiment.project.workspace, execution_id)
+
+
+def _payload(run: Run, asset) -> bytes:
+    workspace = run.experiment.project.workspace
+    path = workspace.assets_at(asset.scope).payload_path(asset.id)
+    return Path(path).read_bytes()
+
+
+class TestExecutionContextRegister:
+    def test_same_bytes_return_the_existing_asset(self, run: Run) -> None:
         with run.start() as ctx:
-            first = ctx.emit_artifact(b"one", name="a.txt")
-            with pytest.raises(ValueError, match=first.id):
-                ctx.emit_artifact(b"two", name="a.txt")
+            first = ctx.register(b"one", title="a.txt")
+            again = ctx.register(b"one", title="other.txt")
             execution_id = ctx.id
-        recorded = run.execution(execution_id).artifacts
-        assert [artifact.id for artifact in recorded] == [first.id]
+        assert again.id == first.id
+        assert first.ref == f"molab:asset/{first.id}"
+        assert [asset.id for asset in _produced(run, execution_id)] == [first.id]
         assert first.content.digest == "sha256:" + hashlib.sha256(b"one").hexdigest()
 
-    def test_user_results_json_and_set_result_do_not_collide(self, run: Run) -> None:
+    def test_new_bytes_replace_the_slot_and_keep_its_id(self, run: Run) -> None:
+        with run.start() as ctx:
+            first = ctx.register(b"one", title="a.txt")
+            second = ctx.register(b"two", title="a.txt")
+            execution_id = ctx.id
+        assert second.id == first.id
+        produced = _produced(run, execution_id)
+        assert [asset.content.digest for asset in produced] == [second.content.digest]
+        assert second.content.digest != first.content.digest
+
+    def test_a_later_attempt_replaces_the_runs_product(self, run: Run) -> None:
+        with run.start() as ctx:
+            first = ctx.register(b"one", title="a.txt")
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            second = ctx.register(b"two", title="a.txt")
+            later = ctx.id
+        assert second.id == first.id
+        assert isinstance(second.origin, ExecutionOrigin)
+        assert second.origin.execution_id == later
+        assets = run.experiment.assets.list()
+        assert [asset.id for asset in assets] == [first.id]
+
+    def test_runs_get_their_own_slot_without_numeric_suffixes(self, run: Run) -> None:
+        sibling = run.experiment.add_run()
+        with run.start() as ctx:
+            mine = ctx.register(b"one", title="network.data")
+        with sibling.start() as ctx:
+            theirs = ctx.register(b"two", title="network.data")
+        assert mine.id != theirs.id
+        slugs = sorted(
+            path.parent.name for path in Path(run.experiment.path, "assets").glob("*/asset.json")
+        )
+        assert all(slug.endswith("--network-data") for slug in slugs)
+        assert not any(slug.endswith("-2") for slug in slugs)
+
+    def test_user_results_title_and_set_result_do_not_collapse(self, run: Run) -> None:
         with run.start() as ctx:
             execution_id = ctx.id
-            ctx.emit_artifact(b'{"user": 1}', name="results.json")
+            user = ctx.register(b'{"user": 1}', title="results.json")
             ctx.set_result("k", 1)
-        named = [
-            artifact
-            for artifact in run.execution(execution_id).artifacts
-            if artifact.name == "results.json"
-        ]
-        assert len(named) == 2
-        assert len({artifact.path for artifact in named}) == 2
-        assert any(artifact.path.endswith("artifacts/results.json") for artifact in named)
-        assert any(artifact.path.endswith("artifacts/_molab/results.json") for artifact in named)
-        workspace = run.experiment.project.workspace
-        repository = ArtifactRepository(workspace.root, fs=workspace.fs)
-        execution_dir = run.execution_dir(execution_id)
-        for artifact in named:
-            payload = repository.read_bytes(artifact, execution_dir=execution_dir)
-            assert "sha256:" + hashlib.sha256(payload).hexdigest() == artifact.content.digest
+        produced = _produced(run, execution_id)
+        assert {asset.title for asset in produced} == {"results.json", "results"}
+        assert user.id in {asset.id for asset in produced}
+        for asset in produced:
+            payload = _payload(run, asset)
+            assert "sha256:" + hashlib.sha256(payload).hexdigest() == asset.content.digest
 
-    def test_public_emit_refuses_reserved(self, run: Run) -> None:
-        with run.start() as ctx:
-            with pytest.raises(ValueError):
-                ctx.emit_artifact({"x": 1}, name="_molab/x.json")
-            with pytest.raises(ValueError):
-                ctx.emit_artifact(b"x", name="y", semantic_type="result")
-
-    def test_parallel_emits_of_distinct_names_all_recorded(self, run: Run) -> None:
+    def test_parallel_registers_of_distinct_bytes_all_land(self, run: Run) -> None:
         names = [f"n{index}.txt" for index in range(20)]
         errors: list[BaseException] = []
 
-        def emit_batch(ctx: ExecutionContext, batch: list[str]) -> None:
+        def register_batch(ctx: ExecutionContext, batch: list[str]) -> None:
             try:
                 for name in batch:
-                    ctx.emit_artifact(name.encode(), name=name)
+                    ctx.register(name.encode(), title=name)
             except BaseException as exc:
                 errors.append(exc)
 
         with run.start() as ctx:
             workers = [
-                threading.Thread(target=emit_batch, args=(ctx, names[offset::4]), daemon=True)
+                threading.Thread(target=register_batch, args=(ctx, names[offset::4]), daemon=True)
                 for offset in range(4)
             ]
             for worker in workers:
@@ -507,34 +535,21 @@ class TestExecutionContextEmitArtifact:
                 worker.join(timeout=max(remaining, 0.0))
             assert not any(worker.is_alive() for worker in workers)
             assert errors == []
-            recorded = run.execution(ctx.id).artifacts
-            assert len(recorded) == 20
-            assert {artifact.name for artifact in recorded} == set(names)
+            execution_id = ctx.id
+        produced = _produced(run, execution_id)
+        assert len(produced) == 20
+        assert {asset.title for asset in produced} == set(names)
 
     def test_reused_checkpoint_label_is_refused(self, run: Run) -> None:
         with run.start() as ctx:
             execution_id = ctx.id
             first = ctx.checkpoint("latest", data={"step": 1})
-            with pytest.raises(ValueError, match=first.id):
+            with pytest.raises(ValueError, match="latest"):
                 ctx.checkpoint("latest", data={"step": 2})
-        checkpoints = [
-            artifact
-            for artifact in run.execution(execution_id).artifacts
-            if artifact.semantic_type == "checkpoint"
-        ]
-        assert len(checkpoints) == 1
-        assert checkpoints[0].id == first.id
-        saved = json.loads(
-            (run.execution_dir(execution_id) / "checkpoints" / "latest.json").read_text(
-                encoding="utf-8"
-            )
-        )
+        assert first == run.execution_dir(execution_id) / "checkpoints" / "latest.json"
+        saved = json.loads(first.read_text(encoding="utf-8"))
         assert saved["data"] == {"step": 1}
-        workspace = run.experiment.project.workspace
-        payload = ArtifactRepository(workspace.root, fs=workspace.fs).read_bytes(
-            first, execution_dir=run.execution_dir(execution_id)
-        )
-        assert first.content.digest == "sha256:" + hashlib.sha256(payload).hexdigest()
+        assert _produced(run, execution_id) == []
 
 
 class TestExecutionContextResults:
@@ -545,11 +560,7 @@ class TestExecutionContextResults:
             assert ctx.get_result("energy") == -2.25
             execution_id = ctx.id
             assert list(run.execution_dir(execution_id).rglob("results.json")) == []
-            assert not (run.execution_dir(execution_id) / "artifacts" / "_molab").exists()
-            assert all(
-                artifact.semantic_type != RESULT_SEMANTIC_TYPE
-                for artifact in run.execution(execution_id).artifacts
-            )
+            assert _produced(run, execution_id) == []
 
     def test_set_result_snapshots_value(self, run: Run) -> None:
         with run.start() as ctx:
@@ -567,74 +578,44 @@ class TestExecutionContextResults:
         with pytest.raises(RuntimeError):
             ctx.set_result("k", 1)
 
-    def test_exit_emits_one_result_artifact(self, run: Run) -> None:
+    def test_exit_registers_one_results_asset(self, run: Run) -> None:
         with run.start() as ctx:
             execution_id = ctx.id
             ctx.set_active_task("train")
             ctx.set_result("energy", -1.5)
             ctx.set_result("converged", True)
             ctx.set_result("energy", -2.25)
-        results = [
-            artifact
-            for artifact in run.execution(execution_id).artifacts
-            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
-        ]
+        results = [asset for asset in _produced(run, execution_id) if asset.title == "results"]
         assert len(results) == 1
-        artifact = results[0]
-        assert artifact.name == "results.json"
-        assert artifact.media_type == "application/json"
-        assert artifact.path.endswith("artifacts/_molab/results.json")
-        assert "task_id" not in artifact.metadata
-        workspace = run.experiment.project.workspace
-        payload = ArtifactRepository(workspace.root, fs=workspace.fs).read_bytes(
-            artifact, execution_dir=run.execution_dir(execution_id)
-        )
-        assert json.loads(payload) == {"energy": -2.25, "converged": True}
+        asset = results[0]
+        assert asset.media_type == "application/json"
+        assert isinstance(asset.origin, ExecutionOrigin)
+        assert asset.origin.task is None
+        assert json.loads(_payload(run, asset)) == {"energy": -2.25, "converged": True}
 
-    def test_failed_block_still_emits(self, run: Run) -> None:
+    def test_failed_block_still_registers(self, run: Run) -> None:
         execution_id = ""
         with pytest.raises(ValueError, match="boom"), run.start() as ctx:
             execution_id = ctx.id
             ctx.set_result("k", 1)
             raise ValueError("boom")
         assert run.execution(execution_id).status is ExecutionStatus.FAILED
-        results = [
-            artifact
-            for artifact in run.execution(execution_id).artifacts
-            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
-        ]
+        results = [asset for asset in _produced(run, execution_id) if asset.title == "results"]
         assert len(results) == 1
-        workspace = run.experiment.project.workspace
-        payload = ArtifactRepository(workspace.root, fs=workspace.fs).read_bytes(
-            results[0], execution_dir=run.execution_dir(execution_id)
-        )
-        assert json.loads(payload) == {"k": 1}
+        assert json.loads(_payload(run, results[0])) == {"k": 1}
 
-    def test_no_set_result_no_artifact(self, run: Run) -> None:
+    def test_no_set_result_leaves_no_results_asset(self, run: Run) -> None:
         with run.start() as ctx:
             execution_id = ctx.id
-        results = [
-            artifact
-            for artifact in run.execution(execution_id).artifacts
-            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
-        ]
-        assert results == []
+        assert [asset for asset in _produced(run, execution_id) if asset.title == "results"] == []
 
     def test_none_value_is_recorded(self, run: Run) -> None:
         with run.start() as ctx:
             execution_id = ctx.id
             ctx.set_result("k", None)
-        results = [
-            artifact
-            for artifact in run.execution(execution_id).artifacts
-            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
-        ]
+        results = [asset for asset in _produced(run, execution_id) if asset.title == "results"]
         assert len(results) == 1
-        workspace = run.experiment.project.workspace
-        payload = ArtifactRepository(workspace.root, fs=workspace.fs).read_bytes(
-            results[0], execution_dir=run.execution_dir(execution_id)
-        )
-        assert json.loads(payload) == {"k": None}
+        assert json.loads(_payload(run, results[0])) == {"k": None}
 
     def test_externally_sealed_records_no_results(self, run: Run) -> None:
         with run.start() as ctx:
@@ -642,12 +623,7 @@ class TestExecutionContextResults:
             ctx.set_result("k", 1)
             run.cancel(ctx.id)
         assert run.execution(execution_id).status is ExecutionStatus.CANCELLED
-        results = [
-            artifact
-            for artifact in run.execution(execution_id).artifacts
-            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
-        ]
-        assert results == []
+        assert [asset for asset in _produced(run, execution_id) if asset.title == "results"] == []
         log = (run.execution_dir(execution_id) / "run.log").read_text(encoding="utf-8")
         assert "results not recorded" in log
 

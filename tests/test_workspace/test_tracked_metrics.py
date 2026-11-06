@@ -10,6 +10,7 @@ UTC wall times, the per-task capture the node cache takes, and the in-memory
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -63,53 +64,62 @@ class TestRoundTrip:
         assert record["tags"] == {"split": "val"}
 
 
-class TestMetricsArtifact:
-    def _metrics_artifacts(self, run):
-        return [a for a in run.executions[-1].artifacts if a.semantic_type == "molplot.metrics"]
+def _image_asset(run, title: str):
+    from molab.workspace.asset_repository import assets_produced_by
 
-    def test_registered_when_only_a_histogram_was_written(self, run) -> None:
+    produced = assets_produced_by(run.experiment.project.workspace, run.executions[-1].id)
+    return next(asset for asset in produced if asset.title == title)
+
+
+class TestMetricsWal:
+    def test_a_histogram_writes_the_wal_and_not_an_asset(self, run) -> None:
+        from molab.workspace.asset_repository import assets_produced_by
+
         with run.start() as ctx:
             ctx.metrics.histogram("forces", [0.0, 1.0], [2])
-        (artifact,) = self._metrics_artifacts(run)
-        assert artifact.name == "metrics.mlp.jsonl"
+            execution_dir = ctx.execution_dir
+        assert (execution_dir / "metrics.mlp.jsonl").is_file()
+        assert assets_produced_by(run.experiment.project.workspace, run.executions[-1].id) == []
 
-    def test_not_registered_when_nothing_was_written(self, run) -> None:
+    def test_nothing_is_written_when_no_record_is(self, run) -> None:
         with run.start() as ctx:
             assert ctx.metrics.touched is False
-        assert self._metrics_artifacts(run) == []
+            execution_dir = ctx.execution_dir
+        assert not (execution_dir / "metrics.mlp.jsonl").exists()
 
 
 class TestImage:
-    def test_bytes_become_an_artifact_and_a_ref(self, run) -> None:
+    def test_bytes_become_an_asset_and_a_ref(self, run) -> None:
         with run.start() as ctx:
             record = ctx.metrics.image("rdf", _PNG, 3, caption="g(r)", name="rdf-3.png")
             execution_dir = ctx.execution_dir
-        (artifact,) = [a for a in run.executions[-1].artifacts if a.name == "rdf-3.png"]
-        assert artifact.semantic_type == "molplot.image"
-        assert artifact.media_type == "image/png"
+        asset = _image_asset(run, "rdf-3.png")
+        assert asset.media_type == "image/png"
         assert record["t"] == "image_ref"
-        assert record["v"] == {"path": artifact.path, "caption": "g(r)"}
-        assert (execution_dir / artifact.path).read_bytes() == _PNG
+        assert record["v"] == {"path": asset.ref, "caption": "g(r)"}
+        workspace = run.experiment.project.workspace
+        payload = Path(workspace.assets_at(asset.scope).payload_path(asset.id)).read_bytes()
+        assert payload == _PNG
         (on_disk,) = read_run_metrics(execution_dir, metric_type="image_ref").records
         assert on_disk["v"] == record["v"]
 
-    def test_a_path_is_archived(self, run, tmp_path) -> None:
+    def test_a_path_outside_the_attempt_is_registered(self, run, tmp_path) -> None:
         image = tmp_path / "plot.png"
         image.write_bytes(_PNG)
         with run.start() as ctx:
             record = ctx.metrics.image("plot", image)
-        (artifact,) = [a for a in run.executions[-1].artifacts if a.name == "plot.png"]
-        assert artifact.semantic_type == "molplot.image"
-        assert record["v"] == {"path": artifact.path, "caption": None}
+        asset = _image_asset(run, "plot.png")
+        assert asset.media_type == "image/png"
+        assert record["v"] == {"path": asset.ref, "caption": None}
 
-    def test_a_path_inside_the_attempt_is_promoted_in_place(self, run) -> None:
+    def test_a_path_inside_the_attempt_is_registered(self, run) -> None:
         with run.start() as ctx:
             image = ctx.task_workdir("plot") / "frame.png"
             image.write_bytes(_PNG)
             record = ctx.metrics.image("frame", image)
-        (artifact,) = [a for a in run.executions[-1].artifacts if a.name == "frame.png"]
-        assert artifact.source_path == "out/plot/frame.png"
-        assert record["v"] == {"path": artifact.path, "caption": None}
+        assert image.read_bytes() == _PNG
+        asset = _image_asset(run, "frame.png")
+        assert record["v"] == {"path": asset.ref, "caption": None}
 
     def test_bad_data_raises(self, run) -> None:
         with run.start() as ctx:
@@ -167,7 +177,9 @@ class TestTaskTag:
         (record,) = read_run_metrics(execution_dir).records
         assert record == {**recorded, "tags": {"task": "train", "replayed_from": "e01"}}
         assert recorded["tags"] == {"task": "train"}
-        assert any(a.semantic_type == "molplot.metrics" for a in run.executions[-1].artifacts)
+        from molab.workspace.asset_repository import assets_produced_by
+
+        assert assets_produced_by(run.experiment.project.workspace, run.executions[-1].id) == []
 
     def test_a_nested_execution_starts_with_no_task(self, experiment) -> None:
         outer_run = experiment.add_run(params={"n": 1})

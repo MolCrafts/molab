@@ -135,7 +135,6 @@ def _remote_doc(run: Run) -> str:
         "started_at": "2026-01-01T00:00:01Z",
         "finished_at": "2026-01-01T00:00:09Z",
         "sealed_at": "2026-01-01T00:00:10Z",
-        "sealed_commit": "deadbeef",
         "executor": {"backend": "molq", "kind": "local", "host": "node7", "pid": 42},
         "environment": {**local.environment, "host": "node7"},
     }

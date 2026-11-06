@@ -11,7 +11,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  Input,
   Label,
   Select,
   SelectContent,
@@ -75,7 +74,6 @@ export function RunToolbar({
   const [bypassCache, setBypassCache] = useState(false);
   const [target, setTarget] = useState("local");
   const [targets, setTargets] = useState<TargetResponse[]>([]);
-  const [checkpointArtifactId, setCheckpointArtifactId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,7 +113,6 @@ export function RunToolbar({
       const execution = await runsApi.createExecution(run.projectId, run.experimentId, run.id, {
         mode: mode as ExecutionAttemptCreateRequest.mode,
         ...(selectedExecutionId ? { basedOnExecutionId: selectedExecutionId } : {}),
-        ...(mode === "resume" && checkpointArtifactId ? { checkpointArtifactId } : {}),
         bypassCache: bypassCacheFor(mode, bypassCache),
         target,
       });
@@ -185,17 +182,6 @@ export function RunToolbar({
                     : "This run has no attempt yet."}
               </p>
             </div>
-            {mode === "resume" && (
-              <div className="grid gap-2">
-                <Label htmlFor="checkpoint-artifact">Checkpoint artifact ID (optional)</Label>
-                <Input
-                  id="checkpoint-artifact"
-                  value={checkpointArtifactId}
-                  onChange={(event) => setCheckpointArtifactId(event.target.value)}
-                  placeholder="Artifact UUID"
-                />
-              </div>
-            )}
             <div className="flex items-start gap-2">
               <Checkbox
                 id="bypass-cache"

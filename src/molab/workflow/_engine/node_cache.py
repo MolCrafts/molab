@@ -2,9 +2,11 @@
 
 Wraps :func:`molab.workflow._engine.node.run_task_body` with the
 cache get/put dance: collect + JSON-safe the inputs, look up by
-``(snapshot, inputs)``, re-register cached artifacts and replay the task's
-metric records on a hit, and store the result + produced-artifact manifest +
-metric records on a miss. Kept apart from the dispatch core in :mod:`.node`.
+``(snapshot, inputs)``, replay the task's metric records on a hit, and store
+the result plus metric records on a miss. A hit's result is the value the
+body recorded, including any ``molab:asset/<id>`` ref. The bytes already
+live with the asset, so a hit does not copy files again. Kept apart from
+the dispatch core in :mod:`.node`.
 
 The cache ``inputs`` payload covers every runtime input of a task: upstream
 outputs, engine-injected root inputs (run params), a trigger-delivered value
@@ -18,12 +20,9 @@ attempts of one run executed in different places share their entries.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
 from typing import cast
 
 from mollog import get_logger
-
-from molab.workspace import tracking
 
 from ..protocols import JSONMapping, JSONValue, TaskInput, TaskOutput
 from ..types import UnknownTaskError
@@ -133,172 +132,6 @@ def _cache_inputs(
     return payload
 
 
-def _task_artifacts(deps: WorkflowDeps, name: str) -> list[object]:
-    """Artifacts on this attempt whose ``metadata.task_id`` is *name*.
-
-    Any missing run, execution id, or execution record fails soft to ``[]``.
-    """
-    run_context = deps.run_context
-    if run_context is None:
-        return []
-    run = getattr(run_context, "run", None)
-    execution_id = deps.execution_id
-    if run is None or execution_id is None:
-        return []
-    execution = getattr(run, "execution", None)
-    if not callable(execution):
-        return []
-    try:
-        artifacts = execution(execution_id).artifacts
-    except Exception:
-        return []
-    found: list[object] = []
-    for artifact in artifacts:
-        metadata = getattr(artifact, "metadata", None) or {}
-        try:
-            task_id = metadata.get("task_id")
-        except Exception:
-            continue
-        if task_id == name:
-            found.append(artifact)
-    return found
-
-
-def _project_artifacts(artifacts: list[object]) -> list[dict[str, JSONValue]]:
-    """JSON manifest rows for *artifacts*. Fields, including ``path``, stay put."""
-    manifest: list[dict[str, JSONValue]] = []
-    for artifact in artifacts:
-        metadata = getattr(artifact, "metadata", None) or {}
-        content = getattr(artifact, "content", None)
-        digest = getattr(content, "digest", None)
-        if not digest:
-            continue
-        manifest.append(
-            {
-                "name": getattr(artifact, "name", None),
-                "kind": "artifact",
-                "content_hash": digest,
-                "asset_id": getattr(artifact, "id", None),
-                "mime": getattr(artifact, "media_type", None),
-                "tags": metadata.get("tags") or {},
-                "path": getattr(artifact, "path", None),
-            }
-        )
-    return manifest
-
-
-def _artifact_manifest(deps: WorkflowDeps, name: str) -> list[dict[str, JSONValue]]:
-    """Build the JSON artifact manifest for task *name* in the current run.
-
-    Projects :func:`_task_artifacts`. Returns ``[]`` when no workspace run
-    or execution id is reachable.
-    """
-    return _project_artifacts(_task_artifacts(deps, name))
-
-
-def _upstream_asset_ids(deps: WorkflowDeps, registration: object) -> tuple[str, ...]:
-    """Project the workflow DAG into asset lineage: upstream artifact ids.
-
-    For each declared upstream task of *registration* (the same
-    ``depends_on`` set :func:`_collect_upstream_outputs` reads), collect the
-    ``asset_id``s of the artifacts that upstream registered **in this run's
-    manifests** (the existing ``producer_task=`` query — no new attribution
-    mechanism). Deduped, stable order.
-
-    Semantics (vision-loop-09): edges reference per-run manifest entries —
-    resume-seeded tasks whose artifacts were registered by the prior attempt
-    of the same run still resolve (same manifest); an upstream that persisted
-    nothing (non-JSON-safe output, no run context) contributes no edge,
-    honestly reflecting that nothing was persisted for it. Root tasks (no
-    upstreams) return ``()`` — a root artifact's param identity stays
-    ``config_hash``'s job (no fourth id layer).
-    """
-    ids: list[str] = []
-    for upstream in getattr(registration, "depends_on", ()) or ():
-        try:
-            entries = _artifact_manifest(deps, upstream)
-        except Exception:  # fail-soft: lineage rides the persistence bonus channel
-            logger.debug(f"lineage: upstream query for {upstream!r} skipped")
-            continue
-        for entry in entries:
-            asset_id = entry.get("asset_id")
-            if isinstance(asset_id, str) and asset_id and asset_id not in ids:
-                ids.append(asset_id)
-    return tuple(ids)
-
-
-def _put_file_blobs(deps: WorkflowDeps, artifacts: list[object]) -> None:
-    """Copy registered file bytes into the cache blob store (cache axis).
-
-    Bytes come from ``run.artifact_location``. A stand-in run with no such
-    method returns without logging. A resolve failure or a missing file is
-    skipped with a debug log. This function does not join a workspace root
-    or ``artifact.path``.
-    """
-    store = getattr(getattr(deps, "cache", None), "store", None)
-    put_blob = getattr(store, "put_blob", None)
-    if not callable(put_blob) or not artifacts:
-        return
-    run_context = getattr(deps, "run_context", None)
-    run = getattr(run_context, "run", None) if run_context is not None else None
-    locate = getattr(run, "artifact_location", None)
-    if not callable(locate):
-        return
-    execution_id = deps.execution_id
-    for artifact in artifacts:
-        content = getattr(artifact, "content", None)
-        digest = getattr(content, "digest", None)
-        if not digest:
-            continue
-        name = getattr(artifact, "name", None)
-        try:
-            location = locate(execution_id, artifact)
-            path = Path(location)
-            if not path.is_file():
-                logger.debug(f"cache: blob put for {name!r} skipped")
-                continue
-            put_blob(str(digest), path.read_bytes())
-        except Exception:
-            logger.debug(f"cache: blob put for {name!r} skipped")
-
-
-def _restore_cached_files(
-    deps: WorkflowDeps,
-    manifest: list[dict],
-    *,
-    consumed: tuple[str, ...] = (),
-) -> None:
-    """Publish cached file blobs onto the current run via emit_artifact."""
-    run_context = deps.run_context
-    emit = getattr(run_context, "emit_artifact", None)
-    store = getattr(getattr(deps, "cache", None), "store", None)
-    get_blob = getattr(store, "get_blob", None)
-    if not callable(emit) or not callable(get_blob) or not manifest:
-        return
-    for entry in manifest:
-        content_hash = entry.get("content_hash")
-        name = entry.get("name")
-        if not content_hash or not name:
-            continue
-        try:
-            blob = get_blob(str(content_hash))
-        except Exception:
-            blob = None
-        if blob is None:
-            continue
-        tags = entry.get("tags")
-        try:
-            emit(
-                blob,
-                name=str(name),
-                mime=entry.get("mime"),
-                tags=tags if isinstance(tags, dict) else None,
-                consumed=list(consumed) or None,
-            )
-        except Exception:
-            logger.debug(f"cache: restore of {name!r} skipped")
-
-
 def _replay_cached_metrics(deps: WorkflowDeps, name: str, payload: Mapping[str, object]) -> None:
     """Append a cache entry's metric records to the current attempt (D93).
 
@@ -341,15 +174,14 @@ async def run_task_body_cached(
       root inputs for this task (sweep params; the workdir Path is
       canonicalized out) — as the cache ``inputs`` payload. The profile name
       and the execution location are not part of the key;
-    * ``cache.get`` → on HIT, re-register the cached artifact manifest into
-      the current run, replay the cached metric records (tagged
-      ``replayed_from``), and return the recorded ``result`` WITHOUT running
-      the body (the per-task body counter must not increment);
-    * on MISS, run the body, assemble the produced-artifact manifest, and
-      ``cache.put({"result": raw, "files": manifest})``, plus ``"metrics"``
-      and ``"producer_execution"`` when the task wrote metric records under
-      the capture cap. Non-JSON-safe inputs / results degrade gracefully —
-      the body still runs and the put is skipped.
+    * ``cache.get`` → on HIT, replay the cached metric records (tagged
+      ``replayed_from``) and return the recorded ``result`` WITHOUT running
+      the body (the per-task body counter must not increment). The result
+      may be an asset ref; the bytes stay with the asset.
+    * on MISS, run the body and ``cache.put({"result": raw})``, plus
+      ``"metrics"`` and ``"producer_execution"`` when the task wrote metric
+      records under the capture cap. Non-JSON-safe inputs / results degrade
+      gracefully — the body still runs and the put is skipped.
 
     The returned raw value is routed by the caller through the SAME
     ``_classify_return`` path as a plain return, so branch / End semantics
@@ -385,23 +217,7 @@ async def run_task_body_cached(
             )
             payload = None
         if payload is not None:
-            # The hit's restored artifacts name this task, like a body's.
-            with tracking.task_scope(name):
-                files = payload.get("files", payload.get("artifacts", []))
-                if isinstance(files, list):
-                    set_active = getattr(deps.run_context, "set_active_task", None)
-                    if callable(set_active):
-                        set_active(name)
-                    try:
-                        consumed = _upstream_asset_ids(deps, registration)
-                    except Exception:
-                        consumed = ()
-                    _restore_cached_files(
-                        deps,
-                        [a for a in files if isinstance(a, dict)],
-                        consumed=consumed,
-                    )
-                _replay_cached_metrics(deps, name, payload)
+            _replay_cached_metrics(deps, name, payload)
             return payload.get("result")
 
     try:
@@ -418,10 +234,7 @@ async def run_task_body_cached(
         records = take_task_metrics(deps.run_context, name)
 
     if cacheable and _is_json_safe(raw):
-        produced = _task_artifacts(deps, name)
-        _put_file_blobs(deps, produced)
-        manifest = _project_artifacts(produced)
-        result_payload = cast("dict[str, JSONValue]", {"result": raw, "files": manifest})
+        result_payload = cast("dict[str, JSONValue]", {"result": raw})
         if records and deps.execution_id is not None:
             result_payload["metrics"] = cast("JSONValue", records)
             result_payload["producer_execution"] = deps.execution_id

@@ -13,15 +13,16 @@ rather than an empty directory. History stays a soft dependency.
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
 import pytest
 
 from molab.ids import compute_content_hash
 from molab.profile import ProfileConfig
-from molab.workspace import Project, Run, Workspace
+from molab.workspace import Run, Workspace
+from molab.workspace.asset_repository import assets_produced_by, content_ref
 from molab.workspace.domain import (
-    Artifact,
     ExecutionMode,
     ExecutionStatus,
     SourceFile,
@@ -441,26 +442,14 @@ class TestRunFinishedAt:
         assert run.finished_at is None
 
 
-def _one_result(run: Run, execution_id: str) -> Artifact:
+def _results_asset(run: Run, execution_id: str):
     found = [
-        artifact
-        for artifact in run.execution(execution_id).artifacts
-        if artifact.semantic_type == "result"
+        asset
+        for asset in assets_produced_by(run.experiment.project.workspace, execution_id)
+        if asset.title == "results"
     ]
     assert len(found) == 1
     return found[0]
-
-
-def _patch_result_bytes(monkeypatch: pytest.MonkeyPatch, payload: bytes) -> None:
-    """Replace ``ArtifactRepository.read_bytes``, the seam ``Run.results`` calls."""
-
-    def read_bytes(self: object, artifact: object, *, execution_dir: object) -> bytes:
-        return payload
-
-    monkeypatch.setattr(
-        "molab.workspace.artifact_repository.ArtifactRepository.read_bytes",
-        read_bytes,
-    )
 
 
 class TestRunResults:
@@ -488,68 +477,70 @@ class TestRunResults:
     def test_unknown_execution_is_empty(self, run: Run) -> None:
         assert run.results("no-such") == {}
 
-    def test_corrupt_result_artifact_raises(
-        self, run: Run, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_corrupt_result_bytes_raise(self, run: Run) -> None:
         with run.start() as ctx:
             ctx.set_result("a", 1)
             eid = ctx.id
-        artifact = _one_result(run, eid)
-        _patch_result_bytes(monkeypatch, b"{not json")
-        with pytest.raises(ValueError) as excinfo:
+        asset = _results_asset(run, eid)
+        path = Path(run.experiment.assets.payload_path(asset.id))
+        path.write_bytes(b"{not json")
+        with pytest.raises(ValueError, match=asset.id):
             run.results(eid)
-        assert artifact.id in str(excinfo.value)
 
-    def test_non_dict_result_artifact_raises(
-        self, run: Run, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_non_dict_result_raises(self, run: Run) -> None:
         with run.start() as ctx:
             ctx.set_result("a", 1)
             eid = ctx.id
-        artifact = _one_result(run, eid)
-        _patch_result_bytes(monkeypatch, b"[1]")
-        with pytest.raises(ValueError) as excinfo:
+        asset = _results_asset(run, eid)
+        workspace = run.experiment.project.workspace
+        path = workspace.assets_at(asset.scope).payload_path(asset.id)
+        Path(path).write_bytes(b"[1]")
+        fresh = content_ref(workspace.fs, path)
+        record = Path(path).parent / "asset.json"
+        raw = json.loads(record.read_text(encoding="utf-8"))
+        raw["content"]["digest"] = fresh.digest
+        raw["content"]["size"] = fresh.size
+        record.write_text(json.dumps(raw), encoding="utf-8")
+        with pytest.raises(ValueError, match=asset.id):
             run.results(eid)
-        assert artifact.id in str(excinfo.value)
 
-    def test_missing_result_bytes_raises(self, run: Run) -> None:
+    def test_missing_result_bytes_raise(self, run: Run) -> None:
         with run.start() as ctx:
             ctx.set_result("a", 1)
             eid = ctx.id
-        artifact = _one_result(run, eid)
-        (run.execution_dir(eid) / "artifacts" / "_molab" / "results.json").unlink()
-        with pytest.raises(ValueError) as excinfo:
+        asset = _results_asset(run, eid)
+        Path(run.experiment.assets.payload_path(asset.id)).unlink()
+        with pytest.raises(ValueError, match=asset.id):
             run.results(eid)
-        assert artifact.id in str(excinfo.value)
 
-    def test_multiple_result_artifacts_raise(self, run: Run) -> None:
-        import json
+    def test_set_result_replaces_a_registered_results_asset(self, run: Run) -> None:
+        with run.start() as ctx:
+            ctx.register(b'{"other": 1}', title="results")
+            ctx.set_result("a", 1)
+            eid = ctx.id
+        produced = [
+            asset
+            for asset in assets_produced_by(run.experiment.project.workspace, eid)
+            if asset.title == "results"
+        ]
+        assert len(produced) == 1
+        assert run.results(eid) == {"a": 1}
 
+    def test_reads_through_payload_path(self, run: Run, monkeypatch: pytest.MonkeyPatch) -> None:
         with run.start() as ctx:
             ctx.set_result("a", 1)
             eid = ctx.id
-        path = run.execution_dir(eid) / "execution.json"
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        recorded = [item for item in raw["artifacts"] if item.get("semantic_type") == "result"]
-        assert len(recorded) == 1
-        original_id = recorded[0]["id"]
-        assert isinstance(original_id, str)
-        copied = dict(recorded[0])
-        copied["id"] = "copy-result"
-        raw["artifacts"].append(copied)
-        path.write_text(json.dumps(raw), encoding="utf-8")
+        alt = Path(run.run_dir) / "alt-results.json"
+        alt.write_text('{"x": 1}', encoding="utf-8")
 
-        with pytest.raises(ValueError) as excinfo:
-            run.results(eid)
-        message = str(excinfo.value)
-        assert original_id in message
-        assert "copy-result" in message
+        def payload_path(self: object, asset_id: str) -> str:
+            del self, asset_id
+            return str(alt)
 
-    def test_reads_through_read_bytes(self, run: Run, monkeypatch: pytest.MonkeyPatch) -> None:
-        with run.start() as ctx:
-            ctx.set_result("a", 1)
-            eid = ctx.id
-        _patch_result_bytes(monkeypatch, b'{"x": 1}')
+        monkeypatch.setattr(
+            "molab.workspace.asset_repository.AssetRepository.payload_path",
+            payload_path,
+        )
         assert run.results(eid) == {"x": 1}
 
     def test_reads_through_workspace_fs(self, tmp_path: Path) -> None:
@@ -562,11 +553,10 @@ class TestRunResults:
         with run.start() as ctx:
             ctx.set_result("a", 1)
             eid = ctx.id
-        artifact = _one_result(run, eid)
         fs.reset()
         assert run.results(eid) == {"a": 1}
-        assert fs.for_basename("results.json", "read_bytes") == 1
-        assert artifact.path.endswith("artifacts/_molab/results.json")
+        assert fs.for_basename("payload.json", "read_text") == 1
+        assert fs.for_basename("payload.json", "open") >= 1
 
 
 class TestRunGetResult:
@@ -711,37 +701,20 @@ class TestRunLoad:
         assert parents == []
 
 
-class TestRun:
-    """``Run.artifact_location`` is the bound resolver."""
-
-    def test_artifact_location_is_execution_relative(self, run: Run) -> None:
+class TestPayloadPath:
+    def test_path_reads_the_bytes(self, run: Run) -> None:
         with run.start() as ctx:
-            artifact = ctx.emit_artifact(b"m", name="metrics.json")
+            asset = ctx.register(b"m", title="metrics.json")
+        path = run.experiment.assets.payload_path(asset.id)
+        assert Path(path).read_bytes() == b"m"
 
-        assert run.artifact_location("e01", artifact) == str(
-            run.execution_dir("e01") / "artifacts" / "metrics.json"
-        )
+    def test_unknown_id_raises(self, run: Run) -> None:
+        with pytest.raises(KeyError):
+            run.experiment.assets.payload_path("missing")
 
-    def test_rejects_other_attempt_and_other_run(self, project: Project) -> None:
-        exp = project.add_experiment("loc")
-        run = exp.add_run()
-        other = exp.add_run(params={"n": 2})
+    def test_tampered_bytes_raise(self, run: Run) -> None:
         with run.start() as ctx:
-            artifact = ctx.emit_artifact(b"m", name="metrics.json")
-
-        with pytest.raises(ValueError):
-            run.artifact_location("e02", artifact)
-        foreign = artifact.model_copy(update={"run_id": other.id})
-        with pytest.raises(ValueError):
-            run.artifact_location("e01", foreign)
-
-    def test_legacy_form_matches_new_form(self, workspace: Workspace, run: Run) -> None:
-        with run.start() as ctx:
-            artifact = ctx.emit_artifact(b"m", name="metrics.json")
-
-        new = run.artifact_location("e01", artifact)
-        legacy_path = (
-            Path(new).resolve().relative_to(Path(str(workspace.root)).resolve()).as_posix()
-        )
-        legacy = artifact.model_copy(update={"path": legacy_path})
-        assert run.artifact_location("e01", legacy) == new
+            asset = ctx.register(b"m", title="metrics.json")
+        Path(run.experiment.assets.payload_path(asset.id)).write_bytes(b"nope")
+        with pytest.raises(ValueError, match="bytes are"):
+            run.experiment.assets.payload_path(asset.id)

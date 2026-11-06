@@ -12,7 +12,7 @@ in-process body would have produced:
 * the output comes back encoded by the worker; the parent decodes it for
   ``state.results`` and stashes the bytes in ``state.encoded_outputs`` so
   :func:`.node_record.output_fields` stores them as they are;
-* deferred ``register_artifact`` / ``register_metric`` markers come back and
+* deferred ``RegisterAsset`` / ``RegisterMetric`` markers come back and
   are promoted by the caller exactly as in-process ones; metric records the
   body wrote (already in the attempt's WAL — the worker writes it) are kept
   for the node cache;

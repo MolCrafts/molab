@@ -1,8 +1,10 @@
-"""RegisterArtifact / register_* promotion — task outputs become run products.
+"""RegisterAsset promotion — a task output becomes an asset ref.
 
-Locks the user-facing vocabulary: write under ``ctx.workdir``, publish with
-``register_artifact`` / ``RegisterArtifact``. Downstream binds the *run*
-artifact path, never the ``.materialize`` scratch path.
+A body writes under ``ctx.workdir`` and returns ``ctx.register`` /
+``RegisterAsset``. The engine registers the file and records
+``molab:asset/<id>``. A later task receives the payload path. The working
+file stays under ``out/<task>/``. A cache hit returns that ref and does not
+register again.
 """
 
 from __future__ import annotations
@@ -12,16 +14,16 @@ from pathlib import Path
 import pytest
 
 from molab.workflow import (
-    RegisterArtifact,
+    RegisterAsset,
     TaskContext,
     Workflow,
     WorkflowRuntime,
 )
 from molab.workflow.cache import Caching
 from molab.workspace import Workspace
-from molab.workspace.artifact_repository import AssetRepository
-from molab.workspace.domain import ArtifactOrigin, ExecutionMode
-from molab.workspace.execution_dirs import ARTIFACTS, OUT
+from molab.workspace.asset_repository import AssetRepository, assets_produced_by
+from molab.workspace.domain import ExecutionMode, ExecutionOrigin
+from molab.workspace.execution_dirs import OUT
 
 
 def _new_run(tmp_path: Path, params: dict | None = None):
@@ -29,14 +31,19 @@ def _new_run(tmp_path: Path, params: dict | None = None):
     return ws.add_project(name="p").add_experiment(name="e").add_run(params=params or {})
 
 
-def _run_artifacts(run, execution_id: str):
-    return run._execution_repository().get(execution_id).artifacts
+def _produced(run, execution_id: str):
+    workspace = run.experiment.project.workspace
+    return [
+        asset
+        for asset in assets_produced_by(workspace, execution_id)
+        if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
+    ]
 
 
-class TestPromoteRegisterArtifact:
+class TestPromoteRegisterAsset:
     @pytest.mark.asyncio
-    async def test_returned_marker_copies_into_run_artifacts(self, tmp_path: Path) -> None:
-        captured: dict[str, object] = {}
+    async def test_returned_marker_records_the_asset_ref(self, tmp_path: Path) -> None:
+        captured: dict[str, Path] = {}
         wf = Workflow(name="reg")
 
         @wf.task
@@ -44,70 +51,67 @@ class TestPromoteRegisterArtifact:
             out = ctx.workdir / "system.data"
             out.write_text("atoms")
             captured["scratch"] = out
-            return {"data": RegisterArtifact(out, mime="chemical/x-lammps-data")}
+            return {"data": RegisterAsset(out, title="system", mime="chemical/x-lammps-data")}
+
+        @wf.task(depends_on=["export"])
+        async def consume(data: Path) -> str:
+            return data.read_text(encoding="utf-8")
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
             result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.status == "succeeded"
-        promoted = Path(result.outputs["export"]["data"])
         eid = run.executions[-1].id
-        # A task writes into the bulk tier, not scratch: what a body produces
-        # mixes intermediates with results, and ``out/`` is the tier that is
-        # kept. Promotion into ``artifacts/`` is what ``register_artifact`` is.
-        assert (
-            promoted == Path(run.run_dir) / "executions" / eid / OUT.name / "export" / "system.data"
-        )
-        scratch = Path(captured["scratch"])
+        (asset,) = _produced(run, eid)
+        assert result.outputs["export"]["data"] == asset.ref
+        assert asset.ref.startswith("molab:asset/")
+        assert asset.title == "system"
+        assert asset.media_type == "chemical/x-lammps-data"
+        assert isinstance(asset.origin, ExecutionOrigin)
+        assert asset.origin.task == "export"
+        scratch = captured["scratch"]
         assert scratch.parent.name == "export"
         assert OUT.name in scratch.parts
-        assert "executions" in scratch.parts
-        assert promoted.read_text(encoding="utf-8") == "atoms"
-        # v2 emit_artifact snapshots in place — the promoted path is that file.
-        assert promoted == captured["scratch"]
-        found = _run_artifacts(run, eid)
-        assert any(a.name == "system.data" for a in found)
+        assert scratch.read_text(encoding="utf-8") == "atoms"
+        assert Path(run.asset_path(asset.id)).read_text(encoding="utf-8") == "atoms"
+        assert result.outputs["consume"] == "atoms"
 
     @pytest.mark.asyncio
-    async def test_scalar_marker_return_is_promoted(self, tmp_path: Path) -> None:
+    async def test_scalar_marker_return_is_the_ref(self, tmp_path: Path) -> None:
         wf = Workflow(name="scalar")
 
         @wf.task
-        async def export(ctx: TaskContext) -> RegisterArtifact:
+        async def export(ctx: TaskContext) -> RegisterAsset:
             out = ctx.workdir / "a.txt"
             out.write_text("x")
-            return RegisterArtifact(out)
+            return RegisterAsset(out, title="a")
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
             result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
-        eid = run.executions[-1].id
-        assert (
-            Path(result.outputs["export"])
-            == Path(run.run_dir) / "executions" / eid / OUT.name / "export" / "a.txt"
-        )
+        (asset,) = _produced(run, run.executions[-1].id)
+        assert result.outputs["export"] == asset.ref
+        assert Path(run.asset_path(asset.id)).read_text(encoding="utf-8") == "x"
 
     @pytest.mark.asyncio
-    async def test_ctx_register_artifact_in_return_dict(self, tmp_path: Path) -> None:
+    async def test_ctx_register_in_return_dict(self, tmp_path: Path) -> None:
         wf = Workflow(name="verb")
 
         @wf.task
         async def export(ctx: TaskContext) -> dict:
             out = ctx.workdir / "report.txt"
             out.write_text("ok")
-            return {"report": ctx.register_artifact(out, mime="text/plain")}
+            return {"report": ctx.register(out, title="report", mime="text/plain")}
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
             result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
-        eid = run.executions[-1].id
-        assert (
-            Path(result.outputs["export"]["report"])
-            == Path(run.run_dir) / "executions" / eid / OUT.name / "export" / "report.txt"
-        )
+        (asset,) = _produced(run, run.executions[-1].id)
+        assert result.outputs["export"]["report"] == asset.ref
+        assert asset.media_type == "text/plain"
 
     @pytest.mark.asyncio
     async def test_pending_only_still_registers(self, tmp_path: Path) -> None:
@@ -117,7 +121,7 @@ class TestPromoteRegisterArtifact:
         async def export(ctx: TaskContext) -> int:
             out = ctx.workdir / "side.txt"
             out.write_text("side")
-            ctx.register_artifact(out)
+            ctx.register(out, title="side")
             return 1
 
         run = _new_run(tmp_path)
@@ -126,6 +130,8 @@ class TestPromoteRegisterArtifact:
 
         assert result.outputs["export"] == 1
         eid = run.executions[-1].id
+        (asset,) = [item for item in _produced(run, eid) if item.title == "side"]
+        assert Path(run.asset_path(asset.id)).read_text(encoding="utf-8") == "side"
         assert (
             Path(run.run_dir) / "executions" / eid / OUT.name / "export" / "side.txt"
         ).read_text() == "side"
@@ -144,30 +150,25 @@ class TestPromoteRegisterArtifact:
 
         assert result.outputs["measure"]["n"] == 42.0
         eid = run.executions[-1].id
-        # The versioned tier — a metrics WAL is the record of what the run
-        # measured, so it is not left in scratch.
-        wal = Path(run.run_dir) / "executions" / eid / ARTIFACTS.name / "metrics.mlp.jsonl"
-        assert wal.exists()
-        assert "n_atoms" in wal.read_text()
+        wal = Path(run.run_dir) / "executions" / eid / "metrics.mlp.jsonl"
+        assert wal.is_file()
+        assert "n_atoms" in wal.read_text(encoding="utf-8")
+        assert _produced(run, eid) == []
 
     @pytest.mark.asyncio
-    async def test_pending_only_reregisters_on_cache_hit(self, tmp_path: Path) -> None:
+    async def test_cache_hit_returns_the_ref_without_a_new_asset(self, tmp_path: Path) -> None:
         counters = {"export": 0}
         wf = Workflow(name="cached-reg")
 
         @wf.task
-        async def export(ctx: TaskContext) -> int:
+        async def export(ctx: TaskContext) -> str:
             counters["export"] += 1
             out = ctx.workdir / "cached.txt"
             out.write_text("cached")
-            ctx.register_artifact(out)
-            return 7
+            return ctx.register(out, title="cached")
 
         compiled = (wf).compile()
         cache = Caching(store_dir=tmp_path / "shared-cache")
-
-        # Same workspace so content-hash re-registration can see the first run's
-        # bytes; two experiments keep the runs distinct.
         proj = Workspace(tmp_path / "lab").add_project(name="p")
         run1 = proj.add_experiment(name="e1").add_run()
         with run1.start() as ctx1:
@@ -177,35 +178,35 @@ class TestPromoteRegisterArtifact:
             r2 = await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)
 
         assert counters["export"] == 1
-        assert r1.outputs["export"] == r2.outputs["export"] == 7
-        found = _run_artifacts(run2, run2.executions[-1].id)
-        assert any(a.name == "cached.txt" for a in found)
+        (asset,) = _produced(run1, run1.executions[-1].id)
+        assert r1.outputs["export"] == r2.outputs["export"] == asset.ref
+        assert _produced(run2, run2.executions[-1].id) == []
+        export_dir = run2.execution_dir(run2.executions[-1].id) / OUT.name / "export"
+        assert not (export_dir / "cached.txt").exists()
 
     @pytest.mark.asyncio
-    async def test_asset_title_lands_in_the_project_library(self, tmp_path: Path) -> None:
+    async def test_title_lands_on_the_experiment(self, tmp_path: Path) -> None:
         wf = Workflow(name="asset")
 
         @wf.task
         async def export(ctx: TaskContext) -> dict:
             out = ctx.workdir / "portrait.png"
             out.write_bytes(b"png")
-            return {"file": ctx.register_artifact(out, mime="image/png", asset="portrait")}
+            return {"file": ctx.register(out, title="portrait", mime="image/png")}
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
             result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.status == "succeeded"
-        assets = run.experiment.project.assets.list()
-        assert [asset.title for asset in assets] == ["portrait"]
-        origin = run.experiment.project.assets.versions(assets[0].id)[-1].origin
-        assert isinstance(origin, ArtifactOrigin)
-        assert Path(result.outputs["export"]["file"]).name == "portrait.png"
-        recorded = _run_artifacts(run, run.executions[-1].id)
-        assert all("asset" not in artifact.metadata for artifact in recorded)
+        (asset,) = run.experiment.assets.list()
+        assert asset.title == "portrait"
+        assert isinstance(asset.origin, ExecutionOrigin)
+        assert asset.origin.task == "export"
+        assert result.outputs["export"]["file"] == asset.ref
 
     @pytest.mark.asyncio
-    async def test_cache_hit_and_fresh_rerun_keep_one_library_version(self, tmp_path: Path) -> None:
+    async def test_cache_hit_and_fresh_rerun_keep_one_asset(self, tmp_path: Path) -> None:
         counters = {"export": 0}
         wf = Workflow(name="asset-cache")
 
@@ -214,7 +215,7 @@ class TestPromoteRegisterArtifact:
             counters["export"] += 1
             out = ctx.workdir / "portrait.png"
             out.write_bytes(b"png")
-            return {"file": ctx.register_artifact(out, mime="image/png", asset="portrait")}
+            return {"file": ctx.register(out, title="portrait", mime="image/png")}
 
         compiled = (wf).compile()
         run = _new_run(tmp_path)
@@ -227,32 +228,29 @@ class TestPromoteRegisterArtifact:
 
         assert hit.status == fresh.status == "succeeded"
         assert counters["export"] == 2
-        assets = run.experiment.project.assets.list()
+        assets = run.experiment.assets.list()
         assert [asset.title for asset in assets] == ["portrait"]
-        assert [item.version for item in run.experiment.project.assets.versions(assets[0].id)] == [
-            1
-        ]
+        assert hit.outputs["export"]["file"] == fresh.outputs["export"]["file"] == assets[0].ref
+        assert _produced(run, "e02") == []
 
     @pytest.mark.asyncio
-    async def test_library_failure_fails_the_task(self, tmp_path: Path, monkeypatch) -> None:
-        def boom(self, artifact: object, **kwargs: object) -> None:
-            del self, artifact, kwargs
+    async def test_register_failure_fails_the_task(self, tmp_path: Path, monkeypatch) -> None:
+        def boom(self, source: object, **kwargs: object) -> None:
+            del self, source, kwargs
             raise RuntimeError("library down")
 
-        monkeypatch.setattr(AssetRepository, "promote", boom)
+        monkeypatch.setattr(AssetRepository, "register", boom)
         wf = Workflow(name="asset-fail")
 
         @wf.task
         async def export(ctx: TaskContext) -> dict:
             out = ctx.workdir / "portrait.png"
             out.write_bytes(b"png")
-            return {"file": ctx.register_artifact(out, mime="image/png", asset="portrait")}
+            return {"file": ctx.register(out, title="portrait", mime="image/png")}
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
             result = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
         assert result.status == "failed"
-        assert run.experiment.project.assets.list() == []
-        found = _run_artifacts(run, run.executions[-1].id)
-        assert any(artifact.name == "portrait.png" for artifact in found)
+        assert run.experiment.assets.list() == []

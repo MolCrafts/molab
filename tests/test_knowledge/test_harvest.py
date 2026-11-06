@@ -1,10 +1,11 @@
 """``molab.knowledge.harvest`` — a terminal Run's outcome as typed knowledge.
 
 Harvesting is interpretation, not archival: the two preconditions (a terminal
-run, a non-empty narrative) **raise**, and the body renders the run's status,
-params and results so the document reads without opening the run record. The
-default name is keyed on the run, so re-harvesting the same run and kind updates
-one document in place; an explicit ``name=`` allows a second take.
+run, a non-empty narrative) **raise**, and the body is that narrative. Status,
+errors and result values stay on the run and on the assets it registered. A
+``results`` entry is a span on one of those assets. The default name is keyed
+on the run, so re-harvesting the same run and kind updates one document in
+place; an explicit ``name=`` allows a second take.
 """
 
 from __future__ import annotations
@@ -18,6 +19,14 @@ from molab.knowledge import Finding, Knowledge, Observation, Report
 from molab.workspace.refs import ref_of
 
 _NARRATIVE = "Mobility rises monotonically with temperature."
+
+
+def _prose(body: str) -> str:
+    """The narrative. Trailing ``- [@…]`` lines are the source edges."""
+    lines = body.splitlines()
+    while lines and (not lines[-1].strip() or lines[-1].startswith("- [@")):
+        lines.pop()
+    return "\n".join(lines).strip()
 
 
 def _succeed(run: Any) -> None:
@@ -71,16 +80,19 @@ class TestHarvestRun:
         assert "created_by: tester" in text
         assert "\nsources:" not in text
 
-    def test_body_renders_narrative_status_params_and_results(self, run: Any) -> None:
-        _succeed(run)
+    def test_body_is_the_narrative(self, run: Any) -> None:
+        with run.start() as ctx:
+            ctx.register({"mobility": 0.42}, title="metrics")
 
-        body = _harvest(run, results={"mobility": 0.42}).read()
+        item = _harvest(run, results={"mobility": 0.42})
+        body = item.read()
 
-        assert _NARRATIVE in body
-        assert "succeeded" in body
-        assert "seed" in body
-        assert "0.42" in body
-        assert f"# [Observation] run {run.id}" in body
+        assert _prose(body) == _NARRATIVE
+        assert "succeeded" not in body
+        assert "seed" not in body
+        assert "0.42" not in body
+        assert "#/mobility" in body
+        assert [source.span for source in item.sources if source.kind == "asset"] == ["/mobility"]
 
     def test_writes_a_derived_from_edge_to_the_run(self, run: Any) -> None:
         _succeed(run)
@@ -109,13 +121,14 @@ class TestHarvestRun:
         assert named.name == "finding-take-2"
         assert len(_landed(experiment)) == 2
 
-    def test_a_failed_run_is_harvestable_and_carries_the_error(self, run: Any) -> None:
+    def test_a_failed_run_is_harvestable_without_copying_the_error(self, run: Any) -> None:
         _fail(run, "thermostat diverged")
 
-        body = _harvest(run, of=Report, narrative="Timestep too large.").read()
+        item = _harvest(run, of=Report, narrative="Timestep too large.")
 
-        assert "failed" in body
-        assert "thermostat diverged" in body
+        assert _prose(item.read()) == "Timestep too large."
+        assert "thermostat diverged" not in item.read()
+        assert any(source.kind == "run" for source in item.sources)
 
 
 class TestHarvestPreconditions:
@@ -133,12 +146,130 @@ class TestHarvestPreconditions:
         with pytest.raises(ValueError, match="non-empty narrative"):
             _harvest(run, narrative=narrative)
 
-    def test_a_result_value_is_truncated_at_the_cap(self, run: Any) -> None:
+    def test_a_result_with_no_registered_asset_is_refused(self, experiment: Any, run: Any) -> None:
         _succeed(run)
 
-        body = _harvest(run, results={"trace": "x" * 1000}).read()
+        with pytest.raises(ValueError, match="trace"):
+            _harvest(run, results={"trace": "x" * 1000})
 
-        assert "x" * 401 not in body, "a 1000-char value must not land verbatim"
-        assert "x" * 100 in body, "a truncated prefix of the value must survive"
-        # repr("x" * 1000) is 1002 chars: 400 kept, the remaining 602 counted.
-        assert "… (+602 chars)" in body
+        assert _landed(experiment) == []
+
+
+class TestHarvestCitation:
+    def test_a_json_field_is_the_span_and_the_next_inputs(self, run: Any) -> None:
+        with run.start() as ctx:
+            ctx.register({"loss": 0.08, "epoch": 3}, title="metrics")
+
+        item = _harvest(run, of=Finding, results={"loss": 0.08, "epoch": 3}, name="pinned")
+
+        asset_sources = [source for source in item.sources if source.kind == "asset"]
+        assert [source.span for source in asset_sources] == ["/loss", "/epoch"]
+        assert item.read_cited("/loss") == 0.08
+        assert item.read_cited("/epoch") == 3
+        assert item.inputs == (asset_sources[0].ref.removeprefix("molab:asset/"),)
+        reopened = Finding(item.path)
+        assert reopened.read_cited("/loss") == 0.08
+
+    def test_a_series_object_pins_the_step(self, run: Any) -> None:
+        with run.start() as ctx:
+            ctx.register(
+                {"loss": [{"step": 1000, "value": 0.2}, {"step": 10000, "value": 0.08}]},
+                title="curve",
+            )
+
+        item = _harvest(run, results={"loss": 0.08})
+
+        assert [source.span for source in item.sources if source.kind == "asset"] == ["loss@10000"]
+        assert item.read_cited("loss@10000") == 0.08
+
+    def test_a_jsonl_series_pins_the_step(self, run: Any) -> None:
+        with run.start() as ctx:
+            ctx.register(
+                '{"k":"loss","s":1000,"v":0.2}\n{"k":"loss","s":10000,"v":0.08}\n',
+                title="series",
+            )
+
+        item = _harvest(run, results={"loss": 0.08})
+
+        assert item.read_cited("loss@10000") == 0.08
+        assert item.inputs == tuple(
+            source.ref.removeprefix("molab:asset/")
+            for source in item.sources
+            if source.kind == "asset"
+        )
+
+    def test_a_sibling_attempt_id_is_not_an_input(self, experiment: Any, run: Any) -> None:
+        with run.start() as ctx:
+            own = ctx.register({"loss": 0.08}, title="metrics")
+        other = experiment.add_run()
+        with other.start() as ctx:
+            ctx.register({"note": "elsewhere"}, title="other")
+
+        item = _harvest(run, results={"loss": 0.08})
+
+        assert item.inputs == (own.id,)
+
+    def test_a_missing_point_is_refused_and_writes_nothing(self, experiment: Any, run: Any) -> None:
+        with run.start() as ctx:
+            ctx.register({"loss": 0.08}, title="metrics")
+
+        with pytest.raises(ValueError, match="loss"):
+            _harvest(run, results={"loss": 0.09})
+
+        assert _landed(experiment) == []
+
+    def test_two_assets_with_the_same_point_are_refused(self, run: Any) -> None:
+        with run.start() as ctx:
+            ctx.register({"loss": 0.08, "tag": "a"}, title="a")
+            ctx.register({"loss": 0.08, "tag": "b"}, title="b")
+
+        with pytest.raises(ValueError, match="more than one"):
+            _harvest(run, results={"loss": 0.08})
+
+    def test_two_steps_with_the_same_value_are_refused(self, run: Any) -> None:
+        with run.start() as ctx:
+            ctx.register(
+                '{"k":"loss","s":1000,"v":0.08}\n{"k":"loss","s":2000,"v":0.08}\n',
+                title="flat",
+            )
+
+        with pytest.raises(ValueError, match="more than one point"):
+            _harvest(run, results={"loss": 0.08})
+
+    def test_registered_assets_without_results_stay_unspanned(self, run: Any) -> None:
+        with run.start() as ctx:
+            asset = ctx.register({"loss": 0.08}, title="metrics")
+
+        item = _harvest(run)
+
+        assert [(source.ref, source.span) for source in item.sources if source.kind == "asset"] == [
+            (asset.ref, None)
+        ]
+        assert item.inputs == (asset.id,)
+
+    def test_an_empty_span_is_refused(self, run: Any) -> None:
+        with run.start() as ctx:
+            ctx.register({"loss": 0.08}, title="metrics")
+
+        item = _harvest(run, results={"loss": 0.08})
+
+        with pytest.raises(ValueError, match="requires a span"):
+            item.read_cited("")
+
+    def test_a_span_that_is_not_one_citation_is_refused(self, run: Any) -> None:
+        with run.start() as ctx:
+            ctx.register({"loss": 0.08}, title="metrics")
+
+        item = _harvest(run, results={"loss": 0.08})
+
+        with pytest.raises(ValueError, match="not one asset citation"):
+            item.read_cited("/missing")
+
+
+def test_citation_reads_are_document_members() -> None:
+    import molab.knowledge.harvest as harvest
+
+    assert not hasattr(harvest, "cited_inputs")
+    assert not hasattr(harvest, "read_cited")
+    assert "cited_inputs" not in harvest.__all__
+    assert "read_cited" not in harvest.__all__

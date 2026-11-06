@@ -55,6 +55,7 @@ export function CreateRunDialog({
 }: CreateRunDialogProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [parameters, setParameters] = useState<Record<string, unknown>>({});
+  const [assetInputs, setAssetInputs] = useState("");
   const [inputSchema, setInputSchema] = useState<InputField[] | null>(null);
   const [target, setTarget] = useState<string>(NO_TARGET_VALUE);
   const [targets, setTargets] = useState<TargetResponse[]>([]);
@@ -95,11 +96,13 @@ export function CreateRunDialog({
     try {
       const created = await runsApi.createScopedRun(projectId, experimentId, {
         params: parameters,
+        inputs: assetInputs.split(/[\s,]+/).filter(Boolean),
         target: target === NO_TARGET_VALUE ? null : target,
       });
 
       setOpen(false);
       setParameters({});
+      setAssetInputs("");
       setTarget(NO_TARGET_VALUE);
       onRunCreated(created.id);
     } catch (err) {
@@ -150,6 +153,22 @@ export function CreateRunDialog({
                 ) : (
                   <ParametersForm value={parameters} onChange={setParameters} />
                 )}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
+              <Label htmlFor="run-assets" className="pt-2 text-left sm:text-right">
+                Assets
+              </Label>
+              <div className="col-span-3 grid gap-1">
+                <Input
+                  id="run-assets"
+                  value={assetInputs}
+                  onChange={(event) => setAssetInputs(event.target.value)}
+                  placeholder="Asset ids, separated by space"
+                />
+                <p className="text-micro text-muted-foreground">
+                  Files this run opens. Each id is bound into the root task as a path.
+                </p>
               </div>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">

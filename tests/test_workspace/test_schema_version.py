@@ -22,7 +22,7 @@ def _seed_workspace(root) -> Workspace:
     exp = proj.add_experiment("e", params={"lr": 1e-3})
     run = exp.add_run()
     with run.start() as ctx:
-        ctx.emit_artifact({"loss": 0.1}, name="metrics.json")
+        ctx.register({"loss": 0.1}, title="metrics.json")
     return ws
 
 

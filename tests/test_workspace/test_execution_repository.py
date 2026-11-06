@@ -9,9 +9,7 @@ extend it (add classes / tests here rather than creating sibling files).
 arch-own-01 pins two contracts:
 
 * ``seal`` takes the per-execution locks in the fixed order seal -> state and
-  holds the state lock across its read-modify-write, so a racing
-  ``add_artifact`` either lands in the sealed record or is refused as sealed —
-  never "returned success, then silently overwritten".
+  holds the state lock across its read-modify-write.
 * ``mark_pruned`` is the single writer of the post-seal field set
   ``_POST_SEAL_FIELDS`` (``pruned_at`` / ``pruned_dirs``); every other field of
   a sealed record is frozen, and ``update_operational`` refuses those fields.
@@ -33,9 +31,6 @@ import pytest
 from molab.workspace import Run
 from molab.workspace import execution_repository as repo_mod
 from molab.workspace.domain import (
-    Artifact,
-    ContentRef,
-    EvidenceRef,
     Execution,
     ExecutionMode,
     ExecutionStatus,
@@ -65,66 +60,12 @@ def _sealed(repo: ExecutionRepository) -> Execution:
     return repo.seal(state.id, ExecutionStatus.SUCCEEDED)
 
 
-def _artifact(execution_id: str) -> Artifact:
-    return Artifact(
-        id="a-race",
-        execution_id=execution_id,
-        run_id="run-1",
-        project_id="proj-1",
-        name="race.json",
-        content=ContentRef(digest="sha256:" + "0" * 64, size=2),
-        created_at=_FIXED_TIME,
-        created_by=_TEST_AGENT,
-        path="projects/p/experiments/e/runs/seed=1/executions/e01/artifacts/race.json",
-        source_path="out/race.json",
-    )
-
-
 def _lock_suffix(path: Path) -> str:
     """``run-1.e01.seal.lock`` -> ``.seal.lock``."""
     return "." + ".".join(Path(path).name.split(".")[-2:])
 
 
 class TestExecutionRepositorySeal:
-    def test_concurrent_add_artifact_is_never_lost(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        repo = _repo(tmp_path)
-        state = _running(repo)
-        original = ExecutionRepository._collect_evidence
-        outcome: dict[str, BaseException | Execution] = {}
-        threads: list[threading.Thread] = []
-
-        def racer() -> None:
-            try:
-                outcome["result"] = repo.add_artifact(state.id, _artifact(state.id))
-            except BaseException as exc:
-                outcome["error"] = exc
-
-        def collect_then_race(self: ExecutionRepository, execution_id: str) -> list[EvidenceRef]:
-            # Seal has already read the record it is about to freeze.
-            if not threads:
-                thread = threading.Thread(target=racer)
-                threads.append(thread)
-                thread.start()
-                thread.join(timeout=0.5)
-            return original(self, execution_id)
-
-        monkeypatch.setattr(ExecutionRepository, "_collect_evidence", collect_then_race)
-
-        sealed = repo.seal(state.id, ExecutionStatus.SUCCEEDED)
-        assert threads, "seal never collected evidence"
-        threads[0].join(timeout=15)
-        assert not threads[0].is_alive()
-
-        landed = "a-race" in sealed.artifact_ids
-        error = outcome.get("error")
-        refused = isinstance(error, ValueError) and "sealed" in str(error)
-        assert landed != refused, (
-            f"exactly one of landed={landed} / refused={refused} must hold; "
-            f"racer outcome={outcome!r}"
-        )
-
     def test_seal_takes_seal_lock_then_state_lock(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -440,7 +381,6 @@ class TestExecutionRepositoryCreateModes:
 
         assert rec.mode is ExecutionMode.RESUME
         assert rec.based_on_execution_id == "e01"
-        assert rec.checkpoint_artifact_id is None
 
     @pytest.mark.parametrize("based_on", [None, "e01"])
     def test_resume_after_success_is_refused(self, run: Run, based_on: str | None) -> None:
@@ -457,33 +397,6 @@ class TestExecutionRepositoryCreateModes:
 
         assert _attempt_dirs(repo) == before
 
-    def test_resume_checkpoint_must_belong_to_predecessor(self, run: Run) -> None:
-        with run.start() as ctx:
-            cp = ctx.checkpoint("c1")
-            ctx.mark_failed("boom")
-        repo = _run_repo(run)
-        assert repo.get("e01").status is ExecutionStatus.FAILED
-        _terminal(repo, ExecutionMode.RERUN, ExecutionStatus.FAILED)
-        before = _attempt_dirs(repo)
-
-        with pytest.raises(KeyError):
-            repo.create(
-                mode=ExecutionMode.RESUME,
-                based_on_execution_id="e02",
-                checkpoint_artifact_id=cp.id,
-                created_by=_TEST_AGENT,
-            )
-        assert _attempt_dirs(repo) == before
-
-        rec = repo.create(
-            mode=ExecutionMode.RESUME,
-            based_on_execution_id="e01",
-            checkpoint_artifact_id=cp.id,
-            created_by=_TEST_AGENT,
-        )
-        assert rec.checkpoint_artifact_id == cp.id
-        assert rec.based_on_execution_id == "e01"
-
     # --- RERUN ------------------------------------------------------------
 
     def test_rerun_after_success(self, run: Run) -> None:
@@ -494,20 +407,6 @@ class TestExecutionRepositoryCreateModes:
 
         assert rec.id == "e02"
         assert rec.based_on_execution_id == "e01"
-
-    def test_checkpoint_only_valid_for_resume(self, run: Run) -> None:
-        repo = _run_repo(run)
-        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
-        before = _attempt_dirs(repo)
-
-        with pytest.raises(ValueError, match="only valid for resume"):
-            repo.create(
-                mode=ExecutionMode.RERUN,
-                checkpoint_artifact_id="x",
-                created_by=_TEST_AGENT,
-            )
-
-        assert _attempt_dirs(repo) == before
 
     # --- REPRODUCE --------------------------------------------------------
 
@@ -679,7 +578,6 @@ class TestExecutionRepositoryUpdateOperational:
             {"workflow_hash": "x"},
             {"started_at": datetime.now(UTC)},
             {"based_on_execution_id": "e00"},
-            {"checkpoint_artifact_id": "a"},
             {"pruned_at": datetime.now(UTC)},
             {"pruned_dirs": ("out",)},
         ],
@@ -817,7 +715,6 @@ class TestUpdateOperationalAllowList:
         [
             {"status": "running"},
             {"sealed_at": _FIXED_TIME},
-            {"sealed_commit": "abc"},
             {"finished_at": _FIXED_TIME},
             {"error": {"type": "X"}},
             {"evidence": ()},
@@ -845,8 +742,7 @@ class TestUpdateOperationalAllowList:
 # environment / artifacts win, the local executor (scheduler job ids) wins, a
 # sealed local record is never rewritten, and a remote record that is another
 # attempt or rewrites a creation-time ``environment`` key is refused. Locks and
-# history follow ``seal``: seal -> state, history outside the state lock, the
-# ``sealed_commit`` stamp under a re-taken state lock.
+# history follow ``seal``: seal -> state, history outside the state lock.
 
 _LOCAL_EXECUTOR = {"backend": "molq", "job_id": "j-1", "scheduler_job_id": "123"}
 _LOCAL_ENVIRONMENT = {"submit_cwd": "/home/u/proj", "config_hash": "sha256:c"}
@@ -868,7 +764,6 @@ def _merge_setup(tmp_path: Path) -> tuple[ExecutionRepository, dict[str, object]
         "started_at": "2026-01-01T00:00:01Z",
         "finished_at": "2026-01-01T00:00:09Z",
         "sealed_at": "2026-01-01T00:00:10Z",
-        "sealed_commit": "deadbeef",
         "executor": {"backend": "molq", "kind": "local", "host": "node7", "pid": 42},
         "environment": {**local.environment, "host": "node7"},
     }
@@ -902,14 +797,6 @@ class TestMergeRemote:
                 "host": "node7",
             }
             assert got.finished_at == datetime(2026, 1, 1, 0, 0, 9, tzinfo=UTC)
-
-    def test_foreign_sealed_commit_dropped(self, tmp_path: Path) -> None:
-        repo, remote_doc = _merge_setup(tmp_path)
-
-        merged = repo.merge_remote("e01", remote_doc)
-
-        assert merged.sealed_commit != "deadbeef"
-        assert repo.get("e01").sealed_commit != "deadbeef"
 
     def test_sealed_local_is_not_overwritten(self, tmp_path: Path) -> None:
         repo, remote_doc = _merge_setup(tmp_path)
@@ -969,7 +856,7 @@ class TestMergeRemote:
 
     def test_running_remote_is_not_sealed(self, tmp_path: Path) -> None:
         repo, remote_doc = _merge_setup(tmp_path)
-        remote_doc.update(status="running", finished_at=None, sealed_at=None, sealed_commit=None)
+        remote_doc.update(status="running", finished_at=None, sealed_at=None)
 
         merged = repo.merge_remote("e01", remote_doc)
 
@@ -1006,7 +893,6 @@ class TestMergeRemote:
                 {
                     "event": event,
                     "status": on_disk["status"],
-                    "sealed_commit": on_disk["sealed_commit"],
                     "state_held": ".state.lock" in held,
                 }
             )
@@ -1022,25 +908,21 @@ class TestMergeRemote:
             {
                 "event": "ExecutionSealed",
                 "status": "succeeded",
-                "sealed_commit": None,
                 "state_held": False,
             }
         ]
         acquired = [suffix for kind, suffix in events if kind == "acquire"]
-        assert acquired == [".seal.lock", ".state.lock", ".state.lock"]
-        # seal -> state (released) -> history -> state (released) -> seal released:
-        # no nested state locks, never state -> seal.
+        assert acquired == [".seal.lock", ".state.lock"]
+        # seal -> state (released) -> history -> seal released: one record
+        # write, history outside the state lock, never state -> seal.
         assert events == [
             ("acquire", ".seal.lock"),
             ("acquire", ".state.lock"),
             ("release", ".state.lock"),
             ("history", "ExecutionSealed"),
-            ("acquire", ".state.lock"),
-            ("release", ".state.lock"),
             ("release", ".seal.lock"),
         ]
         for got in (merged, repo.get("e01")):
-            assert got.sealed_commit == "c0ffee"
             assert got.status is ExecutionStatus.SUCCEEDED
 
     def test_remote_status_behind_local_raises(self, tmp_path: Path) -> None:
@@ -1060,7 +942,7 @@ class TestMergeRemote:
 
     def test_remote_sealed_but_not_terminal_raises(self, tmp_path: Path) -> None:
         repo, remote_doc = _merge_setup(tmp_path)
-        remote_doc.update(status="running", finished_at=None, sealed_commit=None)
+        remote_doc.update(status="running", finished_at=None)
         before = _state_bytes(repo)
 
         with pytest.raises(ValueError, match="sealed"):

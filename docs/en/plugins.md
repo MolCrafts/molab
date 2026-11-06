@@ -3,8 +3,8 @@
 ## Scientific data vs plugins (dependency DAG)
 
 **A molab Run is not a MolRec record.** The Run is a workspace *host*
-(``run.json`` definition only, per-execution ``alive`` heartbeat, execution
-``artifacts/``, ``source/``). Scientific packages are **MolRec** products
+(``index.md`` definition only, per-execution ``alive`` heartbeat, execution
+``out/``, ``source/``). Scientific packages are **MolRec** products
 landed under the run or written beside it. Do not treat ``run.json`` as
 MolRec ``status/`` / ``meta/``.
 
@@ -18,8 +18,8 @@ molrec (protocol)  — never imported; products follow the spec by convention
               molab Run (host: run.json + alive — not a Record)
                       ↓
    host metrics / plots (plugin activation by suffix):
-     *.mlp.jsonl       live WAL under executions/<id>/artifacts/
-     *.mlp.vl.json     Vega-Lite plot artifact
+     *.mlp.jsonl       live WAL at executions/<id>/metrics.mlp.jsonl
+     *.mlp.vl.json     Vega-Lite plot file
                       ↓
               UI plugins (filename match only — no protocol reimplementation):
                 molplot ← *.mlp.jsonl / *.mlp.vl.json
@@ -30,7 +30,7 @@ molrec (protocol)  — never imported; products follow the spec by convention
 
 **Record** 是 Zarr V3 根（文档段写在 group attributes；live metrics 是
 ``metrics/metrics.jsonl``，密化 series 在 ``metrics/`` 下）。科学包落到
-``artifacts/`` 时遵循这套布局。**host** Run 不是 Record：``ctx.metrics``
+``out/`` 时遵循这套布局。**host** Run 不是 Record：``ctx.metrics``
 写文件名门控的 ``*.mlp.*``，molplot 靠后缀激活、不必打开 Zarr。打开 Zarr
 结构库是 **molvis**（molrs ``RecordReader``）的事，不是 molab UI 插件。
 生产代码不要 ``import molrec``。
@@ -48,7 +48,7 @@ molrec (protocol)  — never imported; products follow the spec by convention
 Scientific packages may leave **LAMMPS logs**, **TensorBoard event dirs**, or
 **CSV** tables beside a run. :mod:`molab.plugins.metrics_ingest` classifies
 them by content and **normalizes** into the run-local metrics surface
-(JSONL WAL at ``executions/<id>/artifacts/*.mlp.jsonl``).
+(JSONL WAL at ``executions/<id>/*.mlp.jsonl``, beside ``run.log``).
 Source files are never deleted or rewritten. A molab Run remains a **host** —
 ingest does not write MolRec ``meta`` / ``status``.
 

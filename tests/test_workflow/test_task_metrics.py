@@ -3,8 +3,8 @@
 Under an execution a task body writes through the execution's own metrics
 writer: live, tagged ``tags.task``. The node cache stores a task's records
 beside its result and replays them on a hit, tagged ``replayed_from``.
-Without molab the body gets an in-memory ``BufferedMetrics``. An artifact
-names the task that produced it even when same-level tasks run in parallel.
+Without molab the body gets an in-memory ``BufferedMetrics``. An asset
+records the task that registered it even when same-level tasks run in parallel.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from molab.plugins.metrics import read_run_metrics
 from molab.workflow import TaskContext, Workflow, WorkflowRuntime
 from molab.workflow.cache import Caching
 from molab.workspace import Workspace, tracking
-from molab.workspace.domain import ExecutionMode
-from molab.workspace.execution_dirs import ARTIFACTS
+from molab.workspace.asset_repository import assets_produced_by
+from molab.workspace.domain import ExecutionMode, ExecutionOrigin
 from molab.workspace.tracking import BufferedMetrics, TrackedMetrics
 
 
@@ -84,10 +84,15 @@ class TestFromATask:
         records = _records(run, eid)
         assert [r["t"] for r in records] == ["scalar", "histogram", "text", "json", "image_ref"]
         assert all(r["tags"] == {"task": "measure"} for r in records)
-        (image,) = [a for a in run.executions[-1].artifacts if a.name == "frame.png"]
-        assert image.semantic_type == "molplot.image"
-        assert image.metadata["task_id"] == "measure"
-        assert result.outputs["measure"] == image.path
+        (image,) = [
+            asset
+            for asset in assets_produced_by(run.experiment.project.workspace, eid)
+            if asset.title == "frame.png"
+        ]
+        assert image.media_type == "image/png"
+        assert isinstance(image.origin, ExecutionOrigin)
+        assert image.origin.task == "measure"
+        assert result.outputs["measure"] == image.ref
 
     @pytest.mark.asyncio
     async def test_a_record_is_on_disk_before_the_body_returns(self, tmp_path: Path) -> None:
@@ -99,7 +104,7 @@ class TestFromATask:
             ctx.metrics.scalar("loss", 0.75, 0)
             current = tracking.current()
             assert current is not None
-            wal = current.execution_dir / ARTIFACTS.name / "metrics.mlp.jsonl"
+            wal = current.execution_dir / "metrics.mlp.jsonl"
             lines = wal.read_text(encoding="utf-8").splitlines()
             seen["live"] = any(json.loads(line)["k"] == "loss" for line in lines)
             return 1
@@ -202,8 +207,9 @@ class TestNodeCacheReplay:
             assert {k: v for k, v in again.items() if k != "tags"} == {
                 k: v for k, v in original.items() if k != "tags"
             }
-        # The replayed WAL is registered like any other.
-        assert any(a.semantic_type == "molplot.metrics" for a in run.execution("e02").artifacts)
+        wal = run.execution_dir("e02") / "metrics.mlp.jsonl"
+        assert wal.is_file()
+        assert assets_produced_by(run.experiment.project.workspace, "e02") == []
 
     @pytest.mark.asyncio
     async def test_over_the_cap_nothing_is_replayed(self, tmp_path: Path, monkeypatch) -> None:
@@ -257,17 +263,16 @@ class TestProducerTask:
     """Fixes the ``set_active_task`` race: the producer tag is per task body."""
 
     @pytest.mark.asyncio
-    async def test_parallel_tasks_each_tag_their_own_artifact(self, tmp_path: Path) -> None:
+    async def test_parallel_tasks_each_tag_their_own_asset(self, tmp_path: Path) -> None:
         wf = Workflow(name="race")
 
-        # ``fast`` starts, ``slow`` starts (and sets the execution's slot to
-        # "slow"), then ``fast`` returns first and its deferred artifact is
-        # promoted while the slot still names ``slow``.
+        # ``fast`` starts, ``slow`` starts, then ``fast`` returns first and
+        # its marker is registered while ``slow`` is still running.
         @wf.task
         async def fast(ctx: TaskContext) -> int:
             out = ctx.workdir / "fast.txt"
             out.write_text("fast")
-            ctx.register_artifact(out)
+            ctx.register(out, title="fast.txt")
             await asyncio.sleep(0.05)
             return 1
 
@@ -275,7 +280,7 @@ class TestProducerTask:
         async def slow(ctx: TaskContext) -> int:
             out = ctx.workdir / "slow.txt"
             out.write_text("slow")
-            ctx.register_artifact(out)
+            ctx.register(out, title="slow.txt")
             await asyncio.sleep(0.3)
             return 2
 
@@ -283,8 +288,10 @@ class TestProducerTask:
         with run.start() as ctx:
             await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
         produced = {
-            a.name: a.metadata.get("task_id")
-            for a in run.executions[-1].artifacts
-            if a.name in {"fast.txt", "slow.txt"}
+            asset.title: asset.origin.task
+            for asset in assets_produced_by(run.experiment.project.workspace, run.executions[-1].id)
+            if isinstance(asset.origin, ExecutionOrigin)
+            and asset.origin.run_id == run.id
+            and asset.title in {"fast.txt", "slow.txt"}
         }
         assert produced == {"fast.txt": "fast", "slow.txt": "slow"}

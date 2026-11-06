@@ -36,7 +36,7 @@ const run = (id: string, status: string, createdAt: string): WorkspaceRunRow => 
   experimentName: "Experiment",
   definitionHash: `definition-${id}`,
   experimentRevisionId: "revision-1",
-  inputAssetIds: [],
+  inputs: [],
   targetHint: null,
   statusSummary: {
     total: 1,
@@ -57,7 +57,6 @@ const run = (id: string, status: string, createdAt: string): WorkspaceRunRow => 
       finishedAt: status === "failed" || status === "succeeded" ? createdAt : null,
       durationSeconds: 0,
       basedOnExecutionId: null,
-      checkpointArtifactId: null,
       schedulerJobId: null,
       backend: null,
       backendMetadata: {},

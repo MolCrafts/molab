@@ -168,10 +168,10 @@ def _inputs(spec: tuple) -> Any:  # noqa: ANN401
 
 def _split(raw: Any) -> tuple[str, Any, Any]:  # noqa: ANN401
     """``(shape, value, sentinel)``: the part of *raw* the journal records."""
-    from ..outputs import RegisterArtifact, RegisterMetric
+    from ..outputs import RegisterAsset, RegisterMetric
     from ..types import End, Next
 
-    markers = (RegisterArtifact, RegisterMetric)
+    markers = (RegisterAsset, RegisterMetric)
     if isinstance(raw, (Next, End, *markers)):
         return "raw", None, None
     value, shape, sentinel = raw, "plain", None

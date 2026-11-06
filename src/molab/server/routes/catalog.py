@@ -1,8 +1,7 @@
-"""Catalog routes — reverse lookup from a path to the Execution that emitted it.
+"""Catalog routes — reverse lookup from a path to the asset that holds it.
 
-``catalog_by_path`` walks Execution artifact records (``walk_artifacts``).
-Given a path, the UI learns which run produced it, which experiment groups
-it, which project owns it, and what other outputs share its task.
+``catalog_by_path`` walks registered assets. Given a path, the UI learns
+which attempt produced it and which other assets share its task.
 """
 
 from __future__ import annotations
@@ -11,12 +10,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from molab.workspace.artifact_repository import (
-    ArtifactLocation,
-    scan_asset_repositories,
-    walk_artifacts,
-)
-from molab.workspace.domain import Asset, AssetScope
+from molab.workspace.asset_repository import scan_asset_repositories
+from molab.workspace.domain import Asset, AssetScope, ExecutionOrigin
 from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
 
 from ..dependencies import get_workspace
@@ -79,33 +74,26 @@ def catalog_by_path(
 
     workspace_rel = str(target.relative_to(root))
 
-    locations = list(walk_artifacts(workspace))
-    artifact_hit: CatalogByPathResponse | None = None
-    for loc in locations:
-        if loc.location is None:
-            continue
-        try:
-            if Path(loc.location).resolve() != target:
-                continue
-        except OSError:
-            continue
-        artifact_hit = _artifact_catalog_hit(root, loc, locations, workspace_rel)
-        break
-
     named = _named_asset_at(workspace, target)
-    if artifact_hit is not None:
-        if named is None:
-            return artifact_hit
-        return artifact_hit.model_copy(update={"assetId": named.id, "assetKind": named.kind})
     if named is not None:
+        origin = named.origin
+        producer = None
+        siblings: list[CatalogSibling] = []
+        if isinstance(origin, ExecutionOrigin):
+            producer = CatalogProducerInfo(
+                runId=origin.run_id,
+                taskId=origin.task,
+                executionId=origin.execution_id,
+            )
+            siblings = _task_siblings(workspace, root, named)
         return CatalogByPathResponse(
             matched=True,
             workspaceRelPath=workspace_rel,
             assetId=named.id,
-            assetKind=named.kind,
-            producer=None,
+            assetKind=named.media_type or "asset",
+            producer=producer,
             scope=_scope_info(named.scope),
-            siblings=[],
+            siblings=siblings,
         )
 
     return CatalogByPathResponse(
@@ -113,13 +101,6 @@ def catalog_by_path(
         workspaceRelPath=workspace_rel,
         scope=_scope_for_path(workspace, target),
     )
-
-
-def _task_id(metadata: object) -> str | None:
-    if not isinstance(metadata, dict):
-        return None
-    raw = metadata.get("task_id")
-    return raw if isinstance(raw, str) and raw else None
 
 
 def _path_under_root(root: Path, location: str) -> str:
@@ -130,55 +111,36 @@ def _path_under_root(root: Path, location: str) -> str:
         return resolved.as_posix()
 
 
-def _artifact_catalog_hit(
-    root: Path,
-    loc: ArtifactLocation,
-    locations: list[ArtifactLocation],
-    workspace_rel: str,
-) -> CatalogByPathResponse:
-    """Catalog row for one emitted Artifact matched by absolute path."""
-    artifact = loc.artifact
-    task_id = _task_id(artifact.metadata)
+def _task_siblings(workspace, root: Path, asset: Asset) -> list[CatalogSibling]:  # noqa: ANN001
+    """Other assets the same task of the same attempt registered."""
+    origin = asset.origin
+    if not isinstance(origin, ExecutionOrigin) or origin.task is None:
+        return []
     siblings: list[CatalogSibling] = []
-    if task_id is not None:
-        for peer in locations:
-            peer_location = peer.location
+    for repository in scan_asset_repositories(workspace):
+        for peer in repository.list():
+            peer_origin = peer.origin
             if (
-                peer.project_id != loc.project_id
-                or peer.experiment_id != loc.experiment_id
-                or peer.run_id != loc.run_id
-                or peer.execution_id != loc.execution_id
-                or peer.artifact.id == artifact.id
-                or peer_location is None
-                or _task_id(peer.artifact.metadata) != task_id
+                peer.id == asset.id
+                or not isinstance(peer_origin, ExecutionOrigin)
+                or peer_origin.execution_id != origin.execution_id
+                or peer_origin.run_id != origin.run_id
+                or peer_origin.task != origin.task
             ):
+                continue
+            try:
+                location = repository.payload_path(peer.id)
+            except _PAYLOAD_MISS:
                 continue
             siblings.append(
                 CatalogSibling(
-                    assetId=peer.artifact.id,
-                    name=peer.artifact.name,
-                    kind=peer.artifact.semantic_type or "artifact",
-                    relPath=_path_under_root(root, peer_location),
+                    assetId=peer.id,
+                    name=peer.title,
+                    kind=peer.media_type or "asset",
+                    relPath=_path_under_root(root, location),
                 )
             )
-    return CatalogByPathResponse(
-        matched=True,
-        workspaceRelPath=workspace_rel,
-        assetId=artifact.id,
-        assetKind=artifact.semantic_type or "artifact",
-        producer=CatalogProducerInfo(
-            runId=loc.run_id,
-            taskId=task_id,
-            executionId=loc.execution_id,
-        ),
-        scope=CatalogScopeInfo(
-            kind="run",
-            projectId=loc.project_id,
-            experimentId=loc.experiment_id,
-            runId=loc.run_id,
-        ),
-        siblings=siblings,
-    )
+    return siblings
 
 
 def _within(directory: Path, target: Path) -> bool:

@@ -18,7 +18,7 @@ import yaml
 
 from molab.workflow.codec import default_codec
 from molab.workflow.contract import (
-    ArtifactDecl,
+    DeclaredFile,
     TaskInputSpec,
     TaskIO,
     TaskOutputSpec,
@@ -35,9 +35,9 @@ def _sample_contract() -> WorkflowContract:
             TaskIO(
                 task_id="A",
                 outputs=(TaskOutputSpec(name="x", type="int"),),
-                artifacts=(
-                    ArtifactDecl(
-                        path="artifacts/a.json",
+                files=(
+                    DeclaredFile(
+                        path="out/a.json",
                         mime="application/json",
                         produced_by="A",
                     ),

@@ -147,58 +147,60 @@ Two module-level verbs write knowledge into a workspace tree, both hosted by a
 - `write_knowledge(host, *, name, of, sources, created_by, text, cite=(), title="")`
   — write a sourced document, idempotent on `name`.
 
-`harvest_run` turns a finished run's outcome into knowledge under the run's
-experiment:
+`Finding.harvest` (the same method on `Observation` and `Report`) turns a
+finished run's outcome into knowledge under the run's experiment:
 
 ```python
-from molab.knowledge import Finding, harvest_run
+from molab.knowledge import Finding
 
-finding = harvest_run(
+finding = Finding.harvest(
     run,
-    of=Finding,
     narrative="Tg rose with cooling rate.",
     created_by="lin",
 )
 ```
 
-Only a **terminal** run (`succeeded` / `failed` / `cancelled`) can be harvested,
-and `narrative` must be non-empty — a harvest is an interpretation, not an
-archive; the raw record already lives in `run.json` and the run's artifacts.
-`created_by` is a required keyword argument. `of` is typically `Finding`,
-`Observation` or `Report`.
+Only a **terminal** run (`succeeded` / `failed` / `cancelled` / `interrupted`)
+can be harvested, and `narrative` must be non-empty — a harvest is an
+interpretation, not an archive. The raw record already lives in the run's
+`index.md` and the assets it registered. `created_by` is a required keyword
+argument.
 
-## Viewing generated image parts
+## Citing a registered asset
 
-Harvest inlines truncated result text. It does not show the images a run
-emitted. `GeneratedParts(run).list()` lists those artifacts (media type `image/*`,
-or a `part` tag; `result` and `checkpoint` artifacts are skipped).
-`GeneratedParts(run).view(...)` writes a Report under the experiment. Each part is a
-`records` link to its `molab:` artifact ref, and an image part is also a
-relative `![]()` so a markdown preview can show the file. A `molab:` URL is
-not itself an image.
+The prose is the narrative. The writer appends one source link per citation
+and does not copy status, parameters, errors, or result values. Harvest cites
+each asset the latest
+attempt registered (`molab:asset/<id>`). A `results` entry whose value sits at
+one point in those files is cited with that point as the span: `/loss` for a
+JSON field, `loss@10000` for the series value at step 10000. A result with no
+registered asset, or one that matches nothing or more than one point, is
+refused. The next run takes its inputs from the document's `inputs`.
+`read_cited` reads the value at a span. `read` returns the narrative.
+The workflow that opens the files does not import knowledge.
+
+```python
+follow = experiment.add_run(inputs=finding.inputs)
+finding.read_cited("/loss")  # 0.08, the value at that span
+```
+
+`GeneratedParts(run).list()` lists the image assets (media type `image/*`, or
+a `part` tag) one attempt registered. It does not write a document. Cite the
+asset from a harvest when the narrative uses it.
 
 ```python
 from molab.knowledge import GeneratedParts
 
 parts = GeneratedParts(run)
 for part in parts.list():
-    print(part.part, part.path)
-
-report = parts.view(
-    narrative="The portrait split into hair, eyes, clothes, and mouth.",
-    created_by="lin",
-)
+    print(part.part, part.ref)
 ```
 
-The same preconditions as harvest apply. A task body cannot call it:
-`TaskContext` has no path up to the Run. After `molab run`, store the Report
-with `molab knowledge parts --write`.
-
-From a workspace root:
+A task body cannot call it: `TaskContext` has no path up to the Run. After
+`molab run`, list the parts with `molab knowledge parts`.
 
 ```console
 $ molab knowledge parts <run-id> --path .
-$ molab knowledge parts <run-id> --path . --write
 ```
 
 ## Layering

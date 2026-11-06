@@ -179,7 +179,6 @@ def _create_record(
     run: Run,
     mode: ExecutionMode,
     *,
-    checkpoint_artifact_id: str | None,
     fresh: bool,
     profile_config: ProfileConfig | None,
     only: Sequence[str] = (),
@@ -190,7 +189,6 @@ def _create_record(
     Args:
         run: The run that allocates the attempt id.
         mode: ``INITIAL``, ``RESUME`` or ``RERUN``.
-        checkpoint_artifact_id: Optional resume input, stored on the record.
         fresh: Recorded as ``bypass_cache``.
         profile_config: The profile written onto the record at creation.
         only: Recorded as ``selected_tasks`` (a partial rerun).
@@ -206,7 +204,6 @@ def _create_record(
     try:
         return run.create_execution(
             mode=mode,
-            checkpoint_artifact_id=checkpoint_artifact_id,
             bypass_cache=fresh,
             profile_config=profile_config,
             selected_tasks=only,
@@ -317,7 +314,6 @@ def _check_verbs(
     resume: bool,
     rerun: bool,
     fresh: bool,
-    checkpoint: str | None,
     execution_id: str | None,
     only: Sequence[str] = (),
 ) -> None:
@@ -337,17 +333,15 @@ def _check_verbs(
             "fresh=True bypasses the cache for an explicit re-execution and "
             "requires rerun=True (mirroring `molab run --rerun --fresh`)."
         )
-    if checkpoint is not None and not resume:
-        raise ValueError("checkpoint is only valid with resume=True")
     if only and not rerun:
         raise ValueError(
             "only=(...) selects tasks for a partial rerun and requires rerun=True "
             "(mirroring `molab run --rerun --task NAME`)."
         )
-    if execution_id is not None and (resume or rerun or fresh or checkpoint is not None):
+    if execution_id is not None and (resume or rerun or fresh):
         raise ValueError(
-            "execution_id selects an existing Execution; resume, rerun, fresh and "
-            "checkpoint are creation-time facts and cannot be passed with it"
+            "execution_id selects an existing Execution; resume, rerun and fresh "
+            "are creation-time facts and cannot be passed with it"
         )
 
 
@@ -407,7 +401,6 @@ async def aexecute_run(
     rerun: bool = False,
     fresh: bool = False,
     profile_config: ProfileConfig | None = None,
-    checkpoint_artifact_id: str | None = None,
     execution_id: str | None = None,
     resume_from: Run | None = None,
     only: Sequence[str] = (),
@@ -422,15 +415,12 @@ async def aexecute_run(
     Args:
         workflow: A ``CompiledWorkflow``, or an uncompiled ``Workflow``.
         run: The workspace run to execute against.
-        resume: Open a ``RESUME`` attempt. No checkpoint is required. Seeds
-            are reused only when ``config_hash`` matches the predecessor.
+        resume: Open a ``RESUME`` attempt. Seeds are reused only when
+            ``config_hash`` matches the predecessor.
         rerun: Open a ``RERUN`` attempt, including after success.
         fresh: Record ``bypass_cache``. Requires ``rerun=True``.
         profile_config: Profile written when this call creates the attempt.
             With ``execution_id``, ``run.start`` checks it against the record.
-        checkpoint_artifact_id: Recorded on the attempt. Resume seeds come
-            from the predecessor journal, not from this artifact. Only valid
-            with ``resume=True``.
         execution_id: Start this pre-created QUEUED attempt. Its config and
             task selection are taken from the record. Mutually exclusive with
             the creation verbs.
@@ -455,7 +445,6 @@ async def aexecute_run(
         resume=resume,
         rerun=rerun,
         fresh=fresh,
-        checkpoint=checkpoint_artifact_id,
         execution_id=execution_id,
         only=only,
     )
@@ -467,7 +456,6 @@ async def aexecute_run(
         _create_record(
             run,
             _select_mode(run, resume=resume, rerun=rerun),
-            checkpoint_artifact_id=checkpoint_artifact_id,
             fresh=fresh,
             profile_config=profile_config,
             only=only,
@@ -493,7 +481,7 @@ async def aexecute_run(
             entered = True
             result = await WorkflowRuntime().execute(
                 compiled,
-                run_context=ctx,  # ty: ignore[invalid-argument-type]
+                run_context=ctx,
                 attempt_seeds=seeds,
                 resume_from=resume_from,
                 executor=executor,
@@ -514,7 +502,6 @@ def execute_run(
     rerun: bool = False,
     fresh: bool = False,
     profile_config: ProfileConfig | None = None,
-    checkpoint_artifact_id: str | None = None,
     execution_id: str | None = None,
     resume_from: Run | None = None,
     only: Sequence[str] = (),
@@ -533,10 +520,9 @@ def execute_run(
         run: The workspace :class:`~molab.workspace.run.Run` to execute
             against. Its ``RunContext`` lifecycle drives the status machine
             and the ``alive`` heartbeat, exactly as under ``molab run``.
-        resume: Open a new ``RESUME`` attempt. No checkpoint is required.
-            Completed nodes are seeded only when this attempt's
-            ``config_hash`` matches the predecessor's. Mutually exclusive
-            with ``rerun``.
+        resume: Open a new ``RESUME`` attempt. Completed nodes are seeded
+            only when this attempt's ``config_hash`` matches the
+            predecessor's. Mutually exclusive with ``rerun``.
         rerun: Open a new ``RERUN`` attempt, including after success. With
             neither verb, a run that already has an attempt refuses (retrying
             is an explicit verb, never implicit).
@@ -547,9 +533,6 @@ def execute_run(
         profile_config: Profile applied when this call creates the Execution.
             With ``execution_id`` it is not a creation fact; ``run.start``
             still checks it against the record.
-        checkpoint_artifact_id: Recorded on the attempt. Resume seeds come
-            from the predecessor journal, not from this artifact. Only valid
-            with ``resume=True``.
         execution_id: Start this pre-created QUEUED Execution instead of
             allocating one. Its config and task selection are taken from the
             record. Mutually exclusive with the creation-time verbs.
@@ -593,7 +576,6 @@ def execute_run(
             rerun=rerun,
             fresh=fresh,
             profile_config=profile_config,
-            checkpoint_artifact_id=checkpoint_artifact_id,
             execution_id=execution_id,
             resume_from=resume_from,
             only=only,
@@ -630,7 +612,6 @@ class _WorkspaceRunExecutor:
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint: str | None = None,
         execution_id: str | None = None,
         resume_from: Run | None = None,
         only: Sequence[str] = (),
@@ -643,7 +624,6 @@ class _WorkspaceRunExecutor:
             resume=resume,
             rerun=rerun,
             fresh=fresh,
-            checkpoint_artifact_id=checkpoint,
             execution_id=execution_id,
             resume_from=resume_from,
             only=only,
@@ -666,7 +646,6 @@ class _WorkspaceRunExecutor:
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint: str | None = None,
         execution_id: str | None = None,
         resume_from: Run | None = None,
         only: Sequence[str] = (),
@@ -679,7 +658,6 @@ class _WorkspaceRunExecutor:
             resume=resume,
             rerun=rerun,
             fresh=fresh,
-            checkpoint_artifact_id=checkpoint,
             execution_id=execution_id,
             resume_from=resume_from,
             only=only,

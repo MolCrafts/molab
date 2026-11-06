@@ -43,7 +43,7 @@ The experiment script is **science + declaration only**. These are platform resp
 | `argparse` / Typer for `--workspace` / `--seed` / … | `molab run`, task params, `molcfg.yaml` profiles, `--override KEY=VAL` |
 | `sys.path.insert` to a package tree | Install the package (`pip install -e …`); sibling modules work because `molab run` adds the script directory |
 | `exp.add_run(..., id=f"…{time.time()}")` + `execute_run` | `exp.run(wf, params=…)` then `molab run`; re-execute with `--rerun [--fresh]` |
-| Second `run.start()` after execute to register products | In the task: write under `ctx.workdir`, then `ctx.register_artifact` / `ctx.register_metric` |
+| Second `run.start()` after execute to register products | In the task: write under `ctx.workdir`, then `ctx.register` / `ctx.register_metric` |
 | Nested CLIs for optional trajectory / cutoff | Typed task parameters (or a second task), set via profile / `--override` |
 
 External tooling may create workspace nodes and validate a workflow, but it **never** drives the runtime: write the declaration-style script, then invoke `molab run`.

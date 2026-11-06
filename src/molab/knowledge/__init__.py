@@ -28,8 +28,10 @@ subclass, and it has no ``folder`` or ``parse`` method.
 What lives here: the Knowledge handle, the document classes, ``SourceRef``, typed
 edges, BM25F retrieval, named wiki sources, and the read-only Zotero importer.
 Construct the document you mean: ``Note(host, name)``,
-``Finding(host, name, sources=...)``. ``Finding.harvest(run, ...)`` and
-``GeneratedParts(run).view(...)`` write one.
+``Finding(host, name, sources=...)``. ``Finding.harvest(run, ...)`` writes one.
+A sourced document's ``inputs`` are the asset ids it cites. ``read_cited``
+reads the value at a span, and ``read`` returns the narrative.
+``GeneratedParts(run).list()`` reads the image assets that attempt registered.
 ``ZoteroLibrary(path).items()`` reads a library.
 ``KnowledgeSourceStore(root).search(query)`` and
 ``SourceRef.normalize(sources, default_host=...)`` stay.

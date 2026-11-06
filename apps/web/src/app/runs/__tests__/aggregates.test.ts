@@ -22,7 +22,6 @@ const exec = (over: Partial<WorkspaceExecutionRow>): WorkspaceExecutionRow => ({
   schedulerJobId: null,
   backend: "local",
   basedOnExecutionId: null,
-  checkpointArtifactId: null,
   backendMetadata: {},
   ...over,
 });
@@ -83,7 +82,7 @@ const run = (over: RunFixtureOverrides): WorkspaceRunRow => {
     experimentName: "Experiment 1",
     definitionHash: "sha256:definition",
     experimentRevisionId: "revision-1",
-    inputAssetIds: [],
+    inputs: [],
     targetHint: target ?? null,
     statusSummary: {
       total: executions.length,

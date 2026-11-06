@@ -1,11 +1,12 @@
-"""Run-local host metrics: JSONL WAL under an attempt's ``artifacts/`` (``.mlp.jsonl``).
+"""Run-local host metrics: JSONL WAL at an attempt's root (``.mlp.jsonl``).
 
 On-disk layout under an execution root (see
 :mod:`molab.plugins.metrics.mlp_names`)::
 
-    executions/eNN/artifacts/<stem>.mlp.jsonl   # append-only WAL — the persist surface
+    executions/eNN/<stem>.mlp.jsonl   # append-only WAL — the persist surface
 
-Default writer stem is ``metrics`` → ``artifacts/metrics.mlp.jsonl``.
+Default writer stem is ``metrics`` → ``metrics.mlp.jsonl``, beside ``run.log``.
+The file is evidence of the attempt. It is not an asset.
 Leftover ``*.mlp.zarr/`` and ``*.mlp.index.json`` are ignored.
 
 **Layering**
@@ -14,7 +15,7 @@ Leftover ``*.mlp.zarr/`` and ``*.mlp.index.json`` are ignored.
   into this module's writer and land in the WAL via :class:`FileStore`.
 * A molab Run is a workspace host (an ``index.md`` record + run-root ``alive``), not a
   MolRec record. Filename gate ``*.mlp.jsonl`` is the host surface; the WAL
-  is not catalogued as an :class:`~molab.workspace.domain.Artifact`.
+  is not an asset.
 * :meth:`MetricsWriter.flush` does not densify.
 
 Wire API (``read_run_metrics``) returns compact event records so the UI and
@@ -44,7 +45,7 @@ from molab.plugins.metrics.mlp_names import (
     mlp_jsonl_name,
     mlp_zarr_name,
 )
-from molab.workspace.execution_dirs import ARTIFACTS, product_dirs
+from molab.workspace.execution_dirs import product_dirs
 from molab.workspace.file_store import FileStore
 from molab.workspace.fs import FileSystem
 from molab.workspace.fs_local import LocalFS
@@ -343,16 +344,16 @@ def _file_store_append(run_dir: Path) -> _Append:
     store = FileStore(run_dir)
 
     def append(name: str | Path, line: str) -> object:
-        return store.append(Path(ARTIFACTS.name) / name, line)
+        return store.append(Path(name), line)
 
     return append
 
 
 class MetricsWriter:
-    """Append metrics to ``artifacts/metrics.mlp.jsonl`` via :class:`FileStore`.
+    """Append metrics to ``metrics.mlp.jsonl`` via :class:`FileStore`.
 
-    The versioned tier on purpose: the metrics WAL is small and is the
-    record of what the run measured, so it belongs in the history.
+    The file sits at the attempt root, beside ``run.log``. It is evidence
+    of what the attempt measured. It is not registered as an asset.
 
     A record's ``w`` defaults to the current time in UTC
     (``datetime.now(UTC).isoformat()``, with a ``+00:00`` offset). A
@@ -374,7 +375,7 @@ class MetricsWriter:
     def path(self) -> Path:
         """Where this writer appends. Readable as a format like any other, so
         a caller that also *reads* the run must exclude it from its sources."""
-        return self._run_dir / ARTIFACTS.name / METRICS_JSONL_NAME
+        return self._run_dir / METRICS_JSONL_NAME
 
     def scalar(
         self,

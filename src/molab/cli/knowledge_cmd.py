@@ -570,6 +570,16 @@ def knowledge_write(
             help="JSON object of this class's frontmatter fields, or a path to that JSON.",
         ),
     ] = None,
+    replaces: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--replaces",
+            help=(
+                "Workspace-relative document this one supersedes; it is deleted and its "
+                "inbound links point here. Repeat once per document."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Write one knowledge document. The same verb as ``write_knowledge``."""
     from molab.knowledge.concepts import _product
@@ -602,6 +612,7 @@ def knowledge_write(
             text=text,
             record=payload,
             fs=workspace.fs,
+            replaces=[workspace.fs.join(str(workspace.resolve()), item) for item in replaces or ()],
         )
     except (TypeError, ValueError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
@@ -716,23 +727,8 @@ def knowledge_parts(
     path: Annotated[
         Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
     ] = None,
-    write: Annotated[
-        bool,
-        typer.Option("--write", help="Write a Report that shows every generated image part."),
-    ] = False,
-    narrative: Annotated[
-        str,
-        typer.Option("--narrative", help="Interpretation stored with --write."),
-    ] = "",
-    created_by: Annotated[
-        str, typer.Option("--created-by", help="Author recorded on the Report.")
-    ] = "molab",
-    name: Annotated[
-        str | None,
-        typer.Option("--name", help="Report name. Defaults to parts-<run id>."),
-    ] = None,
 ) -> None:
-    """List image parts a run emitted. --write stores them as a Report."""
+    """List image parts a run emitted. The bytes stay on the assets."""
     from molab.knowledge import GeneratedParts
     from molab.workspace.run import Run
 
@@ -748,12 +744,3 @@ def knowledge_parts(
         print(f"No generated image parts on run {run.id}.")
     for part in parts:
         print(f"{part.part}\t{part.ref}\t{part.path}")
-    if not write:
-        return
-    text = narrative.strip() or "Generated image parts of this run."
-    try:
-        report = GeneratedParts(run).view(narrative=text, created_by=created_by, name=name)
-    except ValueError as exc:
-        rprint(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
-    print(f"report: {report.path}")

@@ -1,6 +1,6 @@
 """``molab runs adopt … --from DIR`` folds a ``molab.track()`` directory (D94).
 
-A script with no molab around it wrote stdout, metrics and staged artifacts
+A script with no molab around it wrote stdout, metrics and staged files
 into an offline directory; adopting it gives a sealed attempt carrying them,
 timed from the directory's ``track.json``, and the workspace validates clean.
 """
@@ -44,8 +44,8 @@ def tracked(tmp_path: Path) -> Path:
     tracker.metrics.scalar("loss", 0.2, 2)
     plot = tmp_path / "scratch-run" / "loss.png"
     plot.write_bytes(b"\x89PNG")
-    tracker.emit_artifact(plot, media_type="image/png", semantic_type="plot")
-    tracker.emit_artifact({"best": 0.2}, name="summary.json")
+    tracker.register(plot, title="loss.png", media_type="image/png")
+    tracker.register({"best": 0.2}, title="summary.json")
     tracker.close()
     return root
 
@@ -75,16 +75,27 @@ def test_from_dir_gives_a_sealed_attempt_and_validates_clean(lab: Path, tracked:
 
     attempt = lab / payload["path"]
     assert (attempt / "stdout.log").read_text() == "epoch 1\nepoch 2\n"
+    wal = (attempt / "metrics.mlp.jsonl").read_text(encoding="utf-8")
+    assert '"k": "loss"' in wal or '"k":"loss"' in wal
     record = json.loads((attempt / "execution.json").read_text())
     assert record["sealed_at"]
-    by_name = {a["name"]: a for a in record["artifacts"]}
-    assert set(by_name) == {"metrics.mlp.jsonl", "loss.png", "summary.json"}
-    assert by_name["metrics.mlp.jsonl"]["semantic_type"] == "molplot.metrics"
-    assert by_name["loss.png"]["media_type"] == "image/png"
-    assert by_name["loss.png"]["metadata"]["staged_by"] == "offline"
-    for artifact in record["artifacts"]:
-        assert (attempt / artifact["path"]).is_file()
+    assert "artifacts" not in record
     assert any(ev["kind"] == "stdout" for ev in record["evidence"])
+
+    from molab.workspace.asset_repository import assets_produced_by
+    from molab.workspace.domain import ExecutionOrigin
+
+    ws = Workspace(lab)
+    run = ws.get_project("alpha").get_experiment("sweep").get_run(payload["run_id"])
+    produced = {
+        asset.title: asset
+        for asset in assets_produced_by(ws, payload["execution_id"])
+        if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
+    }
+    assert set(produced) == {"loss.png", "summary.json"}
+    assert produced["loss.png"].media_type == "image/png"
+    assert "staged_by" not in produced["loss.png"].tags
+    assert Path(run.asset_path(produced["loss.png"].id)).read_bytes() == b"\x89PNG"
 
     validate = runner.invoke(app, ["validate", "-ws", str(lab)])
     assert validate.exit_code == 0, validate.output
@@ -108,10 +119,9 @@ def test_explicit_times_win_over_track_json(lab: Path, tracked: Path) -> None:
     assert payload["started_at"].startswith("2026-10-01T10:00:00")
 
 
-def test_a_refused_adoption_moves_everything_back(lab: Path, tracked: Path) -> None:
-    clash = OfflineTracker(tracked)
-    clash.emit_artifact(b"{}", name="metrics.mlp.jsonl")
-    clash.close()
+def test_a_bad_manifest_line_refuses_before_the_run_changes(lab: Path, tracked: Path) -> None:
+    manifest = tracked / "work" / "_molab" / "staged.jsonl"
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "not-json\n", encoding="utf-8")
     before = sorted(p.relative_to(tracked) for p in tracked.rglob("*"))
     run = Workspace(lab).get_project("alpha").get_experiment("sweep").add_run(params={"lr": 0.3})
 
@@ -120,7 +130,7 @@ def test_a_refused_adoption_moves_everything_back(lab: Path, tracked: Path) -> N
         ["runs", "adopt", "alpha", "sweep", "lr=0.3", "--from", str(tracked), "-ws", str(lab)],
     )
     assert result.exit_code == 1
-    assert "adopted twice" in " ".join(result.output.split())
+    assert "not JSON" in result.output
     assert sorted(p.relative_to(tracked) for p in tracked.rglob("*")) == before
     assert run.executions == []
 

@@ -29,10 +29,7 @@ _FIVE_GOLDENS: tuple[tuple[str, MolabRef], ...] = (
         "molab:experiment/E/run/r1/execution/e01",
         MolabRef(experiment_id="E", run_id="r1", execution_id="e01"),
     ),
-    (
-        "molab:experiment/E/run/r1/artifact/A",
-        MolabRef(experiment_id="E", run_id="r1", artifact_id="A"),
-    ),
+    ("molab:asset/A", MolabRef(asset_id="A")),
 )
 
 
@@ -56,7 +53,7 @@ class TestIsRef:
 class TestMolabRef:
     def test_five_shapes_report_kind(self) -> None:
         kinds = [ref.kind for _, ref in _FIVE_GOLDENS]
-        assert kinds == ["project", "experiment", "run", "execution", "artifact"]
+        assert kinds == ["project", "experiment", "run", "execution", "asset"]
 
     def test_project_and_experiment_together_rejected(self) -> None:
         with pytest.raises(pydantic.ValidationError):
@@ -66,13 +63,13 @@ class TestMolabRef:
         with pytest.raises(pydantic.ValidationError):
             MolabRef(run_id="r1")
 
-    def test_execution_and_artifact_together_rejected(self) -> None:
+    def test_execution_and_asset_together_rejected(self) -> None:
         with pytest.raises(pydantic.ValidationError):
             MolabRef(
                 experiment_id="E",
                 run_id="r1",
                 execution_id="e01",
-                artifact_id="A",
+                asset_id="A",
             )
 
     def test_segment_containing_slash_rejected(self) -> None:
@@ -144,9 +141,6 @@ class TestRefOf:
         assert ref_of(experiment) == MolabRef(experiment_id=experiment.id)
         assert str(ref_of(run)) == f"molab:experiment/{experiment.id}/run/{run.id}"
 
-    def test_artifact_on_a_run(self, run) -> None:
-        assert ref_of(run, artifact_id="A").kind == "artifact"
-
     def test_asset(self, experiment: Experiment, tmp_path) -> None:
         source = tmp_path / "input.txt"
         source.write_text("payload")
@@ -154,11 +148,11 @@ class TestRefOf:
         assert ref_of(asset).kind == "asset"
         assert str(ref_of(asset)) == f"molab:asset/{asset.id}"
 
-    def test_foreign_object_and_artifact_on_a_project(self, project: Project) -> None:
+    def test_foreign_object_and_extra_kwarg(self, project: Project) -> None:
         with pytest.raises(TypeError):
             ref_of(object())
         with pytest.raises(TypeError):
-            ref_of(project, artifact_id="A")
+            ref_of(project, asset_id="A")  # type: ignore[call-arg]
 
     def test_not_exported_from_workspace_package(self) -> None:
         assert "ref_of" not in molab.workspace.__all__

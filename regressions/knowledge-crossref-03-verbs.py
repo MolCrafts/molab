@@ -2,9 +2,9 @@
 
 Hard-coded: the ``cites`` edge role on a Knowledge → Knowledge citation, a
 bare-path cite that must survive (the branch a resolver would ``TypeError`` on
-and drop), the ``body=""`` remount that keeps its body, the harvested body
-carrying ``succeeded`` and the result ``0.42``, the two ``ValueError``
-preconditions. The base class does not vend a subclass. Uses
+and drop), the ``body=""`` remount that keeps its body, a harvest whose
+prose is the narrative (status and result values stay off the document), the
+``ValueError`` preconditions. The base class does not vend a subclass. Uses
 ``molab.workspace``'s public surface plus the new ``molab.knowledge`` verbs —
 no third-party runtime.
 """
@@ -95,17 +95,24 @@ def main() -> None:
             pass
         assert _refuses(lambda: Observation.harvest(run, narrative="   \n", created_by="t"))
 
+        assert _refuses(
+            lambda: Observation.harvest(
+                run,
+                narrative="Mobility rises with temperature.",
+                created_by="tester",
+                results={"mobility": 0.42},
+            )
+        )
         harvested = Observation.harvest(
             run,
             narrative="Mobility rises with temperature.",
             created_by="tester",
-            results={"mobility": 0.42},
         )
         body = harvested.read()
         assert run.id in harvested.name
         assert harvested.path == knowledges / f"{harvested.name}.md"
-        assert "succeeded" in body
-        assert "0.42" in body
+        assert "succeeded" not in body
+        assert "0.42" not in body
         assert "Mobility rises with temperature." in body
         reopened = _open_document(harvested.path)
         assert isinstance(reopened, Observation)

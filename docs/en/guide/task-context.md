@@ -35,7 +35,7 @@ class TaskContext[StateT, InputT]:
 !!! warning "Deprecated: `ctx.state`"
     `ctx.state` is deprecated and scheduled for removal: accessing it emits a `DeprecationWarning` and returns a **read-only snapshot** (engine state cannot be mutated through it). Everything it was used for — reading the previous loop iteration's value, picking up a branch-routed value — now arrives as **named parameters** (the values-on-edges engine delivers loop-back and branch-routed values as the body's own arguments). Migrate any remaining reads to named parameters.
 
-There is **no** `ctx.run_context` and **no** `ctx.deps`. Capabilities that used to be reached through them — artifact persistence, asset lookup, run metadata — live on the driver-side `RunContext` (see below) or are delivered to the body as named parameters by the engine.
+There is **no** `ctx.run_context` and **no** `ctx.deps`. A task registers a file by returning `ctx.register(...)`. The engine records `molab:asset/<id>`. Run inputs arrive as named parameters (`inputs`, and a unique identifier title).
 
 ## Reading Configuration
 
@@ -67,13 +67,12 @@ with run.start() as ctx:  # run.start(profile_config=cfg) to attach a profile
     execution_id = ctx.id
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     ctx.set_result("final_loss", result.outputs["train"])
-    ctx.emit_artifact(result.outputs["train"], name="metrics.json")
     ctx.log("run").append("done")
 
 print(run.get_result("final_loss", execution_id=execution_id))  # public read-back on the Run entity
 ```
 
-`ctx.set_result(...)` stores lightweight values on the execution record, `ctx.emit_artifact(...)` emits an `Artifact`, `ctx.log(name)` appends to the execution evidence log, and `ctx.checkpoint(...)` emits a checkpoint `Artifact`. Emitted artifacts carry their `run_id` / `execution_id` automatically; while a task body is executing, the engine tags the active task id into `artifact.metadata["task_id"]`. See the [Artifacts, Assets, and Data Imports](assets.md) guide for the complete picture of artifacts, data imports, and their query paths.
+`ctx.set_result(...)` stores a lightweight value until the context exits. `ctx.log(name)` appends to the execution evidence log. `ctx.checkpoint(...)` writes a file under `checkpoints/` and returns that path. A file the next run should open is registered from the task with `ctx.register`. See [Assets](assets.md).
 
 Inside the task, the run shows up only as data: a root task's sweep `params` bind to its like-named parameters, `ctx.workdir` points into the execution directory, and the resolved profile config binds by name too. The same task code therefore runs unchanged in pure in-memory execution — there is simply no workdir, and whatever `config=` the caller passed binds the same way.
 

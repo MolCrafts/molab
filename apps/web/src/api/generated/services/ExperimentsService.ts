@@ -6,6 +6,8 @@ import type { ExperimentComparisonResponse } from '../models/ExperimentCompariso
 import type { ExperimentCreateRequest } from '../models/ExperimentCreateRequest';
 import type { ExperimentResponse } from '../models/ExperimentResponse';
 import type { MessageResponse } from '../models/MessageResponse';
+import type { SweepSeedRequest } from '../models/SweepSeedRequest';
+import type { SweepSeedResponse } from '../models/SweepSeedResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
@@ -158,6 +160,42 @@ export class ExperimentsService {
             cookies: {
                 'molab_session': molabSession,
             },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Seed Experiment Sweep
+     * Seed one pending run per grid cell. A cell that already exists is skipped.
+     *
+     * This is :meth:`Experiment.seed`, not :meth:`Experiment.sweep`: the
+     * experiment keeps the workflow it already has. Nothing is dispatched.
+     * @param projectId
+     * @param experimentId
+     * @param requestBody
+     * @param molabSession
+     * @returns SweepSeedResponse Successful Response
+     * @throws ApiError
+     */
+    public static seedExperimentSweep(
+        projectId: string,
+        experimentId: string,
+        requestBody: SweepSeedRequest,
+        molabSession?: (string | null),
+    ): CancelablePromise<SweepSeedResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/projects/{project_id}/experiments/{experiment_id}/sweep',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: `Validation Error`,
             },
@@ -326,6 +364,45 @@ export class ExperimentsService {
             cookies: {
                 'molab_session': molabSession,
             },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Seed Experiment Sweep
+     * Seed one pending run per grid cell. A cell that already exists is skipped.
+     *
+     * This is :meth:`Experiment.seed`, not :meth:`Experiment.sweep`: the
+     * experiment keeps the workflow it already has. Nothing is dispatched.
+     * @param projectId
+     * @param experimentId
+     * @param ws
+     * @param requestBody
+     * @param molabSession
+     * @returns SweepSeedResponse Successful Response
+     * @throws ApiError
+     */
+    public static seedExperimentSweepWs(
+        projectId: string,
+        experimentId: string,
+        ws: string,
+        requestBody: SweepSeedRequest,
+        molabSession?: (string | null),
+    ): CancelablePromise<SweepSeedResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/sweep',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+                'ws': ws,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: `Validation Error`,
             },

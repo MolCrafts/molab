@@ -268,15 +268,20 @@ class TestExecuteRun:
         assert len(run.executions) == 2
         assert [e.mode.value for e in run.executions] == ["initial", "rerun"]
 
-    def test_resume_with_checkpoint_creates_resume_execution(self, tmp_path: Path) -> None:
-        """A checkpoint is an optional resume input; with one, resume opens e02."""
+    def test_checkpoint_file_is_not_an_asset_and_resume_opens_e02(self, tmp_path: Path) -> None:
+        """``ctx.checkpoint`` writes under ``checkpoints/``. Resume does not take it."""
+        from molab.workspace.asset_repository import assets_produced_by
+
         run = _make_run(tmp_path)
         with run.start() as ctx:
             cp = ctx.checkpoint("epoch1", data={"step": 1})
             ctx.mark_failed("boom")
         assert [e.status.value for e in run.executions] == ["failed"]
+        assert cp == run.execution_dir("e01") / "checkpoints" / "epoch1.json"
+        assert json.loads(cp.read_text(encoding="utf-8"))["data"] == {"step": 1}
+        assert assets_produced_by(run.experiment.project.workspace, "e01") == []
 
-        result = run.execute(_build_wf(), resume=True, checkpoint=cp.id)
+        result = run.execute(_build_wf(), resume=True)
 
         assert result.status == "succeeded"
         assert result.outputs == {"double": 6, "summarize": "got 6"}
@@ -284,7 +289,6 @@ class TestExecuteRun:
         resumed = run.executions[1]
         assert resumed.id == "e02"
         assert resumed.based_on_execution_id == "e01"
-        assert resumed.checkpoint_artifact_id == cp.id
 
     def test_rerun_after_success_opens_rerun(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
@@ -643,7 +647,7 @@ class TestExecuteRun:
             _execute_run(wf, run, execution_id="e01", rerun=True)
         with pytest.raises(ValueError):
             _execute_run(wf, run, execution_id="e01", fresh=True)
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             execute_run(wf, run, execution_id="e01", checkpoint_artifact_id="x")
 
         assert [item.id for item in run.executions] == ["e01"]
@@ -662,7 +666,7 @@ class TestExecuteRun:
 
         assert len(run.executions) == 1
 
-    def test_checkpoint_without_resume_is_value_error(self, tmp_path: Path) -> None:
+    def test_checkpoint_kwarg_is_rejected(self, tmp_path: Path) -> None:
         wf = Workflow(name="boom")
 
         @wf.task
@@ -674,8 +678,7 @@ class TestExecuteRun:
             run.execute(wf)
         assert len(run.executions) == 1
 
-        # Run.execute's frozen kwarg is ``checkpoint`` (run.py), not the record field name.
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             run.execute(_build_wf(), rerun=True, checkpoint="x")
 
         assert len(run.executions) == 1
@@ -771,7 +774,6 @@ class TestVerbMessages:
                 resume=True,
                 rerun=True,
                 fresh=False,
-                checkpoint=None,
                 execution_id=None,
             )
 

@@ -4,24 +4,22 @@ Reproducibility in Molab is not only about rerunning code. It's about recovering
 
 ## Assets as named resources
 
-Every persistent byproduct — imported data, task artifacts, logs, checkpoints — is a typed `Asset` scoped to the workspace, a project, an experiment, or a single run:
+An Asset is one registered file: one id, one content, one ref `molab:asset/<id>`. It lives under the workspace, a project, or an experiment (`assets/<slug>/asset.json` plus the payload). A run does not keep a second copy. Logs, checkpoints, and `metrics.mlp.jsonl` are evidence of the attempt. They are not assets.
 
 | Scope | Example |
 |---|---|
-| Workspace | Shared training datasets |
-| Project | Force-field parameter files |
-| Experiment | Derived feature caches |
-| Run | Task artifacts, logs, checkpoints |
+| Workspace | A dataset imported for every project |
+| Project | A force-field file imported once |
+| Experiment | A structure a run registered, or a file imported for that experiment |
 
-Assets are recorded in each scope's `asset.json` manifest. Queries scan these manifests — no filesystem walking, no undocumented paths:
+The next run names those ids in `inputs`. At execute time the root task receives them as paths. See [Assets](../guide/assets.md).
 
 ```python
-# docs: skip — conceptual illustration; requires a workspace and run context
-# Find all error traces in an experiment
-traces = exp.assets.query(kind="error_trace", recursive=True)
+# docs: skip — conceptual illustration; requires a workspace and a finished run
+from molab.workspace.asset_repository import assets_produced_by
 
-# A task finds a named asset without hard-coding paths
-data = ctx.find_asset("training_data")
+produced = assets_produced_by(ws, run.executions[-1].id)
+nxt = exp.add_run(inputs=(produced[0].id,))
 ```
 
 ## Reproducibility records
@@ -41,10 +39,10 @@ Together, these turn a run directory into a scientific record — not just a pil
 
 Molab supports FAIR-oriented practice inside a managed workspace:
 
-- **Findable** — stable names, scoped manifests, queryable
-- **Accessible** — Python API, server, and UI all read the same records
-- **Interoperable** — teams can adopt consistent metadata conventions
-- **Reusable** — workflows recover assets by name and scope, not ephemeral paths
+- **Findable** — one id, one ref, queried by the attempt that registered it
+- **Accessible** — Python API, server, and UI all read the same record
+- **Interoperable** — the ref is `molab:asset/<id>`, and a task opens the path it resolves to
+- **Reusable** — the next run names the id in `inputs`
 
 What Molab does **not** do automatically: publish external identifiers, enforce a community schema, or turn local records into a repository-grade FAIR archive. It gives you a strong internal record. That is a substantial improvement over ad hoc folders.
 

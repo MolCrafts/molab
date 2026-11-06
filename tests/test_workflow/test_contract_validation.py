@@ -13,7 +13,7 @@ import pytest
 
 from molab.workflow.codec import default_codec
 from molab.workflow.contract import (
-    ArtifactDecl,
+    DeclaredFile,
     TaskInputSpec,
     TaskIO,
     TaskOutputSpec,
@@ -28,23 +28,23 @@ def _emitted_check_ids(report) -> set[ValidationCheckId]:  # type: ignore[no-unt
     return {issue.check_id for issue in report.issues}
 
 
-class TestUniqueArtifactPaths:
+class TestUniqueFilePaths:
     def test_passes_when_paths_distinct(self) -> None:
         contract = WorkflowContract(
             workflow_hash="workflow_00000000",
             task_io=(
                 TaskIO(
                     task_id="A",
-                    artifacts=(ArtifactDecl(path="a/x.json", produced_by="A"),),
+                    files=(DeclaredFile(path="a/x.json", produced_by="A"),),
                 ),
                 TaskIO(
                     task_id="B",
-                    artifacts=(ArtifactDecl(path="b/y.json", produced_by="B"),),
+                    files=(DeclaredFile(path="b/y.json", produced_by="B"),),
                 ),
             ),
         )
         rep = validate_workflow_contract(contract)
-        assert ValidationCheckId.unique_artifact_paths not in _emitted_check_ids(rep)
+        assert ValidationCheckId.unique_file_paths not in _emitted_check_ids(rep)
 
     def test_fails_on_duplicate_path(self) -> None:
         contract = WorkflowContract(
@@ -52,17 +52,17 @@ class TestUniqueArtifactPaths:
             task_io=(
                 TaskIO(
                     task_id="A",
-                    artifacts=(ArtifactDecl(path="dup.json", produced_by="A"),),
+                    files=(DeclaredFile(path="dup.json", produced_by="A"),),
                 ),
                 TaskIO(
                     task_id="B",
-                    artifacts=(ArtifactDecl(path="dup.json", produced_by="B"),),
+                    files=(DeclaredFile(path="dup.json", produced_by="B"),),
                 ),
             ),
         )
         rep = validate_workflow_contract(contract)
-        assert ValidationCheckId.unique_artifact_paths in _emitted_check_ids(rep)
-        issue = next(i for i in rep.issues if i.check_id is ValidationCheckId.unique_artifact_paths)
+        assert ValidationCheckId.unique_file_paths in _emitted_check_ids(rep)
+        issue = next(i for i in rep.issues if i.check_id is ValidationCheckId.unique_file_paths)
         assert issue.target == "dup.json"
         assert issue.severity == "error"
         assert rep.ok is False
@@ -149,7 +149,7 @@ class TestProducedByResolves:
             task_io=(
                 TaskIO(
                     task_id="A",
-                    artifacts=(ArtifactDecl(path="a.json", produced_by="A"),),
+                    files=(DeclaredFile(path="a.json", produced_by="A"),),
                 ),
             ),
         )
@@ -162,7 +162,7 @@ class TestProducedByResolves:
             task_io=(
                 TaskIO(
                     task_id="A",
-                    artifacts=(ArtifactDecl(path="a.json", produced_by="ghost"),),
+                    files=(DeclaredFile(path="a.json", produced_by="ghost"),),
                 ),
             ),
         )

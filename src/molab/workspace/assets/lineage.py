@@ -1,17 +1,15 @@
-"""Asset lineage traversal.
+"""Asset lineage.
 
-Named assets and emitted artifacts form one directed graph. A named asset's
-upstream ids come from its versions: an import contributes
-``ImportOrigin.input_ids`` and a promotion contributes
-``ArtifactOrigin.artifact_id``. An artifact's upstream ids are
-``Artifact.input_entity_ids``. This module walks that one edge table.
+An asset produced by a run points at the asset ids that run named as
+``inputs``. A run that names an asset as an input points forward to the
+assets that run produced. An import has no upstream asset.
 
 Example::
 
     from molab.workspace.assets import lineage
 
-    upstream = lineage.ancestors(workspace, leaf_asset.id)
-    downstream = lineage.descendants(workspace, raw_input.id)
+    upstream = lineage.ancestors(workspace, leaf.id)
+    downstream = lineage.descendants(workspace, raw.id)
 """
 
 from __future__ import annotations
@@ -22,77 +20,40 @@ if TYPE_CHECKING:
     from ..workspace import Workspace
 
 
-def _artifact_upstreams(workspace: Workspace) -> dict[str, tuple[str, ...]]:
-    """Map artifact id to consumed entity ids, read from the owning Executions."""
-    from ..artifact_repository import scan_artifacts
+def _edges(workspace: Workspace) -> dict[str, tuple[str, ...]]:
+    """Map a produced asset id to the input asset ids of its run."""
+    from ..asset_repository import scan_asset_repositories
+    from ..domain import ExecutionOrigin
 
-    return {artifact.id: tuple(artifact.input_entity_ids) for artifact in scan_artifacts(workspace)}
-
-
-def _asset_upstreams(workspace: Workspace) -> dict[str, tuple[str, ...]]:
-    """Map asset id to upstream ids taken from each version's origin.
-
-    ``ImportOrigin`` contributes ``input_ids``. ``ArtifactOrigin`` contributes
-    ``artifact_id``. Ids are kept in first-seen order. No reference is resolved.
-    """
-    from ..artifact_repository import scan_asset_repositories
-    from ..domain import ArtifactOrigin, ImportOrigin
+    inputs_by_run: dict[str, tuple[str, ...]] = {}
+    for project in workspace.list_projects():
+        for experiment in project.list_experiments():
+            for run in experiment.list_runs():
+                inputs_by_run[run.id] = tuple(run.inputs)
 
     edges: dict[str, tuple[str, ...]] = {}
     for repository in scan_asset_repositories(workspace):
         for asset in repository.list():
-            seen: list[str] = []
-            seen_set: set[str] = set()
-            for version in repository.versions(asset.id):
-                origin = version.origin
-                if isinstance(origin, ImportOrigin):
-                    incoming = origin.input_ids
-                elif isinstance(origin, ArtifactOrigin):
-                    incoming = (origin.artifact_id,)
-                else:
-                    continue
-                for item in incoming:
-                    if item in seen_set:
-                        continue
-                    seen_set.add(item)
-                    seen.append(item)
-            if seen:
-                edges[asset.id] = tuple(seen)
+            origin = asset.origin
+            if not isinstance(origin, ExecutionOrigin):
+                continue
+            upstream = inputs_by_run.get(origin.run_id, ())
+            if upstream:
+                edges[asset.id] = upstream
     return edges
 
 
-def _edges(workspace: Workspace) -> dict[str, tuple[str, ...]]:
-    """Upstream ids for artifacts and named assets. The first id wins."""
-    merged: dict[str, list[str]] = {}
-
-    def add(entity_id: str, upstreams: tuple[str, ...]) -> None:
-        bucket = merged.setdefault(entity_id, [])
-        have = set(bucket)
-        for item in upstreams:
-            if item in have:
-                continue
-            have.add(item)
-            bucket.append(item)
-
-    for entity_id, upstreams in _artifact_upstreams(workspace).items():
-        add(entity_id, upstreams)
-    for entity_id, upstreams in _asset_upstreams(workspace).items():
-        add(entity_id, upstreams)
-    return {entity_id: tuple(upstreams) for entity_id, upstreams in merged.items()}
-
-
 def ancestors(workspace: Workspace, asset_id: str) -> set[str]:
-    """Return every id reachable upstream of *asset_id*.
+    """Return every asset id reachable upstream of *asset_id*.
 
-    Walks the shared edge table. The starting id is not included. A self-loop
-    stops because the id is already in the visited set.
+    The starting id is not included.
 
     Args:
         workspace: Workspace whose records host the graph.
         asset_id: Leaf to walk back from.
 
     Returns:
-        Upstream ids. Empty when the leaf has no upstream edges.
+        Upstream asset ids. Empty when the leaf has no upstream edges.
     """
     edges = _edges(workspace)
     visited: set[str] = {asset_id}
@@ -110,17 +71,16 @@ def ancestors(workspace: Workspace, asset_id: str) -> set[str]:
 
 
 def descendants(workspace: Workspace, asset_id: str) -> set[str]:
-    """Return every id reachable downstream of *asset_id*.
+    """Return every asset id reachable downstream of *asset_id*.
 
-    Inverts the shared edge table, then walks forward. The starting id is
-    excluded. A self-loop stops because the id is already in the visited set.
+    The starting id is excluded.
 
     Args:
         workspace: Workspace whose records host the graph.
         asset_id: Source to walk forward from.
 
     Returns:
-        Downstream ids. Empty when nothing records *asset_id* as an upstream.
+        Downstream asset ids. Empty when no run names *asset_id* as an input.
     """
     children: dict[str, list[str]] = {}
     for entity_id, upstreams in _edges(workspace).items():

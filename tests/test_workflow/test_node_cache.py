@@ -149,87 +149,54 @@ class TestRunTaskBodyCached:
         assert not list(store_dir.glob("*.json"))
 
 
-class _BlobStore:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, bytes]] = []
+class TestCacheHitReturnsTheRef:
+    """A hit returns the stored result. It does not copy the asset bytes."""
 
-    def put_blob(self, digest: str, data: bytes) -> None:
-        self.calls.append((digest, data))
+    @pytest.mark.asyncio
+    async def test_hit_returns_the_ref_and_leaves_the_new_attempt_empty(
+        self, tmp_path: Path
+    ) -> None:
+        from molab.workflow import TaskContext
+        from molab.workspace import Workspace
+        from molab.workspace.asset_repository import assets_produced_by
+        from molab.workspace.domain import ExecutionMode, ExecutionOrigin
 
+        calls = {"sim": 0}
+        wf = Workflow(name="blob")
 
-def _lab(tmp_path: Path):
-    from molab.workspace import Workspace
+        @wf.task
+        async def sim(ctx: TaskContext) -> str:
+            calls["sim"] += 1
+            src = ctx.workdir / "sim.bin"
+            src.write_bytes(b"xyz")
+            return ctx.register(src, title="sim")
 
-    ws = Workspace(tmp_path / "ws", name="lab")
-    run = ws.add_project("p").add_experiment("e").add_run()
-    return ws, run
-
-
-class TestPutFileBlobs:
-    def test_puts_emitted_bytes(self, tmp_path: Path) -> None:
-        from types import SimpleNamespace
-
-        from molab.workflow._engine.node_cache import _put_file_blobs
-
-        _ws, run = _lab(tmp_path)
-        payload = b"xyz"
+        compiled = (wf).compile()
+        ws = Workspace(tmp_path / "ws", name="lab")
+        run = ws.add_project("p").add_experiment("e").add_run()
         with run.start() as ctx:
-            src = ctx.get_dir("work") / "sim.bin"
-            src.write_bytes(payload)
-            artifact = ctx.emit_artifact(src, name="sim.bin", metadata={"task_id": "sim"})
-            store = _BlobStore()
-            deps = SimpleNamespace(
-                cache=SimpleNamespace(store=store),
-                run_context=ctx,
-                execution_id=ctx.id,
-            )
-            _put_file_blobs(deps, [artifact])
+            first = await WorkflowRuntime().execute(compiled, run_context=ctx)
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            second = await WorkflowRuntime().execute(compiled, run_context=ctx)
 
-        assert store.calls == [(artifact.content.digest, payload)]
-
-    def test_legacy_record_is_read(self, tmp_path: Path) -> None:
-        from types import SimpleNamespace
-
-        from molab.workflow._engine.node_cache import _put_file_blobs
-
-        workspace, run = _lab(tmp_path)
-        payload = b"xyz"
-        with run.start() as ctx:
-            artifact = ctx.emit_artifact(payload, name="sim.bin", metadata={"task_id": "sim"})
-            legacy_path = (
-                Path(run.artifact_location(ctx.id, artifact))
-                .resolve()
-                .relative_to(Path(str(workspace.root)).resolve())
-                .as_posix()
-            )
-            legacy = artifact.model_copy(update={"path": legacy_path})
-            store = _BlobStore()
-            deps = SimpleNamespace(
-                cache=SimpleNamespace(store=store),
-                run_context=ctx,
-                execution_id=ctx.id,
-            )
-            _put_file_blobs(deps, [legacy])
-
-        assert store.calls == [(artifact.content.digest, payload)]
-
-    def test_missing_file_and_other_attempt_are_skipped(self, tmp_path: Path) -> None:
-        from types import SimpleNamespace
-
-        from molab.workflow._engine.node_cache import _put_file_blobs
-
-        _ws, run = _lab(tmp_path)
-        with run.start() as ctx:
-            artifact = ctx.emit_artifact(b"xyz", name="sim.bin", metadata={"task_id": "sim"})
-            (run.execution_dir(ctx.id) / artifact.path).unlink()
-            store = _BlobStore()
-            deps = SimpleNamespace(
-                cache=SimpleNamespace(store=store),
-                run_context=ctx,
-                execution_id=ctx.id,
-            )
-            _put_file_blobs(deps, [artifact])
-            deps.execution_id = "e02"
-            _put_file_blobs(deps, [artifact])
-
-        assert store.calls == []
+        assert calls["sim"] == 1
+        (asset,) = [
+            item
+            for item in assets_produced_by(ws, "e01")
+            if isinstance(item.origin, ExecutionOrigin) and item.origin.run_id == run.id
+        ]
+        assert first.outputs["sim"] == second.outputs["sim"] == asset.ref
+        assert asset.ref.startswith("molab:asset/")
+        assert Path(run.asset_path(asset.id)).read_bytes() == b"xyz"
+        assert [
+            item
+            for item in assets_produced_by(ws, "e02")
+            if isinstance(item.origin, ExecutionOrigin) and item.origin.run_id == run.id
+        ] == []
+        stored = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (run.machine_dir() / "cache").glob("*.json")
+        ]
+        assert stored
+        assert all(entry["result"]["result"] == asset.ref for entry in stored)
+        assert not (run.execution_dir("e02") / "out" / "sim" / "sim.bin").exists()

@@ -31,7 +31,6 @@ class WorkspaceExecutionRow(ApiModel):
     finishedAt: str | None = None
     durationSeconds: float | None = None
     basedOnExecutionId: str | None = None
-    checkpointArtifactId: str | None = None
     schedulerJobId: str | None = None
     backend: str | None = None
     backendMetadata: dict[str, str] = Field(default_factory=dict)
@@ -56,7 +55,7 @@ class WorkspaceRunRow(ApiModel):
     experimentName: str
     definitionHash: str
     experimentRevisionId: str
-    inputAssetIds: list[str] = Field(default_factory=list)
+    inputs: list[str] = Field(default_factory=list)
     targetHint: str | None = None
     statusSummary: RunStatusSummaryResponse
     parameters: dict[str, JSONValue] = Field(default_factory=dict)
@@ -83,7 +82,7 @@ class WorkspaceRunRow(ApiModel):
             experimentName=experiment_name,
             definitionHash=run.metadata.definition_hash,
             experimentRevisionId=run.metadata.experiment_revision_id,
-            inputAssetIds=list(run.metadata.input_asset_ids),
+            inputs=list(run.metadata.inputs),
             targetHint=run.metadata.target,
             statusSummary=RunStatusSummaryResponse(
                 total=summary.total,
@@ -131,7 +130,6 @@ def _build_execution_row(run_id: str, record: Execution) -> WorkspaceExecutionRo
         finishedAt=finished.isoformat() if finished else None,
         durationSeconds=duration,
         basedOnExecutionId=record.based_on_execution_id,
-        checkpointArtifactId=record.checkpoint_artifact_id,
         schedulerJobId=scheduler_job_id,
         backend=backend,
         backendMetadata=executor,

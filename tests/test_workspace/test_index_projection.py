@@ -206,7 +206,7 @@ class TestRefreshPoints:
     def test_attempt_writes_refresh_the_run(self, tree) -> None:
         _ws, _project, _experiment, run = tree
         with run.start() as ctx:
-            ctx.emit_artifact({"loss": 0.1}, name="metrics.json")
+            ctx.register({"loss": 0.1}, title="metrics.json")
             running = _reserved(run)
             assert running["latest_status"] == "running"
         _in_sync(run)
@@ -217,7 +217,9 @@ class TestRefreshPoints:
         assert row["mode"] == "initial"
         assert row["status"] == "succeeded"
         assert row["started_at"] and row["finished_at"]
-        assert row["artifacts"] and all(isinstance(p, str) for p in row["artifacts"])
+        assert "artifacts" not in row
+        assert isinstance(row["job_ids"], list)
+        assert isinstance(row["out"], list)
         assert row["error"] is None
         assert _reserved(run)["latest_status"] == "succeeded"
 

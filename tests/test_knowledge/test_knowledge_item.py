@@ -45,16 +45,11 @@ class TestSourceRef:
         with pytest.raises(ValueError):
             source.link_target("/w/k")
 
-    def test_from_edge_round_trips_artifact_and_file(self) -> None:
-        artifact = SourceRef.from_edge(
-            Edge("molab:experiment/E1/run/R1/artifact/A1", "derived_from")
-        )
+    def test_from_edge_round_trips_asset_and_file(self) -> None:
+        asset = SourceRef.from_edge(Edge("molab:asset/A1", "derived_from"))
         file_source = SourceRef.from_edge(Edge("/w/p/s1", "derived_from"))
 
-        assert (artifact.kind, artifact.ref) == (
-            "artifact",
-            "molab:experiment/E1/run/R1/artifact/A1",
-        )
+        assert (asset.kind, asset.ref) == ("asset", "molab:asset/A1")
         assert (file_source.kind, file_source.ref) == ("file", "/w/p/s1")
 
     def test_from_edge_rejects_a_malformed_ref(self) -> None:
@@ -65,5 +60,8 @@ class TestSourceRef:
         project = lab.get_project("p")
 
         assert SourceRef.of(run).ref == str(ref_of(run))
-        assert SourceRef.of(run, artifact_id="A1").kind == "artifact"
+        with run.start() as ctx:
+            asset = ctx.register(b"hi", title="note")
+        assert SourceRef.of(asset).ref == f"molab:asset/{asset.id}"
+        assert SourceRef.of(asset).kind == "asset"
         assert SourceRef.of(project).kind == "project"

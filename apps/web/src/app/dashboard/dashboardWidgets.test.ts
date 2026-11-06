@@ -35,7 +35,7 @@ const run = (
     experimentName: scope.experimentId ?? "e1",
     definitionHash: `definition-${id}`,
     experimentRevisionId: "revision-1",
-    inputAssetIds: [],
+    inputs: [],
     targetHint: null,
     statusSummary: {
       total: attempts.length,
@@ -55,7 +55,6 @@ const run = (
       finishedAt: attempt.finishedAt,
       durationSeconds: 0,
       basedOnExecutionId: null,
-      checkpointArtifactId: null,
       schedulerJobId: null,
       backend: null,
       backendMetadata: {},

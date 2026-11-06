@@ -42,7 +42,7 @@ What that unlocks is a research workflow you can trust and revisit: experiments 
 | `molab.workspace`  | File-system storage primitive — `Workspace → Project → Experiment → Run` `Folder` hierarchy, content-addressed assets, atomic JSON I/O, run lifecycle |
 | `molab.config`     | In-code process-global config — a live `molcfg.Config` kept as a process-level place to register runtime values in code (never from env) |
 | `molab.profile`    | File-based per-run config — `molcfg.yaml` loading and named profiles; resolves `defaults` + `profiles` into an immutable, content-hashed `ProfileConfig` |
-| `molab.services`   | Application-service layer between the shells and the domain layers — `operator_config` (read / write `~/.molab/config.json`), `run_failure`, `auth`. CLI and server both call it and never each other, so a Python operation and a UI operation share one code path |
+| `molab.services`   | Application-service layer between the shells and the domain layers — `operator_config` (read / write `~/.molab/config.json`), `auth`. CLI and server both call it and never each other, so a Python operation and a UI operation share one code path |
 | `molab.knowledge`  | Knowledge documents (`knowledges/<slug>.md`, path is identity) and the `@concept_type` registry — sits above `workspace` and reaches it only through function-body imports |
 | `molab.server`     | FastAPI app — REST routes for workspace, projects, experiments, runs, assets, execution, plus SSE streaming and bundled-SPA serving |
 | `molab.cli`        | `molab` command-line entry point — workspace init/info, run/execute, project / experiment / run / asset / target / session subcommands |

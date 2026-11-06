@@ -1,144 +1,103 @@
-"""Invariant tests for emitted artifacts and the scope asset repository.
-
-- Artifact records travel with the run directory.
-- Emitted payloads hash to the digest recorded for them.
-- The active task id populates ``Artifact.metadata``.
-- Concurrent artifact writes all land on the Execution.
-- ``data_assets`` is the scope ``AssetRepository``.
-"""
+"""Registered files are assets of a scope, not rows on an attempt."""
 
 from __future__ import annotations
 
 import json
-import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from molab.workspace import Run, Workspace
-from molab.workspace.artifact_repository import ArtifactRepository, content_ref, scan_artifacts
-from molab.workspace.domain import Artifact
-from molab.workspace.execution_dirs import execution_dir_names
+from molab.workspace import Workspace
+from molab.workspace.asset_repository import (
+    AssetRepository,
+    assets_produced_by,
+    content_ref,
+    payload_path_for,
+)
+from molab.workspace.domain import ExecutionOrigin
 
-ARTIFACTS_PER_RUN = 2
 
-
-def _seed_workspace(root: Path, n_runs: int = 2) -> Workspace:
+def _seed(root: Path, n_runs: int = 2) -> Workspace:
     ws = Workspace(root=root, name="Test")
-    proj = ws.add_project("demo")
-    exp = proj.add_experiment("baseline", params={"lr": 1e-3})
+    experiment = ws.add_project("demo").add_experiment("baseline", params={"lr": 1e-3})
     for i in range(n_runs):
-        r = exp.add_run(params={"seed": i})
-        with r.start() as ctx:
-            ctx.emit_artifact({"loss": 0.1 * i}, name="metrics.json", semantic_type="artifact")
+        run = experiment.add_run(params={"seed": i})
+        with run.start() as ctx:
+            ctx.register({"loss": 0.1 * i}, title="metrics.json")
             ctx.checkpoint("epoch1", data={"step": 1})
     return ws
 
 
-def _all_artifacts(ws: Workspace) -> list[Artifact]:
-    return scan_artifacts(ws)
-
-
-def _query(ws: Workspace, *, run_id: str | None = None) -> list[Artifact]:
-    out = [a for a in _all_artifacts(ws) if run_id is None or a.run_id == run_id]
-    return sorted(out, key=lambda a: (a.created_at, a.id))
-
-
-def _repo(ws: Workspace) -> ArtifactRepository:
-    return ArtifactRepository(ws.root, fs=ws.fs)
-
-
-def _owning_run(ws: Workspace, artifact: Artifact) -> Run:
-    for project in ws.list_projects():
-        for experiment in project.list_experiments():
-            for run in experiment.list_runs():
-                if run.id == artifact.run_id:
-                    return run
-    raise AssertionError(artifact.run_id)
-
-
-class TestArtifactRecordPortability:
-    def test_artifact_records_relocate_with_run_dir(self, tmp_path):
-        """A run directory copied elsewhere carries its own artifact records —
-        they live in the attempt's ``execution.json``, never in a side index."""
-        ws = _seed_workspace(tmp_path / "source", n_runs=1)
+class TestAssetLivesWithItsRecord:
+    def test_the_run_directory_does_not_hold_the_asset(self, tmp_path: Path) -> None:
+        ws = _seed(tmp_path / "source", n_runs=1)
         run = ws.project("demo").experiment("baseline").list_runs()[0]
-        src_run_dir = Path(run.run_dir)
-
-        dst_run_dir = tmp_path / "destination" / "runs" / src_run_dir.name
-        dst_run_dir.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(src_run_dir, dst_run_dir)
-
-        states = list(dst_run_dir.rglob("executions/*/execution.json"))
-        assert len(states) == 1
-        records = json.loads(states[0].read_text())["artifacts"]
-        assert len(records) == ARTIFACTS_PER_RUN  # artifact + checkpoint
-        for record in records:
-            # Every product came from one of the attempt's own directories.
-            assert record["source_path"].split("/")[0] in execution_dir_names()
-            assert record["path"].startswith("artifacts/")
-            assert record["content"]["digest"].startswith("sha256:")
+        execution = json.loads(
+            (Path(run.run_dir) / "executions" / "e01" / "execution.json").read_text()
+        )
+        assert "artifacts" not in execution
+        assert list(Path(run.run_dir).rglob("asset.json")) == []
+        assert list(Path(str(run.experiment.experiment_dir)).glob("assets/*/asset.json"))
+        assert (Path(run.run_dir) / "executions" / "e01" / "checkpoints" / "epoch1.json").is_file()
 
 
-class TestArtifactContent:
-    def test_every_artifact_payload_verifies(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab", n_runs=2)
-        artifacts = _all_artifacts(ws)
-        assert len(artifacts) == 2 * ARTIFACTS_PER_RUN
-        for artifact in artifacts:
-            assert artifact.content.digest.startswith("sha256:")
-            owner = _owning_run(ws, artifact)
-            location = owner.artifact_location(artifact.execution_id, artifact)
-            assert content_ref(ws.fs, location) == artifact.content
+class TestAssetContent:
+    def test_every_payload_verifies(self, tmp_path: Path) -> None:
+        ws = _seed(tmp_path / "lab", n_runs=2)
+        found = []
+        for run in ws.project("demo").experiment("baseline").list_runs():
+            found.extend(
+                asset
+                for asset in assets_produced_by(ws, run.executions[0].id)
+                if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
+            )
+        assert len(found) == 2
+        for asset in found:
+            assert isinstance(asset.origin, ExecutionOrigin)
+            location = payload_path_for(ws, asset.id)
+            assert content_ref(ws.fs, location) == asset.content
 
-    def test_parallel_emits_all_land_in_index(self, tmp_path):
+    def test_parallel_registers_all_land(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "lab", name="Test")
         run = ws.add_project("p").add_experiment("e").add_run()
         n = 20
         with run.start() as ctx, ThreadPoolExecutor(max_workers=4) as pool:
-            futs = [
-                pool.submit(
-                    lambda i=i: ctx.emit_artifact(
-                        {"i": i}, name=f"a{i}.json", semantic_type="artifact"
-                    )
-                )
+            futures = [
+                pool.submit(lambda i=i: ctx.register({"i": i}, title=f"a{i}.json"))
                 for i in range(n)
             ]
-            results = [f.result() for f in as_completed(futs)]
-
+            results = [future.result() for future in as_completed(futures)]
+            execution_id = ctx.id
         assert len(results) == n
-        assert len(_query(ws, run_id=run.id)) == n
-        assert len(run.executions[0].artifacts) == n
+        assert len(assets_produced_by(ws, execution_id)) == n
 
 
 class TestProducer:
-    def test_active_task_sets_metadata_task_id(self, tmp_path):
+    def test_active_task_is_the_origin_task(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "lab", name="Test")
         run = ws.add_project("p").add_experiment("e").add_run()
         with run.start() as ctx:
             ctx.set_active_task("train")
-            artifact = ctx.emit_artifact({"x": 1}, name="m.json")
-        assert artifact.metadata.get("task_id") == "train"
+            asset = ctx.register({"x": 1}, title="m.json")
+        assert asset.origin.task == "train"
 
 
 class TestScopeAssets:
-    """``data_assets`` is the scope repository. ``DataAssetLibrary`` is gone."""
-
-    def test_data_assets_is_the_scope_repository(self, workspace, project, experiment):
-        from molab.workspace.artifact_repository import AssetRepository
-
+    def test_assets_is_the_scope_repository(self, workspace, project, experiment) -> None:
         for scope in (workspace, project, experiment):
-            assert type(scope.data_assets) is AssetRepository
-            assert scope.data_assets.scope == scope.scope
-            assert not hasattr(scope, "_data_assets")
+            assert type(scope.assets) is AssetRepository
+            assert scope.assets.scope == scope.scope
+            assert not hasattr(scope, "data_assets")
 
-    def test_an_experiment_import_stays_on_that_experiment(self, workspace, experiment, tmp_path):
+    def test_an_experiment_import_stays_on_that_experiment(
+        self, workspace, experiment, tmp_path: Path
+    ) -> None:
         source = tmp_path / "hello.txt"
         source.write_bytes(b"hello\n")
-        asset = experiment.data_assets.import_asset("d", source)
+        asset = experiment.assets.import_asset("d", source)
         assert asset.id in {item.id for item in experiment.assets.list()}
         assert asset.id not in {item.id for item in workspace.assets.list()}
 
-    def test_data_asset_library_is_gone(self):
+    def test_data_asset_library_is_gone(self) -> None:
         import molab.workspace as workspace
         import molab.workspace.assets as assets_pkg
 

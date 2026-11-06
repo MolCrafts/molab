@@ -16,7 +16,8 @@ every change a person made to its terms; ``writes`` key the documents it wrote
 so a retried write is not doubled. ``answers`` keep what a person answered
 when it was blocked, ``approvals`` what a person approved at each human gate
 (the parameters, the plan, a dry run, the results — each about one document
-or entity), and ``last_decision`` the supervisor's latest decision document.
+or entity), and ``decisions`` the supervisor's decision log: every decision
+lives on the Delegation itself, never as a document of its own.
 An attempt links the brief it was dispatched with and the report it came back
 with (:mod:`molab.knowledge.worker_report`).
 """
@@ -140,19 +141,27 @@ class DelegationAttempt(BaseModel):
 
 
 class DelegationDecision(BaseModel):
-    """The supervisor's latest decision document and what it decided.
+    """One entry of the supervisor's decision log.
 
     Attributes:
-        path: Workspace-relative path of the decision document.
+        at: When it was decided (ISO 8601).
+        name: Short name of the decision.
         kind: The decision's kind, as the supervisor names it.
+        reason: Why.
+        evidence: Refs or paths the decision rests on.
         next: What it decided to do next, if anything.
+        questions: What it asked a person, when it blocked.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    path: str = Field(min_length=1)
+    at: str = Field(min_length=1)
+    name: str = Field(min_length=1)
     kind: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    evidence: tuple[str, ...] = ()
     next: str | None = None
+    questions: tuple[str, ...] = ()
 
 
 class DelegationAnswer(BaseModel):
@@ -240,7 +249,7 @@ class DelegationRecord(BaseModel):
     questions: tuple[str, ...] = ()
     amendments: tuple[DelegationAmendment, ...] = ()
     writes: tuple[DelegationWrite, ...] = ()
-    last_decision: DelegationDecision | None = None
+    decisions: tuple[DelegationDecision, ...] = ()
     answers: tuple[DelegationAnswer, ...] = ()
     approvals: tuple[DelegationApproval, ...] = ()
 

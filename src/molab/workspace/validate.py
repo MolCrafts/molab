@@ -64,6 +64,7 @@ from .naming import (
     SCRATCH_CONTAINER,
     VALUE_CONTAINER,
     VALUE_FILE_RE,
+    WORKFLOW_LIB_CONTAINER,
     WORKFLOW_SCRIPT_FILENAME,
     run_slug,
 )
@@ -224,7 +225,15 @@ def _legal_names(level: str) -> tuple[frozenset[str], frozenset[str]]:
     if level == "experiment":
         return (
             # ``__pycache__`` is what importing ``workflow.py`` leaves beside it.
-            frozenset({RUN_CONTAINER, SCRATCH_CONTAINER, ASSET_CONTAINER, "__pycache__"}),
+            frozenset(
+                {
+                    RUN_CONTAINER,
+                    SCRATCH_CONTAINER,
+                    ASSET_CONTAINER,
+                    WORKFLOW_LIB_CONTAINER,
+                    "__pycache__",
+                }
+            ),
             frozenset({INDEX_FILENAME, WORKFLOW_SCRIPT_FILENAME, WORKFLOW_DOC_FILENAME}),
         )
     if level == "run":

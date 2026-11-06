@@ -15,7 +15,6 @@ export type WorkspaceExecutionRow = {
     finishedAt?: (string | null);
     durationSeconds?: (number | null);
     basedOnExecutionId?: (string | null);
-    checkpointArtifactId?: (string | null);
     schedulerJobId?: (string | null);
     backend?: (string | null);
     backendMetadata?: Record<string, string>;

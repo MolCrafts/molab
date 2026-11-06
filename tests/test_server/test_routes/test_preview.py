@@ -16,7 +16,7 @@ class TestPreviewDatasetPath:
         ws = Workspace(tmp_path / "ws", name="lab")
         src = tmp_path / "hello.txt"
         src.write_bytes(b"hello\n")
-        asset = ws.data_assets.import_asset("greeting", src, action="copy")
+        asset = ws.assets.import_asset("greeting", src)
         assert _resolve_dataset_path(ws, asset.id) == Path(ws.assets.payload_path(asset.id))
 
     def test_unknown_id_raises_ref_not_found(self, tmp_path: Path) -> None:

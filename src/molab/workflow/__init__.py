@@ -54,7 +54,7 @@ from .compiled import CompiledWorkflow
 from .compiler import Workflow
 from .context import TaskContext
 from .contract import (
-    ArtifactDecl,
+    DeclaredFile,
     Severity,
     TaskInputSpec,
     TaskIO,
@@ -77,7 +77,7 @@ from .ir import (
     WorkflowGraphIR,
 )
 from .loader import load_workflow_from_entrypoint
-from .outputs import RegisterArtifact, RegisterMetric
+from .outputs import RegisterAsset, RegisterMetric
 from .protocols import Runnable, Streamable
 from .recovery import (
     WorkflowRecoveryError,
@@ -114,7 +114,6 @@ from .types import (
 
 __all__ = [
     "Actor",
-    "ArtifactDecl",
     "AttemptSeeds",
     "BranchEdges",
     "CacheStore",
@@ -123,6 +122,7 @@ __all__ = [
     "CommandTask",
     "CompiledWorkflow",
     "CycleError",
+    "DeclaredFile",
     "EdgeKind",
     "EdgeShapeError",
     "End",
@@ -139,7 +139,7 @@ __all__ = [
     "Next",
     "OutEdges",
     "ParallelExecutionError",
-    "RegisterArtifact",
+    "RegisterAsset",
     "RegisterMetric",
     "RunFailedError",
     "RunNotExecutableError",

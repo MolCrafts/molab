@@ -18,10 +18,12 @@ export type ExecutionResponse = {
     startedAt?: (string | null);
     finishedAt?: (string | null);
     basedOnExecutionId?: (string | null);
-    checkpointArtifactId?: (string | null);
     executor?: Record<string, any>;
     environment?: Record<string, any>;
-    artifactIds?: Array<string>;
     error?: (Record<string, any> | null);
+    /**
+     * Tasks a partial rerun re-executes; empty when the attempt runs every task.
+     */
+    selectedTasks?: Array<string>;
 };
 

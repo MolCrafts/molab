@@ -1,10 +1,8 @@
-"""Engine-automatic artifact lineage (vision-loop-09).
+"""Asset lineage follows ``run.inputs``.
 
-THE FAIR anchor: a tracked run's workflow DAG projects into Artifact
-``input_entity_ids`` with ZERO task-author annotation — the engine
-(``_engine.node_cache._upstream_asset_ids``) records each task's upstream
-artifact ids, so "which input produced this result?" is answerable for every
-tracked run through ``lineage.ancestors``.
+An asset produced by a run points at the asset ids that run named as inputs.
+``lineage.ancestors`` / ``lineage.descendants`` walk that edge. A cache hit
+returns the recorded ref and does not register another asset.
 """
 
 from __future__ import annotations
@@ -13,7 +11,9 @@ from pathlib import Path
 
 from molab.workflow import TaskContext, Workflow
 from molab.workspace import Workspace
+from molab.workspace.asset_repository import assets_produced_by
 from molab.workspace.assets import lineage
+from molab.workspace.domain import ExecutionMode, ExecutionOrigin
 
 
 def _workspace(tmp_path: Path) -> Workspace:
@@ -22,119 +22,102 @@ def _workspace(tmp_path: Path) -> Workspace:
     return ws
 
 
-def _artifact_for(run, task: str):
-    execution_id = run.executions[-1].id
-    artifacts = run._execution_repository().get(execution_id).artifacts
-    found = [a for a in artifacts if a.metadata.get("task_id") == task]
-    assert found, f"no artifact registered for task {task!r}"
-    return found[0]
+def _produced(run, execution_id: str | None = None):
+    workspace = run.experiment.project.workspace
+    execution_id = execution_id or run.executions[-1].id
+    found = [
+        asset
+        for asset in assets_produced_by(workspace, execution_id)
+        if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
+    ]
+    assert found, f"no asset registered on {run.id}"
+    return found
 
 
-def _chain_workflow() -> Workflow:
+def _chain(title: str) -> Workflow:
     wf = Workflow(name="chain")
 
     @wf.task
-    async def upstream(ctx: TaskContext) -> dict:
-        out = {"value": 21}
-        ctx.register_artifact(out, name="upstream.json")
-        return out
-
-    @wf.task(depends_on=["upstream"])
-    async def downstream(ctx: TaskContext, value: int) -> dict:
-        out = {"doubled": value * 2}
-        ctx.register_artifact(out, name="downstream.json")
-        return out
+    async def measure(ctx: TaskContext) -> dict:
+        out = ctx.workdir / f"{title}.txt"
+        out.write_text(title)
+        return {"file": ctx.register(out, title=title)}
 
     return wf
 
 
-class TestEngineAutomaticLineage:
-    def test_chain_projects_upstream_id_into_downstream_producer_inputs(
-        self, tmp_path: Path
-    ) -> None:
-        """THE test: downstream's input_entity_ids carries upstream's artifact id and
-        the ``lineage.ancestors`` traversal answers it — zero task annotation."""
+class TestRunInputLineage:
+    def test_produced_asset_names_the_run_inputs(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
-        run = ws.add_project("p").add_experiment("e").add_run(params=None)
-        run.execute(_chain_workflow())
+        project = ws.add_project("p")
+        raw = tmp_path / "raw.txt"
+        raw.write_text("raw", encoding="utf-8")
+        upstream = project.assets.import_asset("raw", raw)
+        run = project.add_experiment("e").add_run(inputs=(upstream.id,))
+        run.execute(_chain("leaf"))
 
-        up = _artifact_for(run, "upstream")
-        down = _artifact_for(run, "downstream")
-        assert up.id in down.input_entity_ids
-        assert up.id in lineage.ancestors(ws, down.id)
+        (leaf,) = _produced(run)
+        assert isinstance(leaf.origin, ExecutionOrigin)
+        assert leaf.origin.task == "measure"
+        assert lineage.ancestors(ws, leaf.id) == {upstream.id}
+        assert leaf.id in lineage.descendants(ws, upstream.id)
 
-    def test_root_task_artifact_has_empty_inputs(self, tmp_path: Path) -> None:
+    def test_a_run_with_no_inputs_has_no_ancestors(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
-        run = ws.add_project("p").add_experiment("e").add_run(params=None)
-        run.execute(_chain_workflow())
-        up = _artifact_for(run, "upstream")
-        assert up.input_entity_ids == ()
+        run = ws.add_project("p").add_experiment("e").add_run()
+        run.execute(_chain("alone"))
+        (leaf,) = _produced(run)
+        assert lineage.ancestors(ws, leaf.id) == set()
 
-    def test_diamond_fan_in_records_both_upstreams_deduped(self, tmp_path: Path) -> None:
-        wf = Workflow(name="diamond")
+    def test_two_inputs_are_both_ancestors(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        project = ws.add_project("p")
+        left = tmp_path / "left.txt"
+        right = tmp_path / "right.txt"
+        left.write_text("L", encoding="utf-8")
+        right.write_text("R", encoding="utf-8")
+        left_asset = project.assets.import_asset("left", left)
+        right_asset = project.assets.import_asset("right", right)
+        run = project.add_experiment("e").add_run(inputs=(left_asset.id, right_asset.id))
+        run.execute(_chain("join"))
 
-        @wf.task
-        async def left(ctx: TaskContext) -> dict:
-            out = {"l": 1}
-            ctx.register_artifact(out, name="left.json")
-            return out
+        (leaf,) = _produced(run)
+        assert lineage.ancestors(ws, leaf.id) == {left_asset.id, right_asset.id}
+        assert lineage.descendants(ws, left_asset.id) == {leaf.id}
 
-        @wf.task
-        async def right(ctx: TaskContext) -> dict:
-            out = {"r": 2}
-            ctx.register_artifact(out, name="right.json")
-            return out
+    def test_cache_hit_does_not_mint_another_asset(self, tmp_path: Path) -> None:
+        calls = {"measure": 0}
 
-        @wf.task(depends_on=["left", "right"])
-        async def join(ctx: TaskContext, l: int, r: int) -> dict:  # noqa: E741
-            out = {"sum": l + r}
-            ctx.register_artifact(out, name="join.json")
-            return out
+        def build() -> Workflow:
+            wf = Workflow(name="chain")
+
+            @wf.task
+            async def measure(ctx: TaskContext) -> dict:
+                calls["measure"] += 1
+                out = ctx.workdir / "leaf.txt"
+                out.write_text("leaf")
+                return {"file": ctx.register(out, title="leaf")}
+
+            return wf
 
         ws = _workspace(tmp_path)
-        run = ws.add_project("p").add_experiment("e").add_run(params=None)
-        run.execute(wf)
+        project = ws.add_project("p")
+        raw = tmp_path / "raw.txt"
+        raw.write_text("raw", encoding="utf-8")
+        upstream = project.assets.import_asset("raw", raw)
+        run = project.add_experiment("e").add_run(inputs=(upstream.id,))
+        compiled = build().compile()
+        first = run.execute(compiled)
+        second = run.execute(compiled, rerun=True)
 
-        join_artifact = _artifact_for(run, "join")
-        inputs = set(join_artifact.input_entity_ids)
-        left_id = _artifact_for(run, "left").id
-        right_id = _artifact_for(run, "right").id
-        assert {left_id, right_id} <= inputs
-        assert len(join_artifact.input_entity_ids) == len(inputs)  # deduped
-        # Independent parallel tasks record no cross-edges.
-        left_artifact = _artifact_for(run, "left")
-        assert right_id not in left_artifact.input_entity_ids
-
-    def test_cache_hit_upstream_still_chains_downstream(self, tmp_path: Path) -> None:
-        """A second run whose upstream cache-hits still chains downstream→upstream."""
-        ws = _workspace(tmp_path)
-        exp = ws.add_project("p").add_experiment("e")
-
-        run1 = exp.add_run(params=None, id="first")
-        run1.execute(_chain_workflow())
-
-        run2 = exp.add_run(params=None, id="second")
-        run2.execute(_chain_workflow())
-
-        down2 = _artifact_for(run2, "downstream")
-        up2 = _artifact_for(run2, "upstream")
-        assert up2.id in down2.input_entity_ids
-        assert up2.id in lineage.ancestors(ws, down2.id)
-
-    def test_raising_lineage_computation_never_fails_the_run(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        """Fail-soft: lineage rides the persistence bonus channel — a raising
-        upstream-id computation degrades (persist skipped, debug log) and the
-        run still succeeds with its results intact."""
-        from molab.workflow._engine import node_cache
-
-        def _boom(deps, registration):
-            raise RuntimeError("lineage computation broken")
-
-        monkeypatch.setattr(node_cache, "_upstream_asset_ids", _boom)
-        ws = _workspace(tmp_path)
-        run = ws.add_project("p").add_experiment("e").add_run(params=None)
-        result = run.execute(_chain_workflow())
-        assert result.status == "succeeded"
-        assert result.outputs["downstream"] == {"doubled": 42}
+        assert calls["measure"] == 1
+        assert [item.id for item in run.executions] == ["e01", "e02"]
+        assert run.executions[1].mode is ExecutionMode.RERUN
+        (leaf,) = _produced(run, "e01")
+        assert first.outputs["measure"]["file"] == second.outputs["measure"]["file"] == leaf.ref
+        assert lineage.ancestors(ws, leaf.id) == {upstream.id}
+        assert [
+            asset
+            for asset in assets_produced_by(ws, "e02")
+            if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
+        ] == []

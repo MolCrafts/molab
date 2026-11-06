@@ -7,7 +7,10 @@ times, and its bytes are renamed — never copied — into the attempt.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -160,11 +163,14 @@ def test_the_fact_is_history_and_the_bytes_are_not(run, arm, tmp_path):
     GitHistory(root).init()
     (arm / "out" / "big.traj").write_bytes(b"\0" * (2 << 20))
 
-    record = run.adopt_execution(
+    run.adopt_execution(
         started_at=T0, finished_at=T1, products={"nve": arm / "out"}, log=arm / "run.log"
     )
 
-    assert record.sealed_commit is not None
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout
+    assert "execution.json" not in status, "a sealed attempt leaves its record committed"
     tracked = subprocess.run(
         ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True
     ).stdout
@@ -187,18 +193,22 @@ def test_products_dir_reads_the_newest_succeeded_attempt(run, arm):
     assert run.products_dir("nve", execution_id="e02").parent.parent.name == "e02"
 
 
-def test_a_project_import_records_what_it_consumed(tmp_path):
+def test_a_project_import_copies_the_bytes(tmp_path):
+    from molab.workspace.assets import lineage
+
     ws = Workspace(tmp_path / "lab", name="lab")
     project = ws.add_project("p")
     src = tmp_path / "model.ckpt"
     src.write_bytes(b"weights")
 
-    asset = project.import_asset("model", src, "move", consumed=["upstream-id"])
+    asset = project.import_asset("model", src)
 
-    (version,) = project.assets.versions(asset.id)
-    assert version.origin.input_ids == ("upstream-id",)
-    assert version.content is not None
-    assert version.content.size == len(b"weights")
+    assert asset.origin.kind == "import"
+    assert asset.origin.uri == str(src)
+    assert asset.content.size == len(b"weights")
+    assert Path(project.assets.payload_path(asset.id)).read_bytes() == b"weights"
+    assert src.read_bytes() == b"weights"
+    assert lineage.ancestors(ws, asset.id) == set()
 
 
 def test_a_cache_only_attempt_does_not_shadow_the_products(run, arm):
@@ -213,3 +223,32 @@ def test_an_empty_task_directory_does_not_count_as_products(run, arm):
     run.adopt_execution(mode=ExecutionMode.RERUN, started_at=T0, finished_at=T1)
     (run.execution_dir("e02") / "out" / "nve").mkdir(parents=True)
     assert run.products_dir("nve") == run.execution_dir("e01") / "out" / "nve"
+
+
+def test_a_sealed_attempt_commits_its_products_and_leaves_a_clean_tree(run) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    from molab.workspace.history import GitHistory
+
+    root = Path(run.experiment.project.workspace.root)
+    GitHistory(root).init()
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"],
+        cwd=root,
+        check=True,
+    )
+    with run.start() as ctx:
+        asset = ctx.register(b"final structure", title="network.pdb")
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout
+    assert status == "", status
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout
+    slug = f"{run.path.name.replace('=', '-').replace('_', '-')}--network-pdb"
+    assert f"assets/{slug}/asset.json" in tracked, tracked
+    assert "alive" not in tracked
+    assert asset.title == "network.pdb"

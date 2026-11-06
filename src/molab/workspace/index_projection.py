@@ -12,7 +12,7 @@ project     ``parent``, ``children`` — experiments ``{name, path, id,
 experiment  ``parent``, ``entrypoint``, ``scratch`` (whether ``scratch/``
             exists, D90), ``children`` — runs ``{name, path, id, params}``
 run         ``parent``, ``executions`` — per attempt ``{id, path, mode,
-            status, started_at, finished_at, job_ids, out, artifacts,
+            status, started_at, finished_at, job_ids, out,
             error}``, ``latest_status``
 ==========  ==============================================================
 
@@ -225,7 +225,6 @@ def _run_keys(fs: FileSystem, directory: PathArg) -> dict[str, JSONValue]:
                 "finished_at": dumped.get("finished_at"),
                 "job_ids": _job_ids(state.executor),
                 "out": list(_subdir_names(fs, fs.join(attempt, _OUT_DIR))),
-                "artifacts": [artifact.path for artifact in state.artifacts],
                 "error": str(error_type) if error_type else None,
             }
         )

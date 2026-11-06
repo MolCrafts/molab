@@ -2,7 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ArtifactRefResponse } from './ArtifactRefResponse';
+import type { AssetRefResponse } from './AssetRefResponse';
 import type { ContextFocusResponse } from './ContextFocusResponse';
 import type { ExperimentRefResponse } from './ExperimentRefResponse';
 import type { HealthFlagResponse } from './HealthFlagResponse';
@@ -23,7 +23,7 @@ export type WorkspaceContextResponse = {
     recentRuns?: Array<RunRefResponse>;
     failedRuns?: Array<RunRefResponse>;
     runningRuns?: Array<RunRefResponse>;
-    artifacts?: Array<ArtifactRefResponse>;
+    assets?: Array<AssetRefResponse>;
     knowledge?: Array<KnowledgeRefResponse>;
     staleOrMissing?: Array<HealthFlagResponse>;
 };

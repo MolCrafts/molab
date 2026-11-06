@@ -101,12 +101,8 @@ class RunLike(Protocol):
         """
         ...
 
-    def artifact_location(self, execution_id: str, artifact: object) -> str:
-        """Resolve one artifact to a path on this run's filesystem.
-
-        The workspace owns both the execution-relative form and the legacy
-        workspace-relative form. Callers do not join a root onto ``artifact.path``.
-        """
+    def asset_path(self, asset_id: str) -> str:
+        """Path of a registered asset's bytes, checked against its digest."""
         ...
 
     def machine_dir(self) -> Path:
@@ -193,7 +189,7 @@ class RunContextLike(Protocol):
         """
         ...
 
-    def emit_artifact(self, data: object, *, name: str | None = ...) -> object: ...
+    def register(self, data: object, *, title: str, mime: str | None = ...) -> object: ...
 
     def task_workdir(self, task_name: str) -> Path: ...
 

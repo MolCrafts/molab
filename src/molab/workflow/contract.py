@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .compiled import CompiledWorkflow
 
 __all__ = [
-    "ArtifactDecl",
+    "DeclaredFile",
     "Severity",
     "TaskIO",
     "TaskInputSpec",
@@ -37,7 +37,7 @@ class ValidationCheckId(StrEnum):
     """Known validation check identifiers."""
 
     no_orphan_tasks = "no_orphan_tasks"
-    unique_artifact_paths = "unique_artifact_paths"
+    unique_file_paths = "unique_file_paths"
     acyclic_data_edges = "acyclic_data_edges"
     every_input_has_source = "every_input_has_source"
     produced_by_resolves = "produced_by_resolves"
@@ -80,8 +80,8 @@ class TaskOutputSpec(BaseModel):
     description: str = ""
 
 
-class ArtifactDecl(BaseModel):
-    """One declared on-disk artifact a task produces."""
+class DeclaredFile(BaseModel):
+    """One declared on-disk file a task produces."""
 
     model_config = _FROZEN
 
@@ -92,14 +92,14 @@ class ArtifactDecl(BaseModel):
 
 
 class TaskIO(BaseModel):
-    """One task's declared inputs / outputs / artifacts."""
+    """One task's declared inputs, outputs, and files."""
 
     model_config = _FROZEN
 
     task_id: str
     inputs: tuple[TaskInputSpec, ...] = ()
     outputs: tuple[TaskOutputSpec, ...] = ()
-    artifacts: tuple[ArtifactDecl, ...] = ()
+    files: tuple[DeclaredFile, ...] = ()
 
 
 # ── Validation types ─────────────────────────────────────────────────────
@@ -151,7 +151,7 @@ class WorkflowContract(BaseModel):
 _C = ValidationCheckId
 _DEFAULT_CHECKS: tuple[ValidationCheck, ...] = (
     ValidationCheck(id=_C.no_orphan_tasks, severity="error"),
-    ValidationCheck(id=_C.unique_artifact_paths, severity="error"),
+    ValidationCheck(id=_C.unique_file_paths, severity="error"),
     ValidationCheck(id=_C.acyclic_data_edges, severity="error"),
     ValidationCheck(id=_C.every_input_has_source, severity="error"),
     ValidationCheck(id=_C.produced_by_resolves, severity="error"),
@@ -199,24 +199,24 @@ def _check_no_orphan_tasks(
     return issues
 
 
-def _check_unique_artifact_paths(
+def _check_unique_file_paths(
     contract: WorkflowContract, _spec: object | None
 ) -> list[ValidationIssue]:
-    """No two artifacts may declare the same path."""
+    """No two declared files may use the same path."""
     seen: dict[str, str] = {}
     issues: list[ValidationIssue] = []
     for tio in contract.task_io:
-        for art in tio.artifacts:
+        for art in tio.files:
             prev = seen.get(art.path)
             if prev is None:
                 seen[art.path] = tio.task_id
                 continue
             issues.append(
                 ValidationIssue(
-                    check_id=_C.unique_artifact_paths,
+                    check_id=_C.unique_file_paths,
                     severity="error",
                     target=art.path,
-                    message=f"artifact path {art.path!r} declared by both {prev!r} and {tio.task_id!r}",
+                    message=f"file path {art.path!r} declared by both {prev!r} and {tio.task_id!r}",
                     hint="Pick distinct paths or merge the declarations.",
                 )
             )
@@ -290,18 +290,18 @@ def _check_every_input_has_source(
 def _check_produced_by_resolves(
     contract: WorkflowContract, _spec: object | None
 ) -> list[ValidationIssue]:
-    """Every artifact's produced_by must reference a contract task_id."""
+    """Every declared file's produced_by must reference a contract task_id."""
     known: set[str] = {tio.task_id for tio in contract.task_io}
     issues: list[ValidationIssue] = []
     for tio in contract.task_io:
-        for art in tio.artifacts:
+        for art in tio.files:
             if art.produced_by not in known:
                 issues.append(
                     ValidationIssue(
                         check_id=_C.produced_by_resolves,
                         severity="error",
                         target=art.path,
-                        message=f"artifact {art.path!r} declares produced_by={art.produced_by!r}, "
+                        message=f"file {art.path!r} declares produced_by={art.produced_by!r}, "
                         f"which is not a known task",
                         hint="Set produced_by to a task_id that has a TaskIO entry in this contract.",
                     )
@@ -344,7 +344,7 @@ _RunnerFn = Callable[["WorkflowContract", "CompiledWorkflow | None"], list["Vali
 
 _RUNNERS: dict[ValidationCheckId, _RunnerFn] = {
     _C.no_orphan_tasks: _check_no_orphan_tasks,
-    _C.unique_artifact_paths: _check_unique_artifact_paths,
+    _C.unique_file_paths: _check_unique_file_paths,
     _C.acyclic_data_edges: _check_acyclic_data_edges,
     _C.every_input_has_source: _check_every_input_has_source,
     _C.produced_by_resolves: _check_produced_by_resolves,

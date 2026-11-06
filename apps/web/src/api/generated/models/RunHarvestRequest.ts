@@ -7,7 +7,7 @@
  */
 export type RunHarvestRequest = {
     /**
-     * Knowledge class name
+     * Finding, Observation, or Report.
      */
     cls?: RunHarvestRequest.cls;
     /**
@@ -23,21 +23,18 @@ export type RunHarvestRequest = {
      */
     name?: (string | null);
     /**
-     * Optional headline results table
+     * Values to pin as spans on assets this run registered
      */
     results?: (Record<string, any> | null);
 };
 export namespace RunHarvestRequest {
     /**
-     * Knowledge class name
+     * Finding, Observation, or Report.
      */
     export enum cls {
-        NOTE = 'Note',
-        LITERATURE = 'Literature',
-        REPORT = 'Report',
         FINDING = 'Finding',
-        PLAN = 'Plan',
         OBSERVATION = 'Observation',
+        REPORT = 'Report',
     }
 }
 

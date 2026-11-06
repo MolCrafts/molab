@@ -28,6 +28,7 @@ from molab.workflow import (
     WorkflowRuntime,
 )
 from molab.workflow.execute import execute_run
+from molab.workspace.run import Run
 
 # ── module-level workflows (the process executor imports them by path) ──────
 
@@ -72,8 +73,25 @@ def nap_b() -> int:
 SPIN = Workflow(name="executor-spin")
 
 
-def _burn(seconds: float) -> dict:
-    """Hold the GIL in a CPU loop for *seconds* of this process's CPU time."""
+RENDEZVOUS_S = 5.0
+
+
+def _burn(seconds: float, meet: str, me: str, other: str) -> dict:
+    """Meet the sibling task, then hold the GIL in a CPU loop for *seconds* of
+    this process's CPU time.
+
+    The meeting takes the workers' start-up out of the measurement: a child
+    interpreter that spawns late (cold imports, a loaded machine) would
+    otherwise shrink the overlap of two bodies that do run in parallel. A body
+    whose sibling never arrives (one at a time) gives up after
+    ``RENDEZVOUS_S`` and burns alone.
+    """
+    folder = Path(meet)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / me).touch()
+    deadline = time.monotonic() + RENDEZVOUS_S
+    while not (folder / other).exists() and time.monotonic() < deadline:
+        time.sleep(0.005)
     start = time.time()
     t0 = time.process_time()
     total = 0
@@ -83,18 +101,18 @@ def _burn(seconds: float) -> dict:
 
 
 @SPIN.task
-def spin_root(x: int) -> int:
+def spin_root(x: str) -> str:
     return x
 
 
 @SPIN.task(depends_on=["spin_root"])
-def spin_a(spin_root: int) -> dict:
-    return _burn(0.6)
+def spin_a(spin_root: str) -> dict:
+    return _burn(0.6, spin_root, "a", "b")
 
 
 @SPIN.task(depends_on=["spin_root"])
-def spin_b(spin_root: int) -> dict:
-    return _burn(0.6)
+def spin_b(spin_root: str) -> dict:
+    return _burn(0.6, spin_root, "b", "a")
 
 
 class ThreadBound:
@@ -166,7 +184,7 @@ EMIT = Workflow(name="executor-emit")
 def emit(ctx, x: int) -> int:
     molab_print(f"hello from pid {os.getpid()}")
     ctx.metrics.scalar("loss", 0.5)
-    ctx.register_artifact(b"payload", name="note.txt")
+    ctx.register(b"payload", title="note.txt")
     return x
 
 
@@ -250,12 +268,16 @@ class TestParallelism:
         a, b = outputs["spin_a"], outputs["spin_b"]
         return min(a["end"], b["end"]) - max(a["start"], b["start"])
 
+    @staticmethod
+    def _spin_run(tmp_path: Path) -> Run:
+        return _run(tmp_path, params={"x": str(tmp_path / "meet")})
+
     def test_process_runs_gil_bound_tasks_in_parallel(self, tmp_path: Path) -> None:
-        result = execute_run(SPIN, _run(tmp_path), executor="process")
+        result = execute_run(SPIN, self._spin_run(tmp_path), executor="process")
         assert self._overlap(result.outputs) > 0.2
 
     def test_inline_runs_one_at_a_time(self, tmp_path: Path) -> None:
-        result = execute_run(SPIN, _run(tmp_path), executor="inline")
+        result = execute_run(SPIN, self._spin_run(tmp_path), executor="inline")
         assert self._overlap(result.outputs) <= 0
 
 
@@ -329,7 +351,7 @@ class TestFailures:
 
 
 class TestChildTracking:
-    def test_print_metrics_and_artifacts_land_in_the_execution(self, tmp_path: Path) -> None:
+    def test_print_metrics_and_assets_land_in_the_execution(self, tmp_path: Path) -> None:
         run = _run(tmp_path)
         execute_run(EMIT, run, executor="process")
         execution_dir = run.execution_dir("e01")
@@ -337,13 +359,24 @@ class TestChildTracking:
         assert f"hello from pid {pid}" in (execution_dir / "stdout.log").read_text()
         metrics = [
             json.loads(line)
-            for line in (execution_dir / "artifacts" / "metrics.mlp.jsonl").read_text().splitlines()
+            for line in (execution_dir / "metrics.mlp.jsonl").read_text().splitlines()
             if line.strip()
         ]
         losses = [m for m in metrics if m.get("k") == "loss" or m.get("key") == "loss"]
         assert losses, metrics
         assert any((m.get("tags") or {}).get("task") == "emit" for m in losses)
-        assert "note.txt" in {artifact.name for artifact in run.execution("e01").artifacts}
+        from molab.workspace.asset_repository import assets_produced_by
+        from molab.workspace.domain import ExecutionOrigin
+
+        notes = [
+            asset
+            for asset in assets_produced_by(run.experiment.project.workspace, "e01")
+            if asset.title == "note.txt"
+        ]
+        assert len(notes) == 1
+        assert isinstance(notes[0].origin, ExecutionOrigin)
+        assert notes[0].origin.task == "emit"
+        assert Path(run.asset_path(notes[0].id)).read_bytes() == b"payload"
 
 
 class TestRecordsDriveEveryExecutor:

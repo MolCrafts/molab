@@ -10,7 +10,7 @@ export type ComparisonRunRow = {
     runId: string;
     definitionHash: string;
     experimentRevisionId: string;
-    inputAssetIds?: Array<string>;
+    inputs?: Array<string>;
     statusSummary: RunStatusSummaryResponse;
     parameters?: Record<string, any>;
     created: string;

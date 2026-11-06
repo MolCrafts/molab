@@ -2,7 +2,7 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "https://molab.io/schemas/workflow/task_io.json",
     "title": "TaskIO",
-    "description": "Per-task declared inputs / outputs / artifacts for the workflow contract sidecar. Optional in the workflow IR; when absent, downstream code generators see an empty surface for that task.",
+    "description": "Per-task declared inputs / outputs / files for the workflow contract sidecar. Optional in the workflow IR; when absent, downstream code generators see an empty surface for that task.",
     "type": "object",
     "definitions": {
         "TaskInputSpec": {
@@ -62,9 +62,9 @@
             ],
             "additionalProperties": false
         },
-        "ArtifactDecl": {
+        "DeclaredFile": {
             "type": "object",
-            "description": "One on-disk artifact a task produces.",
+            "description": "One on-disk file a task produces.",
             "properties": {
                 "path": {
                     "type": "string",
@@ -109,10 +109,10 @@
             },
             "default": []
         },
-        "artifacts": {
+        "files": {
             "type": "array",
             "items": {
-                "$ref": "#/definitions/ArtifactDecl"
+                "$ref": "#/definitions/DeclaredFile"
             },
             "default": []
         }

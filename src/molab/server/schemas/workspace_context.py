@@ -21,7 +21,7 @@ from ._wire import ApiModel
 if TYPE_CHECKING:
     from molab.services.knowledge_context import KnowledgeContext, KnowledgeRef
     from molab.workspace.workspace_context import (
-        ContextArtifact,
+        ContextAsset,
         ContextFocus,
         ExperimentRef,
         HealthFlag,
@@ -102,7 +102,7 @@ class RunRefResponse(ApiModel):
         )
 
 
-class ArtifactRefResponse(ApiModel):
+class AssetRefResponse(ApiModel):
     assetId: str
     scope: str
     kind: str
@@ -113,7 +113,7 @@ class ArtifactRefResponse(ApiModel):
     taskId: str | None = None
 
     @classmethod
-    def from_ref(cls, ref: ContextArtifact) -> ArtifactRefResponse:
+    def from_ref(cls, ref: ContextAsset) -> AssetRefResponse:
         return cls(
             assetId=ref.asset_id,
             scope=ref.scope,
@@ -174,7 +174,7 @@ class WorkspaceContextResponse(ApiModel):
     recentRuns: list[RunRefResponse] = Field(default_factory=list)
     failedRuns: list[RunRefResponse] = Field(default_factory=list)
     runningRuns: list[RunRefResponse] = Field(default_factory=list)
-    artifacts: list[ArtifactRefResponse] = Field(default_factory=list)
+    assets: list[AssetRefResponse] = Field(default_factory=list)
     knowledge: list[KnowledgeRefResponse] = Field(default_factory=list)
     staleOrMissing: list[HealthFlagResponse] = Field(default_factory=list)
 
@@ -190,7 +190,7 @@ class WorkspaceContextResponse(ApiModel):
             recentRuns=[RunRefResponse.from_ref(r) for r in ctx.recent_runs],
             failedRuns=[RunRefResponse.from_ref(r) for r in ctx.failed_runs],
             runningRuns=[RunRefResponse.from_ref(r) for r in ctx.running_runs],
-            artifacts=[ArtifactRefResponse.from_ref(r) for r in ctx.artifacts],
+            assets=[AssetRefResponse.from_ref(r) for r in ctx.assets],
             knowledge=[KnowledgeRefResponse.from_ref(r) for r in ctx.knowledge],
             staleOrMissing=[HealthFlagResponse.from_flag(r) for r in ctx.stale_or_missing],
         )

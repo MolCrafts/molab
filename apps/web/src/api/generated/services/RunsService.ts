@@ -2,13 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ArtifactPromoteRequest } from '../models/ArtifactPromoteRequest';
-import type { ArtifactPromotionResponse } from '../models/ArtifactPromotionResponse';
 import type { ExecutionAttemptCreateRequest } from '../models/ExecutionAttemptCreateRequest';
 import type { ExecutionCreateRequest } from '../models/ExecutionCreateRequest';
 import type { ExecutionOutputsResponse } from '../models/ExecutionOutputsResponse';
 import type { ExecutionResponse } from '../models/ExecutionResponse';
-import type { RunAnalyzeFailureRequest } from '../models/RunAnalyzeFailureRequest';
 import type { RunCreateRequest } from '../models/RunCreateRequest';
 import type { RunExecutionResponse } from '../models/RunExecutionResponse';
 import type { RunFilesResponse } from '../models/RunFilesResponse';
@@ -116,7 +113,11 @@ export class RunsService {
     }
     /**
      * Create Execution
-     * Create one queued physical attempt without mutating the Run.
+     * Create one physical attempt and submit it to its compute target.
+     *
+     * The attempt is submitted in the same request, so a QUEUED record always
+     * has a job behind it. A submission failure seals the attempt FAILED with
+     * the reason, and the error is returned.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -222,7 +223,7 @@ export class RunsService {
     }
     /**
      * Get Execution Outputs
-     * Separate stdio, managed Artifacts, evidence, and unregistered product files.
+     * Separate stdio, assets this attempt registered, evidence, and working files.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -256,75 +257,34 @@ export class RunsService {
         });
     }
     /**
-     * Promote Artifact
+     * Download Asset Content
+     * Stream one asset this attempt registered.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param executionId
-     * @param artifactId
-     * @param requestBody
-     * @param molabSession
-     * @returns ArtifactPromotionResponse Successful Response
-     * @throws ApiError
-     */
-    public static promoteArtifact(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        executionId: string,
-        artifactId: string,
-        requestBody: ArtifactPromoteRequest,
-        molabSession?: (string | null),
-    ): CancelablePromise<ArtifactPromotionResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/artifacts/{artifact_id}/promote',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'execution_id': executionId,
-                'artifact_id': artifactId,
-            },
-            cookies: {
-                'molab_session': molabSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Download Artifact Content
-     * Stream one Execution Artifact's bytes.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param executionId
-     * @param artifactId
+     * @param assetId
      * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static downloadArtifactContent(
+    public static downloadAssetContent(
         projectId: string,
         experimentId: string,
         runId: string,
         executionId: string,
-        artifactId: string,
+        assetId: string,
         molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/artifacts/{artifact_id}/content',
+            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/assets/{asset_id}/content',
             path: {
                 'project_id': projectId,
                 'experiment_id': experimentId,
                 'run_id': runId,
                 'execution_id': executionId,
-                'artifact_id': artifactId,
+                'asset_id': assetId,
             },
             cookies: {
                 'molab_session': molabSession,
@@ -681,45 +641,6 @@ export class RunsService {
         });
     }
     /**
-     * Analyze Run Failure Route
-     * Analyze a failed run into a sourced Report.
-     *
-     * Shares :func:`molab.services.run_failure.analyze_run_failure` with the CLI
-     * (close-loop-02). Deterministic narrative when ``narrative`` is omitted.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param requestBody
-     * @param molabSession
-     * @returns string Successful Response
-     * @throws ApiError
-     */
-    public static analyzeRunFailureRoute(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        requestBody: RunAnalyzeFailureRequest,
-        molabSession?: (string | null),
-    ): CancelablePromise<Record<string, string>> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/analyze-failure',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-            },
-            cookies: {
-                'molab_session': molabSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Prune Run Route
      * Plan or apply an execution prune.
      *
@@ -894,7 +815,11 @@ export class RunsService {
     }
     /**
      * Create Execution
-     * Create one queued physical attempt without mutating the Run.
+     * Create one physical attempt and submit it to its compute target.
+     *
+     * The attempt is submitted in the same request, so a QUEUED record always
+     * has a job behind it. A submission failure seals the attempt FAILED with
+     * the reason, and the error is returned.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1009,7 +934,7 @@ export class RunsService {
     }
     /**
      * Get Execution Outputs
-     * Separate stdio, managed Artifacts, evidence, and unregistered product files.
+     * Separate stdio, assets this attempt registered, evidence, and working files.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1046,80 +971,36 @@ export class RunsService {
         });
     }
     /**
-     * Promote Artifact
+     * Download Asset Content
+     * Stream one asset this attempt registered.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param executionId
-     * @param artifactId
-     * @param ws
-     * @param requestBody
-     * @param molabSession
-     * @returns ArtifactPromotionResponse Successful Response
-     * @throws ApiError
-     */
-    public static promoteArtifactWs(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        executionId: string,
-        artifactId: string,
-        ws: string,
-        requestBody: ArtifactPromoteRequest,
-        molabSession?: (string | null),
-    ): CancelablePromise<ArtifactPromotionResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/artifacts/{artifact_id}/promote',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'execution_id': executionId,
-                'artifact_id': artifactId,
-                'ws': ws,
-            },
-            cookies: {
-                'molab_session': molabSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Download Artifact Content
-     * Stream one Execution Artifact's bytes.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param executionId
-     * @param artifactId
+     * @param assetId
      * @param ws
      * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static downloadArtifactContentWs(
+    public static downloadAssetContentWs(
         projectId: string,
         experimentId: string,
         runId: string,
         executionId: string,
-        artifactId: string,
+        assetId: string,
         ws: string,
         molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/artifacts/{artifact_id}/content',
+            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/assets/{asset_id}/content',
             path: {
                 'project_id': projectId,
                 'experiment_id': experimentId,
                 'run_id': runId,
                 'execution_id': executionId,
-                'artifact_id': artifactId,
+                'asset_id': assetId,
                 'ws': ws,
             },
             cookies: {
@@ -1498,48 +1379,6 @@ export class RunsService {
             cookies: {
                 'molab_session': molabSession,
             },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Analyze Run Failure Route
-     * Analyze a failed run into a sourced Report.
-     *
-     * Shares :func:`molab.services.run_failure.analyze_run_failure` with the CLI
-     * (close-loop-02). Deterministic narrative when ``narrative`` is omitted.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param ws
-     * @param requestBody
-     * @param molabSession
-     * @returns string Successful Response
-     * @throws ApiError
-     */
-    public static analyzeRunFailureRouteWs(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        ws: string,
-        requestBody: RunAnalyzeFailureRequest,
-        molabSession?: (string | null),
-    ): CancelablePromise<Record<string, string>> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/analyze-failure',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'ws': ws,
-            },
-            cookies: {
-                'molab_session': molabSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
             errors: {
                 422: `Validation Error`,
             },

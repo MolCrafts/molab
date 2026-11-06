@@ -44,8 +44,8 @@ from .project import Project
 from .validate import ValidationReport, validate_workspace
 
 if TYPE_CHECKING:
-    from .artifact_repository import AssetRepository
-    from .domain import Artifact, Asset, Execution
+    from .asset_repository import AssetRepository
+    from .domain import Asset, Execution
     from .experiment import Experiment
     from .models import ComputeTarget
     from .refs import MolabRef
@@ -402,8 +402,8 @@ class Workspace(Folder):
 
     @property
     def assets(self) -> AssetRepository:
-        """Named, versioned assets at workspace scope."""
-        from .artifact_repository import AssetRepository
+        """Assets owned by this workspace."""
+        from .asset_repository import AssetRepository
 
         return AssetRepository(self, self.scope, self.root)
 
@@ -434,14 +434,6 @@ class Workspace(Folder):
         if scope.kind == "experiment":
             return cast(Experiment, self.find(MolabRef(experiment_id=scope.ids[1]))).assets
         raise ValueError("named assets have no run scope")
-
-    @property
-    def data_assets(self) -> AssetRepository:
-        """Alias of :attr:`assets`.
-
-        Kept because ``{scope}.data_assets.import_asset`` is a frozen CLAUDE.md contract.
-        """
-        return self.assets
 
     # ── Conformance ─────────────────────────────────────────────────────
 
@@ -532,9 +524,7 @@ class Workspace(Folder):
             self._write_record(self._canonical_record())
         self._record_written()
 
-    def find(
-        self, ref: MolabRef | str
-    ) -> Project | Experiment | Run | Execution | Artifact | Asset:
+    def find(self, ref: MolabRef | str) -> Project | Experiment | Run | Execution | Asset:
         """Resolve a ``molab:`` reference by walking entity ids.
 
         Args:
@@ -549,7 +539,7 @@ class Workspace(Folder):
             AmbiguousRefError: An experiment id exists under more than one
                 project, or an asset id exists in more than one scope.
         """
-        from .artifact_repository import scan_asset_repositories
+        from .asset_repository import scan_asset_repositories
         from .errors import AmbiguousRefError, RefNotFoundError
         from .experiment import Experiment
         from .refs import MolabRef, parse_ref
@@ -761,15 +751,15 @@ class Workspace(Folder):
 
 def resolve_below_experiment(
     experiment: Experiment, parsed: MolabRef
-) -> Experiment | Run | Execution | Artifact:
+) -> Experiment | Run | Execution:
     """Finish resolving *parsed* once its experiment is found.
 
-    Shared by :meth:`Workspace.find` and a served scope's ``find``: the run,
-    execution and artifact segments resolve the same way wherever the walk
-    started.
+    Shared by :meth:`Workspace.find` and a served scope's ``find``: the run
+    and execution segments resolve the same way wherever the walk started.
+    An asset ref is resolved by :meth:`Workspace.find` before this walk.
 
     Raises:
-        RefNotFoundError: A run, execution or artifact segment names nothing.
+        RefNotFoundError: A run or execution segment names nothing.
     """
     from .errors import RefNotFoundError
     from .run import Run
@@ -779,17 +769,9 @@ def resolve_below_experiment(
     run = experiment._child_by_id(parsed.run_id, cls=Run)
     if run is None:
         raise RefNotFoundError(parsed, "run", parsed.run_id)
-    if parsed.execution_id is None and parsed.artifact_id is None:
+    if parsed.execution_id is None:
         return run
-    if parsed.execution_id is not None:
-        for record in run.executions:
-            if record.id == parsed.execution_id:
-                return record
-        raise RefNotFoundError(parsed, "execution", parsed.execution_id)
-    assert parsed.artifact_id is not None
     for record in run.executions:
-        try:
-            return record.artifact(parsed.artifact_id)
-        except KeyError:
-            continue
-    raise RefNotFoundError(parsed, "artifact", parsed.artifact_id)
+        if record.id == parsed.execution_id:
+            return record
+    raise RefNotFoundError(parsed, "execution", parsed.execution_id)

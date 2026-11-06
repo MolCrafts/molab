@@ -18,7 +18,7 @@ export type WorkspaceRunRow = {
     experimentName: string;
     definitionHash: string;
     experimentRevisionId: string;
-    inputAssetIds?: Array<string>;
+    inputs?: Array<string>;
     targetHint?: (string | null);
     statusSummary: RunStatusSummaryResponse;
     parameters?: Record<string, JSONValue>;

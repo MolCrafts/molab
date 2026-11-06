@@ -26,10 +26,8 @@ const execution = (
   finishedAt: "2026-03-01T12:05:00Z",
   status,
   basedOnExecutionId: null,
-  checkpointArtifactId: null,
   executor: {},
   environment: {},
-  artifactIds: [],
   error,
 });
 

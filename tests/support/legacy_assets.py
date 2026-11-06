@@ -31,6 +31,7 @@ def write_legacy_data_asset(
     relative = rel_path if rel_path is not None else f"assets/{asset_id}/payload"
     record = {
         "kind": "data",
+        "id": asset_id,
         "asset_id": asset_id,
         "name": name,
         "scope": {"kind": scope_kind, "ids": list(scope_ids)},

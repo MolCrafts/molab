@@ -4,6 +4,7 @@ import { EmptyState } from "@/app/components/entity";
 import type { RendererProps } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
 import { formatBytes } from "@/lib/format-bytes";
+import { structureRank } from "@/lib/structure-files";
 import type { DiscoveredFile } from "@/plugins/types";
 import { MolvisErrorBoundary } from "./MolvisErrorBoundary";
 import {
@@ -84,7 +85,7 @@ const PreviewPane = ({
         <EmptyState
           icon={<Atom className="h-6 w-6" />}
           title="Select a file"
-          description="Pick a PDB, XYZ, LAMMPS dump, or Zarr store to preview."
+          description="Pick a PDB, XYZ, LAMMPS data or dump, or Zarr store to preview."
         />
       </div>
     );
@@ -146,7 +147,12 @@ export const MolvisTab = ({
   const openableFiles = useMemo(() => uniqueMolvisFiles(discoveredFiles), [discoveredFiles]);
 
   const defaultRelPath = useMemo(() => {
-    const trajectory = openableFiles.find((file) => isMolvisTrajectoryName(file.name));
+    // The connection table first (mol2 > sdf > pdb …): it carries the elements
+    // and bonds the producer wrote. A LAMMPS data file has no element column,
+    // so it is listed but never the default.
+    const trajectory = [...openableFiles]
+      .filter((file) => isMolvisTrajectoryName(file.name))
+      .sort((left, right) => structureRank(left.name) - structureRank(right.name))[0];
     const zarr = openableFiles.find((file) => isMolvisZarr(file));
     return (trajectory ?? zarr ?? openableFiles[0])?.relPath ?? null;
   }, [openableFiles]);
@@ -179,7 +185,7 @@ export const MolvisTab = ({
         <EmptyState
           icon={<Atom className="h-6 w-6" />}
           title="Nothing MolVis can open"
-          description="This run has no PDB, XYZ, LAMMPS dump, or Zarr trajectory."
+          description="This run has no PDB, XYZ, LAMMPS data or dump, or Zarr trajectory."
         />
       </div>
     );

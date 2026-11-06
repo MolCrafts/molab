@@ -631,7 +631,7 @@ class TestExperiment:
 
 class TestExperimentAssets:
     def test_returns_the_scope_repository(self, experiment: Experiment) -> None:
-        from molab.workspace.artifact_repository import AssetRepository
+        from molab.workspace.asset_repository import AssetRepository
 
         assert isinstance(experiment.assets, AssetRepository)
         assert experiment.assets.scope == experiment.scope

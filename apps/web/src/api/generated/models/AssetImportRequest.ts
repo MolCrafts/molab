@@ -14,20 +14,5 @@ export type AssetImportRequest = {
      * Workspace-relative path of the file.
      */
     path: string;
-    /**
-     * Semantic type, e.g. chemical/monomer (metadata is checked).
-     */
-    kind?: (string | null);
-    /**
-     * Structured metadata.
-     */
-    metadata?: Record<string, any>;
-    action?: AssetImportRequest.action;
 };
-export namespace AssetImportRequest {
-    export enum action {
-        COPY = 'copy',
-        REFERENCE = 'reference',
-    }
-}
 

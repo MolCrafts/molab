@@ -106,7 +106,5 @@ def fake_run(tmp_path: Path) -> Path:
 
 
 def read_wal(run_dir: Path) -> list[dict[str, Any]]:
-    from molab.workspace.execution_dirs import ARTIFACTS
-
-    path = run_dir / ARTIFACTS.name / "metrics.mlp.jsonl"
+    path = run_dir / "metrics.mlp.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]

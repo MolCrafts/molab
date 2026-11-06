@@ -3,7 +3,6 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AssetImportRequest } from '../models/AssetImportRequest';
-import type { AssetVersionResponse } from '../models/AssetVersionResponse';
 import type { ManagedAssetResponse } from '../models/ManagedAssetResponse';
 import type { MessageResponse } from '../models/MessageResponse';
 import type { ProjectCreateRequest } from '../models/ProjectCreateRequest';
@@ -141,8 +140,7 @@ export class ProjectsService {
      * Import Project Asset
      * Import a workspace file as a project asset — the same verb as ``molab asset import``.
      *
-     * 422 when the path is not a file inside the served directory, or the
-     * semantic type's metadata is incomplete.
+     * 422 when the path is not a file inside the served directory.
      * @param projectId
      * @param requestBody
      * @param molabSession
@@ -186,35 +184,6 @@ export class ProjectsService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/projects/{project_id}/assets/{asset_id}',
-            path: {
-                'project_id': projectId,
-                'asset_id': assetId,
-            },
-            cookies: {
-                'molab_session': molabSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * List Project Asset Versions
-     * List immutable versions of a Project Asset.
-     * @param projectId
-     * @param assetId
-     * @param molabSession
-     * @returns AssetVersionResponse Successful Response
-     * @throws ApiError
-     */
-    public static listProjectAssetVersions(
-        projectId: string,
-        assetId: string,
-        molabSession?: (string | null),
-    ): CancelablePromise<Array<AssetVersionResponse>> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/projects/{project_id}/assets/{asset_id}/versions',
             path: {
                 'project_id': projectId,
                 'asset_id': assetId,
@@ -403,8 +372,7 @@ export class ProjectsService {
      * Import Project Asset
      * Import a workspace file as a project asset — the same verb as ``molab asset import``.
      *
-     * 422 when the path is not a file inside the served directory, or the
-     * semantic type's metadata is incomplete.
+     * 422 when the path is not a file inside the served directory.
      * @param projectId
      * @param ws
      * @param requestBody
@@ -453,38 +421,6 @@ export class ProjectsService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/workspaces/{ws}/projects/{project_id}/assets/{asset_id}',
-            path: {
-                'project_id': projectId,
-                'asset_id': assetId,
-                'ws': ws,
-            },
-            cookies: {
-                'molab_session': molabSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * List Project Asset Versions
-     * List immutable versions of a Project Asset.
-     * @param projectId
-     * @param assetId
-     * @param ws
-     * @param molabSession
-     * @returns AssetVersionResponse Successful Response
-     * @throws ApiError
-     */
-    public static listProjectAssetVersionsWs(
-        projectId: string,
-        assetId: string,
-        ws: string,
-        molabSession?: (string | null),
-    ): CancelablePromise<Array<AssetVersionResponse>> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/workspaces/{ws}/projects/{project_id}/assets/{asset_id}/versions',
             path: {
                 'project_id': projectId,
                 'asset_id': assetId,

@@ -16,7 +16,7 @@ Design invariants:
 - **Focus is caller-supplied.** :class:`ContextFocus` (active project/experiment/run +
   selected refs) is passed in, never persisted; it defaults to empty.
 - **Health flags are computed, never stored** — and only the workspace-computable subset
-  is produced here (``failed_run`` / ``stale_running`` / ``orphan_artifact``).
+  is produced here (``failed_run`` / ``stale_running`` / ``orphan_asset``).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 # Aware-UTC floor for ordering runs that carry no timestamp (they sort last).
 _TS_FLOOR = datetime(1970, 1, 1, tzinfo=UTC)
 
-HealthFlagKind = Literal["failed_run", "stale_running", "orphan_artifact"]
+HealthFlagKind = Literal["failed_run", "stale_running", "orphan_asset"]
 
 
 class WorkspaceRef(BaseModel, frozen=True):
@@ -95,12 +95,11 @@ class RunRef(BaseModel, frozen=True):
     current_execution_id: str | None = None
 
 
-class ContextArtifact(BaseModel, frozen=True):
-    """One emitted Artifact in the workspace read-model.
+class ContextAsset(BaseModel, frozen=True):
+    """One registered asset in the workspace read-model.
 
-    ``path`` is workspace-relative and comes from ``walk_artifacts`` (the
-    same location ``ArtifactRepository.locate`` returns). This is not
-    :class:`molab.workspace.domain.ArtifactRef`, which is only an id pointer.
+    ``path`` is workspace-relative and is the asset's payload, checked
+    against its digest when the bytes can be resolved.
     """
 
     asset_id: str
@@ -141,7 +140,7 @@ class WorkspaceContext(BaseModel, frozen=True):
     recent_runs: list[RunRef] = []
     failed_runs: list[RunRef] = []
     running_runs: list[RunRef] = []
-    artifacts: list[ContextArtifact] = []
+    assets: list[ContextAsset] = []
     stale_or_missing: list[HealthFlag] = []
 
 
@@ -256,43 +255,49 @@ def assemble_workspace_context(
 
     recent_runs = sorted(run_refs, key=_run_sort_key, reverse=True)
 
-    artifacts: list[ContextArtifact] = []
-    # Emitted products, read from the Executions that own them.
-    from .artifact_repository import walk_artifacts
+    assets: list[ContextAsset] = []
+    from .asset_repository import payload_path_for, scan_asset_repositories
+    from .domain import ExecutionOrigin
 
     root_path = Path(root).resolve()
-    for located in walk_artifacts(workspace):
-        art = located.artifact
-        task_id = art.metadata.get("task_id") if isinstance(art.metadata, dict) else None
-        relative = ""
-        if located.location is not None:
+    for repository in scan_asset_repositories(workspace):
+        for asset in repository.list():
+            origin = asset.origin
+            run_id = origin.run_id if isinstance(origin, ExecutionOrigin) else None
+            execution_id = origin.execution_id if isinstance(origin, ExecutionOrigin) else None
+            task_id = origin.task if isinstance(origin, ExecutionOrigin) else None
+            relative = ""
             try:
-                relative = Path(located.location).resolve().relative_to(root_path).as_posix()
-            except ValueError:
-                relative = ""
-        artifacts.append(
-            ContextArtifact(
-                asset_id=art.id,
-                scope=f"artifact:{art.project_id}:{art.run_id}:{art.execution_id}",
-                kind=art.semantic_type or "artifact",
-                path=relative,
-                content_hash=art.content.digest,
-                run_id=art.run_id,
-                execution_id=art.execution_id,
-                task_id=str(task_id) if task_id is not None else None,
-            )
-        )
-        if art.run_id not in run_ids:
-            flags.append(
-                HealthFlag(
-                    kind="orphan_artifact",
-                    ref=art.id,
-                    detail=(
-                        f"artifact {art.id} names producer run "
-                        f"{art.run_id!r}, which no longer resolves"
-                    ),
+                location = payload_path_for(workspace, asset.id)
+            except (KeyError, ValueError, OSError):
+                location = None
+            if location is not None:
+                try:
+                    relative = Path(location).resolve().relative_to(root_path).as_posix()
+                except ValueError:
+                    relative = ""
+            assets.append(
+                ContextAsset(
+                    asset_id=asset.id,
+                    scope=asset.scope.urn,
+                    kind="asset",
+                    path=relative,
+                    content_hash=asset.content.digest,
+                    run_id=run_id,
+                    execution_id=execution_id,
+                    task_id=task_id,
                 )
             )
+            if run_id is not None and run_id not in run_ids:
+                flags.append(
+                    HealthFlag(
+                        kind="orphan_asset",
+                        ref=asset.id,
+                        detail=(
+                            f"asset {asset.id} names producer run {run_id!r}, which no longer resolves"
+                        ),
+                    )
+                )
 
     host = folder.asset_host()
     targets = getattr(getattr(host, "metadata", None), "targets", None) or []
@@ -310,13 +315,13 @@ def assemble_workspace_context(
         recent_runs=recent_runs,
         failed_runs=failed_runs,
         running_runs=running_runs,
-        artifacts=artifacts,
+        assets=assets,
         stale_or_missing=flags,
     )
 
 
 __all__ = [
-    "ContextArtifact",
+    "ContextAsset",
     "ContextFocus",
     "ExperimentRef",
     "HealthFlag",

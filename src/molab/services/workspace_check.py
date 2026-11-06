@@ -177,7 +177,93 @@ def check_workspace(
     )
     knowledge = validate_knowledge(ws, fs=ws.fs, errors_only=errors_only, scope=wanted)
     folded = tuple(Violation.model_validate(item) for item in knowledge)
-    return ValidationReport(root=report.root, violations=(*report.violations, *folded))
+    hygiene = (*_guide_issues(ws), *_asset_issues(ws, wanted))
+    return ValidationReport(root=report.root, violations=(*report.violations, *folded, *hygiene))
+
+
+_HYGIENE_HINTS: dict[str, str] = {
+    "layout.guide_stale": (
+        "AGENTS.md teaches a layout molab no longer writes. Run `molab agents sync`."
+    ),
+    "asset.slot": (
+        "Each asset lives in its slot: `<run>--<title>` for a run's product, `<title>` for "
+        "an import. Re-register it, or run `molab init .` to migrate the workspace."
+    ),
+    "asset.evidence": (
+        "Logs are evidence and stay in the attempt's out/. Delete this asset directory."
+    ),
+    "asset.legacy": "Migrate the workspace with `molab init .`.",
+}
+
+
+def _hygiene(path: str, rule: str, detail: str) -> Violation:
+    from molab.workspace.validate import Violation
+
+    return Violation(
+        path=path, rule=rule, detail=detail, severity="error", hint=_HYGIENE_HINTS[rule]
+    )
+
+
+def _guide_issues(ws: Workspace) -> list[Violation]:
+    """``layout.guide_stale`` when AGENTS.md's managed block is not today's guide."""
+    from molab.workspace.fs_local import LocalFS
+    from molab.workspace.naming import AGENT_GUIDE_FILENAME
+
+    from .agent_guide import BEGIN_MARKER, END_MARKER, render_agent_guide
+
+    if not isinstance(ws.fs, LocalFS):
+        return []
+    try:
+        text = (Path(str(ws.resolve())) / AGENT_GUIDE_FILENAME).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    start = text.find(BEGIN_MARKER)
+    end = text.find(END_MARKER, start + 1) if start >= 0 else -1
+    if start < 0 or end < 0:
+        return []
+    current = text[start : end + len(END_MARKER)] + "\n"
+    if current == render_agent_guide(ws):
+        return []
+    return [
+        _hygiene(AGENT_GUIDE_FILENAME, "layout.guide_stale", "the managed block is out of date")
+    ]
+
+
+def _asset_issues(ws: Workspace, scope: frozenset[str] | None) -> list[Violation]:
+    """``asset.slot`` / ``asset.evidence`` / ``asset.legacy`` for every asset host in scope."""
+    from molab.workspace.asset_repository import scan_asset_repositories
+    from molab.workspace.errors import UnmigratedAssetError
+
+    root = str(ws.resolve()).rstrip("/") + "/"
+    found: list[Violation] = []
+    for repository in scan_asset_repositories(ws):
+        rel = repository.scope_dir[len(root) :] if repository.scope_dir.startswith(root) else ""
+        if (
+            scope is not None
+            and rel
+            and not any(
+                rel == item or item.startswith(rel + "/") or rel.startswith(item + "/")
+                for item in scope
+            )
+        ):
+            continue
+        try:
+            assets = repository.list()
+        except UnmigratedAssetError as exc:
+            found.append(_hygiene(rel or ".", "asset.legacy", str(exc)))
+            continue
+        for asset in assets:
+            slug = repository.find_slug(asset.id) or ""
+            path = posixpath.join(rel, "assets", slug) if rel else posixpath.join("assets", slug)
+            if asset.file.endswith(".log") or asset.title.lower().endswith(".log"):
+                found.append(_hygiene(path, "asset.evidence", f"{asset.title!r} is a log"))
+                continue
+            expected = repository.slot_slug(asset)
+            if slug != expected:
+                found.append(
+                    _hygiene(path, "asset.slot", f"{asset.title!r} belongs in assets/{expected}")
+                )
+    return found
 
 
 def error_keys(report: ValidationReport) -> set[tuple[str, str]]:
@@ -738,8 +824,8 @@ class _PathCheck:
                 if name == ASSET_CONTAINER and not last:
                     return self.deny(
                         "asset.owned",
-                        "assets/ is molab's asset store: asset.json, versions/ and the "
-                        "bytes are written when an asset is imported or promoted.",
+                        "assets/ is molab's asset store. molab writes asset.json and the "
+                        "payload when a file is registered or imported.",
                         self._fill("molab asset import NAME SRC --project {project}"),
                     )
             if level == "execution" and (

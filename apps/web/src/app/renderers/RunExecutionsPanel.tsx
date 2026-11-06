@@ -317,9 +317,6 @@ export const RunExecutionsPanel = ({
                     {selected.finishedAt ? ` · ended ${formatDateTime(selected.finishedAt)}` : ""}
                     {durationLabel ? ` · ${durationLabel}` : ""}
                     {selected.basedOnExecutionId ? ` · from ${selected.basedOnExecutionId}` : ""}
-                    {selected.checkpointArtifactId
-                      ? ` · checkpoint ${selected.checkpointArtifactId}`
-                      : ""}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -409,7 +406,6 @@ export const RunExecutionsPanel = ({
                       experimentId={run.experimentId}
                       runId={run.id}
                       selectedExecutionId={selected.executionId}
-                      onPromoted={onPromoted}
                     />
                   </div>
                 </section>

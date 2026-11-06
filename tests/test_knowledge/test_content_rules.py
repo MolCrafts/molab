@@ -144,3 +144,31 @@ class TestLinksInCode:
         found = [i for i in validate_knowledge(lab) if i["rule"] == "knowledge.local_source"]
         assert len(found) == 1
         assert "missing.md" in found[0]["detail"]
+
+
+class TestHygieneRules:
+    def test_a_localhost_link_is_an_error(self, lab: Any) -> None:
+        _doc(
+            lab,
+            "seen",
+            "---\nclass: Note\nname: Seen\n---\n<iframe src='http://127.0.0.1:8771/x.html'>\n",
+        )
+        assert ("knowledge.ephemeral_link", "knowledges/seen.md", "error") in _issues(lab)
+
+    def test_a_versioned_name_is_an_error(self, lab: Any) -> None:
+        _doc(lab, "fragments-v3", "---\nclass: Note\nname: Fragments v3\n---\nbody\n")
+        assert ("knowledge.versioned_name", "knowledges/fragments-v3.md", "error") in _issues(lab)
+
+    def test_a_report_without_a_molab_ref_is_an_error(self, lab: Any) -> None:
+        _doc(lab, "boxes", "---\nclass: Report\nname: Boxes\n---\nfiles in out/export/\n")
+        assert ("knowledge.report_unanchored", "knowledges/boxes.md", "error") in _issues(lab)
+
+    def test_a_report_citing_an_asset_is_anchored(self, lab: Any) -> None:
+        _doc(
+            lab,
+            "boxes",
+            "---\nclass: Report\nname: Boxes\n---\n"
+            "![box](molab:asset/01a1ac09-072e-7f27-9d1e-3c964b52c345)\n",
+        )
+        rules = {rule for rule, _path, _sev in _issues(lab)}
+        assert "knowledge.report_unanchored" not in rules

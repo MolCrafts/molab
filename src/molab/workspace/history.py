@@ -71,6 +71,8 @@ _GITIGNORE_HEAD = """\
 .molab/
 **/__pycache__/
 *.pyc
+# A live attempt's heartbeat; it is gone once the attempt seals.
+**/executions/*/alive
 """
 
 _GITIGNORE_BULK = """

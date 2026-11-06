@@ -199,60 +199,57 @@ def _agent():
 
 
 class TestManagedAssetResponse:
-    def test_project_id_comes_from_scope(self) -> None:
+    def test_execution_origin(self) -> None:
         from molab.server.schemas.responses import ManagedAssetResponse
-        from molab.workspace.domain import Asset, AssetScope
+        from molab.workspace.domain import Asset, AssetScope, ContentRef, ExecutionOrigin
 
         asset = Asset(
             id="a",
             scope=AssetScope(kind="project", ids=("p1",)),
             title="t",
-            created_at=datetime(2026, 1, 1, tzinfo=UTC),
-            created_by=_agent(),
-        )
-        body = ManagedAssetResponse.from_model(asset, 2)
-        assert body.projectId == "p1"
-        assert body.versionCount == 2
-        assert body.ref == "molab:asset/a"
-
-
-class TestAssetVersionResponse:
-    def test_artifact_origin(self) -> None:
-        from molab.server.schemas.responses import AssetVersionResponse
-        from molab.workspace.domain import ArtifactOrigin, AssetVersion, ContentRef
-
-        version = AssetVersion(
-            id="v",
-            asset_id="a",
-            origin=ArtifactOrigin(
-                artifact_id="art",
-                ref="molab:experiment/e/run/r/artifact/art",
-            ),
             content=ContentRef(digest="sha256:abc", size=6, kind="file"),
-            version=1,
+            media_type="text/plain",
+            origin=ExecutionOrigin(
+                project_id="p1",
+                experiment_id="e",
+                run_id="r",
+                execution_id="e01",
+                task="fit",
+            ),
+            file="payload.txt",
             created_at=datetime(2026, 1, 1, tzinfo=UTC),
             created_by=_agent(),
         )
-        body = AssetVersionResponse.from_model(version)
-        assert body.originKind == "artifact"
-        assert body.originRef == "molab:experiment/e/run/r/artifact/art"
-        assert body.sourceArtifactId == "art"
+        body = ManagedAssetResponse.from_model(asset)
+        assert body.projectId == "p1"
+        assert body.ref == "molab:asset/a"
+        assert body.originKind == "execution"
+        assert body.runId == "r"
+        assert body.executionId == "e01"
+        assert body.task == "fit"
+        assert body.digest == "sha256:abc"
+        assert body.mediaType == "text/plain"
+        assert body.uri is None
 
-    def test_import_origin_and_missing_content(self) -> None:
-        from molab.server.schemas.responses import AssetVersionResponse
-        from molab.workspace.domain import AssetVersion, ImportOrigin
+    def test_import_origin(self) -> None:
+        from molab.server.schemas.responses import ManagedAssetResponse
+        from molab.workspace.domain import Asset, AssetScope, ContentRef, ImportOrigin
 
-        version = AssetVersion(
-            id="v",
-            asset_id="a",
-            origin=ImportOrigin(uri="/data/qm9", action="copy"),
-            content=None,
-            version=1,
+        asset = Asset(
+            id="a",
+            scope=AssetScope(kind="workspace"),
+            title="qm9",
+            content=ContentRef(digest="sha256:def", size=3, kind="file"),
+            origin=ImportOrigin(uri="/data/qm9"),
+            file="payload",
             created_at=datetime(2026, 1, 1, tzinfo=UTC),
             created_by=_agent(),
         )
-        body = AssetVersionResponse.from_model(version)
+        body = ManagedAssetResponse.from_model(asset)
+        assert body.projectId is None
         assert body.originKind == "import"
-        assert body.importAction == "copy"
-        assert body.sourceArtifactId is None
-        assert body.digest is None
+        assert body.uri == "/data/qm9"
+        assert body.runId is None
+        assert body.executionId is None
+        assert body.task is None
+        assert body.ref == "molab:asset/a"

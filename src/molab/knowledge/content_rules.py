@@ -17,6 +17,12 @@ rules read what is on disk and report, for :mod:`molab.knowledge.validate`:
   workspace, or to one that does not exist: the record is not portable.
 * ``knowledge.literature_metadata`` (warning) — a Literature record with no DOI
   or URL, or no authors / year, in its frontmatter.
+* ``knowledge.ephemeral_link`` (error) — a link to ``localhost`` / a loopback
+  address: a port that served one session, dead for every later reader.
+* ``knowledge.versioned_name`` (error) — a document named ``…-v2``. One
+  subject is one document, rewritten in place; git keeps the old text.
+* ``knowledge.report_unanchored`` (error) — a Report that cites no ``molab:``
+  asset, run or execution, so nothing ties its claims to the bytes.
 
 Read-only. ``molab.workspace`` is imported only inside function bodies.
 """
@@ -24,6 +30,7 @@ Read-only. ``molab.workspace`` is imported only inside function bodies.
 from __future__ import annotations
 
 import posixpath
+import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -61,7 +68,25 @@ CONTENT_RULE_HINTS: dict[str, str] = {
         "Put the bibliographic fields in frontmatter (title, authors, year, doi or "
         "url), e.g. `molab knowledge write NAME --class Literature --record '{...}'`."
     ),
+    "knowledge.ephemeral_link": (
+        "Cite the product by its `molab:asset/<id>` ref; molab's viewers render it. "
+        "A localhost URL dies with the session that served it."
+    ),
+    "knowledge.versioned_name": (
+        "Rewrite the document under its stable name (`molab knowledge write NAME …` "
+        "replaces it; git keeps the old text) and delete the numbered copies."
+    ),
+    "knowledge.report_unanchored": (
+        "Cite what the report is about: the `molab:asset/<id>` of each product it "
+        "describes, or the run / execution ref that made them."
+    ),
 }
+
+_EPHEMERAL_RE = re.compile(
+    r"https?://(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\])(?::\d+)?", re.I
+)
+_VERSIONED_RE = re.compile(r"[-_ ]v\d+$", re.I)
+_ANCHOR_RE = re.compile(r"molab:(?:asset/[0-9a-f-]+|experiment/[0-9a-z-]+/run/[0-9a-z-]+)")
 
 _PLANNING_RECORD_ROLES = frozenset({"roadmap", "todo", "milestone"})
 _COMMON_KEYS = frozenset({"class", "name", "created_by", "tags", "status"})
@@ -157,6 +182,43 @@ def _literature_issue(doc: Concept) -> ContentIssue | None:
     )
 
 
+def _ephemeral_issue(doc: Concept) -> ContentIssue | None:
+    found = _EPHEMERAL_RE.search(doc.read())
+    if found is None:
+        return None
+    return ContentIssue(
+        str(doc.path),
+        "knowledge.ephemeral_link",
+        f"links {found.group(0)!r}, a session-local server",
+        "error",
+    )
+
+
+def _versioned_issue(doc: Concept) -> ContentIssue | None:
+    stem = posixpath.splitext(posixpath.basename(str(doc.path)))[0]
+    if _VERSIONED_RE.search(stem) is None:
+        return None
+    return ContentIssue(
+        str(doc.path),
+        "knowledge.versioned_name",
+        f"{stem!r} carries a version number; one subject is one document",
+        "error",
+    )
+
+
+def _anchor_issue(doc: Concept) -> ContentIssue | None:
+    from .concepts import Report
+
+    if not isinstance(doc, Report) or _ANCHOR_RE.search(doc.read()):
+        return None
+    return ContentIssue(
+        str(doc.path),
+        "knowledge.report_unanchored",
+        "the report cites no molab: asset, run or execution",
+        "error",
+    )
+
+
 def _experiment_names(root: str, fs: FileSystem) -> frozenset[str]:
     from molab.workspace import Workspace
     from molab.workspace.naming import EXPERIMENT_CONTAINER
@@ -249,9 +311,10 @@ def content_issues(
             continue
     found: list[ContentIssue] = []
     for doc in docs:
-        record = _record_issue(doc)
-        if record is not None:
-            found.append(record)
+        for check in (_record_issue, _ephemeral_issue, _versioned_issue, _anchor_issue):
+            issue = check(doc)
+            if issue is not None:
+                found.append(issue)
     found.extend(
         issue
         for issue in _campaign_issues(docs, root, fs)

@@ -140,7 +140,7 @@ def summarize_entity(target: Concept | Folder | Asset) -> EntitySummary:
     - A ``Concept``: the same projection, with two differences — ``id`` is the
       document path, because that path is the document; and its narrative is
       read at that path.
-    - An ``Asset``: ``id`` is the asset id, ``kind`` is ``asset.kind``, and
+    - An ``Asset``: ``id`` is the asset id, ``kind`` is ``"asset"``, and
       ``title`` is the asset title.
 
     Args:
@@ -156,7 +156,7 @@ def summarize_entity(target: Concept | Folder | Asset) -> EntitySummary:
     from molab.workspace.folder import Folder
 
     if isinstance(target, Asset):
-        return EntitySummary(id=target.id, kind=target.kind, title=target.title)
+        return EntitySummary(id=target.id, kind="asset", title=target.title)
     if isinstance(target, Concept):
         meta = target.frontmatter()
         raw_type = target.type()

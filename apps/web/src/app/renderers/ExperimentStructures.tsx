@@ -49,15 +49,15 @@ export const ExperimentStructures = ({ runs }: { runs: readonly RunSummary[] }):
     attempts.forEach(({ run, executionId }, index) => {
       const body = outputs[index]?.data;
       if (!body) return;
-      for (const artifact of body.artifacts ?? []) {
-        if (!isChemicalStructureName(artifact.name)) continue;
+      for (const asset of body.assets ?? []) {
+        if (!isChemicalStructureName(asset.title)) continue;
         rows.push({
-          key: `${run.id}:${artifact.id}`,
+          key: `${run.id}:${asset.id}`,
           runName: run.name || run.id,
           runId: run.id,
           executionId,
-          label: artifact.name,
-          artifactId: artifact.id,
+          label: asset.title,
+          artifactId: asset.id,
           path: null,
         });
       }

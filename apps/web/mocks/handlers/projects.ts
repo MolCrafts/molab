@@ -10,11 +10,11 @@ import {
   getAllProjects,
   getAsset,
   getAssetsByProject,
-  getAssetVersions,
   getExperimentsByProject,
   getFile,
   getProject,
   setProject,
+  toManagedAsset,
 } from "../db";
 import { workspaceRoute } from "./workspaceRoute";
 
@@ -57,40 +57,15 @@ export const projectHandlers = [
   // GET /api/projects/:id/assets - Get project assets
   http.get(workspaceRoute(`${API_BASE}/projects/:id/assets`), ({ params }) => {
     const assets = getAssetsByProject(params.id as string);
-    return HttpResponse.json(
-      assets.map((asset) => ({
-        id: asset.id,
-        projectId: asset.projectId,
-        title: asset.title ?? asset.name,
-        createdAt: asset.createdAt,
-        versionCount: getAssetVersions(asset.id).length,
-        ref: `molab:project/${asset.projectId}/asset/${asset.id}`,
-      })),
-    );
+    return HttpResponse.json(assets.map(toManagedAsset));
   }),
 
   http.get(workspaceRoute(`${API_BASE}/projects/:projectId/assets/:assetId`), ({ params }) => {
     const asset = getAsset(String(params.assetId));
     if (!asset || asset.projectId !== params.projectId)
       return HttpResponse.json({ detail: "Asset not found" }, { status: 404 });
-    return HttpResponse.json({
-      id: asset.id,
-      projectId: asset.projectId,
-      title: asset.title ?? asset.name,
-      createdAt: asset.createdAt,
-      versionCount: getAssetVersions(asset.id).length,
-      ref: `molab:project/${asset.projectId}/asset/${asset.id}`,
-    });
+    return HttpResponse.json(toManagedAsset(asset));
   }),
-  http.get(
-    workspaceRoute(`${API_BASE}/projects/:projectId/assets/:assetId/versions`),
-    ({ params }) => {
-      const asset = getAsset(String(params.assetId));
-      if (!asset || asset.projectId !== params.projectId)
-        return HttpResponse.json({ detail: "Asset not found" }, { status: 404 });
-      return HttpResponse.json(getAssetVersions(asset.id));
-    },
-  ),
   http.get(
     workspaceRoute(`${API_BASE}/projects/:projectId/assets/:assetId/download`),
     ({ params }) => {

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 
-import { isMolvisOpenable, isMolvisZarr, uniqueMolvisFiles, zarrStoreRoot } from "./openable";
+import {
+  isLammpsDataName,
+  isMolvisOpenable,
+  isMolvisZarr,
+  uniqueMolvisFiles,
+  zarrStoreRoot,
+} from "./openable";
 
 const file = (relPath: string) => ({
   name: relPath.split("/").pop() ?? relPath,
@@ -88,5 +94,28 @@ describe("uniqueMolvisFiles", () => {
     // same file behind two tabs, one of which cannot draw it.
     expect(isMolvisOpenable(file("log.lammps"))).toBe(false);
     expect(isMolvisOpenable(file("lmp.log"))).toBe(false);
+  });
+});
+
+describe("LAMMPS data files", () => {
+  // Regression: network.data (cell + topology) was not offered at all, so the
+  // tab opened the companion .mol2, which carries no simulation cell.
+  it("opens LAMMPS data files in molvis", () => {
+    for (const name of ["network.data", "system.lmp", "box.lammpsdata"]) {
+      expect(isMolvisOpenable(file(`out/export/${name}`))).toBe(true);
+    }
+    expect(isLammpsDataName("network.ff")).toBe(false);
+    expect(isLammpsDataName("in.network")).toBe(false);
+  });
+
+  it("lists a LAMMPS data file beside its mol2 and pdb", () => {
+    const listed = uniqueMolvisFiles([
+      file("out/export/in.network"),
+      file("out/export/network.data"),
+      file("out/export/network.ff"),
+      file("out/export/pbix.mol2"),
+      file("out/export/pbix.pdb"),
+    ]).map((f) => f.name);
+    expect(listed).toEqual(["network.data", "pbix.mol2", "pbix.pdb"]);
   });
 });

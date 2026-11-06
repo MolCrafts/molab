@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from molab.workspace.execution_dirs import (
-    ARTIFACTS,
     OUT,
     WORK,
     ExecutionDir,
@@ -19,31 +18,24 @@ from molab.workspace.execution_dirs import (
 )
 
 
-class TestTheThreeTiers:
-    def test_all_three_are_declared(self):
+class TestTheTiers:
+    def test_work_and_out_are_declared(self) -> None:
         names = execution_dir_names()
-        assert {"work", "out", "artifacts"} <= names
+        assert {"work", "out"} <= names
+        assert "artifacts" not in names
 
-    def test_only_the_promoted_tier_enters_the_history(self):
-        # out/ holds trajectories and restarts: keeping them would make the
-        # history unusable. artifacts/ is what a paper cites.
-        assert ARTIFACTS.versioned is True
+    def test_bulk_tiers_stay_out_of_history(self) -> None:
         assert OUT.versioned is False
         assert WORK.versioned is False
 
-    def test_scratch_is_not_a_place_readers_look(self):
-        # A half-written intermediate matching a reader's pattern must not be
-        # charted as though it were a result.
+    def test_scratch_is_not_a_place_readers_look(self) -> None:
         assert WORK.products is False
         assert OUT.products is True
-        assert ARTIFACTS.products is True
 
 
 class TestPeerStatus:
-    def test_no_directory_carries_a_rank(self):
-        # Equality is structural: the declaration has no priority/order field
-        # to express one directory outranking another.
-        assert not hasattr(ARTIFACTS, "priority")
+    def test_no_directory_carries_a_rank(self) -> None:
+        assert not hasattr(OUT, "priority")
         assert set(ExecutionDir.__dataclass_fields__) == {
             "name",
             "purpose",
@@ -52,28 +44,21 @@ class TestPeerStatus:
             "prunable",
         }
 
-    def test_every_directory_explains_itself(self):
-        # ``purpose`` is what the UI shows and what a person reads; a blank
-        # one would make a directory unexplainable in the file tree.
+    def test_every_directory_explains_itself(self) -> None:
         for directory in list_execution_dirs():
             assert directory.purpose.strip()
 
 
 class TestQueryingReplacesHardCoding:
-    def test_products_are_found_by_property_not_by_name(self):
-        assert {d.name for d in product_dirs()} == {"out", "artifacts"}
+    def test_products_are_found_by_property_not_by_name(self) -> None:
+        assert {d.name for d in product_dirs()} == {"out"}
 
-    def test_scratch_is_found_by_property_not_by_name(self):
+    def test_scratch_is_found_by_property_not_by_name(self) -> None:
         assert {d.name for d in scratch_dirs()} == {"out", "work"}
-
-    def test_the_promoted_tier_is_searched_before_the_raw_one(self):
-        # Same result, two copies: a searcher wants the registered one.
-        names = [d.name for d in product_dirs()]
-        assert names.index("artifacts") < names.index("out")
 
 
 class TestRegistrationIsOpen:
-    def test_a_package_can_declare_the_directory_it_writes(self):
+    def test_a_package_can_declare_the_directory_it_writes(self) -> None:
         register_execution_dir(
             ExecutionDir(
                 name="test-plugin-dir",
@@ -91,34 +76,31 @@ class TestRegistrationIsOpen:
             mod._REGISTRY.pop("test-plugin-dir")
             mod._ORDER.remove("test-plugin-dir")
 
-    def test_registering_twice_replaces_rather_than_raises(self):
-        # A package imported twice must not blow up at import time.
+    def test_registering_twice_replaces_rather_than_raises(self) -> None:
         register_execution_dir(WORK)
         register_execution_dir(WORK)
         assert [d.name for d in list_execution_dirs()].count("work") == 1
 
 
 class TestUndeclaredNamesAreRefused:
-    def test_resolving_an_unknown_directory_raises(self):
+    def test_resolving_an_unknown_directory_raises(self) -> None:
         with pytest.raises(UnknownExecutionDirError) as excinfo:
             resolve_execution_dir("outputs")
-        # The message names what *is* declared, so the fix is obvious.
-        assert "artifacts" in str(excinfo.value)
+        assert "out" in str(excinfo.value)
 
 
 class TestPrunableDirs:
-    """Which directories a prune may remove is data (arch-own-01-cleanup)."""
-
-    def test_seeded_prunable_dirs_are_the_bulk_tiers(self):
+    def test_seeded_prunable_dirs_are_the_bulk_tiers(self) -> None:
         from molab.workspace.execution_dirs import prunable_dirs
 
         assert {d.name for d in prunable_dirs()} == {"out", "work", "jobs", "checkpoints"}
 
-    def test_promoted_tier_is_not_prunable(self):
-        # ``Artifact.path`` points at these bytes; pruning them would dangle it.
-        assert ARTIFACTS.prunable is False
+    def test_source_is_not_prunable(self) -> None:
+        from molab.workspace.execution_dirs import SOURCE
 
-    def test_undeclared_prunability_defaults_to_kept(self):
+        assert SOURCE.prunable is False
+
+    def test_undeclared_prunability_defaults_to_kept(self) -> None:
         from molab.workspace import execution_dirs as mod
         from molab.workspace.execution_dirs import prunable_dirs
 
@@ -139,9 +121,7 @@ class TestPrunableDirs:
 
 
 class TestSourceDir:
-    """arch-own-02b §2: ``source/`` is a declared, versioned, non-product peer."""
-
-    def test_source_is_versioned_and_not_a_product(self):
+    def test_source_is_versioned_and_not_a_product(self) -> None:
         from molab.workspace.execution_dirs import SOURCE
 
         declared = resolve_execution_dir("source")
@@ -150,18 +130,18 @@ class TestSourceDir:
         assert declared.versioned is True
         assert declared.products is False
 
-    def test_source_is_a_declared_name(self):
+    def test_source_is_a_declared_name(self) -> None:
         from molab.workspace.execution_dirs import SOURCE
 
         assert SOURCE.name in execution_dir_names()
 
-    def test_product_set_is_unchanged(self):
+    def test_product_set_is_unchanged(self) -> None:
         from molab.workspace.execution_dirs import SOURCE
 
         assert SOURCE not in product_dirs()
-        assert {d.name for d in product_dirs()} == {"out", "artifacts"}
+        assert {d.name for d in product_dirs()} == {"out"}
 
-    def test_scratch_set_is_unchanged(self):
+    def test_scratch_set_is_unchanged(self) -> None:
         from molab.workspace.execution_dirs import SOURCE
 
         assert SOURCE not in scratch_dirs()

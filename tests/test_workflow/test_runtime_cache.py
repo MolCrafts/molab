@@ -2,7 +2,7 @@
 
 ``Caching`` identity is unit-tested in ``test_cache_contract``; this file proves
 the runtime actually *calls* it — one orthogonal wiring behaviour per test:
-hit serves the cached output, hit re-registers the artifact, config discriminates
+hit serves the cached output, a hit returns the asset ref, config discriminates
 the key, ``cache=None`` disables caching, actors are never cached, and a failing
 backend degrades gracefully but visibly.
 """
@@ -48,13 +48,6 @@ def _new_run(workspace: Workspace, name: str):
     project = workspace.add_project(name=f"p-{name}")
     experiment = project.add_experiment(name=f"e-{name}")
     return experiment.add_run(params={})
-
-
-def _run_artifacts(run, *, name: str | None = None):
-    artifacts = run._execution_repository().get(run.executions[-1].id).artifacts
-    if name is not None:
-        artifacts = [a for a in artifacts if a.name == name]
-    return artifacts
 
 
 class _FailingPutStore:
@@ -154,39 +147,44 @@ class TestRuntimeCaching:
         assert first.outputs["step"] == second.outputs["step"] == 3
         assert _COUNTERS["shared"] == 1  # keyed by the run, not the attempt dir
 
-    async def test_artifact_reregistered_on_hit_without_recompute(
+    async def test_hit_returns_the_asset_ref_without_recompute(
         self, workspace: Workspace, tmp_path: Path
     ) -> None:
-        wf = Workflow(name="artifact-producer")
+        from molab.workspace.asset_repository import assets_produced_by
+        from molab.workspace.domain import ExecutionOrigin
+
+        wf = Workflow(name="asset-producer")
 
         @wf.task
         async def produce(ctx: TaskContext) -> str:
             _bump("produce")
-            ctx.register_artifact("produced", name="produce.txt")
-            return "produced"
+            return ctx.register(b"produced", title="produce.txt")
 
         compiled = (wf).compile()
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "art1")
         with run1.start() as ctx1:
-            await WorkflowRuntime().execute(compiled, run_context=ctx1, cache=cache)
+            first = await WorkflowRuntime().execute(compiled, run_context=ctx1, cache=cache)
         assert _COUNTERS["produce"] == 1
-        art1 = _run_artifacts(run1, name="produce.txt")
-        assert len(art1) == 1
-        hash1 = art1[0].content.digest
-        assert hash1
+        (asset,) = [
+            item
+            for item in assets_produced_by(workspace, run1.executions[-1].id)
+            if isinstance(item.origin, ExecutionOrigin) and item.origin.run_id == run1.id
+        ]
+        assert first.outputs["produce"] == asset.ref
+        assert asset.content.digest
 
-        # Second run — cache HIT. The producer body must not run, yet the artifact
-        # must be resolvable in run2's scope with a byte-identical content digest.
         run2 = _new_run(workspace, "art2")
         with run2.start() as ctx2:
-            await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)
-        assert _COUNTERS["produce"] == 1  # no recompute
-
-        art2 = _run_artifacts(run2, name="produce.txt")
-        assert len(art2) == 1
-        assert art2[0].content.digest == hash1
+            second = await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)
+        assert _COUNTERS["produce"] == 1
+        assert second.outputs["produce"] == asset.ref
+        assert [
+            item
+            for item in assets_produced_by(workspace, run2.executions[-1].id)
+            if isinstance(item.origin, ExecutionOrigin) and item.origin.run_id == run2.id
+        ] == []
 
     async def test_config_change_forces_miss(self, workspace: Workspace, tmp_path: Path) -> None:
         """The runtime threads the compiled snapshot's config identity into the

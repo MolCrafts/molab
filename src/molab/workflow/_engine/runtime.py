@@ -410,6 +410,48 @@ def _open_executors(
     return _Executors(by_task, runners, pool, _code_locator(run_context))
 
 
+def _declared_asset_inputs(run_context: object) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Asset refs a run declares, plus titles that can bind as parameters.
+
+    A title binds only when it is a unique Python identifier. A title that
+    matches a run parameter is an error, as is a parameter named ``inputs``
+    when the run names any asset input.
+
+    Returns:
+        ``(refs, bindings)``. Both are empty when the run names no inputs.
+    """
+    run = getattr(run_context, "run", None)
+    if run is None:
+        return (), {}
+    ids = tuple(getattr(run, "inputs", ()) or ())
+    if not ids:
+        return (), {}
+    from molab.workspace.asset_repository import asset_by_id
+
+    workspace = run.experiment.project.workspace
+    refs: list[str] = []
+    by_title: dict[str, list[str]] = {}
+    for asset_id in ids:
+        asset = asset_by_id(workspace, asset_id)
+        if asset is None:
+            raise KeyError(f"run input {asset_id} is not an asset")
+        ref = asset.ref
+        refs.append(ref)
+        by_title.setdefault(asset.title, []).append(ref)
+    bindings = {
+        title: owners[0]
+        for title, owners in by_title.items()
+        if len(owners) == 1 and title.isidentifier()
+    }
+    params = dict(getattr(run_context, "params", None) or {})
+    if "inputs" in params:
+        raise ValueError("run parameter 'inputs' overlaps the asset paths bound as inputs")
+    for title in bindings:
+        if title in params:
+            raise ValueError(f"asset title {title!r} overlaps a run parameter")
+    return tuple(refs), bindings
+
+
 class WorkflowRuntime:
     """Workflow runtime over the structural values-on-edges engine.
 
@@ -549,11 +591,12 @@ class WorkflowRuntime:
         """Inject root-task inputs (capabilities-as-inputs + SubWorkflow forwarding).
 
         For each ROOT task (no upstream deps, not a ``wf.parallel`` body, not
-        seeded) of a *workspace* run the engine pre-sets ``ctx.inputs = {"params":
-        <run params>, "workdir": <task scratch Path>}``. The workdir is a bare
-        ``pathlib.Path`` (NEVER a navigable handle) under the execution slot;
-        this half is a no-op without a ``run_context`` so non-workspace runs are
-        unaffected.
+        seeded) of a *workspace* run the engine pre-sets ``{"params": <run
+        params>, "workdir": <task scratch Path>}``. When the run names asset
+        inputs, ``inputs`` is those refs in order and ``asset_bindings`` maps
+        a unique identifier title to its ref. Bind time turns the refs into
+        paths. The workdir is a bare ``pathlib.Path`` under the execution
+        slot; this half is a no-op without a ``run_context``.
 
         When ``root_input`` is provided (a :class:`SubWorkflow` forwarding its node
         input — the fan-out element, upstream output, or root params — into this
@@ -567,12 +610,18 @@ class WorkflowRuntime:
         body_names = {par.body for par in compiled._parallels}
         if run_context is not None:
             params = getattr(run_context, "params", None) or {}
+            asset_inputs, asset_bindings = _declared_asset_inputs(run_context)
             for reg in compiled._tasks:
                 name = reg.name
                 if reg.depends_on or name in body_names or name in state.seeded:
                     continue
                 workdir = _workdir_for(deps, name)
-                state.root_inputs[name] = {"params": dict(params), "workdir": workdir}
+                envelope: dict[str, Any] = {"params": dict(params), "workdir": workdir}
+                if asset_inputs:
+                    envelope["inputs"] = asset_inputs
+                    if asset_bindings:
+                        envelope["asset_bindings"] = asset_bindings
+                state.root_inputs[name] = envelope
         if root_input is not _NO_ROOT_INPUT:
             entry = _resolve_single_root(compiled)
             existing = state.root_inputs.get(entry)

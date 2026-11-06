@@ -487,20 +487,21 @@ export const featureShowcaseHandlers = [
   http.post(
     workspaceRoute("/api/projects/:projectId/experiments/:experimentId/runs/:runId/:operation"),
     async ({ params, request }) => {
-      if (!["harvest", "analyze-failure"].includes(String(params.operation))) return;
+      if (params.operation !== "harvest") return;
       const run = getRun(String(params.runId));
       if (!run || run.projectId !== params.projectId || run.experimentId !== params.experimentId)
         return HttpResponse.json({ detail: "Run not found" }, { status: 404 });
       const body = (await request.json()) as { name?: string; narrative?: string; cls?: string };
+      const narrative = body.narrative?.trim() ?? "";
+      if (!narrative) {
+        return HttpResponse.json({ detail: "narrative required" }, { status: 400 });
+      }
       const hostPath = getExperiment(run.experimentId)?.path ?? "";
       const name = body.name ?? `${run.id}-${params.operation}`;
       const relPath = documentRelPath(hostPath, name);
-      const narrative =
-        body.narrative ??
-        "The synthetic execution exceeded GPU memory. Reduce batch size and retry.";
       const reportBody = `# ${name}\n\n${narrative}\n\n[@records ${run.id}](${run.ref})`;
       notes.set(relPath, {
-        cls: params.operation === "analyze-failure" ? "Report" : (body.cls ?? "Finding"),
+        cls: body.cls ?? "Finding",
         name,
         relPath,
         hostPath,

@@ -52,7 +52,7 @@ def _render(ctx: KnowledgeContext) -> None:
     rprint(f"  projects:    {len(ctx.projects)}")
     rprint(f"  experiments: {len(ctx.experiments)}")
     rprint(f"  workflows:   {len(ctx.workflows)}")
-    rprint(f"  artifacts:   {len(ctx.artifacts)}")
+    rprint(f"  assets:      {len(ctx.assets)}")
     rprint(f"  knowledge:   {len(ctx.knowledge)}")
     rprint(
         f"  runs:        {len(ctx.recent_runs)} "

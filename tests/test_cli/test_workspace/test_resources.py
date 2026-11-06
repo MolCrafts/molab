@@ -1,4 +1,4 @@
-"""CLI run commands: harvest / analyze-failure gates and the run readers."""
+"""CLI run commands: the harvest gate and the run readers."""
 
 from __future__ import annotations
 
@@ -175,13 +175,7 @@ class TestRunHarvestRedirect:
 
         assert result.exit_code == 1, result.output
         assert calls == []
-
-
-class TestRunAnalyzeFailure:
-    def test_prints_report(self) -> None:
-        src = inspect.getsource(resources.run_analyze_failure)
-        assert "Report:" in src
-        assert "FailureAnalysis" not in src
+        assert not hasattr(resources, "run_analyze_failure")
 
 
 # ----------------------------------------------------------------------
@@ -403,7 +397,7 @@ def _greeting(tmp_path: Path) -> tuple[Workspace, str]:
     ws.materialize()
     source = tmp_path / "hello.txt"
     source.write_bytes(b"hello\n")
-    asset = ws.assets.import_asset("greeting", source, action="copy")
+    asset = ws.assets.import_asset("greeting", source)
     return ws, asset.id
 
 
@@ -413,17 +407,19 @@ class TestAssetList:
         result = CliRunner().invoke(resources.asset_app, ["list", "-ws", str(ws.root)])
         assert result.exit_code == 0, result.output
         assert "greeting" in result.output
-        assert "asset" in result.output
+        assert "text/plain" in result.output
 
 
 class TestAssetInfo:
-    def test_shows_v001(self, tmp_path: Path) -> None:
+    def test_shows_ref_media_type_digest_and_origin(self, tmp_path: Path) -> None:
         ws, asset_id = _greeting(tmp_path)
         result = CliRunner().invoke(resources.asset_app, ["info", asset_id, "-ws", str(ws.root)])
         assert result.exit_code == 0, result.output
-        assert "v001" in result.output
+        assert f"molab:asset/{asset_id}" in result.output
+        assert "text/plain" in result.output
+        assert "sha256:" in result.output
+        assert "import" in result.output
         assert "greeting" in result.output
-        assert "asset" in result.output
 
     def test_unknown_id_exits_1(self, tmp_path: Path) -> None:
         ws, _asset_id = _greeting(tmp_path)
@@ -432,21 +428,18 @@ class TestAssetInfo:
 
 
 class TestAssetLineage:
-    def test_promoted_ancestor_points_at_the_artifact(self, tmp_path: Path) -> None:
-        from molab.workspace import AgentRef
-
+    def test_produced_asset_points_at_the_run_input(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "ws", name="lab")
         ws.materialize()
-        project = ws.add_project("p")
-        experiment = project.add_experiment("e")
-        run = experiment.add_run()
+        source = tmp_path / "hello.txt"
+        source.write_bytes(b"hello\n")
+        upstream = ws.add_project("p").assets.import_asset("raw", source)
+        experiment = ws.project("p").add_experiment("e")
+        run = experiment.add_run(inputs=(upstream.id,))
         with run.start() as ctx:
-            path = ctx.get_dir("work") / "hello.txt"
-            path.write_bytes(b"hello\n")
-            artifact = ctx.emit_artifact(path, name="hello.txt")
-        asset, _version = project.assets.promote(
-            artifact, created_by=AgentRef(id="molab", type="system"), title="greeting"
+            produced = ctx.register(b"done\n", title="result.txt")
+        result = CliRunner().invoke(
+            resources.asset_app, ["lineage", produced.id, "-ws", str(ws.root)]
         )
-        result = CliRunner().invoke(resources.asset_app, ["lineage", asset.id, "-ws", str(ws.root)])
         assert result.exit_code == 0, result.output
-        assert f"<- {artifact.id}" in result.output
+        assert f"<- {upstream.id}" in result.output

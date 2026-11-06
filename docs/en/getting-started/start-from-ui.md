@@ -237,7 +237,7 @@ existing Compare / Aggregate views.
 | Register compute targets / remote workspaces | ✅ | Settings, or inline from dialogs |
 | Assets and lineage browsing | ✅ | Asset panel |
 | Export run as ZIP from the run page | ✅ | Uses `archive_folder_zip_iter` (streamed) |
-| Harvest run → Knowledge from UI | ✅ | Terminal runs; `POST …/harvest` → `harvest_run` |
+| Harvest run → Knowledge from UI | ✅ | Terminal runs; `POST …/harvest` → `Finding.harvest` |
 | Create parameter sweep from UI | ✅ | Single-axis Sweep dialog (full DOE still Python/CLI) |
 | Rename / archive objects | **TODO** | Create + delete only |
 | Bulk multi-select lifecycle | **TODO** | Multi-select mainly for metrics aggregate |

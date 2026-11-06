@@ -1,4 +1,3 @@
-import type { ArtifactPromoteRequest } from "@/api/generated/models/ArtifactPromoteRequest";
 import type { ExecutionAttemptCreateRequest } from "@/api/generated/models/ExecutionAttemptCreateRequest";
 import type { RunCreateRequest } from "@/api/generated/models/RunCreateRequest";
 import type { RunFilesResponse } from "@/api/generated/models/RunFilesResponse";
@@ -6,7 +5,6 @@ import type { RunPruneRequest } from "@/api/generated/models/RunPruneRequest";
 import type { RunPruneResponse } from "@/api/generated/models/RunPruneResponse";
 import { RunsService } from "@/api/generated/services/RunsService";
 
-export type { ArtifactResponse } from "@/api/generated/models/ArtifactResponse";
 export type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 export type { RunFilesResponse } from "@/api/generated/models/RunFilesResponse";
 export type { RunFileTextResponse } from "@/api/generated/models/RunFileTextResponse";
@@ -33,21 +31,13 @@ export const runsApi = {
     runId: string,
     executionId: string,
   ) => RunsService.getExecutionOutputs(projectId, experimentId, runId, executionId),
-  getArtifactContent: (
+  getAssetContent: (
     projectId: string,
     experimentId: string,
     runId: string,
     executionId: string,
-    artifactId: string,
-  ) => RunsService.downloadArtifactContent(projectId, experimentId, runId, executionId, artifactId),
-  promoteArtifact: (
-    projectId: string,
-    experimentId: string,
-    runId: string,
-    executionId: string,
-    artifactId: string,
-    data: ArtifactPromoteRequest,
-  ) => RunsService.promoteArtifact(projectId, experimentId, runId, executionId, artifactId, data),
+    assetId: string,
+  ) => RunsService.downloadAssetContent(projectId, experimentId, runId, executionId, assetId),
   getRunExecutionLogsWs: (
     ws: string,
     projectId: string,

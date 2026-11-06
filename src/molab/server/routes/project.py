@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import Field
@@ -15,7 +13,6 @@ from ..dependencies import get_workspace
 from ..deps.served import active_served_key, assert_workspace_writable
 from ..exceptions import AssetNotFoundError, ProjectNotFoundError
 from ..schemas import (
-    AssetVersionResponse,
     ManagedAssetResponse,
     MessageResponse,
     ProjectCreateRequest,
@@ -71,10 +68,7 @@ def list_project_assets(
 ) -> list[ManagedAssetResponse]:
     """List long-lived Project data identities."""
     project = workspace.get_project(project_id)
-    return [
-        ManagedAssetResponse.from_model(asset, len(project.assets.versions(asset.id)))
-        for asset in project.assets.list()[:limit]
-    ]
+    return [ManagedAssetResponse.from_model(asset) for asset in project.assets.list()[:limit]]
 
 
 class AssetImportRequest(ApiModel):
@@ -82,7 +76,6 @@ class AssetImportRequest(ApiModel):
 
     name: str = Field(..., min_length=1, description="Asset title.")
     path: str = Field(..., min_length=1, description="Workspace-relative path of the file.")
-    action: Literal["copy", "reference"] = "copy"
 
 
 def _require_writable(request: Request) -> None:
@@ -117,15 +110,10 @@ def import_project_asset(
         raise HTTPException(422, f"{body.path!r} is not a file in the served directory")
     project = workspace.get_project(project_id)
     try:
-        asset = project.data_assets.import_asset(
-            body.name,
-            source,
-            action=body.action,
-            meta={"role": "import"},
-        )
+        asset = project.import_asset(body.name, source, tags={"role": "import"})
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return ManagedAssetResponse.from_model(asset, len(project.data_assets.versions(asset.id)))
+    return ManagedAssetResponse.from_model(asset)
 
 
 @router.get("/{project_id}/assets/{asset_id}", response_model=ManagedAssetResponse)
@@ -139,33 +127,14 @@ def get_project_asset(
         asset = project.assets.get(asset_id)
     except KeyError:
         raise AssetNotFoundError(asset_id) from None
-    return ManagedAssetResponse.from_model(asset, len(project.assets.versions(asset.id)))
-
-
-@router.get(
-    "/{project_id}/assets/{asset_id}/versions",
-    response_model=list[AssetVersionResponse],
-)
-def list_project_asset_versions(
-    project_id: str,
-    asset_id: str,
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> list[AssetVersionResponse]:
-    """List immutable versions of a Project Asset."""
-    project = workspace.get_project(project_id)
-    try:
-        project.assets.get(asset_id)
-    except KeyError:
-        raise AssetNotFoundError(asset_id) from None
-    return [
-        AssetVersionResponse.from_model(version) for version in project.assets.versions(asset_id)
-    ]
+    return ManagedAssetResponse.from_model(asset)
 
 
 @router.get("/{project_id}/assets/{asset_id}/download")
 def download_project_asset(project_id: str, asset_id: str, workspace=Depends(get_workspace)):  # noqa: ANN001, ANN201
     project = workspace.get_project(project_id)
     try:
+        asset = project.assets.get(asset_id)
         payload = project.assets.payload_path(asset_id)
     except InvalidRefError:
         raise
@@ -173,10 +142,8 @@ def download_project_asset(project_id: str, asset_id: str, workspace=Depends(get
         raise AssetNotFoundError(asset_id) from None
     if not payload or not workspace.fs.exists(payload) or workspace.fs.is_dir(payload):
         raise AssetNotFoundError(asset_id)
-    versions = project.assets.versions(asset_id)
-    media_type = versions[-1].media_type if versions else None
     return StreamingResponse(
         iter_file_chunks(workspace.fs, payload, size=workspace.fs.getsize(payload)),
-        media_type=media_type or "application/octet-stream",
+        media_type=asset.media_type or "application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{asset_id}"'},
     )

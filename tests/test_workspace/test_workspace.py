@@ -149,7 +149,7 @@ class TestWorkspaceFind:
     def test_each_kind_resolves_to_that_id(self, tmp_path: Path) -> None:
         ws, project, experiment, run = _lab(tmp_path)
         with run.start() as ctx:
-            art = ctx.emit_artifact("hello", name="note.txt")
+            art = ctx.register("hello", title="note.txt")
             execution_id = ctx.id
         assert execution_id == "e01"
         assert ws.find(MolabRef(project_id=project.id)).id == project.id
@@ -160,9 +160,9 @@ class TestWorkspaceFind:
         )
         assert execution is not None
         assert execution.id == execution_id
-        artifact = ws.find(MolabRef(experiment_id=experiment.id, run_id="r1", artifact_id=art.id))
-        assert artifact is not None
-        assert artifact.id == art.id
+        found = ws.find(MolabRef(asset_id=art.id))
+        assert found is not None
+        assert found.id == art.id
 
     def test_qualified_run_refs_distinguish_same_id(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "lab", name="Lab")
@@ -206,13 +206,11 @@ class TestWorkspaceFind:
         assert exc_info.value.segment == "execution"
         assert exc_info.value.entity_id == "e09"
 
-    def test_missing_artifact(self, tmp_path: Path) -> None:
-        ws, _project, experiment, run = _lab(tmp_path)
-        with run.start():
-            pass
+    def test_missing_asset(self, tmp_path: Path) -> None:
+        ws, _project, _experiment, _run = _lab(tmp_path)
         with pytest.raises(RefNotFoundError) as exc_info:
-            ws.find(MolabRef(experiment_id=experiment.id, run_id=run.id, artifact_id="missing"))
-        assert exc_info.value.segment == "artifact"
+            ws.find(MolabRef(asset_id="missing"))
+        assert exc_info.value.segment == "asset"
 
 
 class TestWorkspaceIdentity:
@@ -308,13 +306,17 @@ class TestWorkspaceFindAssets:
 
     def test_scope_kind_matches_the_import_site(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "lab", name="Lab")
-        src = tmp_path / "hello.txt"
-        src.write_bytes(b"hello\n")
-        root_asset = ws.data_assets.import_asset("root", src, action="reference")
+        root_src = tmp_path / "root.txt"
+        root_src.write_bytes(b"root\n")
+        project_src = tmp_path / "project.txt"
+        project_src.write_bytes(b"project\n")
+        experiment_src = tmp_path / "experiment.txt"
+        experiment_src.write_bytes(b"experiment\n")
+        root_asset = ws.assets.import_asset("root", root_src)
         project = ws.add_project("alpha")
-        project_asset = project.data_assets.import_asset("proj", src, action="reference")
+        project_asset = project.assets.import_asset("proj", project_src)
         experiment = project.add_experiment("sweep")
-        experiment_asset = experiment.data_assets.import_asset("exp", src, action="reference")
+        experiment_asset = experiment.assets.import_asset("exp", experiment_src)
         assert ws.find(f"molab:asset/{root_asset.id}").scope.kind == "workspace"
         assert ws.find(f"molab:asset/{project_asset.id}").scope.kind == "project"
         assert ws.find(f"molab:asset/{experiment_asset.id}").scope.kind == "experiment"
@@ -330,7 +332,7 @@ class TestWorkspaceFindAssets:
         project = ws.add_project("alpha")
         src = tmp_path / "hello.txt"
         src.write_bytes(b"hello\n")
-        asset = project.data_assets.import_asset("raw", src, action="copy")
+        asset = project.assets.import_asset("raw", src)
         record = next(Path(project.project_dir).glob("assets/*/"))
         dest = Path(ws.root) / "assets" / record.name
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -343,7 +345,7 @@ class TestWorkspaceFindAssets:
 
 class TestWorkspaceAssets:
     def test_returns_the_scope_repository(self, workspace: Workspace) -> None:
-        from molab.workspace.artifact_repository import AssetRepository
+        from molab.workspace.asset_repository import AssetRepository
 
         assert isinstance(workspace.assets, AssetRepository)
         assert workspace.assets.scope == workspace.scope

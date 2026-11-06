@@ -130,7 +130,7 @@ class ScientificRepository:
             ),
             Relation(predicate="partOf", object=EntityRef(id=experiment_id, type="experiment")),
         ]
-        raw_ids = record.get("input_asset_ids", [])
+        raw_ids = record.get("inputs", [])
         if isinstance(raw_ids, list):
             relations.extend(
                 Relation(predicate="uses", object=EntityRef(id=str(value), type="asset"))

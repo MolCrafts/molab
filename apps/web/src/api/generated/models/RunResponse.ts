@@ -13,6 +13,7 @@ export type RunResponse = {
     experimentId: string;
     definitionHash: string;
     experimentRevisionId: string;
+    inputs?: Array<string>;
     statusSummary: RunStatusSummaryResponse;
     created: string;
     finished?: (string | null);

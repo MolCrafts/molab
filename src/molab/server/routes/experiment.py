@@ -171,7 +171,7 @@ def get_experiment_comparison(
                 runId=run.id,
                 definitionHash=run.metadata.definition_hash,
                 experimentRevisionId=run.metadata.experiment_revision_id,
-                inputAssetIds=list(run.metadata.input_asset_ids),
+                inputs=list(run.metadata.inputs),
                 statusSummary={
                     "total": summary.total,
                     "active": summary.active,

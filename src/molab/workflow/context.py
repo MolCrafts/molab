@@ -15,7 +15,7 @@ cannot climb up from its context to the Run, the workspace, or engine
 workflow state. Loop-back and branch-routed values arrive as named task
 parameters (declared ``depends_on`` wins; trigger-carried values reach
 dep-less targets). Engine capabilities that used to be reached through
-``run_context`` — the task output directory, artifact persistence, running
+``run_context`` — the task output directory, asset registration, running
 a sub-workflow — are delivered *as inputs* by the engine, or handled by the
 engine's materialization layer after the body returns.
 
@@ -33,7 +33,7 @@ from pathlib import Path
 from molab.workspace import tracking
 from molab.workspace.tracking import BufferedMetrics, TrackedMetrics
 
-from .outputs import RegisterArtifact, RegisterMetric
+from .outputs import RegisterAsset, RegisterMetric
 from .protocols import JSONMapping
 
 
@@ -45,7 +45,7 @@ class TaskContext[StateT, InputT]:
     engine fills ``sigma`` from {upstream task outputs keyed by task name} |
     {run sweep params} | {build config}, falling back to the declared default).
     ``ctx`` exposes ``workdir``, the live ``metrics``, plus the deferred
-    ``register_artifact`` / ``register_metric`` verbs (there is no
+    ``register`` / ``register_metric`` verbs (there is no
     ``ctx.inputs`` / ``ctx.config``).
 
     Attributes:
@@ -62,7 +62,7 @@ class TaskContext[StateT, InputT]:
     _inputs: InputT
     _config: JSONMapping
     _workdir: Path | None
-    _pending: list[RegisterArtifact | RegisterMetric]
+    _pending: list[RegisterAsset | RegisterMetric]
     _buffered: BufferedMetrics | None
     __slots__ = ("_buffered", "_config", "_inputs", "_pending", "_workdir")
 
@@ -96,7 +96,7 @@ class TaskContext[StateT, InputT]:
         ``scalar`` / ``histogram`` / ``text`` / ``image_ref`` / ``json`` /
         ``image``. Under an execution this is the execution's own writer
         (``molab.workspace.tracking.current().metrics``): each record lands in
-        ``executions/eNN/artifacts/metrics.mlp.jsonl`` when it is written,
+        ``executions/eNN/metrics.mlp.jsonl`` when it is written,
         tagged ``tags.task`` with this task's name, and a node-cache hit
         replays the task's records into the new attempt. Without molab it is
         a :class:`~molab.workspace.tracking.BufferedMetrics` that keeps the
@@ -111,39 +111,27 @@ class TaskContext[StateT, InputT]:
             object.__setattr__(self, "_buffered", buffered)
         return buffered
 
-    def register_artifact(
+    def register(
         self,
         data: Path | bytes | dict | list | str,
         *,
-        name: str | None = None,
+        title: str,
         mime: str | None = None,
         tags: dict[str, str] | None = None,
-        asset: str | None = None,
-    ) -> RegisterArtifact:
-        """Record intent to publish *data* as a run artifact.
+    ) -> RegisterAsset:
+        """Record intent to register *data* as an asset.
 
-        Does **not** touch the Run. The engine promotes the returned
-        :class:`RegisterArtifact` after the body returns. In-memory payloads
-        are written under :attr:`workdir` first (``name`` required).
-
-        Args:
-            asset: Title in the project asset library. When the body ran, the
-                engine asks the repository to file the artifact under that
-                title: a new asset, or the next version of the one asset that
-                already has it. The same bytes do not add a version. A title
-                shared by two assets fails the task. A cache hit re-emits the
-                run artifact and leaves the library as it is. Blank is the
-                same as omitting it.
+        Does **not** touch the workspace. The engine registers the returned
+        :class:`RegisterAsset` after the body returns and replaces it with
+        ``molab:asset/<id>``. In-memory payloads are written under
+        :attr:`workdir` first. *title* is a label. The same bytes registered
+        again return the existing ref.
         """
-        path = data if isinstance(data, Path) else self._write_pending_file(data, name)
-        title = asset.strip() if isinstance(asset, str) else ""
-        marker = RegisterArtifact(
-            path,
-            name=name if name is not None else path.name,
-            tags=tags,
-            mime=mime,
-            asset=title or None,
-        )
+        if not title.strip():
+            raise ValueError("register requires a title")
+        filename = title.strip()
+        path = data if isinstance(data, Path) else self._write_pending_file(data, filename)
+        marker = RegisterAsset(path, title=title.strip(), tags=tags, mime=mime)
         self._pending.append(marker)
         return marker
 
@@ -170,10 +158,10 @@ class TaskContext[StateT, InputT]:
         name: str | None,
     ) -> Path:
         if name is None:
-            raise ValueError("register_artifact: name is required when data is not a Path")
+            raise ValueError("register: a title is required when data is not a Path")
         if self._workdir is None:
             raise RuntimeError(
-                "register_artifact: in-memory data requires ctx.workdir; "
+                "register: in-memory data requires ctx.workdir; "
                 "pass a Path or run under a workspace"
             )
         target = self._workdir / name

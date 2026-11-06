@@ -57,7 +57,17 @@ clean`` empties it by age.
 """
 
 ASSET_CONTAINER = "assets"
-"""The subdir holding a host's imported assets (``asset.json`` + ``versions/``)."""
+"""The subdir holding a host's assets, one slot per directory (``asset.json`` + payload).
+
+An attempt's product is slotted by run (``<run>--<title>``); an import by title.
+"""
+
+WORKFLOW_LIB_CONTAINER = "lib"
+"""An experiment's first-party modules, imported by ``workflow.py``.
+
+A workflow that outgrows one file splits its tasks into modules here; the
+attempt's ``source/`` snapshot captures them as first-party imports.
+"""
 
 WORKFLOW_SCRIPT_FILENAME = "workflow.py"
 """An experiment's own workflow script, beside the runs it produced."""

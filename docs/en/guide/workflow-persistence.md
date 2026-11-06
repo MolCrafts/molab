@@ -101,7 +101,7 @@ Use these to group, compare, and replay runs.
                 ├── execution.json        ← status, ownership, evidence, error, seal
                 ├── alive                 ← owner heartbeat is mtime
                 ├── workflow.json         ← per-node journal: status + input/output refs
-                ├── artifacts/
+                ├── metrics.mlp.jsonl     ← evidence, beside run.log; not an asset
                 ├── out/<task>/
                 └── run.log               ← the attempt's one log
 ```

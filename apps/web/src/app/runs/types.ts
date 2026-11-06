@@ -15,7 +15,6 @@ export interface WorkspaceExecutionRow {
   finishedAt: string | null;
   durationSeconds: number | null;
   basedOnExecutionId: string | null;
-  checkpointArtifactId: string | null;
   schedulerJobId: string | null;
   backend: string | null;
   backendMetadata: Record<string, string>;
@@ -55,7 +54,8 @@ export interface WorkspaceRunRow {
   experimentName: string;
   definitionHash: string;
   experimentRevisionId: string;
-  inputAssetIds: string[];
+  /** Asset ids this run opens. */
+  inputs: string[];
   targetHint: string | null;
   statusSummary: RunStatusSummary;
   parameters: Record<string, unknown>;

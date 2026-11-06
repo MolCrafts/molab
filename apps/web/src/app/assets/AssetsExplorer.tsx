@@ -14,7 +14,7 @@ import { EMPTY_COPY, StatusBadge } from "@/app/components/entity";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
 import { type TreeNode, TreeView } from "@/app/panels/TreeView";
 import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
-import { assetDetailQueryOptions, assetVersionsQueryOptions } from "@/app/state/entityQueries";
+import { assetDetailQueryOptions } from "@/app/state/entityQueries";
 import type { AssetSummary } from "@/app/types";
 import { LeftExplorer } from "@/components/layout/ExplorerShell";
 import { WorkbenchIconAction } from "@/components/workbench";
@@ -179,7 +179,6 @@ export const AssetsExplorer = (
       prefetchRenderer("asset");
       if (!asset.projectId) return;
       void queryClient.prefetchQuery(assetDetailQueryOptions(asset.projectId, asset.id));
-      void queryClient.prefetchQuery(assetVersionsQueryOptions(asset.projectId, asset.id));
     },
   });
   const actions = (

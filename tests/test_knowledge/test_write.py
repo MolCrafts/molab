@@ -185,7 +185,7 @@ class TestMountNote:
 
 class TestNormalizeSources:
     def test_a_source_ref_passes_through(self, experiment: Any) -> None:
-        ref = SourceRef(kind="artifact", ref="deadbeef")
+        ref = SourceRef(kind="asset", ref="molab:asset/deadbeef")
 
         assert SourceRef.normalize([ref], default_host=experiment) == [ref]
 
@@ -280,7 +280,7 @@ class TestWriteKnowledgePath:
         write_knowledge(lab, name="Lab Notes", of=Note, created_by="t", text="")
         assert item.read() == "# Lab\n"
 
-    def test_history_records_a_create_once_and_never_blocks(
+    def test_history_records_every_write_and_never_blocks(
         self, lab: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from molab.knowledge.write import write_knowledge
@@ -296,8 +296,8 @@ class TestWriteKnowledgePath:
         monkeypatch.setattr(GitHistory, "record", spy)
         write_knowledge(lab, name="Lab Notes", of=Note, created_by="t", text="# Lab\n")
         assert calls == [("knowledge.created", "Note", "knowledges/lab-notes.md")]
-        write_knowledge(lab, name="Lab Notes", of=Note, created_by="t", text="# Lab\n")
-        assert calls == [("knowledge.created", "Note", "knowledges/lab-notes.md")]
+        write_knowledge(lab, name="Lab Notes", of=Note, created_by="t", text="# Lab 2\n")
+        assert calls[-1] == ("knowledge.rewritten", "Note", "knowledges/lab-notes.md")
 
         wiki = tmp_path / "wiki"
         wiki.mkdir()
@@ -311,3 +311,35 @@ class TestWriteKnowledgePath:
         monkeypatch.setattr(GitHistory, "record", boom)
         made = write_knowledge(lab, name="Still", of=Note, created_by="t", text="# Still\n")
         assert made.path.name == "still.md"
+
+    def test_replaces_deletes_the_old_document_and_relinks_its_readers(self, lab: Any) -> None:
+        from molab.knowledge.write import write_knowledge
+
+        old = write_knowledge(lab, name="Fragments v3", of=Note, created_by="t", text="# v3\n")
+        reader = write_knowledge(
+            lab,
+            name="Reader",
+            of=Note,
+            created_by="t",
+            text="- [@derived_from fragments](fragments-v3.md)\n",
+        )
+        new = write_knowledge(
+            lab,
+            name="Fragments",
+            of=Note,
+            created_by="t",
+            text="# current\n",
+            replaces=[old.path],
+        )
+        assert not Path(str(old.path)).exists()
+        assert Path(str(new.path)).exists()
+        assert "(fragments.md)" in Path(str(reader.path)).read_text(encoding="utf-8")
+
+    def test_replaces_refuses_the_document_being_written(self, lab: Any) -> None:
+        from molab.knowledge.write import write_knowledge
+
+        item = write_knowledge(lab, name="Plan", of=Note, created_by="t", text="# p\n")
+        with pytest.raises(ValueError, match="being written"):
+            write_knowledge(
+                lab, name="Plan", of=Note, created_by="t", text="# q\n", replaces=[item.path]
+            )

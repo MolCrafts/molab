@@ -60,7 +60,6 @@ SURVIVING_NAMES = (
     "Folder",
     "Asset",
     "AssetScope",
-    "AssetVersion",
     "FileStore",
     "Params",
     "ComputeTarget",

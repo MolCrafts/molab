@@ -1,32 +1,36 @@
 """Public-API goldens for knowledge-crossref-04-services.
 
-Hard-coded: the shared knowledge binding (``run_failure.harvest_run`` is
-``molab.knowledge.harvest.harvest_run``), the failure Report as a **file**
-(``knowledges/failure-analysis-<run.id>.md``) with its ``run`` source, and the
-one projected :class:`KnowledgeRef` row for a mounted Note. The terminal Run is
+Hard-coded: a failure write-up is ``Report.harvest`` (there is no second
+verb), the Report as a **file** (``knowledges/report-<run.id>.md``) whose
+prose is the caller's narrative and whose source is the run, and the one
+projected :class:`KnowledgeRef` row for a mounted Note. The terminal Run is
 produced in-process (``run.start()`` + ``mark_failed``) — no subprocess, no
-third-party runtime.
+third-party runtime. The execution error is not copied into the document.
 """
 
 from __future__ import annotations
 
-import inspect
+import importlib.util
 import tempfile
 from pathlib import Path
 
 from molab.knowledge import Report
 from molab.knowledge.write import mount_note
-from molab.services import run_failure
 from molab.services.knowledge_context import KnowledgeRef, context_with_knowledge
-from molab.services.run_failure import analyze_run_failure
 from molab.workspace import Workspace
 from molab.workspace.refs import ref_of
 
 
+def _prose(body: str) -> str:
+    """The narrative. Trailing ``- [@…]`` lines are the source edges."""
+    lines = body.splitlines()
+    while lines and (not lines[-1].strip() or lines[-1].startswith("- [@")):
+        lines.pop()
+    return "\n".join(lines).strip()
+
+
 def main() -> None:
-    # The failure Report is knowledge's own harvest, not a services writer.
-    assert run_failure.Report is Report
-    assert "Report.harvest(" in inspect.getsource(analyze_run_failure)
+    assert importlib.util.find_spec("molab.services.run_failure") is None
 
     with tempfile.TemporaryDirectory() as raw:
         workspace = Workspace(root=Path(raw) / "lab", name="Lab")
@@ -38,12 +42,14 @@ def main() -> None:
             (ctx.execution_dir / "error.txt").write_text(marker + "\n", encoding="utf-8")
             ctx.mark_failed(marker)
 
-        item = analyze_run_failure(run, created_by="regression")
+        item = Report.harvest(
+            run, created_by="regression", narrative="The cutoff exceeded the box."
+        )
         assert type(item) is Report
-        assert item.name == f"failure-analysis-{run.id}"
-        assert marker in item.read()
-        # A Knowledge document is a file: no directory, no report.json sidecar.
-        assert item.path.name == f"failure-analysis-{run.id}.md"
+        assert item.name == f"report-{run.id}"
+        assert _prose(item.read()) == "The cutoff exceeded the box."
+        assert marker not in item.read()
+        assert item.path.name == f"report-{run.id}.md"
         assert item.path.is_file()
         assert any(s.kind == "run" and s.ref == str(ref_of(run)) for s in item.sources)
 

@@ -10,7 +10,7 @@ import platform
 import sys
 import threading
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -20,17 +20,14 @@ from mollog import get_logger
 from molab._typing import JSONValue, TaskOutput
 from molab.profile import ProfileConfig
 
-from .artifact_repository import RESERVED_ARTIFACT_DIR, ArtifactRepository
 from .domain import (
-    RESULT_SEMANTIC_TYPE,
-    Artifact,
     Asset,
     Execution,
     ExecutionMode,
+    ExecutionOrigin,
     ExecutionStatus,
 )
 from .execution_dirs import (
-    ARTIFACTS,
     CHECKPOINTS,
     OUT,
     WORK,
@@ -46,10 +43,9 @@ from .run_heartbeat import HEARTBEAT_INTERVAL_SECONDS, touch_alive, unlink_alive
 from .tracking import (
     EXECUTION_DIR_ENV,
     MANIFEST,
-    METRICS_SEMANTIC_TYPE,
     STAGED_DIR,
     TASK_ENV,
-    StagedArtifact,
+    StagedFile,
     StdioFiles,
     Stream,
     TrackedMetrics,
@@ -70,6 +66,18 @@ if TYPE_CHECKING:
     from .run import Run
 
 _logger = get_logger(__name__)
+
+
+def _register_filename(title: str, data: object) -> str:
+    """A filename for in-memory bytes registered under *title*."""
+    from .naming import entity_slug
+
+    slug = entity_slug(title, fallback="asset")
+    if isinstance(data, (bytes, bytearray)):
+        return slug
+    if isinstance(data, (dict, list)):
+        return f"{slug}.json"
+    return f"{slug}.txt"
 
 
 def _system_agent() -> AgentRef:
@@ -255,7 +263,7 @@ class _ExecutionLogs:
 
 
 class _CheckpointWriter:
-    """A checkpoint is an explicitly emitted Artifact with checkpoint semantics."""
+    """Write a resumable payload under ``checkpoints/``. It is not an asset."""
 
     def __init__(self, context: ExecutionContext) -> None:
         self._context = context
@@ -266,15 +274,12 @@ class _CheckpointWriter:
         *,
         data: dict[str, JSONValue] | None = None,
         tags: dict[str, str] | None = None,
-    ) -> Artifact:
+    ) -> Path:
+        del tags
         label = name or f"checkpoint-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}"
         path = self._context.get_dir(CHECKPOINTS.name) / f"{label}.json"
-        recorded_name = f"{label}.json"
-        for existing in self._context._executions.get(self._context.id).artifacts:
-            if existing.semantic_type == "checkpoint" and existing.name == recorded_name:
-                raise ValueError(
-                    f"checkpoint label {label!r} is already recorded by Artifact {existing.id}"
-                )
+        if path.exists():
+            raise ValueError(f"checkpoint label {label!r} already exists")
         path.write_text(
             json.dumps(
                 {
@@ -287,13 +292,7 @@ class _CheckpointWriter:
             ),
             encoding="utf-8",
         )
-        return self._context.emit_artifact(
-            path,
-            name=path.name,
-            media_type="application/json",
-            semantic_type="checkpoint",
-            metadata=cast("dict[str, JSONValue]", {"tags": tags or {}}),
-        )
+        return path
 
 
 class ExecutionContext:
@@ -328,8 +327,8 @@ class ExecutionContext:
         execution_id: A *preallocated* attempt, i.e. one already created by
             ``run._create_execution(...)`` (for example by a scheduler
             submitter) and still QUEUED. Its creation facts are fixed, so
-            passing *mode*, *predecessor*, *checkpoint*
-            or *bypass_cache* alongside it raises ``ValueError``.
+            passing *mode*, *predecessor*, or *bypass_cache* alongside it
+            raises ``ValueError``.
         mode: How a newly created attempt relates to earlier ones.
         predecessor: The predecessor of a newly created attempt.
         checkpoint: The checkpoint a newly created ``resume``
@@ -351,7 +350,6 @@ class ExecutionContext:
         execution_id: str | None = None,
         mode: ExecutionMode = ExecutionMode.INITIAL,
         predecessor: str | None = None,
-        checkpoint: str | None = None,
         created_by: AgentRef | None = None,
         bypass_cache: bool = False,
         workflow_hash: str | None = None,
@@ -362,7 +360,6 @@ class ExecutionContext:
                 for name, given in (
                     ("mode", mode is not ExecutionMode.INITIAL),
                     ("predecessor", predecessor is not None),
-                    ("checkpoint", checkpoint is not None),
                     ("bypass_cache", bypass_cache),
                 )
                 if given
@@ -383,7 +380,6 @@ class ExecutionContext:
         self._execution_id: str | None = None
         self._mode = mode
         self._based_on_execution_id = predecessor
-        self._checkpoint_artifact_id = checkpoint
         self._bypass_cache = bypass_cache
         self._workflow_hash = workflow_hash
         self._execution_dir: Path | None = None
@@ -394,7 +390,7 @@ class ExecutionContext:
         self._workflow_succeeded = False
         self._entered = False
         self._results: dict[str, TaskOutput] = {}
-        self._emit_lock = threading.Lock()
+        self._register_lock = threading.Lock()
         self._heartbeat_stop: threading.Event | None = None
         self._heartbeat_thread: threading.Thread | None = None
         self._metrics: TrackedMetrics | None = None
@@ -405,14 +401,12 @@ class ExecutionContext:
         self._seal_at_exit_registered = False
         self._borrows = 0
         workspace = run.experiment.project.workspace
-        self._artifacts = ArtifactRepository(workspace.root, fs=workspace.fs)
         self._executions = ExecutionRepository(
             workspace.root,
             run.run_dir,
             run_id=run.id,
             project_id=run.experiment.project.id,
             fs=workspace.fs,
-            artifacts=self._artifacts,
         )
 
     @property
@@ -540,24 +534,21 @@ class ExecutionContext:
 
     @property
     def metrics(self) -> TrackedMetrics:
-        """This attempt's metrics, written live to ``artifacts/metrics.mlp.jsonl`` (D93).
+        """This attempt's metrics, written live to ``metrics.mlp.jsonl`` (D93).
 
         ``scalar`` / ``histogram`` / ``text`` / ``image_ref`` / ``json``, plus
-        ``image`` (archived as an Artifact, then referenced). A record
-        written inside a workflow task carries ``tags.task``. Built on first
-        use; the WAL file appears with the first record.
+        ``image`` (registered as an asset, then referenced by its ref). A
+        record written inside a workflow task carries ``tags.task``. Built
+        on first use; the WAL file appears with the first record.
         """
         if self._metrics is None:
-            # Into the versioned tier: a metrics WAL is small and is the
-            # record of what the run measured. Appended through a store
-            # rooted at the attempt so the tier is part of the path.
             store = FileStore(self.execution_dir, fs=self.run._disk())
             sink = create_metrics_writer(
                 self.execution_dir,
-                lambda name, line: store.append(Path(ARTIFACTS.name) / name, line),
+                lambda name, line: store.append(Path(name), line),
             )
             self._metrics = TrackedMetrics(
-                sink, emit_artifact=self.emit_artifact, execution_dir=self.execution_dir
+                sink, register=self.register, execution_dir=self.execution_dir
             )
         return self._metrics
 
@@ -568,10 +559,10 @@ class ExecutionContext:
         mixed — the inputs it generated, its intermediates, and the
         trajectory — and those cannot be separated from outside the body.
         They land in the tier that is *kept*; anything worth citing is then
-        promoted into ``artifacts/`` by ``register_artifact``.
+        registered as an asset by ``ctx.register``.
 
-        ``work/`` is left to the framework's own scratch (``ctx.files``, emit
-        staging), which is genuinely disposable.
+        ``work/`` is left to the framework's own scratch (``ctx.files``),
+        which is genuinely disposable.
         """
         return self.get_dir(OUT.name, task_name)
 
@@ -706,31 +697,39 @@ class ExecutionContext:
         else:
             self.__exit__(None, None, None)
 
-    def emit_artifact(
+    def register(
         self,
         data: object,
         *,
-        name: str | None = None,
+        title: str,
         media_type: str | None = None,
         mime: str | None = None,
-        semantic_type: str | None = None,
-        declaration_id: str | None = None,
-        metadata: dict[str, JSONValue] | None = None,
         tags: dict[str, str] | None = None,
-        consumed: Sequence[Artifact | Asset | str] | None = None,
-    ) -> Artifact:
-        """Explicitly snapshot an observed output; declarations never call this."""
+    ) -> Asset:
+        """Register *data* as an asset produced by this attempt.
+
+        The bytes are copied next to the asset record, at this run's
+        experiment. The same bytes registered again return the existing
+        asset. *title* is a label. The task's working file is left in place.
+
+        Returns:
+            The asset. ``asset.ref`` is ``molab:asset/<id>``.
+
+        Raises:
+            RuntimeError: Called outside an execution.
+            ValueError: In-memory *data* has no *title*.
+        """
         if not self._entered:
-            raise RuntimeError("emit_artifact must be called inside an ExecutionContext")
+            raise RuntimeError("register must be called inside an ExecutionContext")
+        if not title.strip():
+            raise ValueError("register requires a title")
         source: Path
         if isinstance(data, Path):
             source = data
         elif isinstance(data, str) and Path(data).exists():
             source = Path(data)
         else:
-            if name is None:
-                raise ValueError("emit_artifact requires name for in-memory data")
-            source = self.get_dir(WORK.name) / name
+            source = self.get_dir(WORK.name) / _register_filename(title, data)
             source.parent.mkdir(parents=True, exist_ok=True)
             if isinstance(data, (bytes, bytearray)):
                 source.write_bytes(bytes(data))
@@ -738,67 +737,22 @@ class ExecutionContext:
                 source.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
             else:
                 source.write_text(str(data), encoding="utf-8")
-        return self._emit(
-            source,
-            name=name,
-            media_type=media_type or mime,
-            semantic_type=semantic_type,
-            declaration_id=declaration_id,
-            metadata=metadata,
-            tags=tags,
-            consumed=consumed,
-            reserved=False,
+        origin = ExecutionOrigin(
+            project_id=self.run.experiment.project.id,
+            experiment_id=self.run.experiment.id,
+            run_id=self.run.id,
+            execution_id=self.id,
+            task=current_task() or self._active_task_id,
         )
-
-    def _emit(
-        self,
-        source: Path,
-        *,
-        name: str | None = None,
-        media_type: str | None = None,
-        semantic_type: str | None = None,
-        declaration_id: str | None = None,
-        metadata: dict[str, JSONValue] | None = None,
-        tags: dict[str, str] | None = None,
-        consumed: Sequence[Artifact | Asset | str] | None = None,
-        reserved: bool,
-    ) -> Artifact:
-        """Promote *source* and record it on this attempt, under one lock.
-
-        ``reserved`` is the only caller that may land in ``artifacts/_molab/``
-        or use the result semantic type. The public emit always passes false.
-        """
-        inputs = tuple(self._entity_id(item) for item in (consumed or ()))
-        combined_metadata: dict[str, JSONValue] = dict(metadata or {})
-        if tags:
-            combined_metadata["tags"] = cast("JSONValue", dict(tags))
-        # The task scope is per task body, so it is right under parallelism;
-        # the slot is only the fallback outside one.
-        task_id = current_task() or self._active_task_id
-        if task_id:
-            combined_metadata["task_id"] = task_id
-        if inputs:
-            self._executions.add_observed_inputs(self.id, inputs)
-        with self._emit_lock:
-            recorded = self._executions.get(self.id).artifacts
-            artifact = self._artifacts.emit(
+        with self._register_lock:
+            return self.run.experiment.assets.register(
                 source,
-                execution_dir=self.execution_dir,
-                execution_id=self.id,
-                run_id=self.run.id,
-                project_id=self.run.experiment.project.id,
+                title=title,
                 created_by=self._created_by,
-                name=name,
-                media_type=media_type,
-                semantic_type=semantic_type,
-                declaration_id=declaration_id,
-                input_entity_ids=inputs,
-                metadata=combined_metadata,
-                recorded=recorded,
-                reserved=reserved,
+                origin=origin,
+                media_type=media_type or mime,
+                tags=tags,
             )
-            self._executions.add_artifact(self.id, artifact)
-            return artifact
 
     def register_metric(
         self,
@@ -814,7 +768,7 @@ class ExecutionContext:
         """Snapshot one result in memory until this context's ``__exit__``.
 
         Values persist only when the context exits: ``__exit__`` writes them
-        to the result Artifact ``artifacts/_molab/results.json``. A driver
+        to an asset titled ``results``. A driver
         killed before ``__exit__`` loses them. ``ctx.checkpoint`` is the
         durable path for data that must outlive the process.
 
@@ -867,7 +821,6 @@ class ExecutionContext:
         state = self.run._create_execution(
             mode=self._mode,
             predecessor=self._based_on_execution_id,
-            checkpoint=self._checkpoint_artifact_id,
             bypass_cache=self._bypass_cache,
             profile_config=self._requested_profile_config,
             created_by=self._created_by,
@@ -971,49 +924,25 @@ class ExecutionContext:
                 _logger.warning(f"could not close stdio of execution {self.id}", exc_info=True)
 
     def _register_metrics(self) -> None:
-        """Register the metrics WAL as an Artifact when anything wrote to it.
-
-        Written in this process (any record type), or by a child attached to
-        this attempt (the file exists and is not empty, D94). An attempt
-        sealed early is left untouched, with one ``run.log`` line.
-        """
+        """Flush the metrics WAL. The file is evidence, not an asset."""
         if self._metrics is not None:
             self._metrics.flush()
-        metrics_path = self.execution_dir / ARTIFACTS.name / "metrics.mlp.jsonl"
-        if not metrics_path.is_file():
-            return
-        touched = self._metrics is not None and self._metrics.touched
-        if not touched and metrics_path.stat().st_size == 0:
-            return
-        if self._executions.get(self.id).sealed:
-            self.log("run").append(
-                f"metrics not recorded: Execution {self.id} was sealed before exit"
-            )
-            return
-        self.emit_artifact(
-            metrics_path,
-            media_type="application/x-ndjson",
-            semantic_type=METRICS_SEMANTIC_TYPE,
-        )
 
     def _fold_staged(self) -> None:
-        """Record what child processes staged under ``work/_molab/`` (D94).
+        """Register files a child staged under ``work/_molab/`` (D94).
 
-        Each manifest entry's bytes move from ``work/_molab/staged/`` to
-        ``artifacts/<name>`` and are recorded through :meth:`emit_artifact`
-        with their name, types and tags, plus ``metadata.task`` and
-        ``metadata.staged_by="child"``. An entry that cannot be recorded is
-        logged in ``run.log`` and does not fail the attempt.
+        Each manifest entry is registered as an asset. An entry that cannot
+        be registered is logged in ``run.log`` and does not fail the attempt.
         """
         entries = list(manifest_entries(self.execution_dir))
         if not entries:
             return
         if self._executions.get(self.id).sealed:
             self.log("run").append(
-                f"staged artifacts not recorded: Execution {self.id} was sealed before exit"
+                f"staged files not recorded: Execution {self.id} was sealed before exit"
             )
             return
-        self.set_active_task(None)
+        previous = self._active_task_id
         for number, entry in entries:
             try:
                 if isinstance(entry, ValueError):
@@ -1021,32 +950,21 @@ class ExecutionContext:
                 self._fold_one(entry)
             except Exception as exc:
                 self.log("run").append(
-                    f"staged artifact {MANIFEST}:{number} not recorded: {type(exc).__name__}: {exc}"
+                    f"staged file {MANIFEST}:{number} not recorded: {type(exc).__name__}: {exc}"
                 )
+        self._active_task_id = previous
 
-    def _fold_one(self, entry: StagedArtifact) -> None:
+    def _fold_one(self, entry: StagedFile) -> None:
         staged = self.execution_dir / entry.staged
         if staged.parent != self.execution_dir / STAGED_DIR or not staged.exists():
             raise FileNotFoundError(f"{entry.staged} is not a staged file")
-        target = self.execution_dir / entry.path
-        if target.exists():
-            raise FileExistsError(f"{entry.path} already exists")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        staged.rename(target)
-        try:
-            self.emit_artifact(
-                target,
-                name=entry.name,
-                media_type=entry.media_type,
-                semantic_type=entry.semantic_type,
-                metadata=entry.metadata("child"),
-            )
-        except BaseException:
-            target.rename(staged)
-            raise
+        self._active_task_id = entry.task
+        tags = dict(entry.tags)
+        tags["staged_by"] = "child"
+        self.register(staged, title=entry.name, media_type=entry.media_type, tags=tags)
 
     def _emit_results(self) -> None:
-        """Write in-memory results once, unless the attempt was sealed early.
+        """Register in-memory results as an asset titled ``results``.
 
         A sealed attempt is left untouched: one ``run.log`` line records why,
         and this method does not raise, so ``__exit__`` can still finish.
@@ -1061,21 +979,9 @@ class ExecutionContext:
             )
             return
         self.set_active_task(None)
-        path = self.get_dir(WORK.name, RESERVED_ARTIFACT_DIR) / "results.json"
+        path = self.get_dir(WORK.name) / "results.json"
         path.write_text(json.dumps(self._results, indent=2, sort_keys=True), encoding="utf-8")
-        self._emit(
-            path,
-            name="results.json",
-            media_type="application/json",
-            semantic_type=RESULT_SEMANTIC_TYPE,
-            reserved=True,
-        )
-
-    @staticmethod
-    def _entity_id(value: Artifact | Asset | str) -> str:
-        if isinstance(value, str):
-            return value
-        return value.id
+        self.register(path, title="results", media_type="application/json")
 
     def _start_heartbeat(self) -> None:
         touch_alive(self.run, self.id)

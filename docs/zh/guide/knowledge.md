@@ -134,22 +134,42 @@ for edge in note.links():
 - `write_knowledge(host, *, name, of, sources, created_by, text, cite=(), title="")`
   —— 写一份有出处的文档，按 `name` 幂等。
 
-`harvest_run` 把一个终态 Run 的结果收获成它 experiment 之下的知识：
+`Finding.harvest`（`Observation`、`Report` 上是同一个方法）把一个终态 Run 的结果
+收获成它 experiment 之下的知识：
 
 ```python
-from molab.knowledge import Finding, harvest_run
+from molab.knowledge import Finding
 
-finding = harvest_run(
+finding = Finding.harvest(
     run,
-    of=Finding,
     narrative="Tg rose with cooling rate.",
     created_by="lin",
 )
 ```
 
-只有**终态** Run（`succeeded` / `failed` / `cancelled`）才能收获，且 `narrative`
-必须非空 —— 收获是解释，不是归档；原始记录已经在 `run.json` 与 Run 的 artifacts 里。
-`created_by` 是必填的关键字参数。`of` 通常是 `Finding`、`Observation` 或 `Report`。
+只有**终态** Run（`succeeded` / `failed` / `cancelled` / `interrupted`）才能收获，
+且 `narrative` 必须非空 —— 收获是解释，不是归档。原始记录已经在 Run 的 `index.md`
+和它登记的 asset 里。`created_by` 是必填的关键字参数。
+
+正文的散文就是这段解释。写出时会为每条出处追加一行链接，不复制状态、参数、错误或结果值。
+收获引用最近一次 attempt 登记的每个 asset（`molab:asset/<id>`）。
+`results` 里的值若能在这些文件里对上唯一一个点，出处的 span 就是这个点
+（JSON 字段 `/loss`，或序列 `loss@10000`）。没有登记 asset、对不上、或对上不止一个点，
+都会拒绝，并且什么都不写。下一次运行的 `inputs` 就是文档的 `inputs`。
+`read_cited` 读取 span 上的值，`read` 返回正文。工作流不导入知识。
+
+```python
+follow = experiment.add_run(inputs=finding.inputs)
+finding.read_cited("/loss")  # 0.08，span 上的值
+```
+
+`GeneratedParts(run).list()` 只列出某次 attempt 登记的图片 asset（媒体类型
+`image/*`，或带 `part` 标签）。它不写第二份文档。叙事要用这张图时，在收获里引用
+那个 asset。
+
+```console
+$ molab knowledge parts <run-id> --path .
+```
 
 ## 分层
 

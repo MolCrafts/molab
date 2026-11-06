@@ -34,8 +34,8 @@ tool) to discover the registered set.
 ### Sidecar Contract Layer
 
 5. **[task_io.json](task_io.json)** - TaskIO schema
-   - Per-task declared inputs / outputs / artifacts (typed I/O)
-   - Defines `TaskInputSpec`, `TaskOutputSpec`, `ArtifactDecl` sub-schemas
+   - Per-task declared inputs / outputs / files (typed I/O)
+   - Defines `TaskInputSpec`, `TaskOutputSpec`, `DeclaredFile` sub-schemas
    - Optional in the contract; when omitted, downstream code generators see an empty surface for that task
 
 6. **[workflow_contract.json](workflow_contract.json)** - WorkflowContract schema
@@ -54,7 +54,7 @@ workflow.json
 ├── $ref: workflow_metadata.json (for metadata object)
 └── $ref: workflow_contract.json (for the OPTIONAL workflow_contract section)
                 ├── $ref: task_io.json (for each task_io entry)
-                │       ├── TaskInputSpec / TaskOutputSpec / ArtifactDecl (inline definitions)
+                │       ├── TaskInputSpec / TaskOutputSpec / DeclaredFile (inline definitions)
                 └── ValidationCheck (inline definition; enum of check ids + severity)
 ```
 
@@ -191,7 +191,7 @@ print('✓ Valid workflow')
 | `task_id` | string | Yes | Task this declaration applies to |
 | `inputs` | array[TaskInputSpec] | No | Declared inputs (default `[]`) |
 | `outputs` | array[TaskOutputSpec] | No | Declared outputs (default `[]`) |
-| `artifacts` | array[ArtifactDecl] | No | Declared on-disk artifacts (default `[]`) |
+| `files` | array[DeclaredFile] | No | Declared on-disk files (default `[]`) |
 
 ### WorkflowContract
 
@@ -206,10 +206,10 @@ print('✓ Valid workflow')
 | Id | Default severity | Spec-aware? | What it asserts |
 |----|------------------|-------------|------------------|
 | `no_orphan_tasks` | error | yes | Every spec task has a TaskIO entry; every TaskIO references a real spec task |
-| `unique_artifact_paths` | error | no | No duplicate artifact paths across tasks |
+| `unique_file_paths` | error | no | No duplicate file paths across tasks |
 | `acyclic_data_edges` | error | no | The `inputs[].source` dep graph is acyclic |
 | `every_input_has_source` | error | yes | Every input has a `source` (entry-task inputs exempt when spec is provided) |
-| `produced_by_resolves` | error | no | Every artifact's `produced_by` references a known `task_id` |
+| `produced_by_resolves` | error | no | Every file's `produced_by` references a known `task_id` |
 | `outputs_match_downstream_inputs` | warning | no | Each input's `(source, name)` matches an upstream output |
 
 ## Status Values

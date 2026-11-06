@@ -4,6 +4,7 @@
 /* eslint-disable */
 import type { WorkflowDocumentRequest } from '../models/WorkflowDocumentRequest';
 import type { WorkflowDocumentResponse } from '../models/WorkflowDocumentResponse';
+import type { WorkflowDryRunResponse } from '../models/WorkflowDryRunResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
@@ -75,6 +76,40 @@ export class WorkflowService {
         });
     }
     /**
+     * Dry Run Workflow Document
+     * Walk the stored workflow IR without running a task or importing code.
+     *
+     * Reports the task waves, the declared branches, each task's dependencies
+     * and the runs the experiment would dispatch (its declared runs). 404 when
+     * no ``workflow.ir.json`` is stored, 400 when the IR does not compile.
+     * Nothing is written.
+     * @param projectId
+     * @param experimentId
+     * @param molabSession
+     * @returns WorkflowDryRunResponse Successful Response
+     * @throws ApiError
+     */
+    public static dryRunWorkflowDocument(
+        projectId: string,
+        experimentId: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<WorkflowDryRunResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/projects/{project_id}/experiments/{experiment_id}/workflow/dry-run',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Put Workflow Document
      * Bind a normalized workflow IR as the document kind.
      *
@@ -133,6 +168,43 @@ export class WorkflowService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/workflow',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+                'ws': ws,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Dry Run Workflow Document
+     * Walk the stored workflow IR without running a task or importing code.
+     *
+     * Reports the task waves, the declared branches, each task's dependencies
+     * and the runs the experiment would dispatch (its declared runs). 404 when
+     * no ``workflow.ir.json`` is stored, 400 when the IR does not compile.
+     * Nothing is written.
+     * @param projectId
+     * @param experimentId
+     * @param ws
+     * @param molabSession
+     * @returns WorkflowDryRunResponse Successful Response
+     * @throws ApiError
+     */
+    public static dryRunWorkflowDocumentWs(
+        projectId: string,
+        experimentId: string,
+        ws: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<WorkflowDryRunResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/workflow/dry-run',
             path: {
                 'project_id': projectId,
                 'experiment_id': experimentId,

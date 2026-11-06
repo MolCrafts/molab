@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
     from molab.param import ParamSpace
 
-    from .artifact_repository import AssetRepository
+    from .asset_repository import AssetRepository
     from .project import Project
     from .runset import RunSet
     from .workspace import Workspace
@@ -462,20 +462,12 @@ class Experiment(Folder):
 
     @property
     def assets(self) -> AssetRepository:
-        """Named, versioned assets at this experiment's scope."""
-        from .artifact_repository import AssetRepository
+        """Assets owned by this experiment."""
+        from .asset_repository import AssetRepository
 
         return AssetRepository(
             cast("Workspace", self.asset_host()), self.scope, self.experiment_dir
         )
-
-    @property
-    def data_assets(self) -> AssetRepository:
-        """Alias of :attr:`assets`.
-
-        Kept because ``{scope}.data_assets.import_asset`` is a frozen CLAUDE.md contract.
-        """
-        return self.assets
 
     def declared_runs(self) -> list[Run]:
         """Runs whose parameters are the cell, not a legacy replica expansion.

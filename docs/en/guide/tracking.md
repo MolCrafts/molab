@@ -59,7 +59,7 @@ with run.start() as ctx:
 
 ## Metrics
 
-`ctx.metrics` writes measurements as the computation runs, the way TensorBoard does. Each call appends one record to the attempt's `executions/eNN/artifacts/metrics.mlp.jsonl` at once, so a chart of a running attempt is current. There is one writer per attempt, and a driver script and a workflow task reach the same one.
+`ctx.metrics` writes measurements as the computation runs, the way TensorBoard does. Each call appends one record to the attempt's `executions/eNN/metrics.mlp.jsonl` at once, beside `run.log`, so a chart of a running attempt is current. There is one writer per attempt, and a driver script and a workflow task reach the same one. The file is evidence. It is not an asset.
 
 ```python
 with run.start() as ctx:
@@ -81,7 +81,7 @@ with run.start() as ctx:
 | `image_ref(key, path, step=None, caption=None)` | `image_ref` | `{"path": ..., "caption": ...}` |
 | `image(key, data, step=None, caption=None, name=None)` | `image_ref` | as above, for an archived copy |
 
-Every method also takes `wall_time=` and `tags=`, and returns the record it wrote. `wall_time` defaults to now, in UTC. `image` archives the image first: `data` is a path to an existing file, or the image's bytes together with `name=`. It becomes an Artifact of the attempt with `semantic_type="molplot.image"`, and the `image_ref` record points at that Artifact's path (`artifacts/<name>`), so the image is kept with the attempt rather than referenced where it happened to be. Each image is its own Artifact, so give each one its own name. `image_ref` alone records a path and archives nothing. When the attempt exits, the WAL itself is registered as an Artifact (`semantic_type="molplot.metrics"`) if anything was written to it. `ctx.register_metric(key, value, step=None)` is still there and appends a scalar.
+Every method also takes `wall_time=` and `tags=`, and returns the record it wrote. `wall_time` defaults to now, in UTC. `image` registers the image as an asset first: `data` is a path to an existing file, or the image's bytes together with `name=`. The `image_ref` record's path is `molab:asset/<id>` when the owner registered it. Each image is its own asset, so give each one its own title. `image_ref` alone records a path and registers nothing. `ctx.register_metric(key, value, step=None)` appends a scalar. The WAL itself stays at the attempt root and is not registered.
 
 **Where it shows up.** The run's **MolPlot** tab gives each key its own card, by record type. A scalar is a series tile with its chart. A histogram is a bar chart of the latest step, with a slider over the steps it was written at. A text key lists its entries newest first, each one folding. A JSON key shows its latest value as a folding tree, with a step picker. An image key is a gallery in step order, with the step and caption under each thumbnail; clicking one opens it in the image viewer. The thumbnails are read through the attempt's file route, so only an attempt-relative path (what `image` records) can be shown. The tab's badge counts keys of every type. Charts thin scalars and histograms to one point every 10 000 steps per key; text, JSON and image records are never thinned.
 

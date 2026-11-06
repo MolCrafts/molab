@@ -57,13 +57,11 @@ export const runSummaryForPluginMatching = (run: WorkspaceRunRow): RunSummary =>
     finishedAt: execution.finishedAt,
     status: execution.status,
     basedOnExecutionId: execution.basedOnExecutionId,
-    checkpointArtifactId: execution.checkpointArtifactId,
     executor: {
       ...(execution.backend ? { backend: execution.backend } : {}),
       ...execution.backendMetadata,
     },
     environment: {},
-    artifactIds: [],
     error: null,
   })),
   errorMessage: null,

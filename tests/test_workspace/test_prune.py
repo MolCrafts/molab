@@ -264,3 +264,72 @@ class TestApplyExecutionPrune:
         foreign = ExecutionPrunePlan(run_id="someone-else", entries=())
         with pytest.raises(ValueError, match="someone-else"):
             apply_execution_prune(seeded, foreign)
+
+
+class TestDiscardSuperseded:
+    def test_keeps_only_the_newest_attempt_and_its_products(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+        from molab.workspace.asset_repository import assets_produced_by
+        from molab.workspace.domain import ExecutionMode
+        from molab.workspace.prune import discard_superseded_attempts
+
+        ws = Workspace(root=tmp_path / "ws", name="W")
+        run = ws.add_project("p").add_experiment("e").add_run(params={"m": "a"})
+        with run.start() as ctx:
+            ctx.register(b"stale only", title="draft.txt")
+            ctx.register(b"one", title="final.txt")
+            first = ctx.id
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            kept_asset = ctx.register(b"two", title="final.txt")
+            last = ctx.id
+
+        repo = run._execution_repository()
+        assert repo._seal_lock(first).exists() or repo._state_lock(first).exists()
+        assert discard_superseded_attempts(run) == (first,)
+        assert not repo._seal_lock(first).exists() and not repo._state_lock(first).exists()
+        assert [item.id for item in run.executions] == [last]
+        assert not Path(run._execution_repository().execution_dir(first)).exists()
+        assert assets_produced_by(ws, first) == []
+        titles = sorted(asset.title for asset in run.experiment.assets.list())
+        assert titles == ["final.txt"]
+        assert run.experiment.assets.list()[0].id == kept_asset.id
+        assert discard_superseded_attempts(run) == ()
+
+    def test_identical_bytes_from_the_newest_attempt_survive(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+        from molab.workspace.domain import ExecutionMode, ExecutionOrigin
+        from molab.workspace.prune import discard_superseded_attempts
+
+        ws = Workspace(root=tmp_path / "ws", name="W")
+        run = ws.add_project("p").add_experiment("e").add_run(params={"m": "a"})
+        with run.start() as ctx:
+            first = ctx.register(b"same", title="frag.pdb")
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            second = ctx.register(b"same", title="frag.pdb")
+            last = ctx.id
+        assert second.id == first.id
+        assert isinstance(second.origin, ExecutionOrigin) and second.origin.execution_id == last
+        discard_superseded_attempts(run)
+        assert [asset.id for asset in run.experiment.assets.list()] == [first.id]
+
+    def test_an_attempt_the_newest_was_seeded_from_is_kept(self, tmp_path: Path) -> None:
+        import json
+
+        from molab.workspace import Workspace
+        from molab.workspace.domain import ExecutionMode
+        from molab.workspace.prune import discard_superseded_attempts
+
+        ws = Workspace(root=tmp_path / "ws", name="W")
+        run = ws.add_project("p").add_experiment("e").add_run(params={"m": "a"})
+        ids = []
+        for mode in (ExecutionMode.INITIAL, ExecutionMode.RERUN, ExecutionMode.RERUN):
+            with run.start(mode=mode) as ctx:
+                ids.append(ctx.id)
+        repo = run._execution_repository()
+        journal = Path(repo.execution_dir(ids[2])) / "workflow.json"
+        journal.write_text(
+            json.dumps({"seeded_from": {"build": {"execution_id": ids[1], "ref": "sha256:x"}}}),
+            encoding="utf-8",
+        )
+        assert discard_superseded_attempts(run) == (ids[0],)
+        assert [item.id for item in run.executions] == ids[1:]

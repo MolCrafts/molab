@@ -1,8 +1,8 @@
 """Tests for ``ExecutionContext`` (``RunContext``) — the run-execution
-context manager and its typed artifact/log/checkpoint/metrics accessors.
+context manager and its register/log/checkpoint/metrics accessors.
 
 Scope is the ExecutionContext surface only: lifecycle status resolution,
-in-context result/artifact/log/checkpoint/metrics I/O, working-dir guards,
+in-context result/asset/log/checkpoint/metrics I/O, working-dir guards,
 and the sync/async context-manager protocols. Manifest *scanning* is owned by
 ``test_asset_scan`` / ``test_assets``; failure-recovery / no-op resolution by
 ``test_run_lifecycle_recovery``.
@@ -67,63 +67,63 @@ class TestRunContextResults:
             assert ctx.get_result("acc") == 0.95
 
 
-class TestEmitArtifactProduct:
-    def test_emits_file_and_registers_artifact(self, run):
-        with run.start() as ctx:
-            dest = ctx.get_dir("work") / "nve.pt"
-            dest.write_bytes(b"traj")
-            artifact = ctx.emit_artifact(dest, name="nve.pt")
-            assert artifact.name == "nve.pt"
-        assert [a.name for a in run.executions[-1].artifacts] == ["nve.pt"]
+class TestRegister:
+    def test_registers_a_file(self, run):
+        from molab.workspace.asset_repository import assets_produced_by
+        from molab.workspace.domain import ExecutionOrigin
 
-    def test_re_emitting_same_path_is_refused(self, run):
         with run.start() as ctx:
             dest = ctx.get_dir("work") / "nve.pt"
             dest.write_bytes(b"traj")
-            first = ctx.emit_artifact(dest, name="nve.pt")
-            with pytest.raises(ValueError, match=first.id):
-                ctx.emit_artifact(dest, name="nve.pt")
-        assert [a.id for a in run.executions[-1].artifacts] == [first.id]
+            asset = ctx.register(dest, title="nve.pt")
+            execution_id = ctx.id
+        assert asset.title == "nve.pt"
+        assert isinstance(asset.origin, ExecutionOrigin)
+        assert asset.origin.execution_id == execution_id
+        assert asset.origin.run_id == run.id
+        produced = assets_produced_by(run.experiment.project.workspace, execution_id)
+        assert [item.title for item in produced] == ["nve.pt"]
+
+    def test_same_bytes_return_the_existing_asset(self, run):
+        with run.start() as ctx:
+            dest = ctx.get_dir("work") / "nve.pt"
+            dest.write_bytes(b"traj")
+            first = ctx.register(dest, title="nve.pt")
+            again = ctx.register(dest, title="nve-again.pt")
+        assert again.id == first.id
         assert dest.read_bytes() == b"traj"
 
-    def test_requires_src_or_name(self, run):
-        with run.start() as ctx, pytest.raises(ValueError, match="name"):
-            ctx.emit_artifact(b"traj")
+    def test_requires_a_title(self, run):
+        with run.start() as ctx:
+            with pytest.raises(ValueError, match="title"):
+                ctx.register(b"traj", title=" ")
+            with pytest.raises(TypeError):
+                ctx.register(b"traj")  # type: ignore[call-arg]
 
     def test_missing_src_raises(self, run):
         with run.start() as ctx, pytest.raises(FileNotFoundError):
-            ctx.emit_artifact(ctx.get_dir("work") / "gone.pt")
+            ctx.register(ctx.get_dir("work") / "gone.pt", title="gone.pt")
 
-
-class TestEmitArtifact:
-    def test_emit_artifact_writes_and_returns_readable_artifact(self, run):
+    def test_dict_is_written_under_work(self, run):
         with run.start() as ctx:
-            artifact = ctx.emit_artifact({"key": "value"}, name="data.json")
-            assert artifact.name == "data.json"
-            src = ctx.get_dir("work") / "data.json"
-            assert src.exists()
-            assert json.loads(src.read_text()) == {"key": "value"}
+            asset = ctx.register({"key": "value"}, title="data.json")
+            written = [path for path in ctx.get_dir("work").rglob("*") if path.is_file()]
+        assert asset.title == "data.json"
+        assert written
+        assert any(json.loads(path.read_text()) == {"key": "value"} for path in written)
 
-    def test_emit_artifact_from_path_defaults_name(self, run):
+    def test_path_register_keeps_the_given_title(self, run):
         with run.start() as ctx:
             src = ctx.get_dir("work") / "report.txt"
             src.write_text("ok")
-            artifact = ctx.emit_artifact(src)
-            assert artifact.name == "report.txt"
-            assert artifact.source_path == "work/report.txt"
+            asset = ctx.register(src, title="report.txt")
+        assert asset.title == "report.txt"
+        assert src.read_text() == "ok"
 
-    def test_emit_artifact_stamps_run_and_execution_id(self, run):
-        with run.start() as ctx:
-            artifact = ctx.emit_artifact({"a": 1}, name="m.json")
-            assert artifact.run_id == run.id
-            assert artifact.execution_id == ctx.id
-
-    def test_register_metric_writes_wal(self, run):
+    def test_register_metric_writes_wal_at_the_attempt_root(self, run):
         with run.start() as ctx:
             ctx.register_metric("score", 0.87, step=1)
-            # The versioned tier: a metrics WAL is the record of what the run
-            # measured, so it belongs in the history rather than in scratch.
-            wal = ctx.get_dir("artifacts") / "metrics.mlp.jsonl"
+            wal = ctx.execution_dir / "metrics.mlp.jsonl"
             assert wal.exists()
             assert "score" in wal.read_text()
 
@@ -140,21 +140,20 @@ class TestLogAccessor:
 class TestCheckpointAccessor:
     def test_checkpoint_saves_and_loads_payload(self, run):
         with run.start() as ctx:
-            artifact = ctx.checkpoint("mid-run", data={"step": 5})
-            assert artifact.name == "mid-run.json"
-            saved = ctx.get_dir("checkpoints") / artifact.name
-            assert saved.exists()
+            saved = ctx.checkpoint("mid-run", data={"step": 5})
+            assert saved.name == "mid-run.json"
+            assert saved == ctx.get_dir("checkpoints") / "mid-run.json"
             assert "checkpoints" in saved.parts
             assert "executions" in saved.parts
             assert json.loads(saved.read_text())["data"] == {"step": 5}
 
-    def test_checkpoints_are_distinct_artifacts(self, run):
+    def test_checkpoints_are_distinct_paths(self, run):
         with run.start() as ctx:
             first = ctx.checkpoint("a", data={"s": 1})
             second = ctx.checkpoint("b", data={"s": 2})
-            assert first.id != second.id
-            assert first.semantic_type == "checkpoint"
-            assert second.semantic_type == "checkpoint"
+            assert first != second
+            assert first.name == "a.json"
+            assert second.name == "b.json"
 
 
 class TestTaskWorkdir:
@@ -195,7 +194,7 @@ class TestExecutionDirectories:
         # The point of the redesign: no directory has an accessor the others
         # lack, so a caller switching tiers changes one string.
         with run.start() as ctx:
-            for name in ("work", "out", "artifacts"):
+            for name in ("work", "out", "checkpoints"):
                 d = ctx.get_dir(name)
                 assert d.is_dir()
                 assert d.name == name
@@ -217,9 +216,9 @@ class TestExecutionDirectories:
 
     def test_has_dir_reports_what_is_actually_there(self, run):
         with run.start() as ctx:
-            assert ctx.has_dir("artifacts") is False
-            ctx.get_dir("artifacts")
-            assert ctx.has_dir("artifacts") is True
+            assert ctx.has_dir("checkpoints") is False
+            ctx.get_dir("checkpoints")
+            assert ctx.has_dir("checkpoints") is True
 
     def test_requires_active_execution(self, run):
         ctx = run.start()  # constructed but not entered → no execution yet
@@ -251,11 +250,11 @@ class TestExecutionDirectories:
         assert seen == [Path(str(run.run_dir)).name]
         assert not (Path(str(run.run_dir)) / "ops").exists()
 
-    def test_emit_artifact_does_not_rewrite_source(self, run):
+    def test_register_does_not_rewrite_source(self, run):
         with run.start() as ctx:
             dest = ctx.files.put("keep.txt", "payload")
             before = dest.stat().st_mtime
-            artifact = ctx.emit_artifact(dest, name="keep.txt")
+            asset = ctx.register(dest, title="keep.txt")
             assert dest.read_text() == "payload"
             assert dest.stat().st_mtime == before
-            assert artifact.name == "keep.txt"
+            assert asset.title == "keep.txt"

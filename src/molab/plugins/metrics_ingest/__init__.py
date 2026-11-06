@@ -5,7 +5,7 @@ A molab **Run is a host**, not a MolRec record. Nothing here writes molrec
 molrec spec; molab does not ship a molrec module.
 
 What these tools produce is the run-local metrics surface: a JSONL **WAL**
-at ``executions/eNN/artifacts/metrics.mlp.jsonl``. That is what ``GET …/runs/{id}/metrics``
+at ``executions/eNN/metrics.mlp.jsonl``, beside ``run.log``. That is what ``GET …/runs/{id}/metrics``
 and the UI read. Leftover zarr / index files are ignored.
 
 Public surface::
@@ -16,7 +16,7 @@ Public surface::
     result = ingest_run(run_dir)  # append to metrics.mlp.jsonl
 
 Detection never guesses: a file it cannot confirm is ``UNKNOWN`` and is left
-alone. Ingestion is additive — source artifacts are never deleted, rewritten,
+alone. Ingestion is additive — source files are never deleted, rewritten,
 or moved.
 
 **molab ships no reader.** Formats arrive through the

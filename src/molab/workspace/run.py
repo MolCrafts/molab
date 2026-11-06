@@ -46,9 +46,7 @@ if TYPE_CHECKING:
 from .domain import (
     ACTIVE_EXECUTION_STATUSES,
     FAILED_EXECUTION_STATUSES,
-    RESULT_SEMANTIC_TYPE,
     TERMINAL_EXECUTION_STATUSES,
-    Artifact,
     Execution,
     ExecutionMode,
     ExecutionStatus,
@@ -127,7 +125,6 @@ class RunWorkflowExecutor(Protocol):
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint: str | None = None,
         execution_id: str | None = None,
         resume_from: Run | None = None,
         only: Sequence[str] = (),
@@ -143,7 +140,6 @@ class RunWorkflowExecutor(Protocol):
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint: str | None = None,
         execution_id: str | None = None,
         resume_from: Run | None = None,
         only: Sequence[str] = (),
@@ -326,7 +322,7 @@ class Run(Folder):
                 ),
                 experiment_revision_id=experiment_revision_id
                 or resolved_parent.metadata.revision_id,
-                input_asset_ids=inputs,
+                inputs=inputs,
             )
         )
 
@@ -425,7 +421,7 @@ class Run(Folder):
     @property
     def inputs(self) -> tuple[str, ...]:
         """Asset ids this run declares as inputs."""
-        return self._entity_metadata.input_asset_ids
+        return self._entity_metadata.inputs
 
     @property
     def target(self) -> str | None:
@@ -520,11 +516,10 @@ class Run(Folder):
     def results(self, execution_id: str) -> dict[str, TaskOutput]:
         """Return the driver-side results one attempt recorded.
 
-        These are the values ``ctx.set_result`` persisted as the Execution's
-        result Artifact (``semantic_type`` :data:`RESULT_SEMANTIC_TYPE`),
-        read through the artifact repository. Every call reads the bytes
-        again and returns a fresh copy. An unknown attempt, or one with no
-        result Artifact, is an empty mapping.
+        These are the values ``ctx.set_result`` persisted as the asset titled
+        ``results`` produced by that attempt. Every call reads the bytes
+        again and returns a fresh copy. An unknown attempt, or one that
+        registered no such asset, is an empty mapping.
 
         Args:
             execution_id: The attempt id (``e01``).
@@ -533,40 +528,43 @@ class Run(Folder):
             A fresh ``{key: value}`` dict.
 
         Raises:
-            ValueError: The attempt has more than one result Artifact, or
-                that Artifact's bytes are unreadable, not valid JSON, or not
-                an object. The message names the Artifact id.
+            ValueError: The attempt registered more than one ``results``
+                asset, or its bytes are unreadable, not valid JSON, or not
+                an object.
         """
+        from .asset_repository import assets_produced_by
+        from .domain import ExecutionOrigin
+
         try:
-            execution = self.execution(execution_id)
+            self.execution(execution_id)
         except KeyError:
             return {}
-        result_artifacts = [
-            artifact
-            for artifact in execution.artifacts
-            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
+        workspace = self.experiment.project.workspace
+        produced = [
+            asset
+            for asset in assets_produced_by(workspace, execution_id)
+            if asset.title == "results"
+            and isinstance(asset.origin, ExecutionOrigin)
+            and asset.origin.run_id == self.id
         ]
-        if not result_artifacts:
+        if not produced:
             return {}
-        if len(result_artifacts) > 1:
-            listed = ", ".join(artifact.id for artifact in result_artifacts)
+        if len(produced) > 1:
+            listed = ", ".join(asset.id for asset in produced)
             raise ValueError(
-                f"Execution {execution_id!r} has more than one result Artifact: {listed}"
+                f"Execution {execution_id!r} registered more than one results asset: {listed}"
             )
-        artifact = result_artifacts[0]
-        execution_dir = self.execution_dir(execution_id)
+        asset = produced[0]
         try:
-            raw = self._execution_repository().artifacts.read_bytes(
-                artifact, execution_dir=execution_dir
-            )
-            parsed = json.loads(raw)
+            path = workspace.assets_at(asset.scope).payload_path(asset.id)
+            parsed = json.loads(workspace.fs.read_text(path))
         except (OSError, ValueError) as exc:
             raise ValueError(
-                f"result Artifact {artifact.id} of Execution {execution_id!r} is unreadable: {exc}"
+                f"results asset {asset.id} of Execution {execution_id!r} is unreadable: {exc}"
             ) from exc
         if not isinstance(parsed, dict):
             raise ValueError(
-                f"result Artifact {artifact.id} of Execution {execution_id!r} is not an object"
+                f"results asset {asset.id} of Execution {execution_id!r} is not an object"
             )
         return dict(parsed)
 
@@ -697,7 +695,6 @@ class Run(Folder):
         execution_id: str | None = None,
         mode: ExecutionMode = ExecutionMode.INITIAL,
         predecessor: str | None = None,
-        checkpoint: str | None = None,
         bypass_cache: bool = False,
         workflow_hash: str | None = None,
     ) -> RunContext:
@@ -720,14 +717,12 @@ class Run(Folder):
                 per-attempt directory ahead of worker startup). Raises
                 ``ValueError`` when the record does
                 not exist, is not QUEUED, or when ``mode``,
-                ``predecessor``, ``checkpoint`` or
+                ``predecessor`` or
                 ``bypass_cache`` is passed with it. ``profile_config`` may be
                 omitted (the recorded config runs) or equal the recorded one;
                 a different one raises ``ValueError``.
             mode: How a newly created attempt relates to earlier ones.
             predecessor: The predecessor of a newly created attempt.
-            checkpoint: The checkpoint a newly created ``resume``
-                attempt starts from.
             bypass_cache: Record that a newly created attempt ignores the
                 workflow node cache — the per-task result store that lets an
                 unchanged task reuse its earlier output instead of running
@@ -747,7 +742,6 @@ class Run(Folder):
             execution_id=execution_id,
             mode=mode,
             predecessor=predecessor,
-            checkpoint=checkpoint,
             bypass_cache=bypass_cache,
             workflow_hash=workflow_hash,
         )
@@ -757,7 +751,6 @@ class Run(Folder):
         *,
         mode: ExecutionMode = ExecutionMode.INITIAL,
         based_on_execution_id: str | None = None,
-        checkpoint_artifact_id: str | None = None,
         bypass_cache: bool = False,
         profile_config: ProfileConfig | None = None,
         environment: dict[str, JSONValue] | None = None,
@@ -784,8 +777,6 @@ class Run(Folder):
         Args:
             mode: How this attempt relates to earlier ones.
             based_on_execution_id: The predecessor, when *mode* needs one.
-            checkpoint_artifact_id: The checkpoint a ``resume`` attempt starts
-                from. Only valid with ``resume``.
             bypass_cache: Whether the attempt ignores the workflow node cache.
                 Recorded once and never changed.
             profile_config: The active profile. ``None`` means empty and
@@ -809,7 +800,7 @@ class Run(Folder):
         Raises:
             ValueError: *environment* names a profile key, *environment* or
                 *executor* names a start-time key, *mode* and the predecessor
-                or checkpoint disagree, or an attempt is active.
+                or the predecessor disagree, or an attempt is active.
             KeyError: The named predecessor does not exist.
             FileNotFoundError: *source_entrypoint* is not a file; no record
                 is created.
@@ -819,7 +810,6 @@ class Run(Folder):
         return self._create_execution(
             mode=mode,
             predecessor=based_on_execution_id,
-            checkpoint=checkpoint_artifact_id,
             bypass_cache=bypass_cache,
             profile_config=profile_config,
             environment=environment,
@@ -864,12 +854,11 @@ class Run(Folder):
           adopted attempt still points at its code.
         - ``tracked`` — a ``molab.track()`` offline directory (D94): its
           ``stdout.log`` / ``stderr.log`` land at the attempt root, each
-          ``artifacts/*.mlp.jsonl`` in ``artifacts/`` as a ``molplot.metrics``
-          Artifact, and each staged artifact at ``artifacts/<name>`` as an
-          Artifact (``metadata.staged_by="offline"``). The rest of the
-          directory stays where it is. Its ``track.json`` times are only read
-          by ``molab runs adopt --from``; here *started_at* / *finished_at*
-          are always the caller's.
+          ``*.mlp.jsonl`` lands beside them as evidence, and each staged
+          file is registered as an asset produced by this attempt. The rest
+          of the directory stays where it is. Its ``track.json`` times are
+          only read by ``molab runs adopt --from``; here *started_at* /
+          *finished_at* are always the caller's.
 
         The record is written once, sealed, with the real start and finish
         times; with *digest* each moved path's content digest is in its
@@ -914,37 +903,23 @@ class Run(Folder):
         if log is not None:
             moves.append((log, "run.log"))
         moves.extend((item, f"{SOURCE.name}/{Path(str(item)).name}") for item in source)
-        # Function-body imports keep this module's line layout stable.
-        from .execution_repository import STDIO_FILES, AdoptedArtifact
-        from .tracking import METRICS_SEMANTIC_TYPE, OfflineTracker, read_tracked
+        from .domain import ExecutionOrigin
+        from .execution_repository import STDIO_FILES
+        from .tracking import read_tracked
 
-        artifacts: list[AdoptedArtifact] = []
+        staged: list[tuple[str, str, str | None, dict[str, str]]] = []
         if tracked is not None:
             layout = read_tracked(tracked)
             moves.extend((str(path), STDIO_FILES[stream]) for stream, path in layout.stdio.items())
-            artifacts.extend(
-                AdoptedArtifact(
-                    source=str(path),
-                    name=path.name,
-                    media_type="application/x-ndjson",
-                    semantic_type=METRICS_SEMANTIC_TYPE,
-                )
-                for path in layout.metrics
+            moves.extend((str(path), path.name) for path in layout.metrics)
+            staged.extend(
+                (str(layout.root / entry.staged), entry.name, entry.media_type, dict(entry.tags))
+                for entry in layout.staged
             )
-            artifacts.extend(
-                AdoptedArtifact(
-                    source=str(layout.root / entry.staged),
-                    name=entry.name,
-                    media_type=entry.media_type,
-                    semantic_type=entry.semantic_type,
-                    metadata=entry.metadata(OfflineTracker.staged_by),
-                    created_at=entry.created_time,
-                )
-                for entry in layout.artifacts
-            )
+        agent = created_by or _system_agent()
         state = self._execution_repository().adopt(
             status=ExecutionStatus(status),
-            created_by=created_by or _system_agent(),
+            created_by=agent,
             started_at=started_at,
             finished_at=finished_at,
             moves=moves,
@@ -954,8 +929,25 @@ class Run(Folder):
             environment=environment,
             error=error,
             digest=digest,
-            artifacts=artifacts,
         )
+        if staged:
+            origin = ExecutionOrigin(
+                project_id=self.experiment.project.id,
+                experiment_id=self.experiment.id,
+                run_id=self.id,
+                execution_id=state.id,
+                task=None,
+            )
+            for source, title, media_type, tags in staged:
+                self.experiment.assets.register(
+                    source,
+                    title=title,
+                    created_by=agent,
+                    origin=origin,
+                    media_type=media_type,
+                    tags=tags,
+                )
+                Path(source).unlink(missing_ok=True)
         return self._bound(state)
 
     def _create_execution(
@@ -963,7 +955,6 @@ class Run(Folder):
         *,
         mode: ExecutionMode = ExecutionMode.INITIAL,
         predecessor: str | None = None,
-        checkpoint: str | None = None,
         bypass_cache: bool = False,
         profile_config: ProfileConfig | None = None,
         environment: dict[str, JSONValue] | None = None,
@@ -1022,7 +1013,6 @@ class Run(Folder):
         Args:
             mode: How this attempt relates to earlier ones.
             predecessor: The predecessor, when *mode* needs one.
-            checkpoint: The checkpoint to resume from (``resume`` only).
             bypass_cache: Whether the attempt ignores the workflow node cache;
                 recorded once and never changed (always ``True`` for
                 ``reproduce``).
@@ -1049,7 +1039,7 @@ class Run(Folder):
         Raises:
             ValueError: *environment* names a profile key, *environment* or
                 *executor* names a start-time key, *mode* and the
-                predecessor / checkpoint disagree, or an attempt is active.
+                predecessor disagree, or an attempt is active.
             KeyError: The named predecessor does not exist.
             FileNotFoundError: *source_entrypoint* is not a file; no record
                 is created.
@@ -1080,7 +1070,6 @@ class Run(Folder):
             mode=mode,
             created_by=created_by or _system_agent(),
             based_on_execution_id=predecessor,
-            checkpoint_artifact_id=checkpoint,
             executor=dict(executor or {}),
             environment={**profile_environment, **extra},
             bypass_cache=bypass_cache,
@@ -1194,33 +1183,22 @@ class Run(Folder):
             execution_id = (holding or done)[-1].id
         return self.execution_dir(execution_id) / OUT.name / task
 
-    def artifact_location(self, execution_id: str, artifact: Artifact) -> str:
-        """Resolve one Artifact of this run to a path on its filesystem.
-
-        The only cross-layer entry. ``artifact.run_id`` / ``artifact.execution_id``
-        must name this run and *execution_id*; a new-form record carries no
-        workspace path, so a mismatch can only be seen here.
+    def asset_path(self, asset_id: str) -> str:
+        """Path of a registered asset's bytes, checked against its digest.
 
         Args:
-            execution_id: The attempt that must own *artifact*.
-            artifact: The record to resolve.
+            asset_id: The asset id (the same id ``molab:asset/<id>`` names).
 
         Returns:
-            A path string on the filesystem this run lives on.
+            A path string on the filesystem this workspace lives on.
 
         Raises:
-            ValueError: *artifact* belongs to another run or attempt, or
-                :meth:`ArtifactRepository.locate` rejects its path.
+            KeyError: No asset has that id.
+            ValueError: The bytes are missing or no longer match the digest.
         """
-        if artifact.run_id != self.id or artifact.execution_id != execution_id:
-            raise ValueError(
-                f"Artifact {artifact.id} belongs to run {artifact.run_id!r} "
-                f"execution {artifact.execution_id!r}, not run {self.id!r} "
-                f"execution {execution_id!r}"
-            )
-        return self._execution_repository().artifacts.locate(
-            artifact, execution_dir=self.execution_dir(execution_id)
-        )
+        from .asset_repository import payload_path_for
+
+        return payload_path_for(self.experiment.project.workspace, asset_id)
 
     def machine_dir(self) -> Path:
         """This run's machine-state directory: ``<workspace>/.molab/runs/<run-id>``.
@@ -1254,7 +1232,6 @@ class Run(Folder):
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint: str | None = None,
         resume_from: Run | None = None,
         only: Sequence[str] = (),
         executor: str | None = None,
@@ -1299,7 +1276,6 @@ class Run(Folder):
             resume=resume,
             rerun=rerun,
             fresh=fresh,
-            checkpoint=checkpoint,
             resume_from=resume_from,
             only=only,
             executor=executor,
@@ -1314,7 +1290,6 @@ class Run(Folder):
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint: str | None = None,
         resume_from: Run | None = None,
         only: Sequence[str] = (),
         executor: str | None = None,
@@ -1332,7 +1307,6 @@ class Run(Folder):
             resume=resume,
             rerun=rerun,
             fresh=fresh,
-            checkpoint=checkpoint,
             resume_from=resume_from,
             only=only,
             executor=executor,
@@ -1437,7 +1411,7 @@ class Run(Folder):
                 "created_at",
                 "definition_hash",
                 "experiment_revision_id",
-                "input_asset_ids",
+                "inputs",
                 "target",
             },
         )

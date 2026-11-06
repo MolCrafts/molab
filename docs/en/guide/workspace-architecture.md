@@ -9,7 +9,7 @@ Workspace
         └── Run          (one execution attempt; re-runs append ExecutionRecords)
 ```
 
-Every persistent byproduct — imported data, task artifacts, logs, checkpoints, error traces, workflow execution state — is a typed `Asset` subclass recorded in a per-scope `asset.json` manifest. Those manifests are authoritative and are what asset queries scan directly — there is no derived asset index beside them. Every metadata write is atomic (temp-file + `os.rename`), so a crash never leaves a half-written JSON file.
+A registered file is an Asset: one `asset.json` plus its payload under `assets/<slug>/` at workspace, project, or experiment scope. There is no derived asset index. Logs, checkpoints, and metrics stay with the attempt. Every metadata write is atomic (temp-file + `os.rename`), so a crash never leaves a half-written JSON file.
 
 Workspace is the bottom of the molab dependency DAG. It owns filesystem layout, atomic JSON, content-addressed assets, and generic per-kind subsystem storage — and **does not know about workflows or knowledge**. Upstream layers (workflow, knowledge, services, cli, server) reach *down* into workspace's public surface; the inverse is forbidden by the import-guard test.
 
@@ -146,24 +146,20 @@ Every attempt appears in `run.executions`, newest last. An execution is opened w
 
 ## Assets
 
-Emitted artifacts are recorded by the execution (`ctx.emit_artifact` / `ctx.checkpoint`) and queried through the `ArtifactRepository`; imported data lives in a scope's `data_assets` library. See [Artifacts, Assets, and Data Imports](assets.md).
+A task registers a file with `ctx.register`. The bytes are copied into the experiment's `assets/<slug>/`. Import outside bytes with `{scope}.import_asset` or `{scope}.assets.import_asset`. The same bytes return the existing asset. See [Assets](assets.md).
 
 ```python
 from pathlib import Path
 
 Path("qm9.csv").write_text("mol,energy\nH2O,-76.4\n")
-ws.data_assets.import_asset("bert-model", "qm9.csv")
-project.data_assets.import_asset("dataset", "qm9.csv")
+project.import_asset("dataset", "qm9.csv")
 
-# Driver-side, around the workflow execution
-with run.start(mode=ExecutionMode.RERUN) as ctx:
-    dataset = project.data_assets.get("dataset")
+with run.start() as ctx:
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
-    ctx.emit_artifact(result.outputs["train"], name="metrics.json")
     ctx.log("run").append("epoch 1")
 ```
 
-`import_asset(name, src, action="copy", meta=None)` supports `"copy"`, `"move"`, `"symlink"`, and `"hardlink"` for ingestion.
+`ctx.checkpoint(name, data=...)` writes `checkpoints/<name>.json` and returns that path. It does not register an asset.
 
 ## CLI Surface
 
@@ -183,27 +179,24 @@ molab info      # show workspace summary
 
 ```
 ./lab/
-├── workspace.json
-├── asset.json                     # workspace-scoped asset manifest (authoritative)
-├── data_assets/<asset_id>/payload/ # imported DataAssets
+├── index.md
+├── assets/<slug>/                 # one asset: asset.json + payload
 └── projects/
     └── qm9/
-        ├── project.json
-        ├── asset.json             # project-scoped asset manifest
-        ├── data_assets/            # project-scoped DataAssets
+        ├── index.md
+        ├── assets/<slug>/
         └── experiments/
             └── baseline/
-                ├── experiment.json
-                ├── asset.json     # experiment-scoped asset manifest
-                ├── data_assets/    # experiment-scoped DataAssets
+                ├── index.md
+                ├── assets/<slug>/   # files this experiment's runs registered
                 └── runs/
                     └── <key=value_…>/
-                        ├── run.json        # logical definition only
+                        ├── index.md        # logical definition, including inputs
                         └── executions/e01/ # one attempt
                             ├── execution.json
                             ├── alive       # owner heartbeat is mtime
                             ├── workflow.json
-                            ├── artifacts/
+                            ├── metrics.mlp.jsonl
                             └── out/<task>/
 ```
 

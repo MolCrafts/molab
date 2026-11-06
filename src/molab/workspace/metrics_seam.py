@@ -21,7 +21,7 @@ from molab._typing import JSONValue
 #: One compact WAL event (``t`` / ``k`` / ``s`` / ``w`` / ``v`` / ``tags``).
 MetricRecord = dict[str, JSONValue]
 
-#: ``append(name, line)`` lands one WAL line under ``artifacts/``.
+#: ``append(name, line)`` lands one WAL line at the attempt root.
 MetricsAppend = Callable[[str | Path, str], object]
 
 

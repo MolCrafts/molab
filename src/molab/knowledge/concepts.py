@@ -168,6 +168,62 @@ class _SourcedKnowledge(Concept):
             return found
         return list(self._sources)
 
+    @property
+    def inputs(self) -> tuple[str, ...]:
+        """Asset ids this document cites, in source order.
+
+        Run and experiment sources are skipped. The same asset cited at more
+        than one point is returned once. Pass the tuple to
+        ``Experiment.add_run(inputs=...)``.
+        """
+        from molab.workspace.refs import parse_ref
+
+        found: list[str] = []
+        for source in self.sources:
+            if source.kind != "asset":
+                continue
+            asset_id = parse_ref(source.ref).asset_id
+            if asset_id and asset_id not in found:
+                found.append(asset_id)
+        return tuple(found)
+
+    def read_cited(self, span: str) -> JSONValue:
+        """The value at *span* in the one asset source that carries it.
+
+        ``/loss`` is a JSON pointer. ``loss@10000`` is the series ``loss`` at
+        step 10000. The narrative is :meth:`read`.
+
+        Raises:
+            ValueError: *span* is empty, is not exactly one asset citation, or
+                the asset bytes do not contain that point.
+        """
+        if not span:
+            raise ValueError("read_cited requires a span")
+        matches = [
+            source for source in self.sources if source.kind == "asset" and source.span == span
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"span {span!r} is not one asset citation on {self.name}")
+        from molab.workspace import Workspace
+        from molab.workspace.asset_repository import payload_path_for
+        from molab.workspace.refs import parse_ref
+
+        from .harvest import _document_at, _value_at
+        from .location import enclosing_workspace_root
+
+        root = enclosing_workspace_root(self.path, fs=self.fs)
+        if root is None:
+            raise ValueError(f"{self.path} is not inside a workspace")
+        workspace = Workspace(root)
+        asset_id = parse_ref(matches[0].ref).asset_id
+        if not asset_id:
+            raise ValueError(f"{matches[0].ref} is not an asset reference")
+        path = payload_path_for(workspace, asset_id)
+        body = _document_at(workspace.fs, path)
+        if body is None:
+            raise ValueError(f"asset {asset_id} has no JSON point at {span}")
+        return _value_at(body, span)
+
     @classmethod
     def harvest(
         cls,

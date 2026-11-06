@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 REF_SCHEME: Final = "molab:"
 
-RefKind = Literal["project", "experiment", "run", "execution", "artifact", "asset"]
+RefKind = Literal["project", "experiment", "run", "execution", "asset"]
 
 _SEGMENT = re.compile(r"[^/\s?#]+")
 _ORDERS: dict[tuple[str, ...], RefKind] = {
@@ -26,7 +26,6 @@ _ORDERS: dict[tuple[str, ...], RefKind] = {
     ("experiment",): "experiment",
     ("experiment", "run"): "run",
     ("experiment", "run", "execution"): "execution",
-    ("experiment", "run", "artifact"): "artifact",
     ("asset",): "asset",
 }
 
@@ -56,7 +55,6 @@ class MolabRef(BaseModel):
     - ``molab:experiment/<e>``
     - ``molab:experiment/<e>/run/<r>``
     - ``molab:experiment/<e>/run/<r>/execution/<x>``
-    - ``molab:experiment/<e>/run/<r>/artifact/<a>``
     - ``molab:asset/<id>``
     """
 
@@ -66,7 +64,6 @@ class MolabRef(BaseModel):
     experiment_id: str | None = None
     run_id: str | None = None
     execution_id: str | None = None
-    artifact_id: str | None = None
     asset_id: str | None = None
 
     @model_validator(mode="after")
@@ -76,7 +73,6 @@ class MolabRef(BaseModel):
             "experiment": self.experiment_id,
             "run": self.run_id,
             "execution": self.execution_id,
-            "artifact": self.artifact_id,
             "asset": self.asset_id,
         }
         for value in segments.values():
@@ -89,7 +85,6 @@ class MolabRef(BaseModel):
                 self.experiment_id,
                 self.run_id,
                 self.execution_id,
-                self.artifact_id,
             )
         ):
             raise ValueError("an asset reference cannot name another entity")
@@ -99,7 +94,6 @@ class MolabRef(BaseModel):
                 self.experiment_id,
                 self.run_id,
                 self.execution_id,
-                self.artifact_id,
                 self.asset_id,
             )
         ):
@@ -108,10 +102,8 @@ class MolabRef(BaseModel):
             raise ValueError("a reference needs a project, an experiment, or an asset")
         if self.run_id is not None and self.experiment_id is None:
             raise ValueError("a run reference needs an experiment")
-        if (self.execution_id is not None or self.artifact_id is not None) and self.run_id is None:
-            raise ValueError("an execution or artifact reference needs a run")
-        if self.execution_id is not None and self.artifact_id is not None:
-            raise ValueError("a reference names an execution or an artifact, not both")
+        if self.execution_id is not None and self.run_id is None:
+            raise ValueError("an execution reference needs a run")
         return self
 
     @property
@@ -119,8 +111,6 @@ class MolabRef(BaseModel):
         """The deepest segment this reference names."""
         if self.asset_id is not None:
             return "asset"
-        if self.artifact_id is not None:
-            return "artifact"
         if self.execution_id is not None:
             return "execution"
         if self.run_id is not None:
@@ -141,8 +131,6 @@ class MolabRef(BaseModel):
             parts.extend(("run", self.run_id))
         if self.execution_id is not None:
             parts.extend(("execution", self.execution_id))
-        if self.artifact_id is not None:
-            parts.extend(("artifact", self.artifact_id))
         return REF_SCHEME + "/".join(parts)
 
 
@@ -177,7 +165,6 @@ def parse_ref(text: str, *, kind: RefKind | None = None) -> MolabRef:
         "experiment": "experiment_id",
         "run": "run_id",
         "execution": "execution_id",
-        "artifact": "artifact_id",
         "asset": "asset_id",
     }
     try:
@@ -189,7 +176,7 @@ def parse_ref(text: str, *, kind: RefKind | None = None) -> MolabRef:
     return ref
 
 
-def ref_of(entity: object, *, artifact_id: str | None = None) -> MolabRef:
+def ref_of(entity: object) -> MolabRef:
     """The canonical reference for a live workspace entity.
 
     Entity classes are imported inside the function so this module does not
@@ -197,14 +184,12 @@ def ref_of(entity: object, *, artifact_id: str | None = None) -> MolabRef:
 
     Args:
         entity: A ``Project``, ``Experiment``, ``Run``, or ``Asset``.
-        artifact_id: When *entity* is a ``Run``, names that run's artifact.
 
     Returns:
         The reference ``Workspace.find`` accepts.
 
     Raises:
-        TypeError: *entity* is not one of those classes, or *artifact_id* is
-            set on anything other than a ``Run``.
+        TypeError: *entity* is not one of those classes.
     """
     from molab.workspace.domain import Asset
     from molab.workspace.experiment import Experiment
@@ -212,15 +197,7 @@ def ref_of(entity: object, *, artifact_id: str | None = None) -> MolabRef:
     from molab.workspace.run import Run
 
     if isinstance(entity, Run):
-        if artifact_id is None:
-            return MolabRef(experiment_id=entity.experiment.id, run_id=entity.id)
-        return MolabRef(
-            experiment_id=entity.experiment.id,
-            run_id=entity.id,
-            artifact_id=artifact_id,
-        )
-    if artifact_id is not None:
-        raise TypeError(f"artifact_id is only valid on a Run, got {type(entity).__name__}")
+        return MolabRef(experiment_id=entity.experiment.id, run_id=entity.id)
     if isinstance(entity, Project):
         return MolabRef(project_id=entity.id)
     if isinstance(entity, Experiment):

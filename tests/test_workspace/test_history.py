@@ -165,13 +165,16 @@ class TestSoftDependency:
         ws = Workspace(tmp_path / "lab", name="lab")
         run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
         with run.start() as ctx:
-            ctx.emit_artifact({"loss": 0.1}, name="metrics.json")
+            ctx.register({"loss": 0.1}, title="metrics.json")
 
         assert not (tmp_path / "lab" / ".git").exists()
         execution = run.executions[-1]
         assert execution.status.value == "succeeded"
         assert execution.sealed
-        assert [a.name for a in execution.artifacts] == ["metrics.json"]
+        from molab.workspace.asset_repository import assets_produced_by
+
+        produced = assets_produced_by(ws, execution.id)
+        assert [asset.title for asset in produced] == ["metrics.json"]
 
     def test_history_added_later_captures_the_existing_tree(self, tmp_path):
         ws = Workspace(tmp_path / "lab", name="lab")

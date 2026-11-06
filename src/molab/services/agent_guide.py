@@ -97,7 +97,7 @@ AGENT_PYTHON: Final[tuple[tuple[str, str], ...]] = (
 #: the code — ``run.start()``'s or a workflow task's — rendered after
 #: :data:`AGENT_PYTHON`. Every call resolves on both contexts (pinned by a test).
 AGENT_CONTEXT: Final[tuple[tuple[str, str], ...]] = (
-    # D93: written live into executions/eNN/artifacts/metrics.mlp.jsonl.
+    # D93: written live into executions/eNN/metrics.mlp.jsonl.
     ("Record training data", "ctx.metrics.scalar(...)"),
 )
 
@@ -133,6 +133,7 @@ def _layout() -> str:
         RUN_CONTAINER,
         SCRATCH_CONTAINER,
         VALUE_CONTAINER,
+        WORKFLOW_LIB_CONTAINER,
         WORKFLOW_SCRIPT_FILENAME,
         execution_slug,
     )
@@ -144,10 +145,18 @@ def _layout() -> str:
         (f"├── {KNOWLEDGE_CONTAINER}/<slug>.md", "knowledge documents (also at every level below)"),
         (f"└── {PROJECT_CONTAINER}/<project>/", "directory name = slug of the project name"),
         (f"    ├── {INDEX_FILENAME}", "project record"),
-        (f"    ├── {ASSET_CONTAINER}/", "imported data (molab asset import)"),
+        (f"    ├── {ASSET_CONTAINER}/<title>/", "imported files (molab asset import)"),
         (f"    └── {EXPERIMENT_CONTAINER}/<experiment>/", ""),
         (f"        ├── {INDEX_FILENAME}", "experiment record"),
         (f"        ├── {WORKFLOW_SCRIPT_FILENAME}", "the experiment's workflow script"),
+        (
+            f"        ├── {WORKFLOW_LIB_CONTAINER}/",
+            "the workflow's own modules, once one file is too big",
+        ),
+        (
+            f"        ├── {ASSET_CONTAINER}/<run>--<title>/",
+            "a run's final products (ctx.register); a later attempt replaces them",
+        ),
         (f"        ├── {SCRATCH_CONTAINER}/", "quick tests only; disposable, gitignored"),
         (f"        └── {RUN_CONTAINER}/<key=value_…>/", "directory name = the run's parameters"),
         (f"            ├── {INDEX_FILENAME}", "run record (parameters) + attempt list"),
@@ -200,7 +209,11 @@ def _commands() -> str:
 def render_agent_guide(ws: Workspace) -> str:
     """The managed block of ``AGENTS.md`` for *ws*, markers included."""
     from molab.knowledge.naming import KNOWLEDGE_CONTAINER
-    from molab.workspace.naming import SCRATCH_CONTAINER
+    from molab.workspace.naming import (
+        SCRATCH_CONTAINER,
+        WORKFLOW_LIB_CONTAINER,
+        WORKFLOW_SCRIPT_FILENAME,
+    )
 
     name = ws.metadata.name
     sections = [
@@ -224,7 +237,7 @@ def render_agent_guide(ws: Workspace) -> str:
         "",
         "Start at `./index.md`. Its YAML frontmatter has an `index:` block: follow "
         "`index.children[].path` down to each project, experiment and run. A run's "
-        "`index.executions[]` lists its attempts (`path`, `status`, `out`, `artifacts`). "
+        "`index.executions[]` lists its attempts (`path`, `status`, `out`). "
         f"`index.{KNOWLEDGE_CONTAINER}` lists a level's knowledge documents. An "
         "experiment's `index.entrypoint` names its workflow code.",
         "",
@@ -234,7 +247,7 @@ def render_agent_guide(ws: Workspace) -> str:
         "`index:` block. molab writes both; edit only the body below the closing "
         "`---` (or use `molab index write`). Never write `index.md` to create a "
         "record, a `<kind>.json` / `meta.json` record, or anything an attempt owns "
-        "(`execution.json`, logs, `source/`, `artifacts/`, `jobs/`, `checkpoints/`); "
+        "(`execution.json`, logs, `metrics.mlp.jsonl`, `source/`, `jobs/`, `checkpoints/`); "
         "use the command in the table below.",
         "",
         "### Layout",
@@ -252,6 +265,21 @@ def render_agent_guide(ws: Workspace) -> str:
         "or anything a result depends on, becomes a run: execute it through molab, "
         "or record a finished job with `molab runs adopt`. `molab scratch clean` "
         "empties old entries.",
+        "",
+        "### Keep the workspace tidy",
+        "",
+        "- Register only final products with `ctx.register`: structures, force fields, "
+        "solver inputs, figures. Logs and per-task evidence stay in the attempt's `out/`; "
+        "molab refuses a log.",
+        "- A run's product has one slot, `assets/<run>--<title>/`. Re-running replaces it "
+        "and keeps its `molab:asset/<id>`, so a citation always names the current bytes.",
+        "- One subject is one document. Rewrite it under the same name; never add `-v2`. "
+        "Delete a document that is wrong or superseded; git keeps the old text.",
+        "- A Report cites the `molab:asset/<id>` of each product it describes, so molab's "
+        "viewers render it. Never link a `localhost` server.",
+        f"- When `{WORKFLOW_SCRIPT_FILENAME}` grows past a few hundred lines, move its tasks "
+        f"into modules under `{WORKFLOW_LIB_CONTAINER}/`.",
+        "- Create an experiment when its stage starts, not ahead of the roadmap.",
         "",
         "### Knowledge documents",
         "",

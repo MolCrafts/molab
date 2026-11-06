@@ -134,7 +134,7 @@ class TestContextWithKnowledge:
             "recent_runs",
             "failed_runs",
             "running_runs",
-            "artifacts",
+            "assets",
             "stale_or_missing",
         ):
             assert getattr(got, field) == getattr(plain, field), field

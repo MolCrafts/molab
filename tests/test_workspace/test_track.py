@@ -4,7 +4,7 @@
 ``MOLAB_EXECUTION_DIR`` names a live attempt; a live attempt of a run it
 opens when *project* / *experiment* are given inside a workspace; otherwise
 an offline directory. A non-owner never writes ``execution.json``: it stages
-artifacts, and the owner records them at seal.
+files, and the owner registers them at seal.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ import pytest
 
 import molab
 from molab.workspace import Workspace, tracking
-from molab.workspace.artifact_repository import RESERVED_ARTIFACT_DIR
-from molab.workspace.domain import ExecutionStatus
+from molab.workspace.asset_repository import assets_produced_by
+from molab.workspace.domain import ExecutionOrigin, ExecutionStatus
 from molab.workspace.tracking import (
     MANIFEST,
     STAGED_DIR,
@@ -29,7 +29,7 @@ from molab.workspace.tracking import (
     TRACK_RECORD,
     AttachedTracker,
     OfflineTracker,
-    StagedArtifact,
+    StagedFile,
     current,
     print,
 )
@@ -66,8 +66,8 @@ class TestSurface:
         assert molab.track is tracking.track
         assert "track" in molab.__all__
 
-    def test_track_dir_is_the_reserved_name(self) -> None:
-        assert TRACK_DIR.name == RESERVED_ARTIFACT_DIR
+    def test_track_dir_is_under_work(self) -> None:
+        assert TRACK_DIR.as_posix() == "work/_molab"
 
     def test_every_tracker_is_a_tracker(self, run, tmp_path) -> None:
         with run.start() as ctx:
@@ -131,7 +131,10 @@ class TestDispatch:
         assert record.status is ExecutionStatus.SUCCEEDED
         assert record.sealed
         assert (run.execution_dir("e01") / "stdout.log").read_text(encoding="utf-8") == "hello\n"
-        assert {a.semantic_type for a in record.artifacts} == {"molplot.metrics"}
+        wal = run.execution_dir("e01") / "metrics.mlp.jsonl"
+        assert wal.is_file()
+        assert _wal_records(wal)[0]["k"] == "loss"
+        assert assets_produced_by(ws, "e01") == []
         assert current() is None
 
     def test_case_3_without_with_is_sealed_at_exit(self, tmp_path, monkeypatch) -> None:
@@ -157,18 +160,18 @@ class TestDispatch:
             assert current() is t
             print("offline line")
             t.metrics.scalar("loss", 2.0, 3)
-            staged = t.emit_artifact({"a": 1}, name="result.json")
+            staged = t.register({"a": 1}, title="result.json")
         capsys.readouterr()
 
         root = tmp_path / "molab-track"
         assert t.execution_dir == root
         assert (root / "stdout.log").read_text(encoding="utf-8") == "offline line\n"
-        (record,) = _wal_records(root / "artifacts" / "metrics.mlp.jsonl")
+        (record,) = _wal_records(root / "metrics.mlp.jsonl")
         assert record["k"] == "loss" and "tags" not in record
-        assert staged.path == "artifacts/result.json"
+        assert staged.path.startswith("work/_molab/staged/")
         assert json.loads((root / staged.staged).read_text(encoding="utf-8")) == {"a": 1}
         (line,) = (root / MANIFEST).read_text(encoding="utf-8").splitlines()
-        assert StagedArtifact.from_line(line) == staged
+        assert StagedFile.from_line(line) == staged
         meta = json.loads((root / TRACK_RECORD).read_text(encoding="utf-8"))
         assert meta["started_at"] and meta["finished_at"]
         assert {"host", "pid", "argv", "python", "cwd"} <= set(meta)
@@ -189,30 +192,27 @@ class TestDispatch:
 
 
 class TestAttached:
-    def test_staged_artifacts_are_folded_by_the_owner_at_seal(self, run) -> None:
+    def test_staged_files_are_registered_by_the_owner_at_seal(self, run) -> None:
         with run.start() as ctx:
             child = _in_fresh_context(AttachedTracker, ctx.execution_dir, task="fit")
             child.write_stdio("stdout", "from child\n")
             child.metrics.scalar("loss", 0.25, 7)
             source = ctx.execution_dir.parent / "outside.txt"
             source.write_text("bytes", encoding="utf-8")
-            child.emit_artifact(source, semantic_type="text", tags={"k": "v"})
-            assert run.executions[-1].artifacts == ()
+            staged = child.register(source, title="outside.txt", tags={"k": "v"})
+            assert assets_produced_by(run.experiment.project.workspace, ctx.id) == []
             child.close()
 
         record = run.executions[-1]
-        by_name = {a.name: a for a in record.artifacts}
-        folded = by_name["outside.txt"]
-        assert folded.path == "artifacts/outside.txt"
-        assert folded.semantic_type == "text"
-        assert folded.metadata["staged_by"] == "child"
-        assert folded.metadata["task"] == "fit"
-        assert folded.metadata["tags"] == {"k": "v"}
-        assert (ctx.execution_dir / "artifacts" / "outside.txt").read_text() == "bytes"
-        assert not any((ctx.execution_dir / STAGED_DIR).iterdir())
-        # The child's WAL is registered although this process wrote no record.
-        assert by_name["metrics.mlp.jsonl"].semantic_type == "molplot.metrics"
-        (wal,) = _wal_records(ctx.execution_dir / "artifacts" / "metrics.mlp.jsonl")
+        produced = assets_produced_by(run.experiment.project.workspace, record.id)
+        folded = next(asset for asset in produced if asset.title == "outside.txt")
+        assert isinstance(folded.origin, ExecutionOrigin)
+        assert folded.origin.task == "fit"
+        assert folded.tags["staged_by"] == "child"
+        assert folded.tags["k"] == "v"
+        assert (ctx.execution_dir / staged.staged).read_text() == "bytes"
+        assert not any(asset.title == "metrics.mlp.jsonl" for asset in produced)
+        (wal,) = _wal_records(ctx.execution_dir / "metrics.mlp.jsonl")
         assert wal["tags"] == {"task": "fit"}
         assert (ctx.execution_dir / "stdout.log").read_text() == "from child\n"
         stdout = next(ev for ev in record.evidence if ev.kind == "stdout")
@@ -221,7 +221,7 @@ class TestAttached:
     def test_a_bad_entry_is_logged_and_the_attempt_still_succeeds(self, run) -> None:
         with run.start() as ctx:
             child = _in_fresh_context(AttachedTracker, ctx.execution_dir)
-            child.emit_artifact(b"x", name="good.bin")
+            child.register(b"x", title="good.bin")
             with (ctx.execution_dir / MANIFEST).open("a", encoding="utf-8") as fh:
                 fh.write("not json\n")
                 fh.write(
@@ -230,7 +230,8 @@ class TestAttached:
             child.close()
         record = run.executions[-1]
         assert record.status is ExecutionStatus.SUCCEEDED
-        assert [a.name for a in record.artifacts] == ["good.bin"]
+        produced = assets_produced_by(run.experiment.project.workspace, record.id)
+        assert [asset.title for asset in produced] == ["good.bin"]
         log = (ctx.execution_dir / "run.log").read_text()
         assert f"{MANIFEST}:2 not recorded" in log
         assert f"{MANIFEST}:3 not recorded" in log
@@ -238,21 +239,24 @@ class TestAttached:
     def test_a_staged_name_is_refused_twice(self, run) -> None:
         with run.start() as ctx:
             child = _in_fresh_context(AttachedTracker, ctx.execution_dir)
-            child.emit_artifact(b"1", name="a.bin")
+            child.register(b"1", title="a.bin")
             with pytest.raises(ValueError, match="already staged"):
-                child.emit_artifact(b"2", name="a.bin")
+                child.register(b"2", title="a.bin")
             with pytest.raises(ValueError, match="reserved"):
-                child.emit_artifact(b"3", name="_molab/x")
+                child.register(b"3", title="_molab/x")
             child.close()
 
-    def test_image_ref_points_at_the_eventual_artifact(self, run) -> None:
+    def test_image_ref_points_at_the_staged_path(self, run) -> None:
         with run.start() as ctx:
             child = _in_fresh_context(AttachedTracker, ctx.execution_dir)
             record = child.metrics.image("rdf", b"\x89PNG", name="rdf.png", step=1)
-            assert record["v"]["path"] == "artifacts/rdf.png"
+            assert str(record["v"]["path"]).startswith("work/_molab/staged/")
             child.close()
-        names = {a.name: a for a in run.executions[-1].artifacts}
-        assert names["rdf.png"].semantic_type == tracking.IMAGE_SEMANTIC_TYPE
+        produced = assets_produced_by(run.experiment.project.workspace, run.executions[-1].id)
+        image = next(asset for asset in produced if asset.title == "rdf.png")
+        assert image.media_type == "image/png"
+        (on_disk,) = _wal_records(ctx.execution_dir / "metrics.mlp.jsonl")
+        assert on_disk["v"]["path"].startswith("work/_molab/staged/")
 
 
 class TestSealGuard:
@@ -280,9 +284,9 @@ class TestSealGuard:
             child.metrics.scalar("loss", 1.0, 1)
         assert [w.category for w in caught] == [RuntimeWarning]
         assert stdout.read_text() == "early\n"
-        assert not (ctx.execution_dir / "artifacts" / "metrics.mlp.jsonl").exists()
+        assert not (ctx.execution_dir / "metrics.mlp.jsonl").exists()
         with pytest.raises(RuntimeError, match="sealed"):
-            child.emit_artifact(b"x", name="late.bin")
+            child.register(b"x", title="late.bin")
         child.close()
 
     def test_a_write_inside_the_check_interval_is_not_re_read(self, run, monkeypatch) -> None:
@@ -332,7 +336,7 @@ class TestOfflineAdopt:
         tracker.metrics.scalar("loss", 0.1, 10)
         source = root.parent / "model.pt"
         source.write_bytes(b"weights")
-        tracker.emit_artifact(source, semantic_type="model", tags={"epoch": "10"})
+        tracker.register(source, title="model.pt", tags={"epoch": "10"})
         tracker.close()
         return root
 
@@ -346,36 +350,38 @@ class TestOfflineAdopt:
         assert record.sealed and record.status is ExecutionStatus.SUCCEEDED
         assert (attempt / "stdout.log").read_text() == "trained\n"
         assert (attempt / "stderr.log").read_text() == "warned\n"
-        by_name = {a.name: a for a in record.artifacts}
-        assert by_name["metrics.mlp.jsonl"].semantic_type == "molplot.metrics"
-        model = by_name["model.pt"]
-        assert model.path == "artifacts/model.pt"
-        assert model.metadata == {"staged_by": "offline", "tags": {"epoch": "10"}}
-        assert model.created_at == datetime.fromisoformat(layout.artifacts[0].created_at)
-        assert (attempt / "artifacts" / "model.pt").read_bytes() == b"weights"
+        assert (attempt / "metrics.mlp.jsonl").is_file()
+        produced = assets_produced_by(run.experiment.project.workspace, record.id)
+        model = next(asset for asset in produced if asset.title == "model.pt")
+        assert model.tags == {"epoch": "10"}
         assert model.content.size == len(b"weights")
+        payload = run.experiment.project.workspace.assets_at(model.scope).payload_path(model.id)
+        assert Path(payload).read_bytes() == b"weights"
+        assert not (root / layout.staged[0].staged).exists()
         kinds = {ev.kind for ev in record.evidence}
         assert {"stdout", "stderr"} <= kinds
-        # The rest of the directory stays where it was.
         assert (root / TRACK_RECORD).is_file()
         assert not (root / "stdout.log").exists()
         on_disk = json.loads((attempt / "execution.json").read_text())
-        assert len(on_disk["artifacts"]) == 2
+        assert "artifacts" not in on_disk
 
-    def test_a_refused_adoption_moves_everything_back(self, run, tmp_path) -> None:
+    def test_a_staged_metrics_name_coexists_with_the_wal(self, run, tmp_path) -> None:
         root = self._offline(tmp_path / "track")
-        # A staged artifact named like the metrics WAL lands on the same path.
         clash = OfflineTracker(root)
-        clash.emit_artifact(b"{}", name="metrics.mlp.jsonl")
+        clash.register(b"{}", title="metrics.mlp.jsonl")
         clash.close()
-        before = sorted(p.relative_to(root) for p in root.rglob("*"))
 
-        with pytest.raises(FileExistsError, match="adopted twice"):
-            run.adopt_execution(started_at=T0, finished_at=T1, tracked=root)
+        record = run.adopt_execution(started_at=T0, finished_at=T1, tracked=root)
 
-        assert sorted(p.relative_to(root) for p in root.rglob("*")) == before
-        assert run.executions == []
-        assert not run.execution_dir("e01").exists()
+        attempt = run.execution_dir(record.id)
+        assert _wal_records(attempt / "metrics.mlp.jsonl")[0]["k"] == "loss"
+        produced = assets_produced_by(run.experiment.project.workspace, record.id)
+        named = [asset for asset in produced if asset.title == "metrics.mlp.jsonl"]
+        assert len(named) == 1
+        payload = run.experiment.project.workspace.assets_at(named[0].scope).payload_path(
+            named[0].id
+        )
+        assert Path(payload).read_bytes() == b"{}"
 
     def test_a_rerun_offline_directory_keeps_its_first_start(self, tmp_path) -> None:
         first = OfflineTracker(tmp_path / "t")

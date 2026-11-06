@@ -2,7 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type ArtifactRefResponse = {
+export type AssetRefResponse = {
     assetId: string;
     scope: string;
     kind: string;

@@ -25,7 +25,7 @@ describe("runKeys.artifactContent", () => {
       "e",
       "r",
       "e01",
-      "artifacts",
+      "assets",
       "a1",
       "content",
     ]);

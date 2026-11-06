@@ -1,67 +1,57 @@
-# Artifacts, Assets, and Data Imports
+# Assets
 
-In v2 every persistent byproduct of an experiment falls into one of two surfaces:
+An Asset is one registered file: one id, one content, one ref `molab:asset/<id>`. Each asset owns one slot: its title for an import, its run and title for an attempt's product. The same bytes registered again return the existing ref. New bytes in an occupied slot replace the old ones and keep the id, so `molab:asset/<id>` always names the run's current product; git keeps the old record. Logs are refused: they are evidence, not products.
 
-- **Artifacts** — outputs a running task explicitly emits via `ctx.emit_artifact(...)` (and `ctx.checkpoint(...)`). They are snapshotted into the execution directory, content-addressed, and recorded in a provenance index.
-- **DataAssets** — inputs imported from outside the workspace via `{scope}.data_assets.import_asset(...)`.
+The record and the payload live together under the workspace, a project, or an experiment: `assets/<slot>/asset.json` plus the payload file beside it. An import's slot is its title (`assets/brief/`); an attempt's product is slotted by run (`assets/model-pbix-br--network-data/`). A slot never grows a `-2` suffix. Sealing an attempt commits its run's slots, so the tree is clean afterwards. A run does not store a second product record. "What did this attempt register?" is `assets_produced_by`, a query by producer execution id.
 
-Artifacts are queried through an `ArtifactRepository`; DataAssets through a scope's `data_assets` view or the manifest scanner. This guide explains both, how they are scoped, and how the two query paths differ.
+Files a task writes under `out/<task>/` or `work/` are not assets until something registers them. Logs, `traceback.txt`, `alive`, and `metrics.mlp.jsonl` are evidence of the attempt. `ctx.checkpoint` writes a file under `checkpoints/` and returns a path.
 
-## Emitted artifacts
+## Register
 
-A task (or the driver-side `RunContext`) emits an artifact with `ctx.emit_artifact(data, *, name=...)`:
-
-```python
-import molab as me
-
-ws = me.Workspace("./lab", name="lab")
-run = ws.add_project("demo").add_experiment("baseline").add_run({"lr": 1e-3})
-
-with run.start() as ctx:
-    ctx.set_active_task("train")
-    artifact = ctx.emit_artifact({"loss": 0.1}, name="metrics.json")
-    # artifact.run_id == run.id
-    # artifact.metadata["task_id"] == "train"
-    log = ctx.log("run")
-    log.append("epoch 1")
-    ckpt = ctx.checkpoint("epoch-1", data={"step": 1})
-```
-
-`emit_artifact` accepts a `pathlib.Path` to an existing file (it must live inside the execution's `work/` directory), or an in-memory `dict` / `list` / `str` / `bytes` payload — in that case it writes the payload into `work/<name>` first. Every emit returns an `Artifact` carrying its `id`, `run_id`, `execution_id`, `name`, `semantic_type`, and a content digest. `set_active_task(task_id)` stamps the active task id into `artifact.metadata["task_id"]`.
-
-`ctx.log(name)` is execution evidence, not an artifact — the only valid names are `"run"` (`run.log`), `"stdout"`, and `"stderr"` (`stdout.log` / `stderr.log`, the same files [`molab.print`](tracking.md) writes). `ctx.checkpoint(...)` writes a checkpoint payload and emits it as an artifact with `semantic_type="checkpoint"`.
-
-## Querying artifacts
-
-Emitted artifacts are queried through an `ArtifactRepository`, which reads the content-addressed provenance index the execution wrote to:
+A task registers a file it wants the next run to be able to open:
 
 ```python
-from molab.workspace.artifact_repository import ArtifactRepository
-
-repo = ArtifactRepository(ws.root)
-run_artifacts = repo.list_for_execution(run.executions[-1].id)
-same_artifact = repo.get(run_artifacts[0].id)
+@wf.task
+def simulate(ctx):
+    path = ctx.workdir / "final.xyz"
+    path.write_text("...")
+    return ctx.register(path, title="structure")
 ```
 
-## Importing and querying DataAssets
+Inside a task, `ctx.register` returns a marker. The engine copies the bytes next to the asset record and records `molab:asset/<id>` as the output. The working file stays where the task wrote it, so `out/` and `work/` can be pruned later. The task opens paths; it does not look up the library. A driver that already holds `run.start()` calls the same name and gets the `Asset` back directly.
 
-Data that originates outside the workspace enters through a scope's `data_assets` library:
+Import bytes that did not come from a run with `{scope}.import_asset` (or `{scope}.assets.import_asset`). Import is an origin, not a second type.
+
+## The next run
+
+Name the ids on the run. At execute time they bind into the root task the way parameters do: `inputs` is `tuple[Path, ...]` in `run.inputs` order, and a title that is a unique Python identifier also binds as a parameter of that name. A title that matches a parameter, including a parameter named `inputs`, is an error.
 
 ```python
-from pathlib import Path
+from molab.workspace.asset_repository import assets_produced_by
 
-Path("ligands.csv").write_text("smiles\nCCO\n")
+produced = assets_produced_by(ws, run.executions[-1].id)
+structure = next(asset for asset in produced if asset.title == "structure")
+nxt = exp.add_run(params={"temp": 300}, inputs=(structure.id,))
 
-dataset = ws.data_assets.import_asset("lig-library", "ligands.csv")
-project_dataset = ws.project("demo").data_assets.import_asset("lig-subset", "ligands.csv")
+
+@wf.task
+def analyze(ctx, inputs: tuple[Path, ...], structure: Path):
+    text = structure.read_text()
 ```
 
-The import stores the payload under `<scope>/assets/<asset_id>/` and writes `asset.json` plus `versions/vNNN.json`. `data_assets` is that same repository. Look up imported data by name (`ws.data_assets.get("lig-library")`). `promote` copies a run artifact into that repository. A leftover record that predates the unified asset schema raises `UnmigratedAssetError`, and every asset read answers 409 `MIGRATION_REQUIRED`. It is not rewritten.
+Inside one graph, a downstream task receives the path resolved from the ref. The journal stores the ref string. Without an execution, the string is left as it is.
 
-## Concurrency and atomicity
+## Query
 
-Every write is atomic (temp file + `os.rename`), so a crash never leaves a half-written record. Concurrent emits inside one run all land in the provenance index — nothing is lost and nothing is half-written.
+```python
+from molab.workspace.asset_repository import assets_produced_by, scan_asset_repositories
 
-## Runnable Example
+produced = assets_produced_by(ws, run.executions[-1].id)
+payload = produced[0].content  # digest and size; the file is asset.file
+```
 
-`examples/workspace/assets.py` imports a data asset, emits artifact/log/checkpoint records from a tracked run, and then scans the workspace manifests.
+`{scope}.assets` is that scope's repository. A record that still has `versions/`, or an `asset.json` with no `origin`, raises `UnmigratedAssetError`. Readers do not rewrite it. `molab init` may mint a new id for bytes that should be kept.
+
+## Knowledge
+
+Harvest cites `molab:asset/<id>` for each asset the latest attempt registered, together with the run and the experiment. Workflow does not import knowledge. The ref is the link.

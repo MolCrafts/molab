@@ -369,8 +369,9 @@ def run_adopt(
     The files are moved (renamed, same filesystem) into the run's next
     ``executions/eNN/``: products into ``out/<task>/``, scheduler files into
     ``jobs/``, the log as ``run.log``, scripts into ``source/``. ``--from DIR``
-    folds a ``molab.track()`` directory: ``stdout.log`` / ``stderr.log`` at the
-    attempt root, its metrics and staged artifacts registered in ``artifacts/``.
+    folds a ``molab.track()`` directory: ``stdout.log`` / ``stderr.log`` and
+    ``metrics.mlp.jsonl`` at the attempt root, and registers staged files
+    as assets.
     """
     from molab.workspace import ExperimentNotFoundError, ProjectNotFoundError
     from molab.workspace.domain import ExecutionStatus
@@ -841,8 +842,7 @@ def run_harvest(
     cls = harvest_targets.get(of)
     if cls is None:
         rprint(
-            "[red]Error:[/red] harvest --of must be Finding, Observation, or Report "
-            f"(got {of!r}). Failed runs: molab runs analyze-failure (writes Report)."
+            f"[red]Error:[/red] harvest --of must be Finding, Observation, or Report (got {of!r})."
         )
         raise typer.Exit(1)
     try:
@@ -900,49 +900,6 @@ def run_ingest_metrics(
     )
     for skip in result.skipped:
         rprint(f"  [dim]skip[/dim] {skip.format}: {skip.path.name} — {skip.reason}")
-
-
-@run_app.command("analyze-failure")
-def run_analyze_failure(
-    project_id: Annotated[str, typer.Argument(help="Project ID")],
-    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
-    run_id: Annotated[str, typer.Argument(help="Run ID")],
-    narrative: Annotated[
-        str | None,
-        typer.Option("--narrative", help="Optional interpretation (else deterministic)"),
-    ] = None,
-    force: Annotated[
-        bool,
-        typer.Option("--force", help="Also accept cancelled runs (default: failed only)"),
-    ] = False,
-    created_by: Annotated[str, typer.Option("--created-by")] = "cli",
-    target_spec: TargetOption = ".",
-) -> None:
-    """Analyze a failed run into a Report (shared service)."""
-    ws = _open_ws(target_spec)
-    from molab.services.run_failure import analyze_run_failure
-    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
-    from molab.workspace import ProjectNotFoundError as _ProjNotFound
-    from molab.workspace import RunNotFoundError as _RunNotFound
-
-    try:
-        project = ws.get_project(project_id)
-        experiment = project.get_experiment(experiment_id)
-        run = experiment.get_run(run_id)
-    except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
-        rprint(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
-    try:
-        item = analyze_run_failure(
-            run,
-            created_by=created_by,
-            narrative=narrative,
-            force=force,
-        )
-    except ValueError as exc:
-        rprint(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
-    rprint(f"[green]OK[/green] Report: {item.name}")
 
 
 @run_app.command("info")
@@ -1070,7 +1027,7 @@ def asset_list(
         )
         raise typer.Exit(1)
 
-    from molab.workspace.artifact_repository import scan_asset_repositories
+    from molab.workspace.asset_repository import scan_asset_repositories
 
     assets = [asset for repo in scan_asset_repositories(ws) for asset in repo.list()]
     total = len(assets)
@@ -1099,7 +1056,7 @@ def asset_list(
         table.add_row(
             asset.id[:12] + "...",
             asset.title,
-            asset.kind,
+            asset.media_type or "",
             _format_asset_scope(asset.scope),
             asset.created_at.strftime("%Y-%m-%d %H:%M"),
         )
@@ -1113,34 +1070,38 @@ def asset_info(
     asset_id: Annotated[str, typer.Argument(help="The asset id to inspect.")],
     target_spec: TargetOption = ".",
 ) -> None:
-    """Show one named asset: identity, scope, and versions."""
-    from molab.workspace.domain import ArtifactOrigin, ImportOrigin
+    """Show one asset: identity, content, and where the bytes came from."""
+    from molab.workspace.domain import Asset, ExecutionOrigin, ImportOrigin
     from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
     from molab.workspace.refs import MolabRef
 
     ws = _open_ws(target_spec)
     try:
-        asset = ws.find(MolabRef(asset_id=asset_id))
+        found = ws.find(MolabRef(asset_id=asset_id))
     except (RefNotFoundError, AmbiguousRefError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
+    if not isinstance(found, Asset):
+        rprint(f"[red]Error:[/red] {asset_id!r} is not an asset.")
+        raise typer.Exit(1)
+    asset = found
+    origin = asset.origin
+    if isinstance(origin, ImportOrigin):
+        origin_text = f"import {origin.uri}"
+    elif isinstance(origin, ExecutionOrigin):
+        task = origin.task or "-"
+        origin_text = f"execution {origin.execution_id} task {task} run {origin.run_id}"
+    else:
+        origin_text = origin.kind
     rprint(f"[bold]{asset.title}[/bold]  ({asset.id})")
-    rprint(f"  kind         : {asset.kind}")
+    rprint(f"  ref          : {asset.ref}")
+    rprint(f"  media type   : {asset.media_type or ''}")
     rprint(f"  scope        : {_format_asset_scope(asset.scope)}")
+    rprint(f"  digest       : {asset.content.digest}")
+    rprint(f"  size         : {asset.content.size}")
+    rprint(f"  file         : {asset.file}")
+    rprint(f"  origin       : {origin_text}")
     rprint(f"  created      : {asset.created_at.isoformat()}")
-    for version in ws.assets_at(asset.scope).versions(asset.id):
-        digest = version.content.digest if version.content is not None else "(none)"
-        origin = version.origin
-        if isinstance(origin, ImportOrigin):
-            origin_text = f"import:{origin.action} {origin.uri}"
-        elif isinstance(origin, ArtifactOrigin):
-            origin_text = f"artifact:{origin.artifact_id}"
-        else:
-            origin_text = origin.kind
-        rprint(f"  v{version.version:03d}  {digest}  {origin_text}")
-        if isinstance(origin, ImportOrigin):
-            for input_id in origin.input_ids:
-                rprint(f"  input {input_id}")
 
 
 @asset_app.command("lineage")
@@ -1153,7 +1114,7 @@ def asset_lineage(
     target_spec: TargetOption = ".",
 ) -> None:
     """Trace an asset's provenance — wraps ``assets.lineage.ancestors/descendants``."""
-    from molab.workspace.artifact_repository import scan_asset_repositories
+    from molab.workspace.asset_repository import scan_asset_repositories
     from molab.workspace.assets import lineage as asset_lineage_mod
     from molab.workspace.domain import Asset
     from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
@@ -1182,7 +1143,11 @@ def asset_lineage(
             return
         for related_id in sorted(ids):
             related = named.get(related_id)
-            suffix = f"  {related.title} ({related.kind})" if related is not None else ""
+            suffix = (
+                f"  {related.title} ({related.media_type or 'asset'})"
+                if related is not None
+                else ""
+            )
             rprint(f"  {arrow} {related_id}{suffix}")
 
     if direction in ("ancestors", "both"):
@@ -1191,33 +1156,28 @@ def asset_lineage(
         _render("descendants", "->", asset_lineage_mod.descendants(ws, asset_id))
 
 
-def _find_run(ws: object, run_id: str) -> Run:
-    """Resolve a bare run id or a ``molab:`` ref inside an open workspace."""
-    from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
-    from molab.workspace.refs import InvalidRefError, is_ref, qualify_run_id
-    from molab.workspace.workspace import Workspace
+@asset_app.command("migrate")
+def asset_migrate(
+    target_spec: TargetOption = ".",
+) -> None:
+    """Rewrite versioned asset records into the current schema.
 
-    if not isinstance(ws, Workspace):
-        raise TypeError(f"expected a Workspace, got {type(ws).__name__}")
+    Keeps each asset id and its payload. A record that already loads is left
+    as it is. Removes ``versions/`` only after the payload digest matches.
+    """
+    from molab.workspace.asset_repository import migrate_legacy_assets
+
+    ws = _open_ws(target_spec)
     try:
-        ref = run_id if is_ref(run_id) else qualify_run_id(ws, run_id)
-        found = ws.find(ref)
-    except (InvalidRefError, RefNotFoundError, AmbiguousRefError) as exc:
+        migrated = migrate_legacy_assets(ws)
+    except (OSError, ValueError, RuntimeError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
-    if not isinstance(found, Run):
-        rprint(f"[red]Error:[/red] {run_id!r} is not a run.")
-        raise typer.Exit(1)
-    return found
-
-
-def _version_ids(repo: object) -> set[str]:
-    """Every asset-version id currently in *repo*."""
-    from molab.workspace.artifact_repository import AssetRepository
-
-    if not isinstance(repo, AssetRepository):
-        raise TypeError(f"expected an AssetRepository, got {type(repo).__name__}")
-    return {version.id for asset in repo.list() for version in repo.versions(asset.id)}
+    if not migrated:
+        print("migrated\t0")
+        return
+    for asset in migrated:
+        print(f"migrated\t{asset.title}\t{asset.id}")
 
 
 @asset_app.command("import")
@@ -1230,66 +1190,20 @@ def asset_import(
     project: Annotated[str, typer.Option("--project", help="Project that owns the asset.")],
     target_spec: TargetOption = ".",
 ) -> None:
-    """Copy a file in as a project asset. An existing title is left as it is."""
+    """Copy a file in as a project asset.
+
+    The same bytes registered again return the existing asset. The title is
+    a label, so a matching title with different bytes is a new asset.
+    """
     ws = _open_ws(target_spec)
     try:
         owner = ws.project(project)
     except Exception as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
-    existing = next((asset for asset in owner.data_assets.list() if asset.title == name), None)
-    if existing is not None:
-        print(f"present\t{existing.title}\t{existing.id}")
-        return
     try:
-        asset = owner.data_assets.import_asset(name, src, meta={"role": "import"})
+        asset = owner.import_asset(name, src, tags={"role": "import"})
     except (FileNotFoundError, ValueError, OSError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
     print(f"imported\t{asset.title}\t{asset.id}")
-
-
-@asset_app.command("promote")
-def asset_promote(
-    run_id: Annotated[str, typer.Argument(help="Run id, or a molab:experiment/.../run/... ref.")],
-    target_spec: TargetOption = ".",
-) -> None:
-    """Promote a run's generated images into its project asset library.
-
-    Image parts are the artifacts ``molab knowledge parts`` lists whose media
-    type starts with ``image/``. The project repository files each one under
-    the part name: a new asset, or the next version of the one asset with
-    that title. An artifact or the same bytes already in the library are
-    left as they are.
-    """
-    from molab.knowledge import GeneratedParts
-    from molab.workspace.history import SYSTEM_AGENT
-
-    ws = _open_ws(target_spec)
-    run = _find_run(ws, run_id)
-    try:
-        parts = GeneratedParts(run).list()
-    except ValueError as exc:
-        rprint(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
-    images = [part for part in parts if (part.media_type or "").startswith("image/")]
-    if not images:
-        print(f"No generated image parts on run {run.id}.")
-        return
-    repo = run.experiment.project.data_assets
-    known = _version_ids(repo)
-    for part in images:
-        artifact = run.execution(part.execution_id).artifact(part.artifact_id)
-        try:
-            asset, version = repo.promote(
-                artifact,
-                created_by=SYSTEM_AGENT,
-                title=part.part,
-                metadata={"part": part.part},
-            )
-        except ValueError as exc:
-            rprint(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(1) from None
-        label = "present" if version.id in known else "promoted"
-        print(f"{label}\t{part.part}\t{asset.id}")
-        known.add(version.id)

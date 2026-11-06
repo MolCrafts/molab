@@ -63,14 +63,15 @@ workspace_root/
     └── experiments/<experiment-slug>/
         ├── index.md              ← experiment record + `index:` + narrative
         ├── knowledges/<name>.md
+        ├── assets/<slug>/       ← one registered file: asset.json + payload
         └── runs/<key=value_…>/   ← directory name is the parameters
-            ├── index.md          ← run record: logical definition only
+            ├── index.md          ← run record: logical definition, including inputs
             ├── values/           ← every task input/output, stored once by content
             └── executions/e01/   ← one attempt; `e01` is its id
                 ├── execution.json
                 ├── alive         ← owner heartbeat is mtime
                 ├── workflow.json ← per-node journal; cites values/ by ref
-                ├── artifacts/
+                ├── metrics.mlp.jsonl
                 ├── out/<task>/
                 └── jobs/
 ```

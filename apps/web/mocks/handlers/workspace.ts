@@ -67,7 +67,7 @@ function buildMockWorkspaceRuns() {
         experimentName: experiment.name,
         definitionHash: run.definitionHash,
         experimentRevisionId: run.experimentRevisionId,
-        inputAssetIds: [],
+        inputs: [],
         targetHint: run.target ?? null,
         statusSummary: run.statusSummary,
         parameters: run.parameters ?? {},
@@ -81,7 +81,6 @@ function buildMockWorkspaceRuns() {
           startedAt: e.startedAt,
           finishedAt: e.finishedAt,
           basedOnExecutionId: e.basedOnExecutionId,
-          checkpointArtifactId: e.checkpointArtifactId,
           durationSeconds:
             e.startedAt && e.finishedAt
               ? (Date.parse(e.finishedAt) - Date.parse(e.startedAt)) / 1000

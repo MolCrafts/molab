@@ -1,81 +1,76 @@
-"""Artifact queries answered by the Executions that own the artifacts.
+"""Which assets an attempt produced is a walk of asset records.
 
-There is no artifact index. An Execution records its own products in its
-``execution.json``, so "which artifacts exist" is a walk of the run tree
-(:func:`molab.workspace.artifact_repository.scan_artifacts`) and "which
-artifacts did this attempt emit" is one file read. Emitted artifacts are
-created by
-:meth:`molab.workspace.execution_context.ExecutionContext.emit_artifact`.
+There is no artifact index and no product list on ``execution.json``.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from molab.workspace import Workspace
-from molab.workspace.artifact_repository import scan_artifacts
-from molab.workspace.domain import Artifact
-
-# Each started run persists two artifacts: the user's "artifact" + a checkpoint.
-ARTIFACTS_PER_RUN = 2
+from molab.workspace.asset_repository import asset_by_id, assets_produced_by
+from molab.workspace.domain import ExecutionOrigin
 
 
-def _seed_workspace(root: Path, n_runs: int = 3) -> Workspace:
+def _seed(root: Path, n_runs: int = 3) -> Workspace:
     ws = Workspace(root=root, name="Test")
-    proj = ws.add_project("demo")
-    exp = proj.add_experiment("baseline", params={"lr": 1e-3})
+    experiment = ws.add_project("demo").add_experiment("baseline", params={"lr": 1e-3})
     for i in range(n_runs):
-        r = exp.add_run(params={"seed": i})
-        with r.start() as ctx:
-            ctx.emit_artifact({"loss": 0.1 * i}, name="metrics.json", semantic_type="artifact")
+        run = experiment.add_run(params={"seed": i})
+        with run.start() as ctx:
+            ctx.register({"loss": 0.1 * i}, title="metrics.json")
             ctx.checkpoint("epoch1", data={"step": 1})
     return ws
 
 
-def _all_artifacts(ws: Workspace) -> list[Artifact]:
-    return scan_artifacts(ws)
-
-
-class TestQueryArtifacts:
-    def test_run_scope_matches_only_that_run(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")
+class TestAssetsProducedBy:
+    def test_one_attempt(self, tmp_path: Path) -> None:
+        ws = _seed(tmp_path / "lab")
         run = ws.project("demo").experiment("baseline").list_runs()[0]
         execution = run.executions[0]
-        assert len(execution.artifacts) == ARTIFACTS_PER_RUN
-        assert all(
-            a.execution_id == execution.id and a.run_id == run.id for a in execution.artifacts
-        )
+        produced = [
+            asset
+            for asset in assets_produced_by(ws, execution.id)
+            if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
+        ]
+        assert len(produced) == 1
+        origin = produced[0].origin
+        assert isinstance(origin, ExecutionOrigin)
+        assert origin.execution_id == execution.id
+        assert origin.run_id == run.id
 
-    def test_scan_sees_every_run(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")
-        assert len(_all_artifacts(ws)) == 3 * ARTIFACTS_PER_RUN
+    def test_scan_sees_every_run(self, tmp_path: Path) -> None:
+        ws = _seed(tmp_path / "lab")
+        produced = []
+        for run in ws.project("demo").experiment("baseline").list_runs():
+            produced.extend(
+                asset
+                for asset in assets_produced_by(ws, run.executions[0].id)
+                if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
+            )
+        assert len(produced) == 3
+
+    def test_unknown_attempt_is_empty(self, tmp_path: Path) -> None:
+        ws = _seed(tmp_path / "lab", n_runs=1)
+        assert assets_produced_by(ws, "e99") == []
 
 
-class TestGetArtifact:
-    def test_execution_resolves_its_own_artifact_else_keyerror(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")
+class TestAssetById:
+    def test_found_or_none(self, tmp_path: Path) -> None:
+        ws = _seed(tmp_path / "lab", n_runs=1)
         run = ws.project("demo").experiment("baseline").list_runs()[0]
-        execution = run.executions[0]
-        some = execution.artifacts[0]
-        assert execution.artifact(some.id).id == some.id
-        with pytest.raises(KeyError):
-            execution.artifact("nonexistent")
+        (asset,) = assets_produced_by(ws, run.executions[0].id)
+        assert asset_by_id(ws, asset.id).id == asset.id
+        assert asset_by_id(ws, "missing") is None
 
 
-class TestNoDerivedArtifactIndex:
-    """Invariant lock: nothing re-encodes an artifact outside its Execution."""
-
-    def test_seeded_workspace_keeps_artifacts_only_in_executions(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")
+class TestNoDerivedIndex:
+    def test_bytes_live_with_the_asset_record(self, tmp_path: Path) -> None:
+        ws = _seed(tmp_path / "lab")
         root = Path(str(ws.root))
-        assert len(_all_artifacts(ws)) == 3 * ARTIFACTS_PER_RUN
         assert not (root / "catalog").exists()
-        assert not (root / "index").exists()
-        assert not (root / "provenance").exists()
-        assert not (root / "content").exists()
-        assert not list(root.rglob("*.sqlite"))
         assert not list(root.rglob("artifact.json"))
-        # The bytes live where a person would look for them.
-        assert list(root.rglob("executions/e01/artifacts/metrics.json"))
+        assert not list(root.rglob("executions/e01/artifacts/*"))
+        assert list(root.rglob("assets/*/asset.json"))
+        assert list(root.rglob("executions/e01/checkpoints/epoch1.json"))
+        assert ws.project("demo").experiment("baseline").list_runs()[0].execution("e01").id == "e01"

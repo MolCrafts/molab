@@ -18,7 +18,8 @@ data, not from matching names: it is the directories whose
 ``work/``, ``jobs/`` and ``checkpoints/``). Solver output under ``out/`` and
 scheduler stdout/stderr under ``jobs/`` therefore go with the bulk. Other
 entries survive, including ``execution.json``, the node journal
-(``workflow.json``), the attempt's ``run.log`` and ``artifacts/``. So does the
+(``workflow.json``), the attempt's ``run.log`` and ``metrics.mlp.jsonl``.
+A registered asset lives outside the attempt, so it is not pruned. So does the
 run-level ``source/``, which lies outside every execution directory. Because
 the record survives, the next attempt's id (``max(seq) + 1``) never reuses a
 pruned one.
@@ -58,6 +59,7 @@ __all__ = [
     "ExecutionPrunePlan",
     "LivePruneRefusedError",
     "apply_execution_prune",
+    "discard_superseded_attempts",
     "plan_execution_prune",
 ]
 
@@ -203,7 +205,8 @@ def apply_execution_prune(run: Run, plan: ExecutionPrunePlan) -> int:
     contract: a directory that vanished since planning is still recorded as
     pruned, but it is not counted. No record is deleted. ``execution.json`` is
     only updated with the stamp, and ``workflow.json``, ``run.log`` and
-    ``artifacts/`` are left alone.
+    ``metrics.mlp.jsonl`` are left alone. A registered asset lives outside
+    the attempt.
 
     Pass a plan from :func:`plan_execution_prune`. A hand-built entry is
     re-validated before removal: one that names a non-prunable directory
@@ -261,3 +264,80 @@ def apply_execution_prune(run: Run, plan: ExecutionPrunePlan) -> int:
                 fs.rm(path, recursive=True)
                 removed_dirs += 1
     return removed_dirs
+
+
+def _seeding_closure(repo: object, execution_id: str) -> set[str]:
+    """*execution_id* and every attempt whose task results it reused (``seeded_from``), transitively."""
+    import json
+
+    kept: set[str] = set()
+    pending = [execution_id]
+    while pending:
+        current = pending.pop()
+        if current in kept:
+            continue
+        kept.add(current)
+        journal = repo.fs.join(repo.execution_dir(current), "workflow.json")  # ty: ignore[unresolved-attribute]
+        try:
+            seeded = json.loads(repo.fs.read_text(journal)).get("seeded_from") or {}  # ty: ignore[unresolved-attribute]
+        except (OSError, ValueError):
+            continue
+        for source in seeded.values():
+            if isinstance(source, dict) and isinstance(source.get("execution_id"), str):
+                pending.append(source["execution_id"])
+    return kept
+
+
+def discard_superseded_attempts(run: Run) -> tuple[str, ...]:
+    """Delete every attempt of *run* the newest one does not stand on; return their ids.
+
+    The newest attempt stays, and so does every attempt it reused task
+    results from (``seeded_from`` in its journal), transitively: a resumed
+    attempt's result is partly theirs.
+
+    A superseded attempt is stale evidence once a later one exists: its record,
+    logs, bulk directories and any asset it registered that the newest attempt
+    did not replace all go. The deletion is one history commit, so git keeps
+    the committed records. Zombie attempts are reaped first.
+
+    Raises:
+        LivePruneRefusedError: An attempt of *run* is still active.
+    """
+    from .asset_repository import assets_produced_by
+    from .domain import ExecutionOrigin
+    from .history import EntityRef
+    from .run_reaper import reap_zombie_run
+
+    reap_zombie_run(run)
+    executions = run.executions
+    active = [item.id for item in executions if item.status in ACTIVE_EXECUTION_STATUSES]
+    if active:
+        raise LivePruneRefusedError(
+            f"run {run.id!r} has active attempt(s) {', '.join(active)}; cancel or finish them first"
+        )
+    repo = run._execution_repository()
+    kept = _seeding_closure(repo, executions[-1].id) if executions else set()
+    stale = tuple(item.id for item in executions if item.id not in kept)
+    if not stale:
+        return ()
+    workspace = run.experiment.project.workspace
+    touched: list[str] = [str(repo.run_dir)]
+    for execution_id in stale:
+        for asset in assets_produced_by(workspace, execution_id):
+            if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id:
+                assets = workspace.assets_at(asset.scope)
+                slug = assets.find_slug(asset.id)
+                assets.remove(asset.id)
+                if slug is not None:
+                    touched.append(repo.fs.join(assets.assets_dir, slug))
+        repo.fs.rm(repo.execution_dir(execution_id), recursive=True)
+        for lock in (repo._seal_lock(execution_id), repo._state_lock(execution_id)):
+            lock.unlink(missing_ok=True)
+    run_name = repo.fs.basename(str(repo.run_dir))
+    repo.history.record(
+        "ExecutionsDiscarded",
+        subject=EntityRef(id=run.id, type="run"),
+        summary=f"{run_name} discarded {', '.join(stale)}",
+        paths=tuple(touched),
+    )
+    return stale

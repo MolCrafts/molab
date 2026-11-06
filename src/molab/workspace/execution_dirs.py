@@ -1,9 +1,10 @@
 """The directories inside one Execution, as peers.
 
 An attempt's directory holds several siblings — scratch, bulk output,
-promoted products, scheduler evidence, resumable state. **They are peers.**
+scheduler evidence, resumable state. **They are peers.**
 Nothing ranks them, no directory gets an accessor the others do not have,
-and no caller may special-case one by matching its name.
+and no caller may special-case one by matching its name. A registered file
+lives with its asset record, outside the attempt.
 
 What a directory *means* is the fields of its :class:`ExecutionDir`
 declaration, so the questions callers actually ask are answered by querying
@@ -19,12 +20,11 @@ question                                     answer
 ===========================================  =============================
 
 Registration is open: a package that writes a directory declares it, the
-same rule that gives molrs the solver formats. molab seeds the six its
-own layout law documents; anything else is declared by whoever writes it.
+same rule that gives molrs the solver formats. molab seeds the directories
+its own layout law documents; anything else is declared by whoever writes it.
 
 Naming a directory at a *call site* is not privilege — ``get_dir("work")``
-and ``get_dir("artifacts")`` are the same call, and a writer naturally knows
-which of the three tiers it is producing. Privilege would be one of them
+and ``get_dir("out")`` are the same call. Privilege would be one of them
 having a bespoke property while the others need a string.
 """
 
@@ -33,7 +33,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 __all__ = [
-    "ARTIFACTS",
     "CHECKPOINTS",
     "JOBS",
     "NODES",
@@ -98,27 +97,26 @@ class ExecutionDir:
     ``execution.json``. Only a *sealed* attempt, one that has finished and
     been frozen, is ever pruned. Defaults to False, the safe direction: a
     directory whose declaration does not opt in is always kept.
-    ``artifacts/`` is not prunable because ``Artifact.path`` points at its
-    bytes.
+    A registered asset lives with its record, outside the attempt, so
+    pruning ``out/`` and ``work/`` does not remove it.
     """
 
 
-# ── molab's own three tiers, plus the two the layout law documents ──────
+# ── molab's working tiers, plus the directories the layout law documents ─
 #
 # A workflow task writes into ``out/`` (``ctx.task_workdir`` resolves there):
 # what a body produces mixes its generated inputs, its intermediates and its
 # trajectory, and those cannot be sorted out from the outside — so they land
-# in the tier that is *kept*, never the disposable one. ``artifacts/`` is
-# reached by promotion, and ``emit_artifact`` promotes from any tier.
+# in the tier that is *kept*, never the disposable one. A file worth citing
+# is registered as an asset; its bytes then live with that record.
 #
 # ``work/`` is the framework's own scratch: ``ExecutionContext.files``
-# (``ctx.files``) writes here, and ``emit_artifact`` stages in-memory data here
-# before promoting it into ``artifacts/``. Its declaration reaches the UI
+# (``ctx.files``) writes here. Its declaration reaches the UI
 # through ``RunFilesResponse.dirs``.
 
 WORK = ExecutionDir(
     name="work",
-    purpose="Framework scratch: ctx.files writes and emit_artifact staging. Disposable.",
+    purpose="Framework scratch: ctx.files writes. Disposable.",
     versioned=False,
     products=False,
     prunable=True,
@@ -130,13 +128,6 @@ OUT = ExecutionDir(
     versioned=False,
     products=True,
     prunable=True,
-)
-
-ARTIFACTS = ExecutionDir(
-    name="artifacts",
-    purpose="Promoted products, registered on the Execution and citable.",
-    versioned=True,
-    products=True,
 )
 
 JOBS = ExecutionDir(
@@ -211,9 +202,8 @@ def execution_dir_names() -> frozenset[str]:
 def product_dirs() -> tuple[ExecutionDir, ...]:
     """Directories a reader should search for results, in lookup order.
 
-    Most-curated first is *registration* order, not status: a promoted
-    ``artifacts/`` copy and the raw ``out/`` file it came from are the same
-    result, and a searcher wants the registered one.
+    Most-curated first is *registration* order, not status. A registered
+    asset is not in these directories; its bytes live with the asset record.
     """
     return tuple(d for d in list_execution_dirs() if d.products)
 
@@ -227,8 +217,7 @@ def prunable_dirs() -> tuple[ExecutionDir, ...]:
 
     Returns:
         Every declared directory whose ``prunable`` is True. With molab's own
-        seeds these are ``out``, ``work``, ``jobs`` and ``checkpoints``;
-        ``artifacts`` is never included.
+        seeds these are ``out``, ``work``, ``jobs`` and ``checkpoints``.
     """
     return tuple(d for d in list_execution_dirs() if d.prunable)
 
@@ -238,5 +227,5 @@ def scratch_dirs() -> tuple[ExecutionDir, ...]:
     return tuple(d for d in list_execution_dirs() if not d.versioned)
 
 
-for _seed in (ARTIFACTS, OUT, WORK, JOBS, CHECKPOINTS, NODES, SOURCE):
+for _seed in (OUT, WORK, JOBS, CHECKPOINTS, NODES, SOURCE):
     register_execution_dir(_seed)

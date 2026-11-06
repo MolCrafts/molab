@@ -41,7 +41,7 @@ export const RunInspectorDetails = ({
         <Field label="Definition" value={run.definitionHash} mono />
         <Field label="Experiment revision" value={run.experimentRevisionId} mono />
         <Field label="Target hint" value={run.targetHint ?? "—"} />
-        <Field label="Input assets" value={String(run.inputAssetIds.length)} />
+        <Field label="Inputs" value={String(run.inputs.length)} />
       </Section>
 
       <Section title="Execution summary">

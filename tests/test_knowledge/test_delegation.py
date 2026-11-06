@@ -249,11 +249,16 @@ class TestDelegationWorkerLinks:
                 },
                 {"id": "a2", "worker": "subagent", "tokens": "unavailable"},
             ],
-            last_decision={
-                "path": "projects/p/knowledges/decision-1.md",
-                "kind": "continue",
-                "next": "Dispatch round 2 with seed 42.",
-            },
+            decisions=[
+                {
+                    "at": "2026-11-05T12:00:00Z",
+                    "name": "round 2",
+                    "kind": "continue",
+                    "reason": "round 1 passed its checks",
+                    "evidence": ["molab:asset/01a1ac09-072e-7f27-9d1e-3c964b52c345"],
+                    "next": "Dispatch round 2 with seed 42.",
+                }
+            ],
             answers=[
                 {
                     "path": "projects/p/knowledges/answer-1.md",
@@ -273,10 +278,10 @@ class TestDelegationWorkerLinks:
         assert first.tokens != "unavailable" and first.tokens.input == 1200
         assert first.tokens.cache_read is None
         assert second.tokens == "unavailable"
-        assert record.last_decision is not None and record.last_decision.kind == "continue"
+        assert [item.kind for item in record.decisions] == ["continue"]
         assert record.answers[0].by == "roykid"
         stored = record_of(doc)
-        assert stored["last_decision"]["next"] == "Dispatch round 2 with seed 42."
+        assert stored["decisions"][0]["next"] == "Dispatch round 2 with seed 42."
         assert stored["attempts"][0]["tokens"] == {"input": 1200, "output": 340}
 
     def test_a_record_without_the_new_fields_still_loads(self) -> None:
@@ -286,7 +291,7 @@ class TestDelegationWorkerLinks:
         attempt = record.attempts[0]
         assert attempt.brief is None and attempt.brief_digest is None
         assert attempt.report is None and attempt.tokens is None
-        assert record.last_decision is None and record.answers == ()
+        assert record.decisions == () and record.answers == ()
 
     def test_the_new_fields_are_validated(self) -> None:
         with pytest.raises(ValueError, match="brief_digest"):
@@ -295,8 +300,8 @@ class TestDelegationWorkerLinks:
             )
         with pytest.raises(ValueError, match="tokens"):
             parse_delegation(_record(attempts=[{"id": "a1", "worker": "w", "tokens": "none"}]))
-        with pytest.raises(ValueError, match="last_decision"):
-            parse_delegation(_record(last_decision={"path": "d.md"}))
+        with pytest.raises(ValueError, match="decisions"):
+            parse_delegation(_record(decisions=[{"kind": "continue"}]))
         with pytest.raises(ValueError, match="answers"):
             parse_delegation(_record(answers=[{"path": "a.md", "by": "me"}]))
 

@@ -190,7 +190,7 @@ def _write_report(lab: Any, record: dict[str, object], *, name: str = "Round 1 r
         of=Report,
         sources=[SourceRef.of(project)],
         created_by="worker",
-        text="# Round 1\n\nBuilt both chains.\n",
+        text="# Round 1\n\nBuilt both chains: molab:asset/01a1ac09-072e-7f27-9d1e-3c964b52c345\n",
         record=record,
     )
 

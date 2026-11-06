@@ -1,8 +1,7 @@
-"""Return values are not auto-published as artifacts.
+"""Return values are not auto-published as assets.
 
-``persist_result`` / ``FileMaterializationStore`` retired: a task's return
-value lives in ``workflow.json``. Files become run products only through
-``register_artifact``.
+A task's return value lives in ``workflow.json``. A file becomes an asset
+only through ``ctx.register``.
 """
 
 from __future__ import annotations
@@ -16,7 +15,9 @@ from molab.workspace import Workspace
 
 
 @pytest.mark.asyncio
-async def test_json_return_is_not_auto_registered_as_artifact(tmp_path: Path) -> None:
+async def test_json_return_is_not_auto_registered(tmp_path: Path) -> None:
+    from molab.workspace.asset_repository import assets_produced_by
+
     ws = Workspace(tmp_path / "lab")
     run = ws.add_project(name="p").add_experiment(name="e").add_run()
     wf = Workflow(name="plain")
@@ -29,7 +30,4 @@ async def test_json_return_is_not_auto_registered_as_artifact(tmp_path: Path) ->
         out = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
     assert out.outputs["produce"] == {"value": 42}
-    execution_id = run.executions[-1].id
-    artifacts = run._execution_repository().get(execution_id).artifacts
-    found = [a for a in artifacts if a.metadata.get("task_id") == "produce"]
-    assert found == []
+    assert assets_produced_by(ws, run.executions[-1].id) == []

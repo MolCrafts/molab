@@ -30,8 +30,8 @@ execution, or an :class:`AttachedTracker` in a child process molab started
 (``MOLAB_EXECUTION_DIR``), or a live execution of a run it opens, or an
 :class:`OfflineTracker` that writes the same layout into a plain directory.
 A child and an offline script never write ``execution.json``: their stdio
-and metrics land at their final paths, and an artifact is only *staged*
-(``work/_molab/staged/`` plus one line in ``work/_molab/artifacts.jsonl``).
+and metrics land at their final paths, and a file worth registering is only
+*staged* (``work/_molab/staged/`` plus one line in ``work/_molab/staged.jsonl``).
 The owner folds the manifest at seal; ``molab runs adopt --from`` folds an
 offline directory.
 
@@ -66,13 +66,12 @@ from mollog import get_logger
 from molab._typing import JSONValue
 from molab.atomicio import atomic_write_json
 
-from .execution_dirs import ARTIFACTS, WORK
+from .execution_dirs import WORK
 from .metrics_seam import MetricRecord, MetricsSink, create_metrics_writer
 
 if TYPE_CHECKING:
     from _typeshed import SupportsWrite
 
-    from .domain import Artifact
     from .execution_context import ExecutionContext
     from .fs import PathArg
 
@@ -103,19 +102,18 @@ class Tracker(Protocol):
         """Append *text* verbatim to the attempt's *stream* file."""
         ...
 
-    def emit_artifact(
+    def register(
         self,
         data: object,
         *,
-        name: str | None = None,
+        title: str,
         media_type: str | None = None,
-        semantic_type: str | None = None,
         tags: dict[str, str] | None = None,
-    ) -> Artifact | StagedArtifact:
-        """Archive *data* as an Artifact of the attempt.
+    ) -> object:
+        """Register *data* as an asset of the attempt.
 
-        The owning process records it at once; a child or an offline script
-        stages it for the owner (:class:`StagedArtifact`).
+        The owning process mints the asset at once. A child or an offline
+        script stages the bytes for the owner (:class:`StagedFile`).
         """
         ...
 
@@ -402,22 +400,22 @@ class TrackedMetrics(_MetricsFront):
 
     ``ExecutionContext.metrics`` returns it, and so does ``TaskContext.metrics``
     under an execution, so a driver script and a workflow task write the same
-    ``artifacts/metrics.mlp.jsonl``, live.
+    ``metrics.mlp.jsonl`` at the attempt root, live.
 
     - A record written while a task scope is active gets ``tags.task`` (an
       explicit ``tags["task"]`` wins) and is also kept in memory under the
       task's name, at most :data:`TASK_RECORD_CAP` per task. The node cache
       takes them with :meth:`take_task_records` to replay on a hit.
-    - :meth:`image` archives the image as an Artifact first, then appends an
-      ``image_ref`` to that Artifact's path.
+    - :meth:`image` registers the image as an asset, then appends an
+      ``image_ref`` to that asset's ref. A child cannot mint the id, so it
+      records the staged path until the owner registers the file.
 
     Args:
         sink: The execution's WAL writer (``metrics_seam.create_metrics_writer``).
-        emit_artifact: The execution's ``emit_artifact``, which :meth:`image`
-            archives through. ``None``: :meth:`image` raises.
+        register: The execution's ``register``, which :meth:`image` calls.
+            ``None``: :meth:`image` raises.
         execution_dir: The attempt's directory. An image file outside it is
-            archived from a copy of its bytes, since an Artifact is a product
-            of the attempt.
+            registered from a copy of its bytes.
         task: The task a record is tagged with outside a task scope (an
             attached child's ``MOLAB_TASK``, D94). Such records are not kept
             for the node cache: only the owner's task scope captures.
@@ -427,12 +425,12 @@ class TrackedMetrics(_MetricsFront):
         self,
         sink: MetricsSink,
         *,
-        emit_artifact: Callable[..., Artifact | StagedArtifact] | None = None,
+        register: Callable[..., object] | None = None,
         execution_dir: Path | None = None,
         task: str | None = None,
     ) -> None:
         super().__init__(sink, task=task)
-        self._emit_artifact = emit_artifact
+        self._register = register
         self._execution_dir = execution_dir
         self._lock = threading.Lock()
         self._captured: dict[str, list[MetricRecord]] = {}
@@ -534,30 +532,30 @@ class TrackedMetrics(_MetricsFront):
         name: str | None = None,
         tags: dict[str, JSONValue] | None = None,
     ) -> MetricRecord:
-        """Archive an image as an Artifact, then reference it with ``image_ref``.
+        """Register an image as an asset, then reference it with ``image_ref``.
 
         Args:
             key: The metric key.
             data: A path to an existing image file (one outside the attempt
-                is archived from a copy of its bytes), or the image's bytes.
+                is registered from a copy of its bytes), or the image's bytes.
             step: The step this image belongs to.
             caption: A caption for the viewer.
-            name: The Artifact's name; required for bytes, the file's name by
-                default. Each image is its own Artifact, so two images need
-                two names.
+            name: Title of the asset; required for bytes, the file's name by
+                default. Each image is its own asset, so two images need
+                two titles.
             tags: Record tags.
 
         Returns:
-            The ``image_ref`` record; its ``v.path`` is the Artifact's path
-            (``artifacts/<name>``, relative to the execution directory).
+            The ``image_ref`` record. ``v.path`` is ``molab:asset/<id>`` when
+            the owner registered it, or the staged path when a child wrote it.
 
         Raises:
             ValueError: *data* is bytes without *name*, or a string that is not
                 an existing path.
-            RuntimeError: No ``emit_artifact`` was given.
+            RuntimeError: No ``register`` was given.
         """
-        if self._emit_artifact is None:
-            raise RuntimeError("metrics.image needs an execution to archive the image")
+        if self._register is None:
+            raise RuntimeError("metrics.image needs an execution to register the image")
         source: object
         if isinstance(data, (bytes, bytearray)):
             if not name:
@@ -571,13 +569,11 @@ class TrackedMetrics(_MetricsFront):
             label = name or path.name
             source = path if self._inside_execution(path) else path.read_bytes()
         media_type, _ = mimetypes.guess_type(label)
-        artifact = self._emit_artifact(
-            source,
-            name=label,
-            media_type=media_type,
-            semantic_type=IMAGE_SEMANTIC_TYPE,
-        )
-        return self.image_ref(key, artifact.path, step, caption=caption, tags=tags)
+        registered = self._register(source, title=label, media_type=media_type)
+        pointer = getattr(registered, "ref", None)
+        if not isinstance(pointer, str):
+            pointer = getattr(registered, "path", label)
+        return self.image_ref(key, pointer, step, caption=caption, tags=tags)
 
 
 class _MemorySink:
@@ -740,36 +736,34 @@ DEFAULT_TRACK_DIR = "molab-track"
 #: How often, at most, an attached child re-reads the seal before a write.
 SEAL_CHECK_SECONDS = 5.0
 
-#: The ``semantic_type`` of a metrics WAL registered as an Artifact.
+#: The ``semantic_type`` of a metrics WAL. The file is evidence, not an asset.
 METRICS_SEMANTIC_TYPE = "molplot.metrics"
 
 #: ``work/_molab/``: what a child or an offline script leaves for the owner.
-#: The same reserved name as ``artifacts/_molab/``
-#: (``artifact_repository.RESERVED_ARTIFACT_DIR``).
 TRACK_DIR = PurePosixPath(WORK.name, "_molab")
 
-#: Staged artifact bytes, ``work/_molab/staged/<n>-<basename>``.
+#: Staged file bytes, ``work/_molab/staged/<n>-<basename>``.
 STAGED_DIR = TRACK_DIR / "staged"
 
-#: The staging manifest: one JSON line per staged artifact.
-MANIFEST = TRACK_DIR / "artifacts.jsonl"
+#: The staging manifest: one JSON line per staged file.
+MANIFEST = TRACK_DIR / "staged.jsonl"
 
 #: An offline directory's own record: start / finish times and the process.
 TRACK_RECORD = TRACK_DIR / "track.json"
 
 
 @dataclass(frozen=True)
-class StagedArtifact:
-    """An artifact a child or an offline script staged for the owner to record.
+class StagedFile:
+    """A file a child or an offline script staged for the owner to register.
 
     Attributes:
-        name: The Artifact's name; it is recorded at ``artifacts/<name>``.
-        path: That eventual path, relative to the attempt (``artifacts/<name>``),
-            so an ``image_ref`` written now points where the image will be.
-        staged: Where the bytes wait, relative to the tracked directory.
+        name: Title the owner registers the asset under.
+        path: Where the bytes wait, relative to the tracked directory. A
+            child's ``image_ref`` points here until the owner registers it.
+        staged: Same relative path as :attr:`path`.
         media_type: The media type to record.
-        semantic_type: The semantic type to record.
-        tags: Tags, recorded as ``metadata.tags``.
+        semantic_type: Kept so an older manifest line still parses. Unused.
+        tags: Tags recorded on the asset.
         task: The task that staged it (``MOLAB_TASK``), if any.
         created_at: When it was staged (ISO, UTC).
     """
@@ -797,7 +791,7 @@ class StagedArtifact:
         return json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
 
     @classmethod
-    def from_line(cls, line: str) -> StagedArtifact:
+    def from_line(cls, line: str) -> StagedFile:
         """Parse one manifest line.
 
         Raises:
@@ -816,7 +810,7 @@ class StagedArtifact:
         rel = PurePosixPath(staged)
         if rel.is_absolute() or ".." in rel.parts or rel.parent != STAGED_DIR:
             raise ValueError(f"staged path {staged!r} is not under {STAGED_DIR}/")
-        _check_artifact_name(name, raw.get("semantic_type"))
+        _check_register_name(name)
         tags = raw.get("tags")
 
         def _text(key: str) -> str | None:
@@ -825,7 +819,7 @@ class StagedArtifact:
 
         return cls(
             name=name,
-            path=PurePosixPath(ARTIFACTS.name, name).as_posix(),
+            path=staged,
             staged=staged,
             media_type=_text("media_type"),
             semantic_type=_text("semantic_type"),
@@ -840,7 +834,7 @@ class StagedArtifact:
         return _parse_time(self.created_at)
 
     def metadata(self, staged_by: str) -> dict[str, JSONValue]:
-        """The Artifact metadata the owner records: ``staged_by``, the task, the tags."""
+        """Tags the owner records: ``staged_by``, the task, and the entry's tags."""
         meta: dict[str, JSONValue] = {"staged_by": staged_by}
         if self.task:
             # ``task_id`` is the producer key the server and the cache read.
@@ -851,21 +845,20 @@ class StagedArtifact:
         return meta
 
 
-def _check_artifact_name(name: str, semantic_type: object) -> None:
-    """Refuse a name ``artifacts/<name>`` cannot hold, as ``emit_artifact`` does.
+def _check_register_name(name: str) -> None:
+    """Refuse a title that cannot be a staged file name.
 
     Raises:
-        ValueError: *name* is empty, absolute, has ``..``, lands in the
-            reserved ``artifacts/_molab/``, or the type is the reserved result.
+        ValueError: *name* is empty, absolute, or has ``..``.
     """
     rel = PurePosixPath(name)
     if not name or rel.is_absolute() or ".." in rel.parts or rel.as_posix() != name:
-        raise ValueError(f"artifact name must be a plain relative path: {name!r}")
-    if rel.parts[0] == TRACK_DIR.name or semantic_type == "result":
-        raise ValueError("artifacts/_molab/ and semantic_type 'result' are reserved for molab")
+        raise ValueError(f"asset title must be a plain relative name: {name!r}")
+    if rel.parts[0] == "_molab":
+        raise ValueError("_molab is reserved")
 
 
-def manifest_entries(directory: Path) -> Iterator[tuple[int, StagedArtifact | ValueError]]:
+def manifest_entries(directory: Path) -> Iterator[tuple[int, StagedFile | ValueError]]:
     """Each line of *directory*'s staging manifest, parsed or with why it is not.
 
     Yields ``(line number, entry or error)``; blank lines are skipped. Nothing
@@ -879,7 +872,7 @@ def manifest_entries(directory: Path) -> Iterator[tuple[int, StagedArtifact | Va
         if not line.strip():
             continue
         try:
-            yield number, StagedArtifact.from_line(line)
+            yield number, StagedFile.from_line(line)
         except ValueError as exc:
             yield number, exc
 
@@ -891,8 +884,8 @@ class TrackedDirectory:
     Attributes:
         root: The directory.
         stdio: Stream -> its existing log file (``stdout.log`` / ``stderr.log``).
-        metrics: The ``artifacts/*.mlp.jsonl`` WALs.
-        artifacts: The staged artifacts, in manifest order.
+        metrics: The ``*.mlp.jsonl`` WALs at the directory root.
+        staged: The staged files, in manifest order.
         started_at: ``track.json``'s start, if recorded.
         finished_at: ``track.json``'s finish, if recorded.
     """
@@ -900,7 +893,7 @@ class TrackedDirectory:
     root: Path
     stdio: dict[str, Path]
     metrics: tuple[Path, ...]
-    artifacts: tuple[StagedArtifact, ...]
+    staged: tuple[StagedFile, ...]
     started_at: datetime | None = None
     finished_at: datetime | None = None
 
@@ -909,7 +902,7 @@ class TrackedDirectory:
         return [
             *self.stdio.values(),
             *self.metrics,
-            *(self.root / entry.staged for entry in self.artifacts),
+            *(self.root / entry.staged for entry in self.staged),
         ]
 
 
@@ -936,13 +929,8 @@ def read_tracked(directory: PathArg) -> TrackedDirectory:
     if not root.is_dir():
         raise FileNotFoundError(f"{root} is not a directory")
     stdio = {stream: root / name for stream, name in STDIO_FILES.items() if (root / name).is_file()}
-    metrics_dir = root / ARTIFACTS.name
-    metrics = (
-        tuple(sorted(p for p in metrics_dir.glob("*.mlp.jsonl") if p.is_file()))
-        if metrics_dir.is_dir()
-        else ()
-    )
-    entries: list[StagedArtifact] = []
+    metrics = tuple(sorted(p for p in root.glob("*.mlp.jsonl") if p.is_file()))
+    entries: list[StagedFile] = []
     for number, entry in manifest_entries(root):
         if isinstance(entry, ValueError):
             raise ValueError(f"{root / MANIFEST}:{number}: {entry}")
@@ -961,7 +949,7 @@ def read_tracked(directory: PathArg) -> TrackedDirectory:
         root=root,
         stdio=stdio,
         metrics=metrics,
-        artifacts=tuple(entries),
+        staged=tuple(entries),
         started_at=started,
         finished_at=finished,
     )
@@ -1006,10 +994,10 @@ class _StagingTracker:
     """The tracking surface of a process that does not own the attempt (D94).
 
     stdio goes to ``<dir>/stdout.log`` / ``stderr.log`` and metrics to
-    ``<dir>/artifacts/<stem>.mlp.jsonl`` (through the seam), both appended
-    with ``O_APPEND``. An artifact is copied into
+    ``<dir>/<stem>.mlp.jsonl`` (through the seam), both appended
+    with ``O_APPEND``. A file worth registering is copied into
     ``<dir>/work/_molab/staged/<n>-<basename>`` and announced by one line in
-    ``<dir>/work/_molab/artifacts.jsonl``. Nothing here writes
+    ``<dir>/work/_molab/staged.jsonl``. Nothing here writes
     ``execution.json``.
     """
 
@@ -1058,44 +1046,39 @@ class _StagingTracker:
     def _append_wal(self, name: str | Path, line: str) -> None:
         if not self._writable():
             return
-        self._files.write(
-            self._dir / ARTIFACTS.name / name, line if line.endswith("\n") else line + "\n"
-        )
+        self._files.write(self._dir / name, line if line.endswith("\n") else line + "\n")
 
     @property
     def metrics(self) -> TrackedMetrics:
-        """Metrics appended live to ``<dir>/artifacts/metrics.mlp.jsonl``."""
+        """Metrics appended live to ``<dir>/metrics.mlp.jsonl``."""
         if self._metrics is None:
             sink = create_metrics_writer(self._dir, self._append_wal)
             self._metrics = TrackedMetrics(
-                sink, emit_artifact=self.emit_artifact, execution_dir=self._dir, task=self._task
+                sink, register=self.register, execution_dir=self._dir, task=self._task
             )
         return self._metrics
 
-    def emit_artifact(
+    def register(
         self,
         data: object,
         *,
-        name: str | None = None,
+        title: str,
         media_type: str | None = None,
-        semantic_type: str | None = None,
         tags: dict[str, str] | None = None,
-    ) -> StagedArtifact:
-        """Stage *data* for the owner to record as ``artifacts/<name>``.
+    ) -> StagedFile:
+        """Stage *data* for the owner to register as an asset titled *title*.
 
-        The same forms as ``ExecutionContext.emit_artifact``: a path to a file
-        or directory (copied, so later changes to it are not recorded), or
-        bytes / a dict or list (as JSON) / anything else (as text) with
-        *name*.
+        The same forms as ``ExecutionContext.register``: a path to a file or
+        directory (copied, so later changes to it are not recorded), or bytes
+        / a dict or list (as JSON) / anything else (as text).
 
         Raises:
-            ValueError: In-memory data without *name*; a name
-                ``artifacts/<name>`` cannot hold; a name already staged here.
+            ValueError: *title* is empty or already staged here.
             FileNotFoundError: A path that does not exist.
             RuntimeError: The attempt is sealed.
         """
         if not self._writable():
-            raise RuntimeError(f"cannot stage an artifact: the attempt at {self._dir} is sealed")
+            raise RuntimeError(f"cannot stage a file: the attempt at {self._dir} is sealed")
         source: Path | None = None
         if isinstance(data, Path):
             source = data
@@ -1103,19 +1086,17 @@ class _StagingTracker:
                 raise FileNotFoundError(source)
         elif isinstance(data, str) and Path(data).exists():
             source = Path(data)
-        elif name is None:
-            raise ValueError("emit_artifact requires name for in-memory data")
-        label = name if name is not None else source.name if source is not None else ""
-        _check_artifact_name(label, semantic_type)
+        if not title or not title.strip():
+            raise ValueError("register requires a title")
+        label = title.strip()
+        _check_register_name(label)
         task = current_task() or self._task
         with self._stage_lock:
             if any(
-                isinstance(entry, StagedArtifact) and entry.name == label
+                isinstance(entry, StagedFile) and entry.name == label
                 for _, entry in manifest_entries(self._dir)
             ):
-                raise ValueError(
-                    f"artifact {label!r} is already staged; stage it under another name"
-                )
+                raise ValueError(f"{label!r} is already staged; stage it under another title")
             is_dir = source is not None and source.is_dir()
             target = self._reserve(PurePosixPath(label).name, is_dir=is_dir)
             try:
@@ -1131,12 +1112,12 @@ class _StagingTracker:
                 else:
                     target.unlink(missing_ok=True)
                 raise
-            staged = StagedArtifact(
+            relative = target.relative_to(self._dir).as_posix()
+            staged = StagedFile(
                 name=label,
-                path=PurePosixPath(ARTIFACTS.name, label).as_posix(),
-                staged=target.relative_to(self._dir).as_posix(),
+                path=relative,
+                staged=relative,
                 media_type=media_type,
-                semantic_type=semantic_type,
                 tags=dict(tags or {}),
                 task=task,
                 created_at=datetime.now(UTC).isoformat(),
@@ -1182,7 +1163,7 @@ class _StagingTracker:
 
 
 def _write_data(target: Path, data: object) -> None:
-    """Write in-memory *data* the way ``ExecutionContext.emit_artifact`` does."""
+    """Write in-memory *data* the way ``ExecutionContext.register`` does."""
     if isinstance(data, (bytes, bytearray)):
         target.write_bytes(bytes(data))
     elif isinstance(data, (dict, list)):
@@ -1205,13 +1186,13 @@ class AttachedTracker(_StagingTracker):
     """A child process writing into its parent's attempt (D94).
 
     :func:`track` returns one when ``MOLAB_EXECUTION_DIR`` is set. stdio and
-    metrics land at their final paths; artifacts are staged, and the owner
-    records them when it seals. A metric record carries ``tags.task`` from
+    metrics land at their final paths; files are staged, and the owner
+    registers them when it seals. A metric record carries ``tags.task`` from
     ``MOLAB_TASK``. ``with`` is a no-op.
 
     The seal is re-read at most every :data:`SEAL_CHECK_SECONDS` before a
     write. After it, a print or a metric is dropped (one ``RuntimeWarning``,
-    never an exception), and ``emit_artifact`` raises.
+    never an exception), and ``register`` raises.
 
     Under an offline directory (``work/_molab/track.json``, no
     ``execution.json``) there is no seal to check.
@@ -1270,8 +1251,8 @@ class AttachedTracker(_StagingTracker):
 class OfflineTracker(_StagingTracker):
     """A script with no molab around it, writing the attempt layout into a directory (D94).
 
-    ``stdout.log`` / ``stderr.log``, ``artifacts/metrics.mlp.jsonl``, the staged
-    artifacts and their manifest, plus ``work/_molab/track.json``
+    ``stdout.log`` / ``stderr.log``, ``metrics.mlp.jsonl``, the staged
+    files and their manifest, plus ``work/_molab/track.json``
     (``started_at``, host, pid, argv, python, cwd), whose ``finished_at`` is
     written by :meth:`close`, at interpreter exit, or when the first ``with``
     around it exits. ``molab runs adopt P E RUN --from DIR`` folds the
@@ -1509,7 +1490,7 @@ __all__ = [
     "AttachedTracker",
     "BufferedMetrics",
     "OfflineTracker",
-    "StagedArtifact",
+    "StagedFile",
     "StdioFiles",
     "Stream",
     "TrackedDirectory",

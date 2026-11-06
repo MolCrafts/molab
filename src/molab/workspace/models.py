@@ -209,7 +209,7 @@ class RunMetadata(BaseModel, frozen=True):
     created_at: UtcDatetime = Field(default_factory=utc_now)
     definition_hash: str
     experiment_revision_id: str
-    input_asset_ids: tuple[str, ...] = ()
+    inputs: tuple[str, ...] = ()
 
     # Intended compute target name (matches a ComputeTarget in the workspace
     # registry).  Captured at run-creation time so the UI can filter and the

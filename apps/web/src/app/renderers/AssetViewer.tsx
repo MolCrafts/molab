@@ -1,33 +1,9 @@
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@molcrafts/ui";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Archive,
-  Clock,
-  Download,
-  Import,
-  Minus,
-  Package,
-  TrendingDown,
-  TrendingUp,
-} from "lucide-react";
+import { Archive, Download } from "lucide-react";
 import { useState } from "react";
-import { assetsApi, assetVersionOrigin } from "@/api";
-import {
-  BYTES_EXPR,
-  type CountBar,
-  CountBars,
-  DashboardCanvas,
-  EmptyState,
-  EntityPage,
-  GaugeSection,
-  Instrument,
-  InstrumentStrip,
-  OverviewCanvas,
-  OverviewList,
-  OverviewSurface,
-  Tally,
-} from "@/app/components/entity";
-import { assetDetailQueryOptions, assetVersionsQueryOptions } from "@/app/state/entityQueries";
+import { assetOriginText, assetsApi } from "@/api";
+import { EntityPage, OverviewCanvas, OverviewList, OverviewSurface } from "@/app/components/entity";
+import { assetDetailQueryOptions } from "@/app/state/entityQueries";
 import type { ScopedRendererProps } from "@/app/types";
 import {
   WorkbenchIconAction,
@@ -36,12 +12,21 @@ import {
 } from "@/components/workbench";
 import { formatDateTime } from "@/lib/datetime";
 import { formatBytes } from "@/lib/format-bytes";
-import { formatRelative } from "@/lib/format-time";
+
+const extraText = (extra: Record<string, unknown> | undefined, key: string): string | null => {
+  const value = extra?.[key];
+  return typeof value === "string" && value ? value : null;
+};
+
+const extraNumber = (extra: Record<string, unknown> | undefined, key: string): number | null => {
+  const value = extra?.[key];
+  return typeof value === "number" ? value : null;
+};
 
 export const AssetViewer = ({
   selection,
   snapshot,
-}: ScopedRendererProps<"assets">): JSX.Element => {
+}: ScopedRendererProps<"assets" | "runs">): JSX.Element => {
   const [tab, setTab] = useState("overview");
   const summary = snapshot.assets.find((item) => item.id === selection.objectId) ?? null;
   const projectId = summary?.projectId ?? "";
@@ -49,31 +34,29 @@ export const AssetViewer = ({
     ...assetDetailQueryOptions(projectId, selection.objectId),
     enabled: Boolean(summary?.projectId),
   });
-  const versionsQuery = useQuery({
-    ...assetVersionsQueryOptions(projectId, selection.objectId),
-    enabled: Boolean(summary?.projectId),
-  });
   const asset = assetQuery.data ?? null;
-  const versions = versionsQuery.data ?? [];
   const error =
     assetQuery.error instanceof Error
       ? assetQuery.error.message
-      : versionsQuery.error instanceof Error
-        ? versionsQuery.error.message
-        : assetQuery.error || versionsQuery.error
-          ? "Failed to load asset"
-          : null;
-  const retry = (): void => {
-    void assetQuery.refetch();
-    void versionsQuery.refetch();
-  };
+      : assetQuery.error
+        ? "Failed to load asset"
+        : null;
 
-  if (!summary || !projectId) {
+  if (!summary) {
     return (
       <WorkbenchOperationState
         kind="empty"
         title="Asset not found"
-        detail="Assets are addressed inside a Project data space."
+        detail="This asset is not in the loaded catalog."
+      />
+    );
+  }
+  if (!projectId) {
+    return (
+      <WorkbenchOperationState
+        kind="empty"
+        title="No project for this asset"
+        detail="Assets are addressed inside a Project."
       />
     );
   }
@@ -83,84 +66,44 @@ export const AssetViewer = ({
         kind="error"
         title="Cannot load asset"
         detail={error}
-        action={<WorkbenchRetryAction onClick={retry} />}
+        action={<WorkbenchRetryAction onClick={() => void assetQuery.refetch()} />}
       />
     );
   }
-  if ((assetQuery.isPending || versionsQuery.isPending) && !asset) {
+  if (assetQuery.isPending && !asset) {
     return <WorkbenchOperationState kind="loading" title="Loading asset" />;
   }
 
+  const extra = asset?.extra;
   const title = asset?.title ?? summary.name;
-  const ordered = [...versions].sort((left, right) => left.version - right.version);
-  const latest = ordered[ordered.length - 1] ?? null;
-  const previous = ordered[ordered.length - 2] ?? null;
-  const sizeChange =
-    latest &&
-    previous &&
-    typeof latest.size === "number" &&
-    typeof previous.size === "number" &&
-    previous.size > 0
-      ? Math.round(((latest.size - previous.size) / previous.size) * 100)
-      : null;
-  const promoted = ordered.filter((version) => version.originKind === "artifact").length;
-  const imported = ordered.filter((version) => version.originKind === "import").length;
-  const sizeBars: CountBar[] = ordered.flatMap((version) =>
-    typeof version.size === "number" && version.size >= 0
-      ? [
-          {
-            key: version.id,
-            label: `v${version.version}`,
-            value: version.size,
-            readout: formatBytes(version.size),
-            // One fact per line: a narrow chart cannot hold a long origin on one row.
-            tip: [
-              `v${version.version} · ${formatBytes(version.size)}`,
-              assetVersionOrigin(version),
-              formatDateTime(version.createdAt),
-            ].join("\n"),
-          },
-        ]
-      : [],
-  );
-  const openVersions = (): void => setTab("versions");
-  const versionsTable =
-    versions.length === 0 ? (
-      <WorkbenchOperationState
-        kind={asset ? "empty" : "loading"}
-        title={asset ? "No versions" : "Loading versions"}
-        detail={asset ? "Promote an Artifact to create this asset's first version." : undefined}
-      />
-    ) : (
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Version</TableHead>
-            <TableHead>Origin</TableHead>
-            <TableHead>Content</TableHead>
-            <TableHead>Size</TableHead>
-            <TableHead>Created</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {versions.map((version) => (
-            <TableRow key={version.id}>
-              <TableCell className="font-mono">v{version.version}</TableCell>
-              <TableCell className="font-mono text-label">{assetVersionOrigin(version)}</TableCell>
-              <TableCell className="font-mono text-micro">{version.digest ?? ""}</TableCell>
-              <TableCell className="font-mono text-label">{formatBytes(version.size)}</TableCell>
-              <TableCell className="text-label">{formatDateTime(version.createdAt)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    );
+  const origin = assetOriginText({
+    originKind: extraText(extra, "originKind"),
+    runId: extraText(extra, "runId"),
+    executionId: extraText(extra, "executionId"),
+    task: extraText(extra, "task"),
+    uri: extraText(extra, "uri"),
+  });
+  const digest = extraText(extra, "digest") ?? "—";
+  const size = extraNumber(extra, "size");
+  const mediaType = extraText(extra, "mediaType") ?? asset?.kind ?? "—";
+  const ref = asset?.ref ?? summary.ref ?? "—";
+  const consumers = snapshot.runs.filter((run) => (run.inputs ?? []).includes(selection.objectId));
+  const rows: Array<[string, string]> = [
+    ["Ref", ref],
+    ["Content", digest],
+    ["Size", size == null ? "—" : formatBytes(size)],
+    ["Media type", mediaType],
+    ["File", asset?.path || "—"],
+    ["Origin", origin],
+    ["Registered", asset ? formatDateTime(asset.createdAt) : "—"],
+  ];
+
   return (
     <EntityPage
       icon={Archive}
       title={title}
       actions={
-        <WorkbenchIconAction label="Download latest asset version" asChild>
+        <WorkbenchIconAction label="Download asset" asChild>
           <a href={assetsApi.downloadUrl(projectId, selection.objectId)} download>
             <Download className="size-3.5" />
           </a>
@@ -170,84 +113,45 @@ export const AssetViewer = ({
         {
           value: "overview",
           label: "Overview",
-          content:
-            ordered.length === 0 ? (
-              <OverviewCanvas>
-                <EmptyState
-                  title="No versions yet"
-                  description="Promote an Artifact to create this asset's first version."
-                />
-              </OverviewCanvas>
-            ) : (
-              <OverviewCanvas>
-                <InstrumentStrip label="Asset gauges" lead={false}>
-                  <Instrument
-                    title="Versions"
-                    figure={ordered.length}
-                    caption={
-                      latest ? (
-                        <Tally
-                          icon={Clock}
-                          value={`v${latest.version} · ${formatRelative(latest.createdAt)}`}
-                          label={`Latest v${latest.version}, ${formatRelative(latest.createdAt)}`}
-                        />
-                      ) : undefined
-                    }
-                    onSelect={openVersions}
-                    selectHint="Versions"
-                    selectLabel={`${ordered.length} versions. Open the list`}
-                  />
-                  <Instrument
-                    title="Size"
-                    figure={latest ? formatBytes(latest.size) : "—"}
-                    caption={
-                      sizeChange === null ? undefined : (
-                        <Tally
-                          icon={sizeChange > 0 ? TrendingUp : sizeChange < 0 ? TrendingDown : Minus}
-                          value={`${sizeChange > 0 ? "+" : ""}${sizeChange}%`}
-                          label={`${sizeChange > 0 ? "+" : ""}${sizeChange}% vs v${previous?.version}`}
-                        />
-                      )
-                    }
-                  />
-                  <Instrument
-                    title="Origin"
-                    caption={
-                      <span className="flex items-center gap-6 text-title text-foreground">
-                        <Tally
-                          icon={Package}
-                          value={promoted}
-                          label={`${promoted} promoted from runs`}
-                        />
-                        <Tally icon={Import} value={imported} label={`${imported} imported`} />
-                      </span>
-                    }
-                  />
-                </InstrumentStrip>
-                <GaugeSection title="Size by version">
-                  {sizeBars.length > 0 ? (
-                    <CountBars
-                      bars={sizeBars}
-                      label="Size of each asset version"
-                      orientation="vertical"
-                      valueExpr={BYTES_EXPR}
-                      onPick={openVersions}
-                    />
-                  ) : (
-                    <p className="text-label text-muted-foreground">No version records a size.</p>
-                  )}
-                </GaugeSection>
-              </OverviewCanvas>
-            ),
+          content: (
+            <OverviewCanvas>
+              <OverviewSurface>
+                <OverviewList title="This file">
+                  <dl className="grid gap-2">
+                    {rows.map(([label, value]) => (
+                      <div key={label} className="grid grid-cols-[8rem_1fr] gap-3">
+                        <dt className="text-label text-muted-foreground">{label}</dt>
+                        <dd className="break-all font-mono text-label">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </OverviewList>
+              </OverviewSurface>
+            </OverviewCanvas>
+          ),
         },
         {
-          value: "versions",
-          label: `Versions (${versions.length})`,
+          value: "runs",
+          label: `Runs (${consumers.length})`,
           content: (
             <OverviewSurface>
-              <DashboardCanvas>
-                <OverviewList title="Versions">{versionsTable}</OverviewList>
-              </DashboardCanvas>
+              {consumers.length === 0 ? (
+                <WorkbenchOperationState
+                  kind="empty"
+                  title="No loaded run names this asset"
+                  detail="A run lists it in inputs when the next calculation should open it."
+                />
+              ) : (
+                <OverviewList title="Runs that open this file">
+                  <ul className="grid gap-2">
+                    {consumers.map((run) => (
+                      <li key={run.id} className="font-mono text-label">
+                        {run.name || run.id}
+                      </li>
+                    ))}
+                  </ul>
+                </OverviewList>
+              )}
             </OverviewSurface>
           ),
         },

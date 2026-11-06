@@ -1,7 +1,7 @@
 """Typed pointers a knowledge document cites.
 
 :class:`SourceRef` is the value written as a markdown link. A run, experiment,
-project, artifact or asset is a reference; literature is an https link; a file
+project or asset is a reference; literature is an https link; a file
 is a relative path.
 """
 
@@ -29,7 +29,6 @@ def _relative_posix(path: str, base: str) -> str:
 
 
 SourceKind = Literal[
-    "artifact",
     "run",
     "experiment",
     "project",
@@ -62,19 +61,16 @@ class SourceRef(BaseModel, frozen=True):
         cls,
         entity: object,
         *,
-        artifact_id: str | None = None,
         span: str | None = None,
     ) -> SourceRef:
         """A source pointing at a live workspace entity.
 
-        Project, Experiment, Run, Asset, and a Run plus *artifact_id* become
-        the ``molab:`` reference :func:`molab.workspace.refs.ref_of` builds.
-        Any other workspace ``Folder`` is a ``file`` source at that folder's
-        absolute path.
+        Project, Experiment, Run, and Asset become the ``molab:`` reference
+        :func:`molab.workspace.refs.ref_of` builds. Any other workspace
+        ``Folder`` is a ``file`` source at that folder's absolute path.
 
         Raises:
-            TypeError: *entity* is not a workspace folder or asset, or
-                *artifact_id* is set on a non-Run.
+            TypeError: *entity* is not a workspace folder or asset.
         """
         from molab.workspace.domain import Asset
         from molab.workspace.experiment import Experiment
@@ -84,10 +80,8 @@ class SourceRef(BaseModel, frozen=True):
         from molab.workspace.run import Run
 
         if isinstance(entity, (Project, Experiment, Run, Asset)):
-            built = ref_of(entity, artifact_id=artifact_id)
+            built = ref_of(entity)
             return cls(kind=built.kind, ref=str(built), span=span)
-        if artifact_id is not None:
-            raise TypeError(f"artifact_id is only valid on a Run, got {type(entity).__name__}")
         if isinstance(entity, Folder):
             return cls(kind="file", ref=str(entity.resolve()), span=span)
         path = getattr(entity, "path", None)
@@ -113,7 +107,7 @@ class SourceRef(BaseModel, frozen=True):
         """
         from molab.workspace.refs import is_ref
 
-        if self.kind in {"project", "experiment", "run", "execution", "artifact", "asset"}:
+        if self.kind in {"project", "experiment", "run", "execution", "asset"}:
             if not is_ref(self.ref):
                 raise ValueError(
                     f"entity source {self.ref!r} is not a molab reference; use SourceRef.of"

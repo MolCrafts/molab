@@ -5,8 +5,8 @@
  * with session-scoped persistence. Data survives across requests within a browser tab or test file.
  */
 
-import { AssetVersionResponse } from "../../src/api/generated/models/AssetVersionResponse";
 import type { ExecutionResponse } from "../../src/api/generated/models/ExecutionResponse";
+import type { ManagedAssetResponse } from "../../src/api/generated/models/ManagedAssetResponse";
 import type {
   ApiAssetResponse,
   ApiExperimentResponse,
@@ -36,7 +36,6 @@ interface MockDatabase {
   experiments: Map<string, ApiExperimentResponse>;
   runs: Map<string, ApiRunResponse>;
   assets: Map<string, ApiAssetResponse>;
-  assetVersions: Map<string, AssetVersionResponse[]>;
   files: Map<string, FileNode>; // path -> node
   runLogs: Map<string, string[]>; // runId -> log lines
 }
@@ -212,7 +211,6 @@ function createEmptyDb(): MockDatabase {
     experiments: new Map(),
     runs: new Map(),
     assets: new Map(),
-    assetVersions: new Map(),
     files: new Map(),
     runLogs: new Map(),
   };
@@ -988,10 +986,7 @@ outputs:
           `Traceback (most recent call last):\n  File "simulate.py", line 184, in evaluate\n${execution.error?.type ?? "RuntimeError"}: ${execution.error?.message ?? "Execution failed"}\n`,
         );
       writeFile(`${root}/execution.json`, JSON.stringify(execution, null, 2));
-      if (execution.status === "queued") {
-        execution.artifactIds = [];
-        continue;
-      }
+      if (execution.status === "queued") continue;
       const graph = JSON.parse(run.workflowSource ?? '{"task_configs":[],"links":[]}');
       graph.task_configs = graph.task_configs.map((task: Record<string, unknown>, i: number) => ({
         ...task,
@@ -1155,8 +1150,6 @@ outputs:
               );
     writeFile(`/managed-assets/${asset.id}/payload`, content);
     asset.extra = { ...asset.extra, size: new TextEncoder().encode(content).byteLength };
-    for (const version of getAssetVersions(asset.id))
-      version.size = new TextEncoder().encode(content).byteLength;
   }
 }
 
@@ -1208,7 +1201,6 @@ export function deleteProject(id: string): boolean {
   for (const experiment of getExperimentsByProject(id)) deleteExperiment(experiment.id);
   for (const asset of getAllAssets().filter((a) => a.projectId === id)) {
     db.assets.delete(asset.id);
-    db.assetVersions.delete(asset.id);
     deleteFile(`/managed-assets/${asset.id}`);
   }
   deleteFile(project.path);
@@ -1276,18 +1268,12 @@ export function setRun(run: ApiRunResponse): void {
       startedAt: rec.status === "queued" ? null : rec.startedAt,
       finishedAt: rec.finishedAt ?? null,
       basedOnExecutionId: index ? (run.executionHistory?.[index - 1]?.executionId ?? null) : null,
-      checkpointArtifactId: null,
       executor: {
         ...run.executorInfo,
         target: run.executorInfo?.backend === "molq" ? "hpc-slurm" : "laptop",
         scheduler_job_id: rec.schedulerJobId,
       },
       environment: { python: "3.13.7", platform: "Linux", mock: true },
-      artifactIds: [
-        `${rec.executionId}-metrics`,
-        `${rec.executionId}-trajectory`,
-        `${rec.executionId}-checkpoint`,
-      ],
       error: ["failed", "interrupted"].includes(rec.status)
         ? (run.error ?? {
             type: "RuntimeError",
@@ -1364,33 +1350,31 @@ export function getAsset(id: string): ApiAssetResponse | undefined {
  */
 export function setAsset(asset: ApiAssetResponse): void {
   db.assets.set(asset.id, asset);
-  const versions = db.assetVersions.get(asset.id) ?? [];
-  versions.push({
-    id: `${asset.id}-v${versions.length + 1}`,
-    assetId: asset.id,
-    version: versions.length + 1,
-    originKind: asset.producer
-      ? AssetVersionResponse.originKind.ARTIFACT
-      : AssetVersionResponse.originKind.IMPORT,
-    sourceArtifactId:
-      typeof asset.extra?.sourceArtifactId === "string" ? asset.extra.sourceArtifactId : null,
-    originRef: asset.producer
-      ? `molab:experiment/${getRun(String(asset.producer.run_id))?.experimentId ?? "exp-001"}/run/${asset.producer.run_id}`
-      : null,
-    originUri: String(asset.extra?.source_path ?? asset.path),
-    importAction: asset.producer ? null : "copy",
-    digest: asset.contentHash ?? null,
-    size: typeof asset.extra?.size === "number" ? asset.extra.size : 0,
-    contentKind: "file",
-    mediaType: String(asset.extra?.mime ?? "application/json"),
-    metadata: { ...asset.tags },
-    createdAt: asset.updatedAt,
-  });
-  db.assetVersions.set(asset.id, versions);
 }
 
-export function getAssetVersions(id: string): AssetVersionResponse[] {
-  return db.assetVersions.get(id) ?? [];
+/** The project-asset wire shape: one id, one content, one ref. */
+export function toManagedAsset(asset: ApiAssetResponse): ManagedAssetResponse {
+  const producer = asset.producer ?? null;
+  const runId = producer ? String(producer.run_id ?? "") || null : null;
+  const executionId = producer ? String(producer.executionId ?? "") || null : null;
+  const task = producer && producer.task_id != null ? String(producer.task_id) : null;
+  const size = typeof asset.extra?.size === "number" ? asset.extra.size : 0;
+  return {
+    id: asset.id,
+    projectId: asset.projectId || null,
+    title: asset.title ?? asset.name,
+    createdAt: asset.createdAt,
+    ref: asset.ref ?? `molab:asset/${asset.id}`,
+    mediaType: typeof asset.extra?.mime === "string" ? asset.extra.mime : null,
+    digest: asset.contentHash ?? `sha256:mock-${asset.id}`,
+    size,
+    file: asset.path,
+    originKind: producer ? "execution" : "import",
+    runId,
+    executionId,
+    task,
+    uri: producer ? null : String(asset.extra?.source_path ?? asset.path),
+  };
 }
 
 /**

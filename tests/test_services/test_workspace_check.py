@@ -163,7 +163,7 @@ class TestCheckPathDeny:
             "run.log",
             "traceback.txt",
             "source/workflow.py",
-            "artifacts/fit.png",
+            "metrics.mlp.jsonl",
             "jobs/slurm-1.out",
             "checkpoints/c1.pt",
         ],
@@ -419,3 +419,36 @@ class TestCheckCommand:
         assert verdict.allowed
         assert verdict.in_workspace is False
         assert verdict.root is None
+
+
+class TestHygiene:
+    def _ws(self, tmp_path: Path) -> Workspace:
+        ws = Workspace(root=tmp_path / "ws", name="W")
+        ws.materialize()
+        return ws
+
+    def test_a_stale_agent_guide_is_an_error(self, tmp_path: Path) -> None:
+        from molab.services.agent_guide import sync_agent_files
+
+        ws = self._ws(tmp_path)
+        sync_agent_files(ws)
+        assert "layout.guide_stale" not in {v.rule for v in check_workspace(ws).errors}
+        guide = Path(str(ws.resolve())) / "AGENTS.md"
+        guide.write_text(
+            guide.read_text(encoding="utf-8").replace("Layout", "Old layout"), encoding="utf-8"
+        )
+        assert "layout.guide_stale" in {v.rule for v in check_workspace(ws).errors}
+
+    def test_a_product_outside_its_run_slot_is_an_error(self, tmp_path: Path) -> None:
+        ws = self._ws(tmp_path)
+        run = ws.add_project("p").add_experiment("e").add_run(params={"model": "a"})
+        with run.start() as ctx:
+            asset = ctx.register(b"bytes", title="network.data")
+        assets = Path(str(run.experiment.path)) / "assets"
+        (slot,) = [path for path in assets.iterdir() if path.is_dir()]
+        assert slot.name == "model-a--network-data"
+        assert not {v.rule for v in check_workspace(ws).errors} & {"asset.slot", "asset.evidence"}
+        slot.rename(assets / "networkdata-2")
+        found = [v for v in check_workspace(ws).errors if v.rule == "asset.slot"]
+        assert [v.path for v in found] == ["projects/p/experiments/e/assets/networkdata-2"]
+        assert asset.id

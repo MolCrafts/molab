@@ -220,7 +220,7 @@ Each piece has a single job. They compose without coupling.
   </div>
   <div>
     <dt>Assets</dt>
-    <dd>Every artifact, log, and checkpoint is tracked with content-addressed identity and lineage back to the run and task that produced it.</dd>
+    <dd>A registered file has one id, one content, and a molab:asset ref. The next run names that id as an input.</dd>
   </div>
   <div>
     <dt>Profiles</dt>

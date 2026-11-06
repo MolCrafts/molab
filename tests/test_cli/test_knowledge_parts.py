@@ -1,4 +1,4 @@
-"""``molab knowledge parts`` lists a run's images and can write the Report."""
+"""``molab knowledge parts`` lists a run's images. It does not write a Report."""
 
 from __future__ import annotations
 
@@ -22,27 +22,17 @@ def _lab_with_hair(tmp_path: Path) -> tuple[Workspace, str]:
     with run.start() as ctx:
         image = ctx.get_dir("work") / "hair.png"
         image.write_bytes(_PNG)
-        ctx.emit_artifact(image, name="hair.png", media_type="image/png", tags={"part": "hair"})
+        ctx.register(image, title="hair.png", mime="image/png", tags={"part": "hair"})
     return workspace, run.id
 
 
-def test_parts_prints_the_image_and_write_stores_a_report(tmp_path: Path) -> None:
+def test_parts_prints_the_image(tmp_path: Path) -> None:
     workspace, run_id = _lab_with_hair(tmp_path)
 
     listed = CliRunner().invoke(knowledge_app, ["parts", run_id, "--path", str(workspace.root)])
     assert listed.exit_code == 0, listed.output
-    assert "hair\tmolab:experiment/" in listed.output
-
-    written = CliRunner().invoke(
-        knowledge_app,
-        ["parts", run_id, "--path", str(workspace.root), "--write", "--narrative", "Hair only."],
-    )
-    assert written.exit_code == 0, written.output
-    report = next(Path(str(workspace.root)).rglob("knowledges/*.md"))
-    assert "report:" in written.output
-    text = report.read_text(encoding="utf-8")
-    assert "Hair only." in text
-    assert "![hair](" in text
+    assert "hair\tmolab:asset/" in listed.output
+    assert not list(Path(str(workspace.root)).rglob("knowledges/*.md"))
 
 
 def test_parts_exits_when_the_path_is_not_a_workspace(tmp_path: Path) -> None:

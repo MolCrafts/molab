@@ -82,13 +82,12 @@ export type ApiRunResponse = Pick<
     }>;
     error?: ({ message?: string } & Record<string, unknown>) | null;
   };
-/** Transitional UI projection for Project Assets. Artifacts use their own type. */
+/** One registered file, as the project asset routes return it. */
 export interface ApiAssetResponse {
   id: string;
   projectId: string;
   title: string;
   createdAt: string;
-  versionCount?: number;
   name: string;
   kind: string;
   path: string;
@@ -98,9 +97,8 @@ export interface ApiAssetResponse {
   extra?: Record<string, unknown>;
   tags?: Record<string, string>;
   hasPreviewSidecar?: boolean;
-  /** Legacy mock-only metadata; production Project Assets use versions. */
+  ref?: string;
   producer?: Record<string, unknown> | null;
-  /** Legacy mock-only content field. */
   contentHash?: string | null;
 }
 export type ApiWorkflowSnapshot = WorkflowSnapshotResponse;
@@ -174,10 +172,8 @@ export interface ExecutionRecordSummary {
   finishedAt: string | null;
   status: string;
   basedOnExecutionId: string | null;
-  checkpointArtifactId: string | null;
   executor: Record<string, unknown>;
   environment: Record<string, unknown>;
-  artifactIds: string[];
   error: Record<string, unknown> | null;
 }
 
@@ -193,6 +189,8 @@ export interface RunSummary {
   experimentId: string;
   definitionHash: string;
   experimentRevisionId: string;
+  /** Asset ids this run opens. */
+  inputs?: string[];
   statusSummary: RunStatusSummaryResponse;
   parameters: Record<string, unknown>;
   workflowSource: string | null;

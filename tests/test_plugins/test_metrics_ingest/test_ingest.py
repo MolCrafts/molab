@@ -10,13 +10,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from molab.plugins.metrics_ingest import detect_log_formats, ingest_run
-from molab.workspace.execution_dirs import ARTIFACTS
 
 FAKE_SUFFIX = ".fakelog"
 
 
 def _wal(run_dir: Path) -> Path:
-    return run_dir / ARTIFACTS.name / "metrics.mlp.jsonl"
+    return run_dir / "metrics.mlp.jsonl"
 
 
 def _read_wal(run_dir: Path) -> list[dict]:
@@ -48,7 +47,7 @@ class TestDiscovery:
 
 
 class TestIngestWritesOnlyTheBuffer:
-    def test_writes_jsonl_in_the_products_dir(self, fake_run: Path) -> None:
+    def test_writes_jsonl_at_the_attempt_root(self, fake_run: Path) -> None:
         result = ingest_run(fake_run)
         assert result.records == 2
         assert _wal(fake_run).is_file()

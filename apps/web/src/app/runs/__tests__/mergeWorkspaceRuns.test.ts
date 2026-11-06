@@ -19,7 +19,7 @@ const row = (id: string, createdAt: string): WorkspaceRunRow =>
     experimentName: "E",
     definitionHash: "sha256:x",
     experimentRevisionId: "rev",
-    inputAssetIds: [],
+    inputs: [],
     targetHint: null,
     statusSummary: { total: 1, active: 0, notStarted: false, byStatus: { succeeded: 1 } },
     parameters: {},

@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Archive, File, FileOutput, Folder, Terminal } from "lucide-react";
 import { type JSX, Suspense, useMemo, useState } from "react";
-import { runsApi } from "@/api";
 import { ApiError } from "@/api/generated";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 import type { RunFileNode } from "@/api/generated/models/RunFileNode";
@@ -12,7 +11,6 @@ import {
   runFileBlobQueryOptions,
   runFileTextQueryOptions,
 } from "@/app/state/entityQueries";
-import { WorkbenchIconAction } from "@/components/workbench";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { formatBytes } from "@/lib/format-bytes";
@@ -38,7 +36,6 @@ interface RunExecutionOutputsProps {
    * A later click wins, and survives switching away and back.
    */
   preferred?: SelectedOutput | null;
-  onPromoted?: () => void;
 }
 
 const formatSize = (size: number | null | undefined): string | undefined =>
@@ -104,7 +101,6 @@ export const RunExecutionOutputs = ({
   selectedExecutionId,
   fill = false,
   preferred = null,
-  onPromoted,
 }: RunExecutionOutputsProps): JSX.Element => {
   const [picked, setPicked] = useState<{
     executionId: string;
@@ -118,9 +114,9 @@ export const RunExecutionOutputs = ({
   const defaultStructure = useMemo((): SelectedOutput | null => {
     if (!outputs || !selectedExecutionId) return null;
     const ranked: { rank: number; selected: SelectedOutput }[] = [];
-    for (const item of outputs.artifacts ?? []) {
-      if (!isChemicalStructureName(item.name)) continue;
-      ranked.push({ rank: structureRank(item.name), selected: { kind: "artifact", id: item.id } });
+    for (const item of outputs.assets ?? []) {
+      if (!isChemicalStructureName(item.title)) continue;
+      ranked.push({ rank: structureRank(item.title), selected: { kind: "artifact", id: item.id } });
     }
     for (const row of outputs.unregistered ?? []) {
       if (!isChemicalStructureName(row.name)) continue;
@@ -167,7 +163,7 @@ export const RunExecutionOutputs = ({
   const previewError =
     selected?.kind === "artifact"
       ? artifactQuery.error instanceof ApiError && artifactQuery.error.status === 404
-        ? "Artifact bytes not found for this execution."
+        ? "Asset bytes not found for this execution."
         : artifactQuery.error instanceof Error
           ? artifactQuery.error.message
           : artifactQuery.error
@@ -190,7 +186,7 @@ export const RunExecutionOutputs = ({
           : null;
   const previewName =
     selected?.kind === "artifact"
-      ? (outputs?.artifacts?.find((item) => item.id === selected.id)?.name ?? "")
+      ? (outputs?.assets?.find((item) => item.id === selected.id)?.title ?? "")
       : selected?.kind === "file"
         ? (selected.path.split("/").pop() ?? selected.path)
         : "";
@@ -216,21 +212,17 @@ export const RunExecutionOutputs = ({
     return <p className="text-label text-muted-foreground">Loading outputs…</p>;
   }
 
-  const artifacts = outputs.artifacts ?? [];
+  const registered = outputs.assets ?? [];
   const files = outputs.unregistered ?? [];
-  const selectedArtifact =
-    selected?.kind === "artifact"
-      ? (artifacts.find((item) => item.id === selected.id) ?? null)
-      : null;
 
-  const artifactNodes: TreeNode[] = artifacts.map((item) => ({
+  const assetNodes: TreeNode[] = registered.map((item) => ({
     id: `artifact:${item.id}`,
-    label: item.name,
+    label: item.title,
     icon: Archive,
     meta: formatBytes(item.size),
-    right: item.semanticType ? (
+    right: item.mediaType ? (
       <span className="uppercase tracking-tight text-micro text-muted-foreground">
-        {item.semanticType}
+        {item.mediaType}
       </span>
     ) : undefined,
     onSelect: () => choose({ kind: "artifact", id: item.id }),
@@ -244,13 +236,13 @@ export const RunExecutionOutputs = ({
   }));
 
   const nodes: TreeNode[] = [
-    ...(artifactNodes.length > 0
+    ...(assetNodes.length > 0
       ? [
           {
-            id: "artifacts",
-            label: "Artifacts",
+            id: "assets",
+            label: "Assets",
             icon: Archive,
-            children: artifactNodes,
+            children: assetNodes,
           } satisfies TreeNode,
         ]
       : []),
@@ -288,32 +280,11 @@ export const RunExecutionOutputs = ({
         <TreeView
           nodes={nodes}
           activeId={activeId}
-          expandPath={["artifacts", "files", "stdio", ...taskDirIds(files)]}
+          expandPath={["assets", "files", "stdio", ...taskDirIds(files)]}
           emptyTitle="No outputs"
         />
       </div>
       <div className="relative min-h-0 overflow-auto">
-        {selectedArtifact && (
-          <div className="absolute right-2 top-2 z-10">
-            <WorkbenchIconAction
-              label="Promote to project asset"
-              onClick={() => {
-                void runsApi
-                  .promoteArtifact(
-                    projectId,
-                    experimentId,
-                    runId,
-                    selectedExecutionId,
-                    selectedArtifact.id,
-                    { createdBy: "ui" },
-                  )
-                  .then(() => onPromoted?.());
-              }}
-            >
-              <Archive className="size-icon-sm" />
-            </WorkbenchIconAction>
-          </div>
-        )}
         {binaryKind && !previewError ? (
           <BinaryPreview kind={binaryKind} url={blobUrl} name={filePath} />
         ) : structurePlugin &&

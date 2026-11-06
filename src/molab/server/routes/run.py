@@ -23,7 +23,7 @@ from molab.workspace import (
 from molab.workspace import (
     RunNotFoundError as WorkspaceRunNotFoundError,
 )
-from molab.workspace.domain import Artifact, ExecutionMode, ExecutionStatus
+from molab.workspace.domain import ExecutionMode, ExecutionStatus
 from molab.workspace.execution_dirs import JOBS, product_dirs
 from molab.workspace.execution_repository import (
     RUN_LOG_FILENAME,
@@ -39,16 +39,11 @@ from molab.workspace.targets import resolve_compute_target
 from ..dependencies import get_workspace
 from ..exceptions import RunNotFoundError
 from ..schemas import (
-    ArtifactPromoteRequest,
-    ArtifactPromotionResponse,
-    ArtifactResponse,
-    AssetVersionResponse,
     ExecutionAttemptCreateRequest,
     ExecutionEvidenceResponse,
     ExecutionOutputsResponse,
     ExecutionResponse,
     ManagedAssetResponse,
-    RunAnalyzeFailureRequest,
     RunCreateRequest,
     RunExecutionResponse,
     RunFileNode,
@@ -132,7 +127,6 @@ def _create_attempt(run, body: ExecutionAttemptCreateRequest, target: ComputeTar
             mode=ExecutionMode(body.mode),
             created_by=created_by,
             predecessor=body.based_on_execution_id,
-            checkpoint=body.checkpoint_artifact_id,
             bypass_cache=body.bypass_cache,
             executor=executor,
             environment={"submit_cwd": str(Path.cwd().resolve())},
@@ -177,34 +171,10 @@ def _execution_response(state) -> ExecutionResponse:  # noqa: ANN001
         startedAt=state.started_at.isoformat() if state.started_at else None,
         finishedAt=state.finished_at.isoformat() if state.finished_at else None,
         basedOnExecutionId=state.based_on_execution_id,
-        checkpointArtifactId=state.checkpoint_artifact_id,
         executor=state.executor,
         environment=state.environment,
-        artifactIds=list(state.artifact_ids),
         error=state.error,
         selectedTasks=list(state.selected_tasks),
-    )
-
-
-def _artifact_response(artifact: Artifact) -> ArtifactResponse:
-    """Map an Execution Artifact record onto the API response shape."""
-    content = artifact.content
-    return ArtifactResponse(
-        id=artifact.id,
-        executionId=artifact.execution_id,
-        runId=artifact.run_id,
-        projectId=artifact.project_id,
-        name=artifact.name,
-        sourcePath=artifact.source_path,
-        digest=content.digest,
-        size=content.size,
-        contentKind=content.kind,
-        mediaType=artifact.media_type,
-        semanticType=artifact.semantic_type,
-        declarationId=artifact.declaration_id,
-        inputEntityIds=list(artifact.input_entity_ids),
-        metadata=dict(artifact.metadata),
-        createdAt=artifact.created_at.isoformat(),
     )
 
 
@@ -432,7 +402,7 @@ def get_execution_outputs(
     execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ExecutionOutputsResponse:
-    """Separate stdio, managed Artifacts, evidence, and unregistered product files."""
+    """Separate stdio, assets this attempt registered, evidence, and working files."""
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
@@ -448,12 +418,12 @@ def get_execution_outputs(
         path = fs.join(execution_dir, name)
         return fs.read_text(path, encoding="utf-8") if fs.is_file(path) else None
 
-    artifacts = run.execution(execution_id).artifacts
-    artifact_responses = [_artifact_response(artifact) for artifact in artifacts]
-    registered = {artifact.path for artifact in artifacts}
-    # Where a reader looks for results is declared data (``products``), not a
-    # name: tasks write ``out/<task>/``, and a registered artifact is already
-    # listed above, so only the rest of the product tiers is "unregistered".
+    from molab.workspace.asset_repository import assets_produced_by
+
+    produced = assets_produced_by(workspace, execution_id)
+    asset_responses = [ManagedAssetResponse.from_model(asset) for asset in produced]
+    # Registered bytes live with the asset record, outside this attempt.
+    # What remains under a product directory is a working file.
     unregistered: list[RunFileNode] = []
     exec_prefix = execution_dir.rstrip("/") + "/"
     for tier in product_dirs():
@@ -464,8 +434,6 @@ def get_execution_outputs(
             if not fs.is_file(path):
                 continue
             rel = path[len(exec_prefix) :] if path.startswith(exec_prefix) else path
-            if rel in registered:
-                continue
             stat = fs.stat(path)
             unregistered.append(
                 RunFileNode(
@@ -496,79 +464,44 @@ def get_execution_outputs(
         stdout=read_optional("stdout.log"),
         stderr=read_optional("stderr.log"),
         runtime=read_optional(RUN_LOG_FILENAME),
-        artifacts=artifact_responses,
+        assets=asset_responses,
         evidence=evidence,
         unregistered=unregistered,
         results=results,
     )
 
 
-@router.post(
-    "/{run_id}/executions/{execution_id}/artifacts/{artifact_id}/promote",
-    response_model=ArtifactPromotionResponse,
-    status_code=201,
-)
-def promote_artifact(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    execution_id: str,
-    artifact_id: str,
-    body: ArtifactPromoteRequest,
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> ArtifactPromotionResponse:
-    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
-    if run is None:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    try:
-        artifact = _execution_repository(workspace, run).get(execution_id).artifact(artifact_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    asset, version = run.experiment.project.assets.promote(
-        artifact,
-        created_by=AgentRef(id=body.created_by, type="person", name=body.created_by),
-        title=body.title,
-        into_asset_id=body.into_asset_id,
-        metadata=body.metadata,
-    )
-    return ArtifactPromotionResponse(
-        asset=ManagedAssetResponse.from_model(
-            asset,
-            len(run.experiment.project.assets.versions(asset.id)),
-        ),
-        version=AssetVersionResponse.from_model(version),
-    )
-
-
 @router.get(
-    "/{run_id}/executions/{execution_id}/artifacts/{artifact_id}/content",
+    "/{run_id}/executions/{execution_id}/assets/{asset_id}/content",
 )
-def download_artifact_content(
+def download_asset_content(
     project_id: str,
     experiment_id: str,
     run_id: str,
     execution_id: str,
-    artifact_id: str,
+    asset_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> StreamingResponse:
-    """Stream one Execution Artifact's bytes."""
+    """Stream one asset this attempt registered."""
+    from molab.workspace.asset_repository import assets_produced_by, payload_path_for
+
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
+    produced = {asset.id: asset for asset in assets_produced_by(workspace, execution_id)}
+    asset = produced.get(asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="asset was not registered by this attempt")
     try:
-        artifact = run.execution(execution_id).artifact(artifact_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    try:
-        location = run.artifact_location(execution_id, artifact)
-    except ValueError as exc:
+        location = payload_path_for(workspace, asset_id)
+    except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if not workspace.fs.is_file(location):
-        raise HTTPException(status_code=404, detail="artifact payload not found")
-    filename = Path(artifact.name).name
+        raise HTTPException(status_code=404, detail="asset payload not found")
+    filename = Path(asset.file).name
     return StreamingResponse(
         iter_file_chunks(workspace.fs, location, size=workspace.fs.getsize(location)),
-        media_type=artifact.media_type or "application/octet-stream",
+        media_type=asset.media_type or "application/octet-stream",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
 
@@ -587,6 +520,7 @@ def create_scoped_run(
     run = experiment.add_run(
         params=run_req.params,
         target=run_req.target,
+        inputs=tuple(run_req.inputs),
     )
     return RunResponse.from_model(run)
 
@@ -818,39 +752,19 @@ def get_run_files(
 
     fs = workspace.fs
     try:
-        execution = run.execution(execution_id)
+        run.execution(execution_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     execution_dir = run.execution_dir(execution_id)
     run_dir = str(execution_dir)
-    # Drop pinned listings so newly-written ``*.mlp.jsonl`` / artifacts show up.
+    # Drop pinned listings so a newly-written metrics file shows up.
     _invalidate_run_nav_cache(workspace, run_dir)
-
-    artifact_index: dict[str, Artifact] = {}
-    base = str(execution_dir).rstrip("/")
-    for artifact in execution.artifacts:
-        try:
-            location = run.artifact_location(execution_id, artifact)
-        except ValueError:
-            continue
-        loc = str(location).rstrip("/")
-        if loc == base:
-            rel = ""
-        elif loc.startswith(base + "/"):
-            rel = loc[len(base) + 1 :]
-        else:
-            try:
-                rel = Path(loc).resolve().relative_to(Path(base).resolve()).as_posix()
-            except (ValueError, OSError):
-                continue
-        artifact_index[rel] = artifact
 
     tree = list_tree_children(fs, run_dir, max_depth=8)
     raw_nodes = tree_to_run_file_dicts(tree)
 
     def enrich(node: dict) -> RunFileNode:
         rel = node.get("relPath") or ""
-        info = artifact_index.get(rel)
         children_raw = node.get("children") or []
         return RunFileNode(
             name=node.get("name") or "",
@@ -858,11 +772,6 @@ def get_run_files(
             type=node.get("type") or "file",
             size=node.get("size"),
             modified=node.get("modified"),
-            assetId=info.id if info else None,
-            assetKind=info.semantic_type if info else None,
-            taskId=str(info.metadata.get("task_id"))
-            if info and info.metadata.get("task_id")
-            else None,
             children=[enrich(c) for c in children_raw],
         )
 
@@ -1020,41 +929,6 @@ def ingest_run_metrics(
             for s in result.skipped
         ],
     }
-
-
-@router.post("/{run_id}/analyze-failure")
-def analyze_run_failure_route(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    body: RunAnalyzeFailureRequest,
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> dict[str, str]:
-    """Analyze a failed run into a sourced Report.
-
-    Shares :func:`molab.services.run_failure.analyze_run_failure` with the CLI
-    (close-loop-02). Deterministic narrative when ``narrative`` is omitted.
-    """
-    from molab.services.run_failure import analyze_run_failure
-
-    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    try:
-        item = analyze_run_failure(
-            run,
-            created_by=body.created_by,
-            narrative=body.narrative,
-            force=body.force,
-            name=body.name,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        rel = Path(item.path).relative_to(workspace.resolve()).as_posix()
-    except Exception:
-        rel = item.name
-    return {"name": item.name, "path": rel}
 
 
 class RunPruneRequest(ApiModel):

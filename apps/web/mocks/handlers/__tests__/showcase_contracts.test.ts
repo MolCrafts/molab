@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { strFromU8, unzipSync } from "fflate";
 import { getResponse } from "msw";
-import type { AssetVersionResponse } from "../../../src/api/generated/models/AssetVersionResponse";
 import type { ExecutionOutputsResponse } from "../../../src/api/generated/models/ExecutionOutputsResponse";
 import type { ExecutionResponse } from "../../../src/api/generated/models/ExecutionResponse";
+import type { ManagedAssetResponse } from "../../../src/api/generated/models/ManagedAssetResponse";
 import type { RunResponse } from "../../../src/api/generated/models/RunResponse";
 import {
   getAllProjects,
@@ -50,11 +50,11 @@ describe("offline showcase contracts", () => {
               `${path}/runs/${run.id}/executions/${execution.id}/outputs`,
             );
             expect(outputs.executionId).toBe(execution.id);
-            for (const artifact of outputs.artifacts ?? []) {
+            for (const asset of outputs.assets ?? []) {
               const content = await request(
-                `${path}/runs/${run.id}/executions/${execution.id}/artifacts/${artifact.id}/content`,
+                `${path}/runs/${run.id}/executions/${execution.id}/assets/${asset.id}/content`,
               );
-              expect((await content.arrayBuffer()).byteLength).toBe(artifact.size);
+              expect((await content.arrayBuffer()).byteLength).toBe(asset.size);
             }
           }
         }
@@ -148,22 +148,16 @@ describe("offline showcase contracts", () => {
     expect((await request(`${base}/executions/${execution.id}/cancel`, post({}))).status).toBe(409);
   });
 
-  it("promotes artifact bytes into versioned project assets", async () => {
-    const versions = await json<AssetVersionResponse[]>(
-      "/projects/protein-folding/assets/asset-003/versions",
-    );
-    expect(versions.map((v) => v.version)).toEqual([1, 2]);
-    const response = await request(
-      `${attempt}/artifacts/exec-run-001-01-metrics/promote`,
-      post({ title: "Benchmark metrics", intoAssetId: "asset-003" }),
-    );
-    expect(response.status).toBe(201);
-    const promoted = await json<AssetVersionResponse[]>(
-      "/projects/protein-folding/assets/asset-003/versions",
-    );
-    expect(promoted).toHaveLength(3);
-    expect(promoted[2].sourceArtifactId).toBe("exec-run-001-01-metrics");
-    const content = await request("/projects/protein-folding/assets/asset-003/download");
+  it("serves one asset record and the bytes an attempt registered", async () => {
+    const asset = await json<ManagedAssetResponse>("/projects/protein-folding/assets/asset-003");
+    expect(asset.ref).toBe("molab:asset/asset-003");
+    expect(asset.originKind).toBe("execution");
+    expect(asset.runId).toBe("run-001");
+    const outputs = await json<ExecutionOutputsResponse>(`${attempt}/outputs`);
+    const metrics = outputs.assets?.find((item) => item.id.endsWith("-metrics"));
+    expect(metrics?.originKind).toBe("execution");
+    expect(metrics?.ref.startsWith("molab:asset/")).toBe(true);
+    const content = await request(`${attempt}/assets/${metrics?.id}/content`);
     expect((await content.json()).plddt_mean).toBe(87.4);
   });
 

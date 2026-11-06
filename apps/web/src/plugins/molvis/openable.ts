@@ -3,6 +3,12 @@ import { isChemicalStructureName } from "@/lib/structure-files";
 /** Formats molvis-stage can load in-browser today. Not a file tree. */
 
 const TRAJECTORY = /\.(lammpstrj|lmptrj|lammpsdump|dump)$/i;
+/**
+ * LAMMPS data files: the MD-ready system with its periodic cell and full
+ * topology. molvis-stage reads them by extension (format "lammps").
+ * `.lammps` is left out: `log.lammps` is LAMMPS's solver log, molplot's.
+ */
+const LAMMPS_DATA = /\.(data|lmp|lammpsdata)$/i;
 const ZARR_GROUP = /(?:^|\/)(?:frame|trajectory|meta)\/zarr\.json$/i;
 
 const posix = (relPath: string): string => relPath.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -14,8 +20,10 @@ const isMlpZarrPath = (path: string, name: string): boolean =>
 const hasMrecAncestor = (path: string): boolean =>
   path.split("/").some((seg) => seg.endsWith(".mrec"));
 
+export const isLammpsDataName = (name: string): boolean => LAMMPS_DATA.test(name);
+
 export const isMolvisTrajectoryName = (name: string): boolean =>
-  isChemicalStructureName(name) || TRAJECTORY.test(name);
+  isChemicalStructureName(name) || TRAJECTORY.test(name) || isLammpsDataName(name);
 
 /**
  * True when this file is a molvis-openable ``*.mrec`` store marker.

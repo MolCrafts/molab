@@ -1,13 +1,15 @@
-"""Named assets, emitted artifacts, and workspace-wide asset queries.
+"""Register a file, then open it as the next run's input.
 
 Walks through:
 
-1. ``ctx.emit_artifact`` — writes a file and records an ``Artifact``.
-2. ``ctx.log("run").append`` — appends to the execution evidence log.
-3. ``ctx.checkpoint`` — writes a checkpoint ``Artifact``.
-4. ``ws.data_assets.import_asset`` — pulls external data in as an ``Asset``.
-5. ``ws.assets.versions`` — read that import's origin.
-6. ``scan_asset_repositories`` — every named asset in the workspace.
+1. ``import_asset`` — copies outside bytes in as an Asset.
+2. ``ctx.register`` — copies a task result in as an Asset of the experiment.
+3. ``ctx.checkpoint`` — writes a path under ``checkpoints/``. It is not an Asset.
+4. ``assets_produced_by`` — the assets one attempt registered.
+5. ``Finding.harvest`` — the document cites ``molab:asset/<id>`` and the
+   point the conclusion uses (``/loss``).
+6. ``finding.inputs`` — the next run's inputs are those asset ids. The root
+   task receives them as paths. The workflow does not import knowledge.
 
 Run directly::
 
@@ -27,11 +29,26 @@ wf = Workflow(name="train")
 
 
 @wf.task
-async def train(ctx: TaskContext) -> dict:
-    return {"loss": 0.08, "acc": 0.94}
+def train(ctx: TaskContext) -> str:
+    path = ctx.workdir / "metrics.json"
+    path.write_text('{"loss": 0.08}\n', encoding="utf-8")
+    return ctx.register(path, title="metrics")
 
 
 compiled = wf.compile()
+
+follow = Workflow(name="read")
+
+
+@follow.task
+def read(inputs: tuple[Path, ...], metrics: Path) -> str:
+    opened = inputs[0]
+    if opened != metrics:
+        raise RuntimeError(f"title binding {metrics} is not inputs[0] {opened}")
+    return opened.read_text(encoding="utf-8")
+
+
+follow_compiled = follow.compile()
 
 
 async def main() -> None:
@@ -39,37 +56,45 @@ async def main() -> None:
     ws = me.Workspace(root, name="assets-demo")
 
     external = root / "external.csv"
-    external.write_text("x,y\n1,2\n3,4\n")
-    imported = ws.data_assets.import_asset("toy-dataset", external)
+    external.write_text("x,y\n1,2\n3,4\n", encoding="utf-8")
+    imported = ws.assets.import_asset("toy-dataset", external)
 
     exp = ws.add_project("demo").add_experiment("train").define(compiled, params=None)
     run = exp.list_runs()[0]
     with run.start() as ctx:
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)
-        ctx.emit_artifact(result.outputs["train"], name="metrics.json")
-
         log = ctx.log("run")
-        log.append("epoch 1 start")
-        log.append("epoch 1 done  loss=0.10")
-        log.append("epoch 2 done  loss=0.08")
-
+        log.append("epoch 1 done  loss=0.08")
         ctx.checkpoint("epoch-1", data={"step": 1})
-        ctx.checkpoint("epoch-2", data={"step": 2})
 
-        version = ws.assets.versions(imported.id)[-1]
-        source = version.origin.uri if version.origin.kind == "import" else ""
-        ctx.emit_artifact(
-            {"dataset": imported.title, "source": source},
-            name="dataset-path.json",
-        )
+    from molab.workspace.asset_repository import assets_produced_by
 
-    from molab.workspace.artifact_repository import scan_asset_repositories
+    produced = assets_produced_by(ws, run.executions[-1].id)
+    metrics_asset = next(asset for asset in produced if asset.title == "metrics")
+    print(f"metrics asset: molab:asset/{metrics_asset.id}")
 
-    all_assets = [asset for repo in scan_asset_repositories(ws) for asset in repo.list()]
+    from molab.knowledge.concepts import Finding
+
+    finding = Finding.harvest(
+        run,
+        narrative="The training loss reached 0.08.",
+        created_by="example",
+        name="train-loss",
+        results={"loss": 0.08},
+    )
+    follow_run = exp.add_run(inputs=finding.inputs)
+    with follow_run.start() as follow_ctx:
+        follow_result = await WorkflowRuntime().execute(follow_compiled, run_context=follow_ctx)
+
     print(f"workspace root: {root}")
-    print(f"total assets:   {len(all_assets)}")
-    for asset in all_assets:
-        print(f"  [{asset.kind:<11}] {asset.title:<20} scope={asset.scope.kind}")
+    print(f"imported:       {imported.ref}  origin={imported.origin.kind}")
+    print(f"task returned:  {result.outputs['train']}")
+    print(f"produced:       {len(produced)}")
+    for asset in produced:
+        print(f"  {asset.ref}  {asset.title}  origin={asset.origin.kind}")
+    print(f"cited point:    /loss = {finding.read_cited('/loss')}")
+    print(f"next inputs:    {follow_run.inputs}")
+    print(f"next run read:  {follow_result.outputs['read'].rstrip()}")
 
 
 if __name__ == "__main__":

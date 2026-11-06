@@ -97,10 +97,8 @@ class TestSectionNamesComeFromTheDeclaration:
     """A directory name is written down once, in its declaration.
 
     A second spelling is how a metrics file gets written where nothing looks
-    for it — which is exactly what happened when the products directory was
-    renamed in the artifact repository but not in the metrics WAL. Now that
-    the name lives in ``execution_dirs``, the guard is that nobody re-types
-    it: a module that says ``"artifacts"`` in code has forked the name again.
+    for it. The name lives in ``execution_dirs``, and the guard is that
+    nobody re-types it.
 
     Only modules that build paths *directly* are checked. A call site saying
     ``ctx.get_dir("work")`` is safe because ``get_dir`` resolves the name
@@ -138,11 +136,11 @@ class TestSectionNamesComeFromTheDeclaration:
 
     def test_no_writer_retypes_a_declared_directory_name(self):
         from molab.plugins.metrics import wal
-        from molab.workspace import artifact_repository, execution_context
+        from molab.workspace import asset_repository, execution_context
         from molab.workspace.execution_dirs import execution_dir_names
 
         names = execution_dir_names()
-        for module in (artifact_repository, execution_context, wal):
+        for module in (asset_repository, execution_context, wal):
             retyped = self._code_strings(Path(module.__file__)) & names
             assert not retyped, (
                 f"{module.__name__} hard-codes {sorted(retyped)}; "

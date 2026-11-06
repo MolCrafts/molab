@@ -103,6 +103,10 @@ def _reject_parameters_alias(data: object) -> object:
 
 class RunCreateRequest(ApiModel):
     params: dict[str, Any] = Field(default_factory=dict, description="Run params")
+    inputs: list[str] = Field(
+        default_factory=list,
+        description="Asset ids this run consumes. Bound into the root task as paths.",
+    )
     target: str | None = Field(
         default=None,
         description="Declared compute-target hint (must exist in workspace registry)",
@@ -121,35 +125,17 @@ class RunHarvestRequest(ApiModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    cls: Literal[
-        "Note",
-        "Literature",
-        "Report",
-        "Finding",
-        "Plan",
-        "Observation",
-    ] = Field(default="Finding", description="Knowledge class name")
+    cls: Literal["Finding", "Observation", "Report"] = Field(
+        default="Finding",
+        description="Finding, Observation, or Report.",
+    )
     narrative: str = Field(..., description="Non-empty interpretation")
     created_by: str = Field(default="ui", description="Author string")
     name: str | None = Field(default=None, description="Optional knowledge document name")
     results: dict[str, Any] | None = Field(
-        default=None, description="Optional headline results table"
-    )
-
-
-class RunAnalyzeFailureRequest(ApiModel):
-    """Analyze a failed run into a sourced Report."""
-
-    narrative: str | None = Field(
         default=None,
-        description="Optional interpretation; when omitted a deterministic template is used",
+        description="Values to pin as spans on assets this run registered",
     )
-    created_by: str = Field(default="ui", description="Author string")
-    force: bool = Field(
-        default=False,
-        description="When true, also accept cancelled runs (default: failed only)",
-    )
-    name: str | None = Field(default=None, description="Optional knowledge document name")
 
 
 class ExecutionAttemptCreateRequest(ApiModel):
@@ -157,7 +143,6 @@ class ExecutionAttemptCreateRequest(ApiModel):
 
     mode: Literal["initial", "rerun", "resume", "reproduce"] = "initial"
     based_on_execution_id: str | None = None
-    checkpoint_artifact_id: str | None = None
     bypass_cache: bool = Field(
         default=False,
         description=(
@@ -209,15 +194,6 @@ class ExecutionAttemptCreateRequest(ApiModel):
     max_workers: int | None = Field(
         default=None, ge=1, description="Worker threads / processes at most."
     )
-
-
-class ArtifactPromoteRequest(ApiModel):
-    """Append an Artifact → Asset registration fact."""
-
-    title: str | None = None
-    into_asset_id: str | None = None
-    created_by: str = "ui"
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkflowDocumentRequest(ApiModel):

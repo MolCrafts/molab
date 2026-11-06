@@ -1,4 +1,4 @@
-"""``lineage`` — ancestor and descendant walks over Artifact and Asset records."""
+"""``lineage`` — ancestor and descendant walks over asset records."""
 
 from . import lineage
 

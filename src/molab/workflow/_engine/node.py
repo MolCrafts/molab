@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any, cast
 from molab.workspace import tracking
 
 from ..context import TaskContext
-from ..outputs import RegisterArtifact, RegisterMetric
+from ..outputs import RegisterAsset, RegisterMetric
 from ..protocols import (
     Runnable,
     Streamable,
@@ -345,13 +345,7 @@ async def run_task_body(
                     ),
                     on_end=lambda: mark_task_status(deps.journal_dir, name, "running", ended=True),
                 )
-            from .node_cache import _upstream_asset_ids
-
-            try:
-                consumed = _upstream_asset_ids(deps, registration)
-            except Exception:
-                consumed = ()
-            return _promote_outputs(raw, deps.run_context, task_ctx, consumed=consumed)
+            return _promote_outputs(raw, deps.run_context, task_ctx)
     finally:
         if not keep_metrics:
             take_task_metrics(deps.run_context, name)
@@ -385,51 +379,39 @@ def _promote_outputs(
     output: TaskOutput,
     run_context: object,
     task_ctx: TaskContext | None = None,
-    *,
-    consumed: tuple[str, ...] = (),
 ) -> TaskOutput:
-    """Resolve ``RegisterArtifact`` / ``RegisterMetric`` markers.
+    """Resolve ``RegisterAsset`` / ``RegisterMetric`` markers.
 
-    Markers come from the returned value **and** from ``ctx.register_*``
-    pending calls. The engine performs the side effect (copy+register under
-    ``<run_dir>/artifacts/``; append the scalar) and replaces markers in the
-    recorded output with a plain value (artifact run path / metric number).
-    Without a workspace ``run_context`` the markers degrade to their bare value.
+    Markers come from the returned value and from ``ctx.register`` /
+    ``ctx.register_metric``. The engine registers the file (the recorded
+    value becomes ``molab:asset/<id>``) or appends the scalar. Without a
+    workspace ``run_context`` a file marker degrades to its path string.
     """
-    pending: list[RegisterArtifact | RegisterMetric] = list(
-        getattr(task_ctx, "_pending", None) or []
-    )
+    pending: list[RegisterAsset | RegisterMetric] = list(getattr(task_ctx, "_pending", None) or [])
 
     def _ids_in_output(value: object) -> set[int]:
-        if isinstance(value, (RegisterArtifact, RegisterMetric)):
+        if isinstance(value, (RegisterAsset, RegisterMetric)):
             return {id(value)}
         if isinstance(value, dict):
-            return {
-                id(v) for v in value.values() if isinstance(v, (RegisterArtifact, RegisterMetric))
-            }
+            return {id(v) for v in value.values() if isinstance(v, (RegisterAsset, RegisterMetric))}
         return set()
 
     in_output = _ids_in_output(output)
 
-    def _promote_one(marker: RegisterArtifact | RegisterMetric) -> object:
-        if isinstance(marker, RegisterArtifact):
+    def _promote_one(marker: RegisterAsset | RegisterMetric) -> object:
+        if isinstance(marker, RegisterAsset):
             path = Path(marker.path)
-            emit = getattr(run_context, "emit_artifact", None)
-            if callable(emit):
-                artifact = emit(
+            register = getattr(run_context, "register", None)
+            if callable(register):
+                asset = register(
                     path,
-                    name=marker.name,
+                    title=marker.title,
                     tags=marker.tags,
                     mime=marker.mime,
-                    consumed=list(consumed) or None,
                 )
-                if marker.asset:
-                    _register_project_asset(run_context, artifact, marker.asset)
-                source_path = getattr(artifact, "source_path", None)
-                execution_dir = getattr(run_context, "execution_dir", None)
-                if execution_dir is not None and source_path is not None:
-                    return str(Path(execution_dir) / source_path)
-                return str(path)
+                ref = getattr(asset, "ref", None)
+                if isinstance(ref, str):
+                    return ref
             return str(path)
         register_metric = getattr(run_context, "register_metric", None)
         if callable(register_metric):
@@ -444,38 +426,54 @@ def _promote_outputs(
         if id(marker) not in in_output:
             _promote_one(marker)
 
-    if isinstance(output, (RegisterArtifact, RegisterMetric)):
+    if isinstance(output, (RegisterAsset, RegisterMetric)):
         return _promote_one(output)
     if isinstance(output, dict) and any(
-        isinstance(v, (RegisterArtifact, RegisterMetric)) for v in output.values()
+        isinstance(v, (RegisterAsset, RegisterMetric)) for v in output.values()
     ):
         return {
-            key: _promote_one(value)
-            if isinstance(value, (RegisterArtifact, RegisterMetric))
-            else value
+            key: (
+                _promote_one(value) if isinstance(value, (RegisterAsset, RegisterMetric)) else value
+            )
             for key, value in output.items()
         }
     return output
 
 
-def _register_project_asset(run_context: object, artifact: object, title: str) -> None:
-    """File *artifact* in the project asset library under *title*.
+_ROOT_ENVELOPE = frozenset({"params", "workdir", "inputs", "asset_bindings"})
 
-    :meth:`AssetRepository.promote` decides, under its lock, whether *title*
-    is a new asset, the next version of the one asset with that title, or
-    already current. The task body never sees the workspace. A missing
-    project library leaves the run artifact as it is. A library error
-    propagates, so the task fails in the open.
+
+def _resolve_asset_value(value: object) -> object:
+    """Replace ``molab:asset/<id>`` strings with the file's path.
+
+    A task opens a path. The journal keeps the ref. Without a current
+    execution the string is left as it is.
     """
-    run = getattr(run_context, "run", None)
-    experiment = getattr(run, "experiment", None) if run is not None else None
-    project = getattr(experiment, "project", None) if experiment is not None else None
-    repo = getattr(project, "assets", None) if project is not None else None
-    if repo is None:
-        return
-    from molab.workspace.history import SYSTEM_AGENT
+    if isinstance(value, str):
+        from molab.workspace.refs import InvalidRefError, is_ref, parse_ref
 
-    repo.promote(artifact, created_by=SYSTEM_AGENT, title=title)
+        if not is_ref(value):
+            return value
+        try:
+            ref = parse_ref(value, kind="asset")
+        except InvalidRefError:
+            return value
+        if ref.asset_id is None:
+            return value
+        tracker = tracking.current()
+        run = getattr(tracker, "run", None) if tracker is not None else None
+        if run is None:
+            return value
+        from molab.workspace.asset_repository import payload_path_for
+
+        return Path(payload_path_for(run.experiment.project.workspace, ref.asset_id))
+    if isinstance(value, dict):
+        return {key: _resolve_asset_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_asset_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_resolve_asset_value(item) for item in value)
+    return value
 
 
 class MissingTaskInputError(TypeError):
@@ -485,8 +483,8 @@ class MissingTaskInputError(TypeError):
 def _binding_source(inputs: TaskInput, depends_on: list[str]) -> Any:  # noqa: ANN401 (dynamic binding map)
     """The flat ``name → value`` map a task body's parameters bind from.
 
-    - Root task: the engine envelope ``{"params": <run params>, "workdir": Path}``
-      — bind from the run params, so unwrap to ``inputs["params"]``.
+    - Root task: the engine envelope ``{"params", "workdir", "inputs",
+      "asset_bindings"}``. Bind from the run params, then the asset paths.
     - Multiple upstreams: ``inputs`` is ``{dep → output}``; the by-name model
       merges the per-dep dict outputs into one flat map (the ``task(**a, **b)``
       shape). Later deps win on key collisions.
@@ -505,8 +503,20 @@ def _binding_source(inputs: TaskInput, depends_on: list[str]) -> Any:  # noqa: A
                 merged[dep] = value
         return merged
     if isinstance(inputs, dict):
-        if set(inputs) <= {"params", "workdir"} and isinstance(inputs.get("params"), dict):
-            return inputs["params"]
+        if set(inputs) <= _ROOT_ENVELOPE and isinstance(inputs.get("params"), dict):
+            bound = dict(inputs["params"])
+            asset_inputs = inputs.get("inputs")
+            if asset_inputs:
+                if "inputs" in bound:
+                    raise ValueError(
+                        "run parameter 'inputs' overlaps the asset paths bound as inputs"
+                    )
+                bound["inputs"] = asset_inputs
+            for title, ref in (inputs.get("asset_bindings") or {}).items():
+                if title in bound:
+                    raise ValueError(f"asset title {title!r} overlaps a run parameter")
+                bound[title] = ref
+            return bound
         return inputs
     return inputs
 
@@ -561,11 +571,12 @@ def _bind_call_args(
     base = dict(config) if isinstance(config, Mapping) else {}
     raw = _binding_source(inputs, depends_on)
     if isinstance(raw, dict):
-        name_source = {**base, **raw}  # dynamic inputs win over build-time config
+        # Dynamic inputs win over build-time config. Asset refs become paths.
+        name_source = {**base, **{key: _resolve_asset_value(value) for key, value in raw.items()}}
         single: Any = None
     else:
         name_source = base
-        single = raw  # a single non-dict upstream value (or None for no input)
+        single = _resolve_asset_value(raw) if raw is not None else raw
 
     bound: set[str] = set()
     for p in named:

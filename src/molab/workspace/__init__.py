@@ -14,8 +14,7 @@ Each scope exposes:
 
 - ``workspace.fs``         — the disk (local / remote / cached ``FileSystem``)
 - ``{folder}.files``       — ``FileStore`` rooted at that folder (user byte-exit)
-- ``{scope}.assets``       — ``AssetRepository`` (named, versioned assets)
-- ``{scope}.data_assets``  — alias of ``{scope}.assets`` (frozen ``import_asset`` call path)
+- ``{scope}.assets``       — ``AssetRepository`` (one id, one content, one ref)
 
 Upstream layers extend the workspace tree by importing the public
 ``Folder`` base class and mounting their own subclasses via the
@@ -27,14 +26,13 @@ from molab.param import GridSpace, Params, ParamSpace, UniformSpace
 from .base import atomic_write_json, atomic_write_text
 from .context import Context
 from .domain import (
-    Artifact,
-    ArtifactRef,
     Asset,
     AssetScope,
-    AssetVersion,
     ContentRef,
     Execution,
+    ExecutionOrigin,
     ExecutionStatus,
+    ImportOrigin,
 )
 from .errors import (
     AmbiguousRefError,
@@ -70,7 +68,7 @@ from .targets import LOCAL_TARGET_NAME
 from .validate import ValidationReport, Violation
 from .workspace import Workspace
 from .workspace_context import (
-    ContextArtifact,
+    ContextAsset,
     ContextFocus,
     ExperimentRef,
     HealthFlag,
@@ -92,18 +90,16 @@ __all__ = [
     "WORKSPACE_RUN_KIND",
     "AgentRef",
     "AmbiguousRefError",
-    "Artifact",
-    "ArtifactRef",
     "Asset",
     "AssetScope",
-    "AssetVersion",
     "ComputeTarget",
     "ContentRef",
     "Context",
-    "ContextArtifact",
+    "ContextAsset",
     "ContextFocus",
     "EntityRef",
     "Execution",
+    "ExecutionOrigin",
     "ExecutionPruneEntry",
     "ExecutionPrunePlan",
     "ExecutionStatus",
@@ -117,6 +113,7 @@ __all__ = [
     "GitHistory",
     "GridSpace",
     "HealthFlag",
+    "ImportOrigin",
     "InvalidRefError",
     "LivePruneRefusedError",
     "LocalTarget",
