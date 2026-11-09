@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { applyFilters, computeFacetCounts, computeRecentEventsForRun } from "@/app/runs/aggregates";
+import { applyFilters, computeFacetCounts } from "@/app/runs/aggregates";
 import type {
   WorkspaceExecutionRow,
   WorkspaceRunRow,
@@ -119,90 +119,55 @@ describe("applyFilters", () => {
     expect(applyFilters(runs, filters, NOW).map((item) => item.id)).toEqual(["a", "c"]);
   });
 
-  it("supports the active quick view", () => {
+  it("filters a run by its latest attempt, not by any attempt in its history", () => {
+    const NOW_ISO = new Date(NOW).toISOString();
     const runs = [
-      run({ id: "a", status: "running" }),
-      run({ id: "b", status: "pending" }),
-      run({ id: "c", status: "succeeded" }),
-    ];
-    expect(
-      applyFilters(runs, { quickView: ["active"] }, NOW)
-        .map((item) => item.id)
-        .sort(),
-    ).toEqual(["a", "b"]);
-  });
-
-  it("excludes failed runs older than 24 hours", () => {
-    const fresh = run({
-      id: "fresh",
-      status: "failed",
-      finishedAt: new Date(NOW - 2 * HOUR).toISOString(),
-    });
-    const stale = run({
-      id: "stale",
-      status: "failed",
-      finishedAt: new Date(NOW - 30 * HOUR).toISOString(),
-    });
-    expect(applyFilters([fresh, stale], { quickView: ["failed24h"] }, NOW)).toEqual([fresh]);
-  });
-
-  it("detects long-running executions", () => {
-    // A Run has no scalar status: "still running" is a property of an
-    // attempt, so the attempt is what has to say so.
-    const long = run({
-      id: "long",
-      executions: [
-        exec({
-          status: "running",
-          startedAt: new Date(NOW - 90 * MIN).toISOString(),
-          finishedAt: null,
-        }),
-      ],
-    });
-    const short = run({
-      id: "short",
-      executions: [
-        exec({
-          status: "running",
-          startedAt: new Date(NOW - 10 * MIN).toISOString(),
-          finishedAt: null,
-        }),
-      ],
-    });
-    expect(applyFilters([long, short], { quickView: ["longRunning"] }, NOW)).toEqual([long]);
-  });
-});
-
-describe("computeRecentEventsForRun", () => {
-  it("emits real submitted, started, and finished events in descending order", () => {
-    const events = computeRecentEventsForRun(
       run({
-        id: "r1",
-        createdAt: new Date(NOW - HOUR).toISOString(),
+        id: "recovered",
         executions: [
           exec({
-            executionId: "e1",
-            startedAt: new Date(NOW - 50 * MIN).toISOString(),
-            finishedAt: new Date(NOW - 5 * MIN).toISOString(),
-            status: "succeeded",
+            executionId: "e01",
+            status: "failed",
+            createdAt: new Date(NOW - 2 * HOUR).toISOString(),
           }),
+          exec({ executionId: "e02", status: "succeeded", createdAt: NOW_ISO }),
         ],
       }),
-    );
-    expect(events.map((event) => event.kind)).toEqual(["finished", "started", "submitted"]);
-    expect(events[0].outcome).toBe("succeeded");
-    expect(events[1].executionId).toBe("e1");
+      run({ id: "broken", status: "failed" }),
+      run({ id: "closing", status: "finalizing" }),
+    ];
+    expect(applyFilters(runs, { status: ["failed"] }, NOW).map((item) => item.id)).toEqual([
+      "broken",
+    ]);
+    expect(applyFilters(runs, { status: ["running"] }, NOW).map((item) => item.id)).toEqual([
+      "closing",
+    ]);
   });
 
-  it("never invents unsupported event kinds", () => {
-    const kinds = new Set(
-      computeRecentEventsForRun(
-        run({ executions: [exec({}), exec({ executionId: "e2", finishedAt: null })] }),
-      ).map((event) => event.kind),
-    );
-    for (const kind of kinds) {
-      expect(["submitted", "started", "finished"]).toContain(kind);
-    }
+  it("keeps runs started within the Started window", () => {
+    const fresh = run({
+      id: "fresh",
+      createdAt: new Date(NOW - 2 * HOUR).toISOString(),
+      executions: [],
+    });
+    const old = run({
+      id: "old",
+      createdAt: new Date(NOW - 30 * HOUR).toISOString(),
+      executions: [],
+    });
+    expect(applyFilters([fresh, old], { started: ["24h"] }, NOW)).toEqual([fresh]);
+    expect(applyFilters([fresh, old], { started: ["7d"] }, NOW)).toHaveLength(2);
+  });
+
+  it("reads the bar's free tokens like an experiment's Runs filter", () => {
+    const runs = [
+      run({ id: "a", parameters: { driver: "ase", timestep_fs: 2 } }),
+      run({ id: "b", parameters: { driver: "lib_md3", timestep_fs: 1 } }),
+      run({ id: "c", experimentName: "Thermostat Validation" }),
+    ];
+    expect(applyFilters(runs, { q: "driver:ase" }, NOW).map((item) => item.id)).toEqual(["a"]);
+    expect(applyFilters(runs, { q: "timestep_fs>1" }, NOW).map((item) => item.id)).toEqual(["a"]);
+    expect(applyFilters(runs, { q: "thermostat" }, NOW).map((item) => item.id)).toEqual(["c"]);
   });
 });
 
@@ -219,9 +184,37 @@ describe("computeFacetCounts", () => {
       running: 1,
       failed: 1,
     });
+    expect(facets.status.map((item) => item.label)).toEqual(["Running", "Failed"]);
     expect(Object.fromEntries(facets.backend.map((item) => [item.value, item.count]))).toEqual({
       slurm: 2,
       local: 2,
     });
+  });
+});
+
+describe("status facet", () => {
+  it("counts each run once, by its latest attempt — what picking the facet shows", () => {
+    const recovered = run({
+      id: "recovered",
+      executions: [
+        exec({
+          executionId: "e1",
+          status: "failed",
+          startedAt: new Date(NOW - 50 * MIN).toISOString(),
+        }),
+        exec({
+          executionId: "e2",
+          status: "succeeded",
+          startedAt: new Date(NOW - 20 * MIN).toISOString(),
+        }),
+      ],
+    });
+    const broken = run({ id: "broken", status: "failed" });
+    const facets = computeFacetCounts([recovered, broken], {}, NOW);
+    const counts = Object.fromEntries(facets.status.map((item) => [item.value, item.count]));
+    expect(counts).toEqual({ succeeded: 1, failed: 1 });
+    expect(applyFilters([recovered, broken], { status: ["failed"] }, NOW)).toHaveLength(
+      counts.failed,
+    );
   });
 });

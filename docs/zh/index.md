@@ -230,7 +230,7 @@ molab run train.py --rerun --fresh     # 从头重新执行
 ## 向外扩展，保持轻量
 
 `import molab` 保持轻量——重依赖只在真正用到时加载。核心通过可选 extras
-（例如 `molab[tensorboard]`）连接 molcrafts 栈，并通过三条独立
+（例如 `molab[molvis]`）连接 molcrafts 栈，并通过三条独立
 插件通道（CLI、服务端、UI）接入你自己的代码。
 
 </div>

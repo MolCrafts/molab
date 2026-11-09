@@ -1,21 +1,14 @@
-import "katex/dist/katex.min.css";
 import type { JSX } from "react";
-import ReactMarkdown from "react-markdown";
-import rehypeKatex from "rehype-katex";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
+import { MarkdownContent } from "@/components/ui/markdown";
 import type { FilePreviewContentProps } from "@/lib/file-preview-plugins";
-import { prepareMarkdownMath } from "@/lib/markdown-math";
 
-export const MarkdownPreview = ({ content }: FilePreviewContentProps): JSX.Element => {
-  return (
-    <article className="prose prose-sm max-w-none px-4 py-3 [&_.katex-display]:overflow-x-auto">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeKatex, { strict: "ignore" }]]}
-      >
-        {prepareMarkdownMath(content)}
-      </ReactMarkdown>
-    </article>
-  );
-};
+/**
+ * A markdown file's preview (L07-2): the app's document style — headings,
+ * lists, code, math — the same renderer knowledge documents use. It used
+ * `prose`, which no typography plugin backs, so it rendered as plain text.
+ */
+export const MarkdownPreview = ({ content }: FilePreviewContentProps): JSX.Element => (
+  <article className="max-w-[48rem] px-6 py-4">
+    <MarkdownContent text={content} />
+  </article>
+);

@@ -12,6 +12,7 @@ import type {
   PluginCommandFn,
   PluginLogger,
   PluginPanelSpec,
+  RunViewContribution,
   SettingsSectionSpec,
   StatusBarItemSpec,
   ViewContainerSpec,
@@ -26,12 +27,14 @@ import {
   registerFilePreviewContribution,
   registerFileTypeContribution,
   registerRendererContribution,
+  registerRunViewContribution,
   unregisterEntityTabContribution,
   unregisterExecutionColumnContribution,
   unregisterExecutionDetailContribution,
   unregisterFilePreviewContribution,
   unregisterFileTypeContribution,
   unregisterRendererContribution,
+  unregisterRunViewContribution,
 } from "@/lib/contribution-runtime";
 import type {
   FilePreviewPlugin,
@@ -185,6 +188,16 @@ export function createPluginAPI(pluginId: string): CreatedPluginAPI {
       registerSection(spec: SettingsSectionSpec) {
         const id = ns(pluginId, spec.id);
         track(registerSettingsSection({ ...spec, id, pluginId }));
+      },
+    },
+
+    runViews: {
+      register(spec: RunViewContribution) {
+        const stamped = { ...spec, pluginId: spec.pluginId ?? pluginId };
+        registerRunViewContribution(stamped);
+        track(() => {
+          unregisterRunViewContribution(stamped.id);
+        });
       },
     },
 

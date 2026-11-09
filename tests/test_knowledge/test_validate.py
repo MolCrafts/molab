@@ -119,6 +119,26 @@ class TestValidateKnowledge:
             ("knowledge.stray", "knowledges/nested", "error"),
         ]
 
+    def test_html_documents_and_the_figure_directory_are_legal(self, lab: Any) -> None:
+        write_knowledge(lab, name="page", of=Note, created_by="t", text="<p>x</p>", format="html")
+        figs = Path(str(lab.root)) / "knowledges" / "figs"
+        figs.mkdir()
+        (figs / "plot.png").write_bytes(b"png")
+
+        assert _rules(lab) == []
+
+    def test_one_name_in_two_formats_is_a_duplicate(self, lab: Any) -> None:
+        write_knowledge(lab, name="twin", of=Note, created_by="t", text="x")
+        container = Path(str(lab.root)) / "knowledges"
+        (container / "twin.html").write_text((container / "twin.md").read_text())
+        rebuild_sections(lab)
+
+        assert sorted(_rules(lab)) == [
+            ("knowledge.class", "knowledges/twin.html", "error"),
+            ("knowledge.duplicate", "knowledges/twin.html", "error"),
+            ("knowledge.duplicate", "knowledges/twin.md", "error"),
+        ]
+
     def test_a_stale_section_is_drift(self, lab: Any, run: Any) -> None:
         write_knowledge(run, name="kept", of=Note, created_by="t", text="x")
         assert _rules(lab) == []

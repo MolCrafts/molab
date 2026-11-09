@@ -47,6 +47,16 @@ const parseObjectView = (raw: string | null): ObjectView | undefined => {
   return raw;
 };
 
+/** `?attempt=e02&line=1184` on a run URL: which attempt the page shows, where Logs opens. */
+const parseRunFocus = (searchParams: URLSearchParams): { attemptId?: string; logLine?: number } => {
+  const attempt = searchParams.get("attempt");
+  const line = Number(searchParams.get("line"));
+  return {
+    ...(attempt && /^[A-Za-z0-9_-]{1,64}$/.test(attempt) ? { attemptId: attempt } : {}),
+    ...(Number.isInteger(line) && line > 0 ? { logLine: line } : {}),
+  };
+};
+
 const parseExperimentView = (raw: string | undefined): ExperimentView | undefined => {
   if (
     raw === "workflow" ||
@@ -61,15 +71,8 @@ const parseExperimentView = (raw: string | undefined): ExperimentView | undefine
 };
 
 const parseProjectView = (raw: string | undefined): ProjectView | undefined => {
-  if (
-    raw === "experiments" ||
-    raw === "attention" ||
-    raw === "timeline" ||
-    raw === "assets" ||
-    raw === "settings"
-  ) {
-    return raw;
-  }
+  if (raw === "experiments" || raw === "plan" || raw === "assets") return raw;
+  // attention / timeline / settings left the project in L02: their links open the Overview.
   return undefined;
 };
 
@@ -78,6 +81,7 @@ export const buildSelectionFromLocation = (
   searchParams: URLSearchParams,
 ): Selection | null => {
   const objectView = parseObjectView(searchParams.get("tab"));
+  const runFocus = parseRunFocus(searchParams);
 
   const loneTaskMatch = pathname.match(/^\/run\/([^/]+)\/tasks\/([^/]+)$/);
   if (loneTaskMatch) {
@@ -95,6 +99,7 @@ export const buildSelectionFromLocation = (
       objectType: "run",
       objectId: decodeURIComponent(loneRunMatch[1]),
       objectView,
+      ...runFocus,
     };
   }
 
@@ -114,11 +119,12 @@ export const buildSelectionFromLocation = (
       objectType: "run",
       objectId: decodeURIComponent(scopedRunMatch[2]),
       objectView,
+      ...runFocus,
     };
   }
 
   const scopedExperimentViewMatch = pathname.match(
-    /^\/experiments\/([^/]+)\/(workflow|runs|parameters|notebook)$/,
+    /^\/experiments\/([^/]+)\/(workflow|runs|parameters|notebook|products)$/,
   );
   if (scopedExperimentViewMatch) {
     return {
@@ -156,11 +162,12 @@ export const buildSelectionFromLocation = (
       objectType: "run",
       objectId: decodeURIComponent(projectRunMatch[3]),
       objectView,
+      ...runFocus,
     };
   }
 
   const experimentViewMatch = pathname.match(
-    /^\/projects\/([^/]+)\/experiments\/([^/]+)\/(workflow|runs|parameters|notebook)$/,
+    /^\/projects\/([^/]+)\/experiments\/([^/]+)\/(workflow|runs|parameters|notebook|products)$/,
   );
   if (experimentViewMatch) {
     return {
@@ -179,7 +186,7 @@ export const buildSelectionFromLocation = (
   }
 
   const projectViewMatch = pathname.match(
-    /^\/projects\/([^/]+)\/(experiments|attention|timeline|assets|settings)$/,
+    /^\/projects\/([^/]+)\/(experiments|assets|plan|attention|timeline|settings)$/,
   );
   if (projectViewMatch) {
     return {
@@ -194,15 +201,6 @@ export const buildSelectionFromLocation = (
     return {
       objectType: "project",
       objectId: decodeURIComponent(projectMatch[1]),
-    };
-  }
-
-  const workflowMatch = pathname.match(/^\/workflows\/([^/]+)$/);
-  if (workflowMatch) {
-    return {
-      objectType: "workflow",
-      objectId: decodeURIComponent(workflowMatch[1]),
-      workflowId: decodeURIComponent(workflowMatch[1]),
     };
   }
 
@@ -255,7 +253,10 @@ export const getSelectionPath = (
       if (!run) {
         return "/projects";
       }
-      const path = runPath(run.projectId, run.experimentId, run.id, selection.objectView);
+      const path = runPath(run.projectId, run.experimentId, run.id, selection.objectView, {
+        attempt: selection.attemptId,
+        line: selection.logLine,
+      });
       return path;
     }
     case "task": {
@@ -272,7 +273,7 @@ export const getSelectionPath = (
         : undefined;
       return experiment
         ? experimentPath(experiment.projectId, experiment.id, "workflow")
-        : `/workflows/${encodeURIComponent(selection.workflowId)}`;
+        : "/projects";
     }
     case "asset":
       return `/assets/${encodeURIComponent(selection.objectId)}`;

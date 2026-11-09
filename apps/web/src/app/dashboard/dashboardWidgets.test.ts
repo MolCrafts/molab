@@ -1,15 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 
 import {
-  attentionEdges,
-  attentionMarks,
   attentionRuns,
   durationPointsOf,
   inFlightMarks,
   rollupExecutions,
-  statusGroupsBy,
-  varyingParameterKeys,
 } from "@/app/dashboard/dashboardWidgets";
+import { varyingParameterKeys } from "@/app/renderers/entityWorkbenchData";
 import type { WorkspaceRunRow } from "@/app/runs/types";
 
 interface Attempt {
@@ -85,42 +82,20 @@ describe("durationPointsOf", () => {
 });
 
 describe("attentionRuns", () => {
-  it("counts runs whose latest attempt failed or was cancelled, not every failed attempt", () => {
+  it("counts runs whose latest attempt failed or was interrupted, not every failed attempt", () => {
     const rows = [
       run("recovered", [
         done("failed", "2026-11-01T10:00:00Z", "2026-11-01T10:10:00Z"),
         done("succeeded", "2026-11-01T11:00:00Z", "2026-11-01T11:10:00Z"),
       ]),
       run("broken", [done("failed", "2026-11-01T12:00:00Z", "2026-11-01T12:10:00Z")]),
-      run("stopped", [done("cancelled", "2026-11-01T09:00:00Z", "2026-11-01T09:05:00Z")]),
+      run("cut", [done("interrupted", "2026-11-01T09:00:00Z", "2026-11-01T09:05:00Z")]),
+      // Cancelling is a person's own decision; it does not ask for one.
+      run("stopped", [done("cancelled", "2026-11-01T08:00:00Z", "2026-11-01T08:05:00Z")]),
     ];
-    expect(attentionRuns(rows).map((item) => item.id)).toEqual(["broken", "stopped"]);
+    expect(attentionRuns(rows).map((item) => item.id)).toEqual(["broken", "cut"]);
     // The execution rollup still sees both failed attempts.
     expect(rollupExecutions(rows).failed).toBe(2);
-  });
-});
-
-describe("statusGroupsBy", () => {
-  it("rolls executions up per child scope, busiest first", () => {
-    const rows = [
-      run("a", [done("succeeded", "2026-11-01T10:00:00Z", "2026-11-01T10:30:00Z")], {
-        experimentId: "small",
-      }),
-      run(
-        "b",
-        [
-          done("failed", "2026-11-01T10:00:00Z", "2026-11-01T10:10:00Z"),
-          done("succeeded", "2026-11-01T11:00:00Z", "2026-11-01T11:10:00Z"),
-        ],
-        { experimentId: "big" },
-      ),
-    ];
-    const groups = statusGroupsBy(rows, "experiment");
-    expect(groups.map((group) => [group.id, group.counts.total])).toEqual([
-      ["big", 2],
-      ["small", 1],
-    ]);
-    expect(groups[0]?.onSelect).toBeUndefined();
   });
 });
 
@@ -142,18 +117,6 @@ describe("instrument marks", () => {
     expect(marks[0]?.level).toBe(1);
     expect(marks[1]?.level).toBe(0.25);
     expect(marks[2]?.level).toBeUndefined();
-  });
-
-  it("names each run that needs attention with its age, newest first", () => {
-    const rows = [
-      run("old", [done("failed", "2026-11-01T08:00:00Z", "2026-11-01T09:00:00Z")]),
-      run("new", [done("cancelled", "2026-11-01T11:00:00Z", "2026-11-01T11:40:00Z")]),
-    ];
-    expect(attentionMarks(rows, now).map((mark) => mark.title)).toEqual([
-      "new · cancelled 20m ago",
-      "old · failed 3h ago",
-    ]);
-    expect(attentionEdges(rows, now)).toEqual(["20m", "3h ago"]);
   });
 });
 

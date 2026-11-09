@@ -557,31 +557,6 @@ class RunFileTextResponse(ApiModel):
     size: int
 
 
-class TensorboardScalarPoint(ApiModel):
-    """One scalar sample read from a tfevents file."""
-
-    step: int
-    wallTime: float
-    value: float
-
-
-class TensorboardScalarSeries(ApiModel):
-    """All scalar samples for a single tag inside one logdir."""
-
-    tag: str
-    logdir: str  # path relative to run_dir
-    points: list[TensorboardScalarPoint] = Field(default_factory=list)
-
-
-class TensorboardScalarsResponse(ApiModel):
-    """Parsed scalars across every tfevents logdir found under a run."""
-
-    runId: str
-    runDir: str
-    logdirs: list[str] = Field(default_factory=list)
-    series: list[TensorboardScalarSeries] = Field(default_factory=list)
-
-
 class RunExecutionResponse(ApiModel):
     """One Execution's node journal as the workflow layer reports it (``molab.workflow.read_journal``).
 

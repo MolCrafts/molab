@@ -1,13 +1,9 @@
 /**
- * RED tests for the pure multi-run aggregation builders (ac-001..ac-005).
+ * Tests for the pure multi-run aggregation builders (ac-001..ac-005).
  *
  * Rstest runs in a node environment without jsdom (see rstest.config.ts), so
- * these exercise the pure builders directly — no DOM, no render(). The imports
- * fail today because aggregateSeries.ts does not exist yet (RED).
- *
- * Aligns with the repo idiom in RunMetricsView.test.tsx: pure transforms are
- * imported and called against fixtures; PALETTE is consumed from the (newly
- * exported) RunMetricsView surface.
+ * these exercise the pure builders directly — no DOM, no render(). PALETTE
+ * comes from `scalar-series`, the series builder both views share.
  */
 
 import { describe, expect, it } from "@rstest/core";
@@ -19,7 +15,7 @@ import {
   buildOverlayConfig,
   type RunSeries,
 } from "./aggregateSeries";
-import { PALETTE, type ScalarSeries } from "./RunMetricsView";
+import { PALETTE, type ScalarSeries } from "./scalar-series";
 
 const OPTS: AggregateOptions = {
   xMode: "step",

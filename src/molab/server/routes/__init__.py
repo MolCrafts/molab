@@ -21,7 +21,6 @@ from . import (
     run,
     runs_flat,
     targets,
-    tensorboard,
     workflow,
     workspace,
     workspaces,
@@ -45,7 +44,6 @@ def _workspace_scoped_modules() -> tuple:
         preview,
         catalog,
         workflow,
-        tensorboard,
         history,
     )
 
@@ -136,7 +134,6 @@ def create_api_router() -> APIRouter:
     gated.include_router(registry.router)
     gated.include_router(molq.router)
     gated.include_router(targets.router)
-    gated.include_router(tensorboard.router)
     gated.include_router(workflow.router)
     gated.include_router(history.router)
 
@@ -161,7 +158,6 @@ __all__ = [
     "run",
     "runs_flat",
     "targets",
-    "tensorboard",
     "workflow",
     "workspace",
     "workspaces",

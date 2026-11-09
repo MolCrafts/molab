@@ -44,7 +44,7 @@ Legacy shadcn aliases (`primary`, `success`, `destructive`, `info`,
 `warning`) map onto accent / status tokens for existing feature code.
 `info` aliases **running status**, not the product accent.
 
-Scientific chart series palettes (including ΔF groups) use oklch
+Scientific chart series palettes use oklch
 categorical colors — not brand/status tokens.
 
 Stage 2 conformance is enforced across `apps/web/src/`: feature code contains no

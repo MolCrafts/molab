@@ -1,8 +1,6 @@
 import {
   ContextMenu,
   ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
   Table,
   TableBody,
@@ -11,8 +9,11 @@ import {
   TableHeader,
   TableRow,
 } from "@molcrafts/ui";
-import type { ComponentType, JSX, ReactNode } from "react";
+import type { JSX, ReactNode } from "react";
 import { Fragment } from "react";
+import { usePreview } from "@/app/preview/PreviewContext";
+import type { PreviewTarget } from "@/app/preview/target";
+import { ContextMenuItems } from "@/components/menu/MenuItems";
 import { ROW_PADDING_DENSE, TABLE_HEADER } from "./density";
 
 export interface DataTableColumn<T> {
@@ -26,7 +27,7 @@ export interface DataTableColumn<T> {
 export interface DataTableRowAction<T> {
   id: string;
   label: string;
-  icon?: ComponentType<{ className?: string }>;
+  shortcut?: string;
   disabled?: boolean;
   destructive?: boolean;
   separatorBefore?: boolean;
@@ -38,7 +39,10 @@ export interface DataTableProps<T> {
   columns: DataTableColumn<T>[];
   data: T[];
   getRowKey: (row: T) => string;
+  /** Open the row (double-click, ↵); without `getRowPreview` a click opens too. */
   onRowActivate?: (row: T) => void;
+  /** What a single click / Space / ↑↓ shows in the Preview (L12). */
+  getRowPreview?: (row: T) => PreviewTarget | null;
   getRowLabel?: (row: T) => string;
   empty: ReactNode;
   rowClassName?: (row: T) => string;
@@ -50,32 +54,73 @@ export const DataTable = <T,>({
   data,
   getRowKey,
   onRowActivate,
+  getRowPreview,
   getRowLabel,
   empty,
   rowClassName,
   rowActions,
 }: DataTableProps<T>): JSX.Element => {
+  const previewApi = usePreview();
   const renderRow = (row: T): JSX.Element => {
     const actions = rowActions?.(row) ?? [];
     const interactive = Boolean(onRowActivate);
-    const activate = (): void => onRowActivate?.(row);
+    // Opening the row's page retires the Preview of it.
+    const activate = (): void => {
+      previewApi.close();
+      onRowActivate?.(row);
+    };
+    const target = getRowPreview?.(row) ?? null;
+    const selected = target !== null && previewApi.isPreviewed(target);
+    // Single click previews when the row has a target; otherwise it opens.
+    const click = (event?: { metaKey: boolean; ctrlKey: boolean }): void => {
+      if (target && (event?.metaKey || event?.ctrlKey))
+        previewApi.open(target, { background: true });
+      else if (target) previewApi.preview(target);
+      else activate();
+    };
     const rowElement = (
       <TableRow
         tabIndex={interactive ? 0 : undefined}
         aria-label={interactive ? (getRowLabel?.(row) ?? `Open ${getRowKey(row)}`) : undefined}
-        className={`group transition-colors hover:bg-interactive/50 focus-visible:bg-interactive/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring ${interactive ? "cursor-pointer" : ""} ${rowClassName?.(row) ?? ""}`}
-        onClick={interactive ? activate : undefined}
+        aria-selected={target ? selected : undefined}
+        className={`group transition-colors hover:bg-interactive/50 focus-visible:bg-interactive/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring ${interactive ? "cursor-pointer" : ""} ${selected ? "bg-accent-muted hover:bg-accent-muted" : ""} ${rowClassName?.(row) ?? ""}`}
+        onClick={interactive ? click : undefined}
+        onDoubleClick={
+          interactive && target
+            ? (event) => {
+                // A double-click on a control inside the row is that control's.
+                const control = (event.target as HTMLElement).closest("button, input, a, label");
+                if (control && event.currentTarget.contains(control)) return;
+                activate();
+              }
+            : undefined
+        }
         onKeyDown={
           interactive
             ? (event) => {
-                if (
-                  event.target !== event.currentTarget ||
-                  (event.key !== "Enter" && event.key !== " ")
-                ) {
+                if (event.target !== event.currentTarget) return;
+                if (target && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+                  // ↑↓ moves through the table and the Preview follows (focus stays here).
+                  event.preventDefault();
+                  const next =
+                    event.key === "ArrowDown"
+                      ? event.currentTarget.nextElementSibling
+                      : event.currentTarget.previousElementSibling;
+                  if (next instanceof HTMLElement) {
+                    next.focus();
+                    next.click();
+                  }
                   return;
                 }
-                event.preventDefault();
-                activate();
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  activate();
+                  return;
+                }
+                if (event.key === " ") {
+                  event.preventDefault();
+                  click();
+                }
               }
             : undefined
         }
@@ -83,7 +128,7 @@ export const DataTable = <T,>({
         {columns.map((col) => (
           <TableCell
             key={col.key}
-            className={`${ROW_PADDING_DENSE} ${col.align === "right" ? "text-right" : ""}`}
+            className={`h-6 px-3 py-0 ${col.align === "right" ? "text-right" : ""}`}
           >
             {col.cell(row)}
           </TableCell>
@@ -98,32 +143,10 @@ export const DataTable = <T,>({
     return (
       <ContextMenu key={getRowKey(row)}>
         <ContextMenuTrigger asChild>{rowElement}</ContextMenuTrigger>
-        <ContextMenuContent className="w-48">
-          {actions.map((action) => {
-            const ActionIcon = action.icon;
-            return (
-              <Fragment key={action.id}>
-                {action.separatorBefore && <ContextMenuSeparator />}
-                <ContextMenuItem
-                  disabled={action.disabled}
-                  title={action.title}
-                  className={
-                    action.destructive
-                      ? "text-destructive focus:text-destructive data-[highlighted]:[&_svg]:text-destructive"
-                      : undefined
-                  }
-                  onSelect={() => {
-                    if (!action.disabled) {
-                      action.onSelect(row);
-                    }
-                  }}
-                >
-                  {ActionIcon ? <ActionIcon /> : null}
-                  <span className="min-w-0 flex-1 truncate">{action.label}</span>
-                </ContextMenuItem>
-              </Fragment>
-            );
-          })}
+        <ContextMenuContent className="w-52">
+          <ContextMenuItems
+            actions={actions.map((action) => ({ ...action, onSelect: () => action.onSelect(row) }))}
+          />
         </ContextMenuContent>
       </ContextMenu>
     );

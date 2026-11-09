@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 
-import { RunExecutionsPanel } from "@/app/renderers/RunExecutionsPanel";
+import { attemptTasksText, RunAttemptsPanel } from "@/app/renderers/RunAttemptsPanel";
 import {
   failedTask,
   failureHeadline,
@@ -68,101 +68,169 @@ const story = (node: ReactNode): string =>
   );
 
 describe("RunOverview", () => {
-  it("says a run with no attempts has not been run", () => {
-    const html = story(<RunOverview run={run([])} />);
-    expect(html).toContain("Not run yet");
-    expect(html).toContain("0 attempts");
+  it("says a run with no attempts has not started", () => {
+    const html = story(<RunOverview run={run([])} attempt={null} outputs={null} />);
+    expect(html).toContain("Not started");
     expect(html).not.toContain("sha256:def");
-    expect(html).not.toContain("Definition");
   });
 
-  it("leads with a verdict sentence, not a gauge of one item", () => {
+  it("leads with one verdict line and its evidence, never a tally", () => {
+    const history = [
+      execution("e01", "failed", "initial"),
+      execution("e02", "succeeded", "resume"),
+    ];
     const html = story(
       <RunOverview
-        run={run([execution("e01", "failed", "initial"), execution("e02", "succeeded", "resume")])}
-        results={{ rmse: 0.01234567, epochs: 40, notes: { nested: true } }}
+        run={run(history)}
+        attempt={history[1] ?? null}
+        outputs={{
+          executionId: "e02",
+          results: { rmse: 0.01234567, epochs: 40, notes: { nested: true } },
+        }}
       />,
     );
-    expect(html).toContain("Completed in 5m");
-    expect(html).toContain("Attempt 2 of 2, a resume");
-    expect(html).not.toContain("success");
-    expect(html).not.toContain(">e01");
-    // Scalar results are the run's science; structured values stay on their tab.
-    expect(html).toContain("0.01235");
-    expect(html).toContain("40");
+    // Retrofit R3: the glyph carries the status (its name), the line says what.
+    expect(html).toContain('aria-label="Succeeded"');
+    expect(html).toContain(">5m<");
+    // Scalar results are the evidence; structured values stay on their tab.
+    expect(html).toContain("rmse 0.012346");
+    expect(html).toContain("epochs 40");
     expect(html).not.toContain("nested");
-    expect(html).not.toContain("sha256:def");
+    expect(html).not.toContain("tasks done");
+    expect(html).not.toContain("Knowledge");
   });
 
-  it("puts a failed attempt's own error under the verdict", () => {
+  it("reads the attempt the page shows, not always the latest", () => {
+    const history = [
+      execution("e01", "failed", "initial", { type: "WorkflowError", message: "scheduler died" }),
+      execution("e02", "succeeded", "resume"),
+    ];
+    const html = story(
+      <RunOverview run={run(history)} attempt={history[0] ?? null} outputs={null} />,
+    );
+    expect(html).toContain('aria-label="Failed"');
+    expect(html).toContain("scheduler died");
+    expect(html).not.toContain('aria-label="Succeeded"');
+  });
+
+  it("puts a failure's message on the evidence line, the full error behind it", () => {
+    const failed = execution("e01", "failed", "initial", {
+      type: "WorkflowError",
+      message: "scheduler died",
+    });
+    const html = story(<RunOverview run={run([failed], "boom")} attempt={failed} outputs={null} />);
+    expect(html).toContain('aria-label="Failed"');
+    expect(html).toContain("scheduler died");
+    expect(html).toContain('aria-expanded="false"');
+    // Collapsed: the type-prefixed error and the jump to Logs wait for a click.
+    expect(html).not.toContain("WorkflowError: scheduler died");
+  });
+
+  it("lists what a success registered, each with where it opens", () => {
+    const done = execution("e01", "succeeded");
     const html = story(
       <RunOverview
-        run={run(
-          [
-            execution("e01", "failed", "initial", {
-              type: "WorkflowError",
-              message: "scheduler died",
-            }),
+        run={run([done])}
+        attempt={done}
+        outputs={{
+          executionId: "e01",
+          assets: [
+            {
+              id: "asset-1",
+              title: "trajectory",
+              createdAt: "2026-03-01T12:00:00Z",
+              ref: "molab:asset/asset-1",
+              digest: "abc",
+              size: 2_400_000,
+              file: "trajectory.xyz",
+              mediaType: "chemical/x-xyz",
+              originKind: "execution",
+            },
           ],
-          "boom",
-        )}
+          evidence: [{ kind: "log", path: "run.log", size: 1000 }],
+        }}
+        openIn={(file) =>
+          file.name.endsWith(".xyz") ? { value: "molvis", label: "MolVis" } : null
+        }
+        onOpenView={() => undefined}
       />,
     );
-    expect(html).toContain("Failed after 5m");
-    expect(html).toContain("WorkflowError: scheduler died");
-    expect(html).not.toContain(">Attempts<");
+    expect(html).toContain("Outputs");
+    expect(html).toContain("trajectory.xyz");
+    expect(html).toContain("chemical/x-xyz");
+    expect(html).toContain("MolVis");
+    expect(html).toContain("Logs");
   });
 });
 
-describe("RunExecutionsPanel", () => {
-  it("keeps the attempt list apart from one execution, workflow before outputs", () => {
-    const html = renderToStaticMarkup(
+describe("RunAttemptsPanel", () => {
+  const panel = (history: ExecutionRecordSummary[], selected: string, outputs = null as never) =>
+    renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
-        <RunExecutionsPanel
-          run={run([execution("e01", "failed"), execution("e02", "succeeded", "resume")])}
-          selectedExecutionId="e02"
+        <RunAttemptsPanel
+          run={run(history)}
+          selectedExecutionId={selected}
           onSelectExecution={() => undefined}
+          onPreviewExecution={() => undefined}
           onInspectTask={() => undefined}
-          outputs={null}
+          outputs={outputs}
           logsError={null}
         />
       </QueryClientProvider>,
     );
+
+  it("lists attempts newest first and marks the page's one", () => {
+    const html = panel(
+      [
+        execution("e01", "failed"),
+        { ...execution("e02", "succeeded", "resume"), basedOnExecutionId: "e01" },
+      ],
+      "e01",
+    );
+    expect(html.indexOf(">e02<")).toBeLessThan(html.indexOf(">e01<"));
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain(">resume<");
+    const files = html.search(/Files of e01/);
     const workflow = html.search(/Workflow\s*</);
-    const outputs = html.search(/Outputs\s*</);
-    expect(html).toContain("Executions");
-    expect(html).toContain("e01");
-    expect(html).toContain("e02");
-    expect(workflow).toBeGreaterThan(-1);
-    expect(outputs).toBeGreaterThan(workflow);
+    expect(files).toBeGreaterThan(-1);
+    expect(workflow).toBeGreaterThan(files);
   });
 
   it("leads a failed attempt with its error and opens stderr", () => {
-    const html = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <RunExecutionsPanel
-          run={run([
-            execution("e01", "failed", "initial", {
-              type: "WorkflowError",
-              message: "scheduler died",
-            }),
-          ])}
-          selectedExecutionId="e01"
-          onSelectExecution={() => undefined}
-          onInspectTask={() => undefined}
-          outputs={{ executionId: "e01", stderr: "traceback line" }}
-          logsError={null}
-        />
-      </QueryClientProvider>,
+    const html = panel(
+      [execution("e01", "failed", "initial", { type: "WorkflowError", message: "scheduler died" })],
+      "e01",
+      { executionId: "e01", stderr: "traceback line" } as never,
     );
     const alert = html.indexOf("WorkflowError: scheduler died");
-    const workflow = html.search(/Workflow\s*</);
-    const outputs = html.search(/Outputs\s*</);
     expect(alert).toBeGreaterThan(-1);
-    expect(alert).toBeLessThan(workflow);
-    expect(html).toContain("Read stderr in Outputs.");
+    expect(alert).toBeLessThan(html.search(/Files of e01/));
+    expect(html).toContain("Read stderr in Files.");
     expect(html).toContain("traceback line");
-    expect(workflow).toBeLessThan(outputs);
+  });
+
+  it("says what each attempt did with its tasks", () => {
+    expect(attemptTasksText(null)).toBe("—");
+    expect(
+      attemptTasksText({
+        task_configs: [
+          { id: "a", type: "t", status: "cached" },
+          { id: "b", type: "t", status: "completed" },
+          { id: "c", type: "t", status: "completed" },
+        ],
+        links: [],
+      }),
+    ).toBe("1 reused · 2 run");
+    expect(
+      attemptTasksText({
+        task_configs: [
+          { id: "a", type: "t", status: "completed" },
+          { id: "b", type: "t", status: "failed" },
+          { id: "c", type: "t" },
+        ],
+        links: [],
+      }),
+    ).toBe("1 of 3");
   });
 });
 

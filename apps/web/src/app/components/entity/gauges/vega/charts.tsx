@@ -3,33 +3,37 @@
 // into its named dataset, and reports picks and brushes as callbacks.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { type JSX, useMemo } from "react";
+import { type JSX, type ReactNode, useMemo } from "react";
 
-import { STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
+import { CHART_GROUPS, type ChartGroupId } from "@/app/status/vocabulary";
 
 import type { BreakdownGroup } from "../../Encodings";
 import { useStatusColors } from "../../InstrumentChart";
-import type { DurationSeries } from "../DurationStrip";
 import { formatSpan, spanScale, stackLanes, type TimeBucket } from "../scale";
 import {
   ACTIVITY_HEIGHT,
   activitySpec,
   BAR_ROW,
   barsSpec,
+  CLOCK_AXIS,
+  CLOCK_ROW,
+  COMPARE_ROW,
+  compareBarsSpec,
   DURATION_ROW,
   durationSpec,
   MIX_ROW,
   mixSpec,
-  POSITION_HEIGHT,
-  positionSpec,
-  TIMELINE_ROW,
-  timelineSpec,
+  STATUS_BAR_HEIGHT,
+  SWEEP_HEIGHT,
+  statusBarSpec,
+  sweepSpec,
+  taskClockSpec,
 } from "./chartSpecs";
 import { OverviewChart } from "./OverviewChart";
 
-type Colors = Record<StatusGroupId, string> | null;
+type Colors = Record<ChartGroupId, string> | null;
 
-const paint = (colors: Colors, status: StatusGroupId | null): string =>
+const paint = (colors: Colors, status: ChartGroupId | null): string =>
   status && colors ? colors[status] : "transparent";
 
 const pad2 = (value: number): string => value.toString().padStart(2, "0");
@@ -113,18 +117,24 @@ export const ActivityChart = ({
 
 // ── Status mix ───────────────────────────────────────────────────────────────
 
-const ORDER: readonly StatusGroupId[] = ["running", "pending", "succeeded", "failed", "cancelled"];
+/** What a mix counts, and its own word for a status where the status word would mislead. */
+export interface MixWording {
+  /** Singular, plural: "run", "runs". */
+  unit?: readonly [string, string];
+  words?: Partial<Record<ChartGroupId, string>>;
+}
 
 export const mixRows = (
   groups: readonly BreakdownGroup[],
   colors: Colors,
   selected: string | null = null,
+  { unit = ["execution", "executions"], words = {} }: MixWording = {},
 ) =>
   groups.flatMap((group, gorder) => {
     const { total, failed } = group.counts;
     const share = total === 0 ? 0 : Math.round((failed / total) * 100);
-    return ORDER.map((status, sorder) => {
-      const label = STATUS_GROUPS.find((item) => item.id === status)?.label ?? status;
+    return CHART_GROUPS.map(({ id: status, outline, label: statusLabel }, sorder) => {
+      const label = words[status] ?? statusLabel;
       const count = group.counts[status];
       return {
         key: group.id,
@@ -134,8 +144,8 @@ export const mixRows = (
         sorder,
         count,
         color: paint(colors, status),
-        outline: status === "pending",
-        tip: `${group.label} · ${label}: ${count} of ${total} executions${
+        outline,
+        tip: `${group.label} · ${label}: ${count} of ${total} ${total === 1 ? unit[0] : unit[1]}${
           failed > 0 ? `\n${share}% failed` : ""
         }`,
         // The failed share prints in failed ink; the word would only repeat the colour.
@@ -151,17 +161,20 @@ export const MixChart = ({
   label,
   selected = null,
   onPick,
+  wording,
 }: {
   groups: readonly BreakdownGroup[];
   label: string;
   /** The group a filter holds; the others stay receded. */
   selected?: string | null;
   onPick?: (id: string) => void;
+  /** Tooltip unit and status words (default: executions, status words). */
+  wording?: MixWording;
 }): JSX.Element => {
   const colors = useStatusColors();
   const data = useMemo(
-    () => ({ mix: mixRows(groups, colors, selected) }),
-    [groups, colors, selected],
+    () => ({ mix: mixRows(groups, colors, selected, wording) }),
+    [groups, colors, selected, wording],
   );
   return (
     <OverviewChart
@@ -175,7 +188,47 @@ export const MixChart = ({
   );
 };
 
+/** One group's composition as a single bar (Preview width). */
+export const StatusBar = ({
+  group,
+  label,
+}: {
+  group: BreakdownGroup;
+  label: string;
+}): JSX.Element => {
+  const colors = useStatusColors();
+  const data = useMemo(
+    () => ({ mix: mixRows([group], colors).filter((row) => row.count > 0) }),
+    [group, colors],
+  );
+  return (
+    <OverviewChart
+      label={label}
+      spec={statusBarSpec}
+      specKey="status-bar"
+      data={data}
+      height={STATUS_BAR_HEIGHT}
+      empty={group.counts.total === 0}
+    />
+  );
+};
+
 // ── Durations ────────────────────────────────────────────────────────────────
+
+/** One finished run on a duration axis. */
+export interface DurationPoint {
+  id: string;
+  seconds: number;
+  status: ChartGroupId | null;
+  label: string;
+  href?: string;
+}
+
+export interface DurationSeries {
+  id: string;
+  label?: ReactNode;
+  points: DurationPoint[];
+}
 
 export const durationRows = (series: readonly DurationSeries[], colors: Colors) => {
   const all = series.flatMap((item) => item.points.map((point) => point.seconds));
@@ -217,70 +270,6 @@ export const DurationDots = ({
       specKey={`durations:${groups.join("|")}:${axis.domain.join(",")}:${axis.log}`}
       data={data}
       height={Math.max(1, series.length) * DURATION_ROW}
-      onPick={onPick}
-    />
-  );
-};
-
-// ── Timeline ─────────────────────────────────────────────────────────────────
-
-export interface TimelineSpan {
-  key: string;
-  label: string;
-  start: number;
-  /** Null while running: drawn to now. */
-  end: number | null;
-  status: StatusGroupId | null;
-  tip: string;
-}
-
-/** Labels must be distinct for the band scale; repeats get an invisible suffix. */
-const distinct = (labels: readonly string[]): string[] => {
-  const seen = new Map<string, number>();
-  return labels.map((label) => {
-    const count = seen.get(label) ?? 0;
-    seen.set(label, count + 1);
-    return count === 0 ? label : `${label}${"​".repeat(count)}`;
-  });
-};
-
-export const TimelineChart = ({
-  spans,
-  label = "When each run ran",
-  onPick,
-}: {
-  spans: readonly TimelineSpan[];
-  label?: string;
-  onPick?: (key: string) => void;
-}): JSX.Element => {
-  const colors = useStatusColors();
-  const now = useMemo(() => Date.now(), []);
-  const from = spans.length > 0 ? Math.min(...spans.map((span) => span.start)) : now - 3_600_000;
-  // A finished set ends at its last finish; only live work stretches the clock to now.
-  const live = spans.some((span) => span.end === null);
-  const last = Math.max(from + 1, ...spans.map((span) => span.end ?? now));
-  const window = { from, to: live ? Math.max(now, last) : last };
-  const data = useMemo(() => {
-    const labels = distinct(spans.map((span) => span.label));
-    return {
-      spans: spans.map((span, order) => ({
-        key: span.key,
-        label: labels[order],
-        order,
-        start: span.start,
-        end: Math.max(span.end ?? now, span.start + 1),
-        color: paint(colors, span.status),
-        tip: span.tip,
-      })),
-    };
-  }, [spans, colors, now]);
-  return (
-    <OverviewChart
-      label={label}
-      spec={(palette) => timelineSpec(palette, spans.length, window, live)}
-      specKey={`timeline:${spans.length}:${window.from}:${window.to}:${live}`}
-      data={data}
-      height={Math.max(1, spans.length) * TIMELINE_ROW + 28}
       onPick={onPick}
     />
   );
@@ -331,57 +320,226 @@ export const CountBars = ({
   );
 };
 
-// ── One run among its siblings ───────────────────────────────────────────────
+// ── Tasks on a clock ─────────────────────────────────────────────────────────
 
-export interface SiblingPoint {
+export interface ClockTask {
   key: string;
-  seconds: number;
-  status: StatusGroupId | null;
-  /** The run on the page. */
-  self: boolean;
+  start: number | null;
+  /** Null while it runs, or when it never started. */
+  end: number | null;
+  status: ChartGroupId | null;
+  /** Drawn in place of a bar when the task never started. */
+  note: string | null;
   tip: string;
 }
 
-export const PositionChart = ({
-  points,
+/** The status that earns an end mark: an ending that is not a success. */
+const ENDING_MARKS: ReadonlySet<ChartGroupId> = new Set(["failed", "interrupted", "cancelled"]);
+
+export const TaskClockChart = ({
+  tasks,
+  label,
   onPick,
 }: {
-  points: readonly SiblingPoint[];
+  tasks: readonly ClockTask[];
+  label: string;
+  onPick?: (key: string) => void;
+}): JSX.Element => {
+  const colors = useStatusColors();
+  const now = useMemo(() => Date.now(), []);
+  const starts = tasks.flatMap((task) => (task.start === null ? [] : [task.start]));
+  const from = starts.length > 0 ? Math.min(...starts) : now - 60_000;
+  const live = tasks.some((task) => task.start !== null && task.end === null);
+  const last = Math.max(
+    from + 1,
+    ...tasks.map((task) => task.end ?? (task.start === null ? from : now)),
+  );
+  const window = { from, to: live ? Math.max(now, last) : last };
+  const data = useMemo(() => {
+    let anchor = from;
+    return {
+      tasks: tasks.map((task, order) => {
+        const bar = task.start !== null;
+        const end = bar ? Math.max(task.end ?? now, (task.start ?? 0) + 1) : null;
+        const row = {
+          key: task.key,
+          order,
+          bar,
+          live: bar && task.end === null,
+          start: task.start,
+          end,
+          anchor,
+          note: task.note ?? "",
+          mark:
+            bar && task.end !== null && task.status && ENDING_MARKS.has(task.status)
+              ? paint(colors, task.status)
+              : null,
+          tip: task.tip,
+        };
+        if (end !== null) anchor = end;
+        return row;
+      }),
+    };
+  }, [tasks, colors, now, from]);
+  return (
+    <OverviewChart
+      label={label}
+      spec={(palette) => taskClockSpec(palette, tasks.length, window)}
+      specKey={`clock:${tasks.length}:${window.from}:${window.to}`}
+      data={data}
+      height={Math.max(1, tasks.length) * CLOCK_ROW + CLOCK_AXIS}
+      onPick={onPick}
+    />
+  );
+};
+
+// ── One run among its siblings, on the swept axis ────────────────────────────
+
+export interface SweepChartPoint {
+  key: string;
+  x: string;
+  xOrder: number;
+  y: number | null;
+  series: string;
+  self: boolean;
+  status: ChartGroupId | null;
+  tip: string;
+}
+
+export const SweepChart = ({
+  points,
+  selfSeries,
+  label,
+  onPick,
+}: {
+  points: readonly SweepChartPoint[];
+  /** The line the run on the page belongs to; null draws every line in the accent. */
+  selfSeries: string | null;
+  label: string;
   onPick?: (key: string) => void;
 }): JSX.Element => {
   const colors = useStatusColors();
   const { rows, axis } = useMemo(() => {
-    const scale = spanScale(points.map((point) => point.seconds));
-    const others = points.filter((point) => !point.self);
-    const lanes = stackLanes(
-      others.map((point) => scale.at(point.seconds)),
-      0.02,
+    const labels = [...points]
+      .sort((left, right) => left.xOrder - right.xOrder)
+      .map((point) => point.x)
+      .filter((value, index, all) => all.indexOf(value) === index);
+    const ys = points.flatMap((point) => (point.y === null ? [] : [point.y]));
+    const low = Math.min(...ys);
+    const high = Math.max(...ys);
+    const log = low > 0 && high / low > 30;
+    const domain: [number, number] = log
+      ? [low / 1.6, high * 1.6]
+      : [
+          low - (high - low || Math.abs(low) || 1) * 0.1,
+          high + (high - low || Math.abs(high) || 1) * 0.1,
+        ];
+    // Each line is named once, at its last point; lines that end on the same
+    // point share one label ("ase · nve / ase · nvt") instead of overprinting.
+    const lastOf = new Map<string, SweepChartPoint>();
+    for (const point of points) {
+      if (point.y === null) continue;
+      const current = lastOf.get(point.series);
+      if (!current || point.xOrder >= current.xOrder) lastOf.set(point.series, point);
+    }
+    const labelAt = new Map<string, { key: string; names: string[] }>();
+    for (const [series, point] of lastOf) {
+      const spot = `${point.xOrder}:${point.y?.toPrecision(3)}`;
+      const entry = labelAt.get(spot);
+      if (entry) entry.names.push(series);
+      else labelAt.set(spot, { key: point.key, names: [series] });
+    }
+    const labelOf = new Map(
+      [...labelAt.values()].map((entry) => [entry.key, entry.names.sort().join(" / ")]),
     );
-    const laneOf = new Map(others.map((point, index) => [point.key, lanes[index] ?? 0]));
     return {
+      axis: { labels, log, domain, small: Math.max(Math.abs(low), Math.abs(high)) < 1e-2 },
       rows: points.map((point) => ({
         key: point.key,
-        seconds: point.seconds,
+        x: point.x,
+        xOrder: labels.indexOf(point.x),
+        y: point.y,
+        plotY: point.y ?? domain[1],
+        series: point.series,
         self: point.self,
-        // Siblings sit on lanes around the line; the run itself stays on it.
-        lane: point.self ? 0 : (laneOf.get(point.key) ?? 0) || 1,
-        color: point.status && colors ? colors[point.status] : "transparent",
+        own: selfSeries === null || point.series === selfSeries,
+        color: paint(colors, point.status),
+        label:
+          point.self && point.y === null
+            ? point.tip.replace(/^This run/, "this run")
+            : (labelOf.get(point.key) ?? null),
         tip: point.tip,
       })),
-      axis: { domain: scale.domain, ticks: scale.ticks, log: scale.log },
     };
-  }, [points, colors]);
-  const data = useMemo(() => ({ siblings: rows }), [rows]);
+  }, [points, selfSeries, colors]);
+  const data = useMemo(() => ({ points: rows }), [rows]);
   return (
     <OverviewChart
-      label="This run's duration among the experiment's finished runs"
-      spec={(palette) => positionSpec(palette, axis)}
-      specKey={`position:${axis.domain.join(",")}:${axis.log}`}
+      label={label}
+      spec={(palette) => sweepSpec(palette, axis)}
+      specKey={`sweep:${axis.labels.join(",")}:${axis.log}:${axis.domain.join(",")}`}
       data={data}
-      height={POSITION_HEIGHT}
+      height={SWEEP_HEIGHT + 24}
       onPick={(key) => {
         if (!points.find((point) => point.key === key)?.self) onPick?.(key);
       }}
+    />
+  );
+};
+
+// ── One result across compared runs ─────────────────────────────────────────
+
+export interface CompareBar {
+  key: string;
+  label: string;
+  value: number | null;
+  /** Printed past the bar, or in place of it when there is no value. */
+  printed: string;
+  status: ChartGroupId | null;
+  tip: string;
+}
+
+export const CompareBarsChart = ({
+  bars,
+  baseline,
+  label,
+  onPick,
+}: {
+  bars: readonly CompareBar[];
+  /** The baseline run's value: a dashed rule. */
+  baseline: number | null;
+  label: string;
+  onPick?: (key: string) => void;
+}): JSX.Element => {
+  const colors = useStatusColors();
+  const axis = useMemo(() => {
+    const values = bars.flatMap((bar) => (bar.value === null ? [] : [bar.value]));
+    const low = values.length ? Math.min(...values) : 0;
+    const high = values.length ? Math.max(...values) : 1;
+    const log = low > 0 && high / low > 30;
+    const domain: [number, number] = log
+      ? [low / 2, high * 2]
+      : [Math.min(0, low), high === 0 ? 1 : high * 1.1];
+    return { domain, log, baseline };
+  }, [bars, baseline]);
+  const data = useMemo(
+    () => ({
+      bars: bars.map((bar, order) => ({
+        ...bar,
+        order,
+        color: paint(colors, bar.status),
+      })),
+    }),
+    [bars, colors],
+  );
+  return (
+    <OverviewChart
+      label={label}
+      spec={(palette) => compareBarsSpec(palette, bars.length, axis)}
+      specKey={`compare:${bars.length}:${axis.domain.join(",")}:${axis.log}:${axis.baseline}`}
+      data={data}
+      height={Math.max(1, bars.length) * COMPARE_ROW + 28}
+      onPick={onPick}
     />
   );
 };

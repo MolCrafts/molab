@@ -587,7 +587,7 @@ export const CompareTable = ({
                       <button
                         type="button"
                         title={measure.key}
-                        className="flex h-control-compact w-full min-w-0 items-center justify-center truncate font-mono text-micro text-foreground hover:text-accent"
+                        className="flex h-control-compact w-full min-w-0 items-center justify-center truncate font-mono text-micro text-foreground hover:text-link"
                         onClick={() => openMetric(measure.key)}
                       >
                         {measure.key}

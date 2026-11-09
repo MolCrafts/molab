@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useWorkspaceTabVisible } from "@/app/dashboard/useWorkspaceTab";
 import type { LeftPanelView, WorkspaceSnapshot } from "@/app/types";
 import { LeftIconRail } from "@/components/layout/ExplorerShell";
@@ -11,14 +12,17 @@ export interface NavigationRailProps {
   scopeKind?: string | null;
   snapshot: WorkspaceSnapshot;
   onSelect: (id: LeftPanelView) => void;
+  /** Above Settings at the foot of the bar: the account menu. */
+  account?: ReactNode;
 }
 
-/** Molab adapter from product section metadata to the shared icon rail. */
+/** The activity bar: product section metadata on the shared icon rail. */
 export const NavigationRail = ({
   activeId,
   scopeKind,
   snapshot,
   onSelect,
+  account,
 }: NavigationRailProps): JSX.Element => {
   useWorkbenchGeneration();
   const workspaceTab = useWorkspaceTabVisible(snapshot);
@@ -37,6 +41,7 @@ export const NavigationRail = ({
       activeId={activeId}
       onSelect={(id) => onSelect(id as LeftPanelView)}
       footer={footer ? { ...footer, onIntent: () => prefetchNavigationView(footer.id) } : null}
+      footerSlot={account}
     />
   );
 };

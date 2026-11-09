@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FilePreviewContentProps } from "@/plugins/types";
 import { loadMolvisCore } from "./loadMolvisCore";
+import { SCENE_CONFIG } from "./sceneControls";
 
 type LoadState =
   | { kind: "idle" }
@@ -36,7 +37,7 @@ export const MolvisDatasetPreview = ({ assetId }: FilePreviewContentProps): JSX.
         const { mountMolvis, loadFileContent } = await loadMolvisCore();
         if (cancelled) return;
 
-        const app = mountMolvis(container) as unknown as MolvisHandle;
+        const app = mountMolvis(container, SCENE_CONFIG) as unknown as MolvisHandle;
         appRef.current = app;
         if (typeof app.enableFitContainer === "function") {
           app.enableFitContainer(true);

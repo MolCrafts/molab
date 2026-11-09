@@ -1,3 +1,4 @@
+import { runLabel } from "@/app/runs/runTitle";
 import type {
   AssetSummary,
   ExperimentSummary,
@@ -101,7 +102,7 @@ export const buildMetadataFields = (
       // Parent project/experiment/workflow live under inspector Lineage — ids
       // stay here only as copyable coordinates, not as the navigation surface.
       const fields: MetadataField[] = [
-        { label: "Name", value: run.name || run.id },
+        { label: "Name", value: runLabel(run) },
         { label: "Run ID", value: run.id },
         { label: "Status", value: run.status },
         { label: "Updated", value: run.updatedAt },

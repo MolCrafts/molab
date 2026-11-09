@@ -1,184 +1,205 @@
 /**
- * Settings section: compute targets.
- * List/delete via TanStack Query.
+ * Settings › Compute targets (L11): each target is a setting — its name,
+ * "Local / cluster · scratch path · last test" as the description, and Test
+ * connection / Remove under it; a test lists its checks right there. Adding
+ * is the last setting.
  */
 
+import { Button } from "@molcrafts/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, FlaskConical, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
-import type { TargetTestResponse } from "@/api/generated/models/TargetTestResponse";
+import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import { TargetsService } from "@/api/generated/services/TargetsService";
 import { usePermissions } from "@/app/auth";
-import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
+import { SettingActions, SettingItem } from "@/components/settings";
 import { AddTargetDialog } from "./AddTargetDialog";
+import { TestChecks, type TestOutcome, TestStatus } from "./ConnectionTest";
 import { settingsKeys } from "./settingsKeys";
+import type { SettingEntry } from "./settingsModel";
 
-export function ComputeTargetsPanel(): JSX.Element {
-  const { writeDeniedReason } = usePermissions();
-  const queryClient = useQueryClient();
-  const [busyTarget, setBusyTarget] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<TargetTestResponse | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+const message = (error: unknown, fallback: string): string =>
+  error instanceof Error ? error.message : fallback;
 
-  const listQuery = useQuery({
+export const useComputeTargets = () =>
+  useQuery({
     queryKey: settingsKeys.computeTargets(),
-    queryFn: async () => {
-      const res = await TargetsService.listTargetsEndpoint();
-      return res.targets;
-    },
+    queryFn: async () => (await TargetsService.listTargetsEndpoint()).targets,
   });
 
-  const targets = listQuery.data ?? [];
-  const invalidate = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: settingsKeys.computeTargets() });
-  };
+export const useComputeTargetEntries = (): SettingEntry[] => {
+  const { writeDeniedReason } = usePermissions();
+  const queryClient = useQueryClient();
+  const list = useComputeTargets();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [outcomes, setOutcomes] = useState<Record<string, TestOutcome>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const deleteMutation = useMutation({
+  const invalidate = (): Promise<void> =>
+    queryClient.invalidateQueries({ queryKey: settingsKeys.computeTargets() });
+  const remove = useMutation({
     mutationFn: (name: string) => TargetsService.deleteTargetEndpoint(name),
     onSuccess: invalidate,
   });
 
-  const handleDelete = async (name: string): Promise<void> => {
-    setBusyTarget(name);
-    setActionError(null);
-    setTestResult(null);
+  const run = async (
+    name: string,
+    action: () => Promise<void>,
+    fallback: string,
+  ): Promise<void> => {
+    setBusy(name);
+    setErrors(({ [name]: _cleared, ...rest }) => rest);
     try {
-      await deleteMutation.mutateAsync(name);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to delete target");
+      await action();
+    } catch (error) {
+      setErrors((current) => ({ ...current, [name]: message(error, fallback) }));
     } finally {
-      setBusyTarget(null);
+      setBusy(null);
     }
   };
 
-  const handleTest = async (name: string): Promise<void> => {
-    setBusyTarget(name);
-    setActionError(null);
-    setTestResult(null);
-    try {
-      const res = await TargetsService.testTargetEndpoint(name);
-      setTestResult(res);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to test target");
-    } finally {
-      setBusyTarget(null);
-    }
+  const targetEntry = (target: TargetResponse): SettingEntry => {
+    const outcome = outcomes[target.name] ?? null;
+    const disabled = busy === target.name || Boolean(writeDeniedReason);
+    const where = target.isRemote ? (target.clusterId ?? "Remote") : "Local";
+    return {
+      id: `target:${target.name}`,
+      title: target.name,
+      description: `${where} ${target.scratchRoot}`,
+      keywords: ["compute target"],
+      render: (category) => (
+        <SettingItem
+          key={target.name}
+          id={`target-${target.name}`}
+          category={category}
+          title={target.name}
+          description={
+            <span className="inline-flex flex-wrap items-center gap-1">
+              {where} · <span className="font-mono">{target.scratchRoot}</span> ·{" "}
+              <TestStatus outcome={outcome} />
+            </span>
+          }
+        >
+          <SettingActions>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={disabled}
+              onClick={() =>
+                void run(
+                  target.name,
+                  async () => {
+                    const result = await TargetsService.testTargetEndpoint(target.name);
+                    setOutcomes((current) => ({
+                      ...current,
+                      [target.name]: { result, at: Date.now() },
+                    }));
+                  },
+                  "Could not test the target",
+                )
+              }
+            >
+              Test connection
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={disabled}
+              title={writeDeniedReason ?? undefined}
+              onClick={() =>
+                void run(
+                  target.name,
+                  () => remove.mutateAsync(target.name).then(() => undefined),
+                  "Could not remove the target",
+                )
+              }
+            >
+              Remove
+            </Button>
+          </SettingActions>
+          <TestChecks outcome={outcome} />
+          {errors[target.name] ? (
+            <p role="alert" className="text-label text-status-failed-foreground">
+              {errors[target.name]}
+            </p>
+          ) : null}
+        </SettingItem>
+      ),
+    };
   };
 
-  const listError =
-    listQuery.error instanceof Error
-      ? listQuery.error.message
-      : listQuery.isError
-        ? "Failed to list targets"
-        : null;
+  const add: SettingEntry = {
+    id: "target:add",
+    title: "Add a compute target",
+    description: "A local directory, or a cluster reached over SSH.",
+    render: (category) => (
+      <SettingItem
+        key="add"
+        id="target-add"
+        category={category}
+        title="Add a compute target"
+        description="A local directory, or a cluster reached over SSH."
+      >
+        <SettingActions>
+          {writeDeniedReason ? (
+            <Button size="sm" variant="secondary" disabled title={writeDeniedReason}>
+              Add compute target
+            </Button>
+          ) : (
+            <AddTargetDialog
+              trigger={
+                <Button size="sm" variant="secondary">
+                  Add compute target
+                </Button>
+              }
+              onCreated={() => void invalidate()}
+            />
+          )}
+        </SettingActions>
+      </SettingItem>
+    ),
+  };
 
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-body text-muted-foreground">{targets.length} targets</p>
-        {writeDeniedReason ? (
-          <WorkbenchIconAction label="Add compute target" deniedReason={writeDeniedReason}>
-            <Plus className="size-3.5" />
-          </WorkbenchIconAction>
-        ) : (
-          <AddTargetDialog
-            trigger={
-              <WorkbenchIconAction label="Add compute target">
-                <Plus className="size-3.5" />
-              </WorkbenchIconAction>
-            }
-            onCreated={() => void invalidate()}
+  if (list.isPending || list.isError) {
+    const text = list.isPending
+      ? "Loading…"
+      : message(list.error, "Could not list compute targets");
+    return [
+      {
+        id: "target:status",
+        title: "Compute targets",
+        render: (category) => (
+          <SettingItem key="status" category={category} title="Compute targets">
+            <p
+              role={list.isError ? "alert" : undefined}
+              className={
+                list.isError
+                  ? "text-label text-status-failed-foreground"
+                  : "text-label text-muted-foreground"
+              }
+            >
+              {text}
+            </p>
+          </SettingItem>
+        ),
+      },
+      add,
+    ];
+  }
+  if (list.data.length === 0)
+    return [
+      {
+        id: "target:none",
+        title: "No compute targets",
+        render: (category) => (
+          <SettingItem
+            key="none"
+            category={category}
+            title="No compute targets"
+            description="Runs execute locally until a target is added."
           />
-        )}
-      </div>
-
-      <div className="space-y-3">
-        {listError && <p className="text-body-lg text-status-failed-foreground">{listError}</p>}
-        {listQuery.isLoading && targets.length === 0 ? (
-          <p className="text-body-lg text-muted-foreground">Loading…</p>
-        ) : targets.length === 0 ? (
-          <p className="bg-surface/60 px-4 py-8 text-center text-body text-muted-foreground">
-            No compute targets. Runs execute locally.
-          </p>
-        ) : (
-          <ul className="space-y-1">
-            {targets.map((t) => (
-              <li
-                key={t.name}
-                className="flex flex-col gap-2 bg-surface/60 px-2 py-1 transition-colors hover:bg-surface sm:flex-row sm:items-center"
-              >
-                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-body font-medium">{t.name}</span>
-                    <WorkbenchTag>{t.isRemote ? "Remote" : "Local"}</WorkbenchTag>
-                  </div>
-                  <div className="min-w-0 flex-1 truncate font-mono text-label text-muted-foreground">
-                    {t.scratchRoot}
-                  </div>
-                </div>
-                <div className="flex flex-none items-center justify-end gap-1">
-                  <WorkbenchIconAction
-                    label={`Test ${t.name}`}
-                    disabled={busyTarget === t.name}
-                    deniedReason={writeDeniedReason}
-                    onClick={() => void handleTest(t.name)}
-                  >
-                    <FlaskConical className="size-icon" />
-                  </WorkbenchIconAction>
-                  <WorkbenchIconAction
-                    label={`Remove ${t.name}`}
-                    kind="ghost"
-                    disabled={busyTarget === t.name}
-                    deniedReason={writeDeniedReason}
-                    onClick={() => void handleDelete(t.name)}
-                  >
-                    <Trash2 className="size-icon" />
-                  </WorkbenchIconAction>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        {actionError && <p className="text-body-lg text-status-failed-foreground">{actionError}</p>}
-        {testResult && (
-          <div className="space-y-1 bg-surface/70 px-3 py-3 text-body-lg">
-            <div className="flex items-center gap-2 font-medium">
-              {testResult.ok ? (
-                <Check className="size-icon text-status-completed-foreground" />
-              ) : (
-                <X className="size-icon text-status-failed-foreground" />
-              )}
-              <span>{testResult.name}</span>
-              <span className="text-muted-foreground">
-                {testResult.ok ? "reachable" : "unreachable"}
-              </span>
-            </div>
-            {testResult.error && (
-              <p className="text-label text-status-failed-foreground">{testResult.error}</p>
-            )}
-            <ul className="space-y-1 pl-1">
-              {testResult.checks.map((c) => (
-                <li
-                  key={c.label}
-                  className="flex items-start gap-2 text-label text-muted-foreground"
-                >
-                  {c.ok ? (
-                    <Check className="h-3 w-3 mt-1 text-status-completed-foreground flex-shrink-0" />
-                  ) : (
-                    <X className="h-3 w-3 mt-1 text-status-failed-foreground flex-shrink-0" />
-                  )}
-                  <span>
-                    {c.label}
-                    {c.detail && (
-                      <span className="text-status-failed-foreground"> — {c.detail}</span>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+        ),
+      },
+      add,
+    ];
+  return [...list.data.map(targetEntry), add];
+};

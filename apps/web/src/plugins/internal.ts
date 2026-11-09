@@ -41,13 +41,6 @@ export const INTERNAL_PLUGIN_DESCRIPTORS: readonly InternalPluginDescriptor[] = 
     load: () => import("@/plugins/knowledge/plugin"),
   },
   {
-    id: "deltaf",
-    name: "ΔF",
-    description: "Force-deviation (ΔF) chart tab for phase-1 quantization runs.",
-    userToggleable: true,
-    load: () => import("@/plugins/deltaf/plugin"),
-  },
-  {
     id: "molplot",
     name: "MolPlot",
     description: "Metrics and plot tabs for any format a reader contributes.",
@@ -78,13 +71,6 @@ export const INTERNAL_PLUGIN_DESCRIPTORS: readonly InternalPluginDescriptor[] = 
       "Trajectory and structure viewer tab when a run has PDB/XYZ/LAMMPS dumps or a *.mrec store.",
     userToggleable: true,
     load: () => import("@/plugins/molvis/plugin"),
-  },
-  {
-    id: "tensorboard",
-    name: "TensorBoard",
-    description: "TensorBoard tab when tfevents files are discovered on a run.",
-    userToggleable: true,
-    load: () => import("@/plugins/tensorboard/plugin"),
   },
 ];
 

@@ -5,9 +5,7 @@
 // except the attention set, which is the runs whose latest attempt needs a person.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { ArrowDown, ArrowUp, BoxSelect } from "lucide-react";
 import { type JSX, useCallback, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
 
 import {
   ActivityChart,
@@ -17,16 +15,12 @@ import {
   type DurationPoint,
   type DurationSeries,
   formatSpan,
-  StatusIcon,
-  StatusTally,
-  Tally,
-  TimelineChart,
-  type TimelineSpan,
   timeBuckets,
   type UnitMark,
 } from "@/app/components/entity";
 import { widgetEmptyCopy } from "@/app/dashboard/dashboardModel";
 import { runPath } from "@/app/entities/paths";
+import { usePreview } from "@/app/preview/PreviewContext";
 import { formatScalar } from "@/app/renderers/dashboardData";
 import {
   runActivityAt,
@@ -35,71 +29,68 @@ import {
   runPresentationStatus,
   runStartedAt,
 } from "@/app/runs/projections";
-import { groupForStatus, STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
+import { runLabel } from "@/app/runs/runTitle";
 import type { WorkspaceRunRow } from "@/app/runs/types";
-import { formatRelative } from "@/lib/format-time";
-
-export interface ExecutionRollup {
-  total: number;
-  running: number;
-  pending: number;
-  succeeded: number;
-  failed: number;
-  cancelled: number;
-}
-
-const emptyRollup = (): ExecutionRollup => ({
-  total: 0,
-  running: 0,
-  pending: 0,
-  succeeded: 0,
-  failed: 0,
-  cancelled: 0,
-});
+import {
+  chartGroupOf,
+  countStatuses,
+  FINISHED_GROUPS,
+  needsAttention,
+  type StatusCounts,
+} from "@/app/status/vocabulary";
+import { parseInstant } from "@/lib/format-time";
 
 /** Every count on this page is an execution count — a run has N attempts. */
-export const rollupExecutions = (rows: readonly WorkspaceRunRow[]): ExecutionRollup => {
-  const counts = emptyRollup();
-  for (const run of rows) {
-    for (const execution of run.executions) {
-      const group = groupForStatus(execution.status);
-      counts.total += 1;
-      if (group) counts[group] += 1;
-    }
-  }
-  return counts;
-};
-
-const timestamp = (value: string | null | undefined): number | null => {
-  const parsed = value ? Date.parse(value) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : null;
-};
+export const rollupExecutions = (rows: readonly WorkspaceRunRow[]): StatusCounts =>
+  countStatuses(rows.flatMap((run) => run.executions.map((execution) => execution.status)));
 
 const newestFirst = (left: WorkspaceRunRow, right: WorkspaceRunRow): number =>
-  (timestamp(runActivityAt(right)) ?? 0) - (timestamp(runActivityAt(left)) ?? 0);
+  (parseInstant(runActivityAt(right)) ?? 0) - (parseInstant(runActivityAt(left)) ?? 0);
 
 const runHref = (run: WorkspaceRunRow): string => runPath(run.projectId, run.experimentId, run.id);
 
 const runKey = (run: WorkspaceRunRow): string => `${run.workspaceKey}:${run.id}`;
 
 /**
- * The run page behind a chart mark. A mark's key is its run's key, or the run's
- * key plus an execution id (`ws:run:e02`), so one resolver serves every chart.
+ * The run behind a chart mark. A mark's key is its run's key, or the run's key
+ * plus an execution id (`ws:run:e02`), so one resolver serves every chart.
  */
-export const runHrefForKey = (rows: readonly WorkspaceRunRow[], key: string): string | null => {
-  const run = rows.find((item) => key === runKey(item) || key.startsWith(`${runKey(item)}:`));
-  return run ? runHref(run) : null;
-};
+export const runForKey = (
+  rows: readonly WorkspaceRunRow[],
+  key: string,
+): WorkspaceRunRow | undefined =>
+  rows.find((item) => key === runKey(item) || key.startsWith(`${runKey(item)}:`));
 
-/** Navigate to the run a chart mark stands for. */
+/** Preview the run a chart mark stands for (L12); ↵ / ↗ in the Preview opens it. */
 export const useOpenRun = (rows: readonly WorkspaceRunRow[]): ((key: string) => void) => {
-  const navigate = useNavigate();
+  const { preview } = usePreview();
   return useCallback(
     (key: string) => {
-      const href = runHrefForKey(rows, key);
-      if (href) navigate(href);
+      const run = runForKey(rows, key);
+      if (!run) return;
+      // `ws:run:e02` is a mark for one attempt; `ws:run` for the run.
+      const executionId = key.slice(`${runKey(run)}:`.length);
+      if (key !== runKey(run) && executionId) {
+        preview({
+          kind: "attempt",
+          runId: run.id,
+          projectId: run.projectId,
+          experimentId: run.experimentId,
+          workspaceKey: run.workspaceKey,
+          executionId,
+        });
+        return;
+      }
+      preview({
+        kind: "run",
+        runId: run.id,
+        projectId: run.projectId,
+        experimentId: run.experimentId,
+        workspaceKey: run.workspaceKey,
+        label: runLabel(run),
+      });
     },
-    [rows, navigate],
+    [rows, preview],
   );
 };
 
@@ -109,49 +100,9 @@ export const EmptyLine = ({ children }: { children: string }): JSX.Element => (
 
 // ── Attention ────────────────────────────────────────────────────────────────
 
-const ATTENTION: ReadonlySet<StatusGroupId> = new Set(["failed", "cancelled"]);
-
-/** Runs whose latest attempt failed or was cancelled, newest first. */
+/** Runs whose latest attempt failed or was interrupted, newest first. */
 export const attentionRuns = (rows: readonly WorkspaceRunRow[]): WorkspaceRunRow[] =>
-  rows
-    .filter((run) => {
-      const group = groupForStatus(runPresentationStatus(run));
-      return group !== null && ATTENTION.has(group);
-    })
-    .sort(newestFirst);
-
-const ageOf = (at: string | null | undefined, now: number): string => {
-  const ms = timestamp(at);
-  return ms === null ? "" : formatSpan(Math.max(0, now - ms) / 1000);
-};
-
-/** Age of the newest and the oldest run needing a person: "16m → 6h ago". */
-export const attentionEdges = (
-  rows: readonly WorkspaceRunRow[],
-  now = Date.now(),
-): readonly [string, string] | undefined => {
-  const flagged = attentionRuns(rows);
-  const first = flagged[0];
-  const last = flagged[flagged.length - 1];
-  if (flagged.length < 2 || !first || !last) return undefined;
-  const newest = ageOf(runActivityAt(first), now);
-  const oldest = ageOf(runActivityAt(last), now);
-  return newest && oldest ? [newest, `${oldest} ago`] : undefined;
-};
-
-/** One mark per run needing a person, newest first, each named with its age. */
-export const attentionMarks = (rows: readonly WorkspaceRunRow[], now = Date.now()): UnitMark[] =>
-  attentionRuns(rows).map((run) => {
-    const group = groupForStatus(runPresentationStatus(run)) ?? "failed";
-    const age = ageOf(runActivityAt(run), now);
-    return {
-      key: runKey(run),
-      status: group,
-      title: `${run.name || run.id} · ${group === "failed" ? "failed" : "cancelled"}${
-        age ? ` ${age} ago` : ""
-      }`,
-    };
-  });
+  rows.filter((run) => needsAttention(runPresentationStatus(run))).sort(newestFirst);
 
 /**
  * One mark per active execution. A running mark fills with its elapsed time
@@ -165,9 +116,9 @@ export const inFlightMarks = (
 ): UnitMark[] => {
   const active = rows.flatMap((run) =>
     run.executions.flatMap((execution) => {
-      const group = groupForStatus(execution.status);
-      if (group !== "running" && group !== "pending") return [];
-      const since = timestamp(group === "running" ? execution.startedAt : execution.createdAt);
+      const group = chartGroupOf(execution.status);
+      if (group !== "running" && group !== "queued") return [];
+      const since = parseInstant(group === "running" ? execution.startedAt : execution.createdAt);
       const elapsed = since === null ? null : Math.max(0, now - since) / 1000;
       return [{ run, execution, group, elapsed }];
     }),
@@ -177,12 +128,12 @@ export const inFlightMarks = (
   return [...active]
     .sort((left, right) => rank(right) - rank(left))
     .map(({ run, execution, group, elapsed }) => {
-      const name = `${run.name || run.id} · ${execution.executionId}`;
+      const name = `${runLabel(run)} · ${execution.executionId}`;
       const age = elapsed === null ? "" : ` ${formatSpan(elapsed)}`;
-      if (group === "pending") {
+      if (group === "queued") {
         return {
           key: `${runKey(run)}:${execution.executionId}`,
-          status: "pending" as const,
+          status: "queued" as const,
           outline: true,
           title: `${name} · queued${age}`,
         };
@@ -197,53 +148,6 @@ export const inFlightMarks = (
             : undefined,
       };
     });
-};
-
-export const NeedsAttention = ({
-  rows,
-  inventoryBlocked,
-}: {
-  rows: readonly WorkspaceRunRow[];
-  inventoryBlocked: boolean;
-}): JSX.Element => {
-  const flagged = attentionRuns(rows);
-  if (flagged.length === 0) {
-    return <EmptyLine>{widgetEmptyCopy(inventoryBlocked, "No runs need attention.")}</EmptyLine>;
-  }
-  return (
-    <ul className="divide-y divide-border/60 border-y border-border/60">
-      {flagged.map((run) => {
-        const group = groupForStatus(runPresentationStatus(run)) ?? "failed";
-        const at = runActivityAt(run);
-        const when = at && !Number.isNaN(Date.parse(at)) ? formatRelative(at) : "";
-        return (
-          <li key={runKey(run)}>
-            <Link
-              to={runHref(run)}
-              className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,16rem)_auto] items-center gap-x-3 px-2 py-row-pad outline-none hover:bg-interactive focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
-            >
-              <StatusIcon status={group === "failed" ? "failed" : "cancelled"} />
-              <span
-                className="min-w-0 truncate text-body text-foreground"
-                title={run.name || run.id}
-              >
-                {run.name || run.id}
-              </span>
-              <span
-                className="min-w-0 truncate text-label text-muted-foreground"
-                title={`${run.projectName} · ${run.experimentName}`}
-              >
-                {run.projectName} · {run.experimentName}
-              </span>
-              <span className="whitespace-nowrap font-mono text-micro tabular-nums text-muted-foreground">
-                {when}
-              </span>
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
-  );
 };
 
 // ── Activity ─────────────────────────────────────────────────────────────────
@@ -278,9 +182,9 @@ export const ActivityPanel = ({
   const buckets = useMemo(() => {
     const happenings = rows.flatMap((run) =>
       run.executions.map((execution) => ({
-        startedAt: timestamp(execution.startedAt),
-        finishedAt: timestamp(execution.finishedAt),
-        outcome: groupForStatus(execution.status),
+        startedAt: parseInstant(execution.startedAt),
+        finishedAt: parseInstant(execution.finishedAt),
+        outcome: chartGroupOf(execution.status),
       })),
     );
     return timeBuckets(happenings, now, spec.ms, spec.buckets);
@@ -301,29 +205,19 @@ export const ActivityPanel = ({
 
   return (
     <section aria-label="Activity" className="min-w-0">
-      <header className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-1 pb-3 text-label">
+      <header className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 pb-3 text-label">
         <h2 className="font-medium text-foreground">Activity</h2>
-        <Tally
-          icon={ArrowUp}
-          value={started}
-          label={`${started} executions started — bars above the axis`}
-          className="text-muted-foreground"
-        />
-        <Tally
-          icon={ArrowDown}
-          value={finished}
-          label={`${finished} executions finished — bars below the axis, by outcome`}
-          className="text-muted-foreground"
-        />
-        {failed > 0 ? <StatusTally status="failed" count={failed} unit="executions" /> : null}
-        <span className="ml-auto flex items-center gap-3 text-muted-foreground">
-          <span
-            role="img"
-            aria-label="Drag across the chart to filter the overview to that window"
-            title="Drag across the chart to filter the overview to that window"
-          >
-            <BoxSelect aria-hidden className="size-icon-sm" />
-          </span>
+        <span className="min-w-0 text-muted-foreground tabular-nums">
+          {started} started · {finished} finished
+          {failed > 0 ? (
+            <>
+              {" · "}
+              <span className="text-status-failed-foreground">{failed} failed</span>
+            </>
+          ) : null}{" "}
+          attempts · drag to narrow the page
+        </span>
+        <span className="ml-auto">
           <ChoiceToggle
             label="Activity window"
             choices={WINDOW_CHOICES}
@@ -348,53 +242,7 @@ export const ActivityPanel = ({
   );
 };
 
-// ── Timeline ─────────────────────────────────────────────────────────────────
-
-const timelineSpans = (rows: readonly WorkspaceRunRow[], limit: number): TimelineSpan[] =>
-  [...rows]
-    .sort(newestFirst)
-    .flatMap((run) => {
-      const start = timestamp(runStartedAt(run));
-      if (start === null) return [];
-      const end = timestamp(runFinishedAt(run));
-      const status = groupForStatus(runPresentationStatus(run));
-      const active = status === "running" || status === "pending";
-      const finish = active ? null : end;
-      const word = STATUS_GROUPS.find((group) => group.id === status)?.label ?? "Unknown";
-      const took = formatSpan(Math.max(0, (finish ?? Date.now()) - start) / 1000);
-      return [
-        {
-          key: runKey(run),
-          label: run.name || run.id,
-          start,
-          end: finish,
-          status,
-          tip: `${run.name || run.id} · ${run.experimentName} · ${word} · ${took}`,
-        },
-      ];
-    })
-    .slice(0, limit);
-
-export const RunTimeline = ({
-  rows,
-  limit = 40,
-  inventoryBlocked,
-}: {
-  rows: readonly WorkspaceRunRow[];
-  limit?: number;
-  inventoryBlocked: boolean;
-}): JSX.Element => {
-  const spans = useMemo(() => timelineSpans(rows, limit), [rows, limit]);
-  const openRun = useOpenRun(rows);
-  if (spans.length === 0) {
-    return <EmptyLine>{widgetEmptyCopy(inventoryBlocked, "No run has started yet.")}</EmptyLine>;
-  }
-  return <TimelineChart spans={spans} onPick={openRun} />;
-};
-
 // ── Durations ────────────────────────────────────────────────────────────────
-
-const FINISHED: ReadonlySet<StatusGroupId> = new Set(["succeeded", "failed", "cancelled"]);
 
 /**
  * One point per finished run: its first start to its last finish. A run whose
@@ -402,17 +250,17 @@ const FINISHED: ReadonlySet<StatusGroupId> = new Set(["succeeded", "failed", "ca
  */
 export const durationPointsOf = (rows: readonly WorkspaceRunRow[]): DurationPoint[] =>
   rows.flatMap((run) => {
-    const status = groupForStatus(runPresentationStatus(run));
-    if (status === null || !FINISHED.has(status)) return [];
-    const start = timestamp(runStartedAt(run));
-    const end = timestamp(runFinishedAt(run));
+    const status = chartGroupOf(runPresentationStatus(run));
+    if (status === null || !FINISHED_GROUPS.includes(status)) return [];
+    const start = parseInstant(runStartedAt(run));
+    const end = parseInstant(runFinishedAt(run));
     if (start === null || end === null || end < start) return [];
     return [
       {
         id: runKey(run),
         seconds: (end - start) / 1000,
         status,
-        label: `${run.name || run.id} · ${run.experimentName}`,
+        label: `${runLabel(run)} · ${run.experimentName}`,
         href: runHref(run),
       },
     ];
@@ -420,24 +268,6 @@ export const durationPointsOf = (rows: readonly WorkspaceRunRow[]): DurationPoin
 
 /** What an Overview groups its scope by: projects, experiments, or one swept parameter's values. */
 export type GroupKey = "project" | "experiment" | `param:${string}`;
-
-export const paramGroup = (key: string): GroupKey => `param:${key}`;
-
-/**
- * Parameters whose value differs between the rows, in first-seen order — the
- * axes a grouping can split on. A parameter every run shares is not an axis.
- */
-export const varyingParameterKeys = (rows: readonly WorkspaceRunRow[]): string[] => {
-  const values = new Map<string, Set<string>>();
-  for (const run of rows) {
-    for (const [key, value] of Object.entries(run.parameters ?? {})) {
-      const seen = values.get(key) ?? new Set<string>();
-      seen.add(formatScalar(value));
-      values.set(key, seen);
-    }
-  }
-  return [...values.entries()].filter(([, seen]) => seen.size > 1).map(([key]) => key);
-};
 
 const groupOf = (run: WorkspaceRunRow, key: GroupKey): { id: string; label: string } => {
   if (key === "project") return { id: run.projectId, label: run.projectName || run.projectId };
@@ -488,21 +318,6 @@ export const DurationsBy = ({
 // ── Breakdowns ───────────────────────────────────────────────────────────────
 
 /** Execution status mix per project or experiment, busiest first. */
-export const statusGroupsBy = (
-  rows: readonly WorkspaceRunRow[],
-  key: GroupKey,
-  onSelect?: (id: string) => void,
-): BreakdownGroup[] =>
-  partition(rows, key)
-    .map((group) => ({
-      id: group.id,
-      label: group.label,
-      counts: rollupExecutions(group.rows),
-      onSelect: onSelect ? () => onSelect(group.id) : undefined,
-    }))
-    .filter((group) => group.counts.total > 0)
-    .sort((left, right) => right.counts.total - left.counts.total);
-
 export const backendGroups = (rows: readonly WorkspaceRunRow[], limit = 6): BreakdownGroup[] => {
   const byBackend = new Map<string, WorkspaceRunRow[]>();
   for (const run of rows) {

@@ -8,7 +8,6 @@ export {
 export { ChartWorkbench, type ChartWorkbenchProps } from "./ChartWorkbench";
 export { MolplotBarChart } from "./MolplotBarChart";
 export { MolplotLineChart, type MolplotLineChartHandle } from "./MolplotLineChart";
-export { MolplotRawChart } from "./MolplotRawChart";
 export {
   type AggregateOp,
   type AggregateResult,
@@ -21,18 +20,15 @@ export {
   selectAggregateConfig,
   stepResets,
 } from "./multiRunMetrics";
-export { RunMetricsTab } from "./RunMetricsTab";
-export { RunMetricsView } from "./RunMetricsView";
 export { filterSpikes, smoothEma } from "./smoothing";
 
 /**
- * molplot UI plugin — activates purely by filename suffixes (no heuristics).
+ * molplot UI plugin — the MolPlot run view (`api.runViews`).
  *
- * Contract (see molab.workspace.mlp_names):
- * - ``*.mlp.jsonl`` — live metrics WAL → Metrics tab
- * - leftover ``*.mlp.zarr`` is not a metrics surface
- * - ``*.mlp.vl.json`` — Vega-Lite plot artifact → MolPlot tab
- * - ``*.mlp.index.json`` is a leftover host cache — never matched
+ * It reads the files a contributed metric reader claims (molab's own
+ * ``*.mlp.jsonl`` WAL is one such format) and the run's own Vega-Lite figures
+ * (``*.mlp.vl.json``); ``*.mlp.index.json`` is a leftover host cache and is
+ * never matched. See ``molplot-files.ts``.
  */
 
 export { default } from "./plugin";

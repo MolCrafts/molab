@@ -1,9 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 
 import {
+  defaultMolvisFile,
   isLammpsDataName,
   isMolvisOpenable,
   isMolvisZarr,
+  MOLVIS_FILE_PATTERNS,
   uniqueMolvisFiles,
   zarrStoreRoot,
 } from "./openable";
@@ -117,5 +119,27 @@ describe("LAMMPS data files", () => {
       file("out/export/pbix.pdb"),
     ]).map((f) => f.name);
     expect(listed).toEqual(["network.data", "pbix.mol2", "pbix.pdb"]);
+  });
+});
+
+describe("defaultMolvisFile", () => {
+  it("prefers a connection table over bare coordinates and data files", () => {
+    const files = [file("out/system.data"), file("out/traj.xyz"), file("out/final.mol2")];
+    expect(defaultMolvisFile(files)?.relPath).toBe("out/final.mol2");
+  });
+
+  it("falls back to a store, then to nothing", () => {
+    const store = { ...file("growth.mrec/zarr.json"), name: "growth.mrec" };
+    expect(defaultMolvisFile([store])).toBe(store);
+    expect(defaultMolvisFile([])).toBeNull();
+  });
+});
+
+describe("MOLVIS_FILE_PATTERNS", () => {
+  it("covers structures, LAMMPS data and dump trajectories, never a log", () => {
+    expect(MOLVIS_FILE_PATTERNS).toContain("*.xyz");
+    expect(MOLVIS_FILE_PATTERNS).toContain("*.data");
+    expect(MOLVIS_FILE_PATTERNS).toContain("*.lammpstrj");
+    expect(MOLVIS_FILE_PATTERNS).not.toContain("*.lammps");
   });
 });

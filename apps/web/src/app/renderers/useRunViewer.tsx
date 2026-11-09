@@ -1,36 +1,25 @@
 /**
- * useRunViewer — the shared state core behind both run viewers.
- *
- * `RunViewer` (the default run renderer) and `MolqRunViewer` (the molq-backend
- * override) draw very different chrome but drive it from identical state: run
- * resolution off the snapshot, the active-tab sync, the selected attempt's
- * outputs (artifacts and results), and the cancel + copy-id handlers. Logs are
- * not derived here: `RunLogsPanel` follows each stream itself. That logic lives
- * here once; each component keeps only its own layout. Run-asset counts and the
- * file-type discovery tabs are RunViewer-only and stay in that component.
+ * useRunViewer — the run page's state: run resolution off the snapshot, its
+ * project / experiment / workflow, the active-tab sync, the selected attempt and
+ * its outputs, plugin run tabs, and the stop handler. Logs are not derived here:
+ * `RunLogsPanel` follows each stream itself. File-type discovery tabs stay in
+ * `RunViewer`.
  *
  * All hooks run unconditionally (run may be null — effects guard on its id), so
  * callers can still early-return their own "run not found" chrome afterwards.
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { runsApi } from "@/api";
+import { useEffect, useMemo, useState } from "react";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
-import { listEntityTabs } from "@/app/registry";
-import { formatDuration } from "@/app/renderers/dashboardData";
-import { canCancel, canHarvest, isTerminalStatus } from "@/app/runs/runLifecycle";
+import { usePreview } from "@/app/preview/PreviewContext";
 import { executionOutputsQueryOptions, journalRefetchInterval } from "@/app/state/entityQueries";
-import { useInspectedTask } from "@/app/state/inspectedTask";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import type { RendererSnapshot, ScopedRendererProps, WorkspaceSnapshot } from "@/app/types";
-import { useAlert, useConfirm } from "@/components/ConfirmDialog";
-import { useContributionGeneration } from "@/lib/contribution-runtime";
-import { usePluginPreferencesGeneration } from "@/plugins/preferences";
+import type { ScopedRendererProps, WorkspaceSnapshot } from "@/app/types";
 
 type RunRow = WorkspaceSnapshot["runs"][number];
 export type RunRendererProps = ScopedRendererProps<
-  "projects" | "experiments" | "runs" | "workflows" | "workspaces"
+  "projects" | "experiments" | "runs" | "workflows" | "workspaces" | "assets"
 >;
 
 export interface UseRunViewer {
@@ -45,57 +34,30 @@ export interface UseRunViewer {
   outputsError: string | null;
   outputs: ExecutionOutputsResponse | null;
   selectedExecutionId: string | null;
+  /** Make an attempt the page's (it goes into the URL); the latest drops the parameter. */
   setSelectedExecutionId: (id: string | null) => void;
-  duration: string | null;
+  /** The log line the URL asks Logs to open at. */
+  logLine: number | null;
   attemptCount: number;
-  parameterEntries: [string, unknown][];
-  resultEntries: [string, unknown][];
-  /** True for succeeded/failed/cancelled/skipped. */
-  isTerminal: boolean;
-  /** Backend-accepted harvest statuses (not skipped). */
-  isHarvestable: boolean;
-  runTabContributions: ReturnType<typeof listEntityTabs>;
-  inspectTask: ReturnType<typeof useInspectedTask>["inspectTask"];
+  inspectTask: (taskId: string, runId: string) => void;
   setSelection: ReturnType<typeof useNavigationState>["setSelection"];
-  handleCopyRunId: () => void;
-  handleCancelRun: () => Promise<void>;
-  confirmDialog: ReactNode;
-  alertDialog: ReactNode;
 }
 
 /**
  * Which attempt a run opens on: its latest.
  *
- * Everything discovered from files hangs off an execution — molplot, molvis
- * and tensorboard all take their coordinates from it — so leaving this unset
- * renders a run with no plugin tabs at all until the user happens to click an
- * attempt, which reads as "the feature is missing" rather than "nothing is
- * selected". The last attempt is what a person means by the run's output.
+ * Every run view (L14) shows one attempt's files, so leaving this unset
+ * renders a run with no plugin views at all until the user picks an attempt. The latest attempt is what you watch. The run result is a different
+ * thing: the latest sealed success, even when a later attempt is still running.
  */
 export const defaultExecutionId = (
   history: readonly { executionId: string }[] | undefined,
 ): string | null => (history?.length ? history[history.length - 1].executionId : null);
 
 export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
-  const { selection, snapshot, onRefresh } = props;
+  const { selection, snapshot } = props;
   const { setSelection } = useNavigationState(snapshot);
-  const { inspectTask } = useInspectedTask();
-  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
-  // User-disabled plugins drop their entity tabs without a page reload.
-  const pluginPrefsGeneration = usePluginPreferencesGeneration();
-  const contributionGeneration = useContributionGeneration();
-  // Filter plugin tabs (e.g. molq) by contribution.matches when present.
-  const runTabContributions = useMemo(() => {
-    void pluginPrefsGeneration;
-    void contributionGeneration;
-    return listEntityTabs("run", {
-      selection: props.selection,
-      snapshot: props.snapshot as RendererSnapshot,
-    });
-  }, [props.selection, props.snapshot, pluginPrefsGeneration, contributionGeneration]);
-  const { confirm, dialog: confirmDialog } = useConfirm();
-  const { alert, dialog: alertDialog } = useAlert();
-
+  const preview = usePreview();
   const run = useMemo(
     () => snapshot.runs.find((item) => item.id === selection.objectId) ?? null,
     [snapshot.runs, selection.objectId],
@@ -111,6 +73,24 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
       setActiveTab(requestedTab);
     }
   }, [requestedTab, selectedRunId]);
+
+  // The page's attempt lives in the URL (`?attempt=e02`), so the breadcrumb,
+  // a reload and a shared link all show the same one; absent means the latest.
+  const latestExecutionId = defaultExecutionId(run?.executionHistory);
+  const requestedAttempt = selection.objectType === "run" ? selection.attemptId : undefined;
+  const selectedExecutionId =
+    run?.executionHistory.find((execution) => execution.executionId === requestedAttempt)
+      ?.executionId ?? latestExecutionId;
+  const logLine = selection.objectType === "run" ? (selection.logLine ?? null) : null;
+  const setSelectedExecutionId = (executionId: string | null): void => {
+    if (!run) return;
+    setSelection({
+      objectType: "run",
+      objectId: run.id,
+      objectView: activeTab === "overview" ? undefined : activeTab,
+      ...(executionId && executionId !== latestExecutionId ? { attemptId: executionId } : {}),
+    });
+  };
 
   const runProjectId = run?.projectId;
   const runExperimentId = run?.experimentId;
@@ -136,12 +116,6 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
       : "Failed to load outputs"
     : null;
 
-  const latestExecutionId = defaultExecutionId(run?.executionHistory);
-  useEffect(() => {
-    // The selected attempt belongs to this run; reset when its identity changes.
-    setSelectedExecutionId(runId ? latestExecutionId : null);
-  }, [latestExecutionId, runId]);
-
   const project = run ? snapshot.projects.find((item) => item.id === run.projectId) : undefined;
   const experiment = run
     ? snapshot.experiments.find((item) => item.id === run.experimentId)
@@ -155,41 +129,20 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
         )
       : undefined;
 
-  const duration = run ? formatDuration(run.startedAt, run.finishedAt) : null;
   const attemptCount = run?.executionHistory.length ?? 0;
-  const parameterEntries = Object.entries(run?.parameters ?? {});
-  const resultEntries = Object.entries(outputs?.results ?? {});
-  const isTerminal = run ? isTerminalStatus(run.status) : true;
-  const isHarvestable = run ? canHarvest(run.status) : false;
 
-  const handleCopyRunId = (): void => {
-    if (!run) return;
-    void navigator.clipboard.writeText(run.id);
-  };
-
-  const handleCancelRun = async (): Promise<void> => {
-    const execution = run?.executionHistory.find(
-      (item) => item.executionId === selectedExecutionId,
-    );
-    if (!run || !execution || !canCancel(execution.status)) return;
-    const confirmed = await confirm({
-      title: `Stop ${execution.executionId}?`,
-      description: "The attempt stops. Dismiss leaves it running.",
-      confirmLabel: `Stop ${execution.executionId}`,
-      cancelLabel: "Keep running",
-      destructive: true,
+  // A task bar or graph node previews the task (L12); ↵ / ↗ opens its page.
+  const inspectTask = (taskId: string, runId: string): void => {
+    const owner = snapshot.runs.find((item) => item.id === runId) ?? run;
+    if (!owner) return;
+    preview.preview({
+      kind: "task",
+      runId: owner.id,
+      projectId: owner.projectId,
+      experimentId: owner.experimentId,
+      taskId,
+      ...(owner.id === run?.id && selectedExecutionId ? { executionId: selectedExecutionId } : {}),
     });
-    if (!confirmed) return;
-    try {
-      await runsApi.cancelExecution(run.projectId, run.experimentId, run.id, execution.executionId);
-      onRefresh();
-    } catch (error) {
-      console.error("Failed to stop execution:", error);
-      void alert({
-        title: "Stop failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    }
   };
 
   return {
@@ -204,18 +157,9 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
     outputs,
     selectedExecutionId,
     setSelectedExecutionId,
-    duration,
+    logLine,
     attemptCount,
-    parameterEntries,
-    resultEntries,
-    isTerminal,
-    isHarvestable,
-    runTabContributions,
     inspectTask,
     setSelection,
-    handleCopyRunId,
-    handleCancelRun,
-    confirmDialog,
-    alertDialog,
   };
 };

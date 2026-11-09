@@ -17,7 +17,8 @@ enforces is therefore scope-aware:
   banned at any depth.
 - At module level, the only other ``molab.*`` imports are the layer-0
   primitives in :data:`LAYER0_ALLOWED` (``molab.frontmatter`` among them: the
-  one YAML-frontmatter implementation knowledge and workspace share).
+  one YAML-frontmatter implementation knowledge and workspace share; and
+  ``molab.htmldoc``, the one codec for an HTML knowledge document).
 
 This is an **AST static scan** of the package source — not a runtime
 ``sys.modules`` probe. A runtime probe is unsatisfiable: importing any
@@ -57,6 +58,7 @@ LAYER0_ALLOWED: tuple[str, ...] = (
     "molab.atomicio",
     "molab._typing",
     "molab.frontmatter",
+    "molab.htmldoc",
 )
 
 

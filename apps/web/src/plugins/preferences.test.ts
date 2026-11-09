@@ -37,9 +37,9 @@ describe("plugin preferences", () => {
   });
 
   it("replacePluginEnabledMap overwrites the whole map", () => {
-    replacePluginEnabledMap({ molq: false, deltaf: false });
+    replacePluginEnabledMap({ molq: false, molvis: false });
     expect(isPluginEnabled("molq")).toBe(false);
-    expect(isPluginEnabled("deltaf")).toBe(false);
+    expect(isPluginEnabled("molvis")).toBe(false);
     expect(isPluginEnabled("workflow")).toBe(true);
   });
 });

@@ -5,8 +5,8 @@
  * poller. Completeness is keyed by `(workspaceKey, projectId[, experimentId])`.
  */
 
+import { runLabel } from "@/app/runs/runTitle";
 import type { ExperimentSummary, RunSummary, WorkspaceSnapshot } from "@/app/types";
-
 import { type CompareEntry, type CompareItem, type CompareRef, itemKey } from "./types";
 
 export class ExpandIncompleteError extends Error {
@@ -150,7 +150,7 @@ const entryFromRun = (
     item.ref.kind === "experiment"
       ? item.experimentName || run.experimentId
       : experimentNameOf(snapshot, workspaceKey, run.experimentId),
-  runName: run.name || run.id,
+  runName: runLabel(run),
   parameters: run.parameters ?? {},
   addedAt: item.addedAt,
 });
@@ -245,7 +245,7 @@ export const siblingRunItems = (
         workspaceLabel: ancestor.workspaceLabel,
         projectName: ancestor.projectName,
         experimentName: ref.kind === "experiment" ? ancestor.experimentName : run.experimentId,
-        runName: run.name || run.id,
+        runName: runLabel(run),
         parameters: run.parameters ?? {},
         category: ancestor.category,
         addedAt: now,

@@ -14,54 +14,19 @@
 
 import { type JSX, type ReactNode, useId } from "react";
 
-import { STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
+import {
+  CHART_GROUPS,
+  type ChartGroupId,
+  chartGroup,
+  type StatusCounts,
+  TONE_FILL,
+} from "@/app/status/vocabulary";
 import { WorkbenchAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 
-import type { StatusCountRollup } from "./Dashboard";
 import { StatusDistribution } from "./Dashboard";
 import { formatSpan } from "./gauges/scale";
 import { BarInstrument } from "./InstrumentChart";
-
-// ── MagnitudeBar ─────────────────────────────────────────────────────────────
-
-interface MagnitudeBarProps {
-  /** Measured quantity; null renders the track empty. */
-  value: number | null;
-  /** Domain maximum the bar is normalised against. */
-  max: number;
-  /** Mono readout printed beside the bar — the value is never colour-only. */
-  label: ReactNode;
-  title?: string;
-  className?: string;
-}
-
-/**
- * One quantity inside a dense row: a hairline track plus the number.
- * Turns a column of durations into a shape the eye compares without reading.
- */
-export const MagnitudeBar = ({
-  value,
-  max,
-  label,
-  title,
-  className,
-}: MagnitudeBarProps): JSX.Element => {
-  const ratio = value !== null && max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
-  return (
-    <span className={cn("flex min-w-0 items-center gap-2", className)} title={title}>
-      <span aria-hidden className="h-1 min-w-8 flex-1 rounded-control bg-muted">
-        <span
-          className="block h-full rounded-control bg-accent/40"
-          style={{ width: `${ratio * 100}%` }}
-        />
-      </span>
-      <span className="shrink-0 font-mono text-label tabular-nums text-muted-foreground">
-        {label}
-      </span>
-    </span>
-  );
-};
 
 // ── Histogram ────────────────────────────────────────────────────────────────
 
@@ -180,7 +145,7 @@ export interface ScheduleItem {
   start: number | null;
   /** Epoch ms; null while still running (drawn to "now"). */
   end: number | null;
-  status: StatusGroupId | null;
+  status: ChartGroupId | null;
   /** Wraps the row when the item is openable. */
   render?: (children: ReactNode) => ReactNode;
 }
@@ -195,14 +160,6 @@ const formatScheduleAxis = (ms: number, spanMs: number): string => {
   const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
   if (spanMs < 36 * 60 * 60 * 1000) return clock;
   return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${clock}`;
-};
-
-const STATUS_FILL: Record<StatusGroupId, string> = {
-  running: "bg-status-running",
-  pending: "bg-status-queued",
-  succeeded: "bg-status-completed",
-  failed: "bg-status-failed",
-  cancelled: "bg-status-cancelled",
 };
 
 interface ScheduleProps {
@@ -252,9 +209,11 @@ export const Schedule = ({ items, empty, className }: ScheduleProps): ReactNode 
           const end = item.end ?? now;
           const left = start === null ? 0 : ((start - min) / span) * 100;
           const width = start === null ? 0 : Math.max(0.8, ((end - start) / span) * 100);
-          const fill = item.status ? STATUS_FILL[item.status] : "bg-muted-foreground/40";
+          const fill = item.status
+            ? TONE_FILL[chartGroup(item.status).tone]
+            : "bg-muted-foreground/40";
           const duration = start === null ? "" : formatSpan(Math.max(0, end - start) / 1000);
-          const statusWord = STATUS_GROUPS.find((group) => group.id === item.status)?.label ?? null;
+          const statusWord = CHART_GROUPS.find((group) => group.id === item.status)?.label ?? null;
           const title = [item.label, item.detail, statusWord, duration]
             .filter((part) => part != null && part !== "")
             .join(" · ");
@@ -311,15 +270,15 @@ export const Schedule = ({ items, empty, className }: ScheduleProps): ReactNode 
 /** One legend for a whole page of small multiples, so no bar is colour-alone. */
 export const StatusLegend = ({ className }: { className?: string }): JSX.Element => (
   <ul className={cn("flex flex-wrap items-center gap-x-4 gap-y-1", className)}>
-    {STATUS_GROUPS.map((group) => (
+    {CHART_GROUPS.map((group) => (
       <li key={group.id} className="flex items-center gap-2 text-label text-muted-foreground">
         <span
           aria-hidden
           className={cn(
             "size-1.5 rounded-full",
-            group.id === "pending" && "border border-status-queued bg-transparent",
+            group.outline && "border border-status-queued bg-transparent",
           )}
-          style={group.id === "pending" ? undefined : { backgroundColor: group.color }}
+          style={group.outline ? undefined : { backgroundColor: group.color }}
         />
         {group.label}
       </li>
@@ -332,7 +291,7 @@ export interface BreakdownGroup {
   label: string;
   /** Quiet second line — an axis value's run count, a backend's cluster. */
   detail?: ReactNode;
-  counts: StatusCountRollup;
+  counts: StatusCounts;
   onSelect?: () => void;
 }
 

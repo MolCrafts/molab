@@ -93,6 +93,13 @@ describe("experiment navigation", () => {
     expect(
       buildSelectionFromLocation("/experiments/e%2F1/parameters", new URLSearchParams()),
     ).toEqual({ objectType: "experiment", objectId: "e/1", experimentView: "parameters" });
+    // The Structures view deep-links too (audit X1: it used to land on the empty editor).
+    expect(
+      buildSelectionFromLocation(
+        "/projects/p%201/experiments/e%2F1/products",
+        new URLSearchParams(),
+      ),
+    ).toEqual({ objectType: "experiment", objectId: "e/1", experimentView: "products" });
   });
 
   it("routes workflow selections into their owning experiment", () => {
@@ -139,11 +146,19 @@ describe("experiment navigation", () => {
 describe("project navigation", () => {
   it("builds and parses route-backed project tabs", () => {
     expect(projectPath("p 1", "assets")).toBe("/projects/p%201/assets");
-    expect(buildSelectionFromLocation("/projects/p%201/settings", new URLSearchParams())).toEqual({
+    expect(buildSelectionFromLocation("/projects/p%201/plan", new URLSearchParams())).toEqual({
       objectType: "project",
       objectId: "p 1",
-      projectView: "settings",
+      projectView: "plan",
     });
+  });
+
+  it("opens the Overview for the views that left the project (L02)", () => {
+    for (const view of ["attention", "timeline", "settings"]) {
+      expect(
+        buildSelectionFromLocation(`/projects/p/${view}`, new URLSearchParams()),
+      ).toMatchObject({ objectType: "project", objectId: "p", projectView: undefined });
+    }
   });
 
   it("keeps the project overview at the short canonical URL", () => {

@@ -67,7 +67,7 @@ function buildMockWorkspaceRuns() {
         experimentName: experiment.name,
         definitionHash: run.definitionHash,
         experimentRevisionId: run.experimentRevisionId,
-        inputs: [],
+        inputs: run.inputs ?? [],
         targetHint: run.target ?? null,
         statusSummary: run.statusSummary,
         parameters: run.parameters ?? {},

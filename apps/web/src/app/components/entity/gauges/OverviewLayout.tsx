@@ -7,13 +7,11 @@
 
 import { Sigma } from "lucide-react";
 import type { JSX, ReactNode } from "react";
-
-import type { StatusGroupId } from "@/app/runs/statusGroups";
+import type { StatusCounts } from "@/app/status/vocabulary";
+import { FINISHED_GROUPS } from "@/app/status/vocabulary";
 import { cn } from "@/lib/utils";
-
 import { DashboardCanvas, OverviewSurface } from "../Dashboard";
 import { StatusTally, Tally } from "./Glyph";
-import type { StatusCounts } from "./scale";
 
 /** An Overview tab body: the scrolling surface, its margin, and the centred column. */
 export const OverviewCanvas = ({ children }: { children: ReactNode }): JSX.Element => (
@@ -59,8 +57,6 @@ export const GaugeSection = ({
   </section>
 );
 
-const FINISHED: readonly StatusGroupId[] = ["succeeded", "failed", "cancelled"];
-
 /** The success dial's key: each finished outcome as its icon and count, then Σ the basis. */
 export const DialLegend = ({
   counts,
@@ -71,11 +67,11 @@ export const DialLegend = ({
   unit?: readonly [string, string];
   partial?: boolean;
 }): JSX.Element => {
-  const finished = FINISHED.reduce((sum, id) => sum + counts[id], 0);
+  const finished = FINISHED_GROUPS.reduce((sum, id) => sum + counts[id], 0);
   const noun = finished === 1 ? unit[0] : unit[1];
   return (
     <div className="flex min-w-0 flex-col gap-2 text-label">
-      {FINISHED.map((id) => (
+      {FINISHED_GROUPS.map((id) => (
         <StatusTally key={id} status={id} count={counts[id]} unit={unit[1]} />
       ))}
       <Tally
@@ -100,6 +96,8 @@ export const ChoiceToggle = <Value extends string>({
   choices: readonly { value: Value; label: string }[];
   onChange: (next: Value) => void;
 }): JSX.Element => (
+  // VS Code toggles: 22px, sans 12px words, the pressed one washed (L06 owner
+  // feedback: the mono micro-text segment read "好丑").
   <fieldset aria-label={label} className="flex flex-wrap items-center gap-hairline">
     {choices.map((choice) => (
       <button
@@ -108,8 +106,8 @@ export const ChoiceToggle = <Value extends string>({
         aria-pressed={choice.value === value}
         onClick={() => onChange(choice.value)}
         className={cn(
-          "rounded-control px-2 py-hairline font-mono text-micro text-muted-foreground",
-          "hover:bg-interactive/50 hover:text-foreground",
+          "inline-flex h-shell-action items-center rounded-action px-2 text-label text-muted-foreground",
+          "hover:bg-interactive hover:text-foreground",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
           choice.value === value && "bg-interactive text-foreground",
         )}

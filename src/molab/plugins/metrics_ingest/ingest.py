@@ -7,7 +7,7 @@ Scientific packages follow the external molrec spec; molab does not re-host it.
 What this module produces is the run-local **metrics surface**: JSONL WAL
 (``executions/eNN/metrics.mlp.jsonl``, beside ``run.log``) via
 :class:`~molab.plugins.metrics.MetricsWriter`.
-Foreign dialects (CSV, LAMMPS, TensorBoard, event JSONL) are equal sources.
+Foreign dialects (CSV, LAMMPS, event JSONL) are equal sources.
 
 **Additive.** Source files are never deleted, rewritten, moved, or
 truncated — metrics are written beside them, so an unwanted ingest is undone

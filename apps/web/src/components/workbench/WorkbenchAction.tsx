@@ -3,7 +3,7 @@
  * `Button variant=…`. Visual mapping stays inside this module.
  */
 
-import { Button } from "@molcrafts/ui";
+import { Button, Kbd, Tooltip, TooltipContent, TooltipTrigger } from "@molcrafts/ui";
 import { Slot, Slottable } from "@radix-ui/react-slot";
 import { RefreshCw, X } from "lucide-react";
 import type { ButtonHTMLAttributes, JSX, ReactNode } from "react";
@@ -99,7 +99,15 @@ export interface WorkbenchIconActionProps
   label: string;
   /** All action controls stay borderless; intent is carried by the icon and tooltip. */
   kind?: Exclude<WorkbenchActionKind, "link" | "secondary">;
-  size?: "compact" | "default";
+  /**
+   * compact 28 · default 32 · shell 22 (DS v1.4 chrome: VS Code density, 5px
+   * hover wash, a Radix tooltip after 500 ms instead of the native title).
+   */
+  size?: "compact" | "default" | "shell";
+  /** Shown in the shell tooltip beside the label, e.g. "⌥B". */
+  shortcut?: string;
+  /** Tooltip side for the shell size (the activity bar opens to the right). */
+  tooltipSide?: "top" | "right" | "bottom" | "left";
   children: ReactNode;
   asChild?: boolean;
   /** Permission / policy denial — disables control and explains on hover. */
@@ -117,18 +125,26 @@ export const WorkbenchIconAction = ({
   deniedReason,
   disabled,
   title,
+  shortcut,
+  tooltipSide = "bottom",
   ...rest
 }: WorkbenchIconActionProps): JSX.Element => {
   const blocked = Boolean(deniedReason);
+  const shell = size === "shell";
   const button = (
     <Button
       type={asChild ? undefined : type}
       variant={KIND_TO_VARIANT[kind]}
       size="icon"
       aria-label={label}
-      title={blocked ? undefined : (title ?? label)}
+      aria-keyshortcuts={shortcut}
+      title={blocked || shell ? undefined : (title ?? label)}
       className={cn(
-        size === "compact" ? "size-control-compact" : "size-control",
+        shell
+          ? "size-shell-action rounded-action text-foreground hover:bg-interactive [&_svg]:size-icon"
+          : size === "compact"
+            ? "size-control-compact"
+            : "size-control",
         "shrink-0 border-0 shadow-none",
         kind === "danger" && "text-destructive hover:text-destructive",
         className,
@@ -140,6 +156,21 @@ export const WorkbenchIconAction = ({
       {children}
     </Button>
   );
+  if (shell && !blocked) {
+    return (
+      <Tooltip delayDuration={500}>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent
+          side={tooltipSide}
+          sideOffset={4}
+          className="flex items-center gap-2 rounded-hairline border border-border px-2 py-1 text-label"
+        >
+          {title ?? label}
+          {shortcut ? <Kbd>{shortcut}</Kbd> : null}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
   return <DeniedHint reason={deniedReason}>{button}</DeniedHint>;
 };
 

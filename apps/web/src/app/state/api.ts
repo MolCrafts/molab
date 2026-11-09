@@ -1,10 +1,13 @@
 import type { ManagedAssetResponse } from "@/api/generated/models/ManagedAssetResponse";
 import type { WorkspaceFileNode, WorkspaceFilesResponse } from "@/api/workspace";
+import { withRunTitles } from "@/app/runs/runTitle";
+import { EXECUTION_STATUSES, isActiveStatus, latestStatus } from "@/app/status/vocabulary";
 import type {
   ApiAssetResponse,
   ApiExperimentResponse,
   ApiProjectResponse,
   ApiRunResponse,
+  AssetOrigin,
   AssetSummary,
   ExperimentSummary,
   ProjectSummary,
@@ -18,11 +21,6 @@ import type { TaskGraphJson } from "@/plugins/workflow/task-graph-ir";
 
 export type { EmbedRole, EmbedTargetKind, EntityCard } from "@/api/knowledge";
 export type { RunFilesResponse, RunFileTextResponse } from "@/api/runs";
-export type {
-  TensorboardScalarSeries,
-  TensorboardScalarsResponse,
-} from "@/api/tensorboard";
-export { TensorboardScalarsError } from "@/api/tensorboard";
 export { workflowApi } from "@/api/workflow";
 export type { WorkspaceFilesResponse } from "@/api/workspace";
 
@@ -129,25 +127,16 @@ export const mapRuns = (
   runs: ApiRunResponse[],
   workspaceKey?: string,
 ): RunSummary[] => {
-  const mapStatus = (run: ApiRunResponse): RunSummary["status"] => {
-    if (!run.statusSummary) {
-      const legacy = run.status ?? "pending";
-      return legacy === "running" ||
-        legacy === "succeeded" ||
-        legacy === "failed" ||
-        legacy === "cancelled"
-        ? legacy
-        : "pending";
-    }
-    const counts = run.statusSummary.byStatus ?? {};
-    if (run.statusSummary.active > 0) return "running";
-    if ((counts.succeeded ?? 0) > 0) return "succeeded";
-    if ((counts.failed ?? 0) > 0 || (counts.interrupted ?? 0) > 0) return "failed";
-    if ((counts.cancelled ?? 0) > 0) return "cancelled";
-    return "pending";
+  // A run reads as its latest attempt (the server's `status_label`): a later
+  // failure is not hidden by an earlier success, and no attempt is "pending".
+  const mapStatus = (attempts: readonly { status: string }[]): RunSummary["status"] => {
+    const key = latestStatus(attempts);
+    return (EXECUTION_STATUSES as readonly string[]).includes(key) && key !== "cached"
+      ? (key as RunSummary["status"])
+      : "pending";
   };
 
-  return runs.map((run) => {
+  const mapped = runs.map((run): RunSummary => {
     const executions =
       run.executions ??
       (run.executionHistory ?? []).map((item) => ({
@@ -163,7 +152,7 @@ export const mapRuns = (
         environment: {},
         error: null,
       }));
-    const status = mapStatus(run);
+    const status = mapStatus(executions);
     const firstStarted = executions.find((item) => item.startedAt)?.startedAt ?? null;
     const terminalErrors = executions.filter((item) => item.error);
     const lastError = terminalErrors[terminalErrors.length - 1]?.error;
@@ -185,9 +174,7 @@ export const mapRuns = (
       inputs: run.inputs ?? [],
       statusSummary: run.statusSummary ?? {
         total: executions.length,
-        active: executions.filter((item) =>
-          ["queued", "running", "finalizing"].includes(item.status),
-        ).length,
+        active: executions.filter((item) => isActiveStatus(item.status)).length,
         notStarted: executions.length === 0,
         byStatus: Object.fromEntries(
           [...new Set(executions.map((item) => item.status))].map((value) => [
@@ -221,6 +208,7 @@ export const mapRuns = (
       ...(workspaceKey ? { workspaceKey } : {}),
     };
   });
+  return withRunTitles(mapped);
 };
 
 const assetSize = (asset: ApiAssetResponse): number | null => {
@@ -231,6 +219,24 @@ const assetSize = (asset: ApiAssetResponse): number | null => {
 const assetSummary = (asset: ApiAssetResponse): string => {
   const scope = asset.scopeKind ? `${asset.scopeKind} scope` : "unscoped";
   return `${asset.kind} · ${scope}`;
+};
+
+const extraString = (extra: Record<string, unknown> | undefined, key: string): string | null => {
+  const value = extra?.[key];
+  return typeof value === "string" && value ? value : null;
+};
+
+/** The origin `projectAssetView` folds into `extra` (absent: not recorded). */
+const originFromExtra = (extra: Record<string, unknown> | undefined): AssetOrigin | undefined => {
+  const kind = extraString(extra, "originKind");
+  if (!kind) return undefined;
+  return {
+    kind,
+    runId: extraString(extra, "runId"),
+    executionId: extraString(extra, "executionId"),
+    task: extraString(extra, "task"),
+    uri: extraString(extra, "uri"),
+  };
 };
 
 export const mapAssets = (
@@ -250,6 +256,15 @@ export const mapAssets = (
         scopeKind: "project",
         projectId: asset.projectId || projectId,
         ref: asset.ref,
+        file: asset.file || undefined,
+        mediaType: asset.mediaType ?? null,
+        origin: {
+          kind: asset.originKind,
+          runId: asset.runId ?? null,
+          executionId: asset.executionId ?? null,
+          task: asset.task ?? null,
+          uri: asset.uri ?? null,
+        },
       };
     }
     // ``scopeIds`` is the parent chain ending at the leaf scope: a run-scoped
@@ -268,6 +283,10 @@ export const mapAssets = (
       projectId: ids[0] ?? projectId,
       experimentId: ids[1],
       runId: ids[2],
+      ref: asset.ref ?? undefined,
+      file: asset.path || undefined,
+      mediaType: extraString(asset.extra, "mediaType"),
+      origin: originFromExtra(asset.extra),
     };
   });
 };

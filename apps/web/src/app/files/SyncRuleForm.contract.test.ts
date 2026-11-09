@@ -33,7 +33,9 @@ describe("path sync form", () => {
     expect(form).not.toContain("--exclude");
     expect(form).not.toContain("--delete");
     expect(form).not.toContain("--dry-run");
-    expect(form).not.toContain("Dialog");
+    // A popover, not a modal: only the remove confirm is a dialog.
+    expect(form).not.toContain("<Dialog");
+    expect(form).not.toContain("DialogContent");
     expect(form).not.toContain("<textarea");
     expect(form).toContain("createPortal");
     expect(tree).toContain("data-tree-id");

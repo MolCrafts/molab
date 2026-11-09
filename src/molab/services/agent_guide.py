@@ -142,7 +142,10 @@ def _layout() -> str:
         ("./", ""),
         (f"├── {INDEX_FILENAME}", "workspace record + narrative; start here"),
         (f"├── {AGENT_GUIDE_FILENAME}, {CLAUDE_GUIDE_FILENAME}", "this guide"),
-        (f"├── {KNOWLEDGE_CONTAINER}/<slug>.md", "knowledge documents (also at every level below)"),
+        (
+            f"├── {KNOWLEDGE_CONTAINER}/<slug>.md|.html",
+            "knowledge documents (also at every level below)",
+        ),
         (f"└── {PROJECT_CONTAINER}/<project>/", "directory name = slug of the project name"),
         (f"    ├── {INDEX_FILENAME}", "project record"),
         (f"    ├── {ASSET_CONTAINER}/<title>/", "imported files (molab asset import)"),
@@ -283,8 +286,11 @@ def render_agent_guide(ws: Workspace) -> str:
         "",
         "### Knowledge documents",
         "",
-        f"A document is `<level>/{KNOWLEDGE_CONTAINER}/<slug>.md` whose frontmatter "
-        "names one class (`class:`). The table is the set. Write them with `molab knowledge write`.",
+        f"A document is `<level>/{KNOWLEDGE_CONTAINER}/<slug>.md` (YAML frontmatter + markdown) "
+        'or `<slug>.html` (the record as JSON in `<script id="molab-record">`, a body of '
+        "`<molab-markdown>` blocks and `<molab-…>` elements); its record names one class "
+        "(`class:`). The table is the set. Write them with `molab knowledge write` "
+        "(`--format html` for the HTML form).",
         "",
         _knowledge_classes(),
         "",

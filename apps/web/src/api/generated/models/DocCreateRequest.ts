@@ -7,6 +7,10 @@ export type DocCreateRequest = {
     name: string;
     body?: string;
     hostPath?: (string | null);
+    /**
+     * `md` lands `<slug>.md`; `html` lands `<slug>.html` (body stored verbatim).
+     */
+    format?: DocCreateRequest.format;
     cls?: DocCreateRequest.cls;
     sources?: Array<DocSource>;
     record?: (Record<string, any> | null);
@@ -19,6 +23,13 @@ export type DocCreateRequest = {
     url?: (string | null);
 };
 export namespace DocCreateRequest {
+    /**
+     * `md` lands `<slug>.md`; `html` lands `<slug>.html` (body stored verbatim).
+     */
+    export enum format {
+        MD = 'md',
+        HTML = 'html',
+    }
     export enum cls {
         NOTE = 'Note',
         LITERATURE = 'Literature',

@@ -1,7 +1,7 @@
 import { type JSX, lazy, Suspense } from "react";
 import type { FlowgramCanvasProps } from "./flowgram-canvas-impl";
 
-export type { FlowgramCanvasProps } from "./flowgram-canvas-impl";
+export type { CanvasTools, FlowgramCanvasProps } from "./flowgram-canvas-impl";
 
 const Impl = lazy(() =>
   import("./flowgram-canvas-impl").then((mod) => ({ default: mod.FlowgramCanvas })),

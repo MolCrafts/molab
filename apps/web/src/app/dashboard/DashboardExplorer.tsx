@@ -1,110 +1,160 @@
-import { ArrowUpRight, Circle, FolderOpen } from "lucide-react";
-import type { JSX } from "react";
-import { Link } from "react-router-dom";
+/**
+ * The Dashboard side bar is the triage list (Figma L01-1, L01-3, decision 2):
+ * Needs attention (latest attempt failed or interrupted), Active (running,
+ * then queued) and Finished · 24h (folded). One 28px row per run — its title
+ * and its experiment. A click previews the run (L12); ↵ or a double click
+ * opens it. These lists replace the Dashboard's old Attention and Timeline
+ * views and its project list (the Projects section has the projects).
+ */
 
-import { projectPath } from "@/app/entities/paths";
+import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { type JSX, type ReactNode, useMemo, useState } from "react";
+import { StatusIcon } from "@/app/components/entity";
+import { dashboardLists } from "@/app/dashboard/dashboardLists";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
+import { usePreview } from "@/app/preview/PreviewContext";
+import type { PreviewTarget } from "@/app/preview/target";
+import { runPresentationStatus } from "@/app/runs/projections";
+import { runLabel } from "@/app/runs/runTitle";
+import type { WorkspaceRunRow } from "@/app/runs/types";
+import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import { LeftExplorer } from "@/components/layout/ExplorerShell";
 import { WorkbenchIconAction } from "@/components/workbench";
 
-/**
- * The Dashboard explorer is navigation only. Runs that need a person are the
- * Dashboard's Attention tab; listing them here as well would be a second list.
- */
-export const PROJECT_LIMIT = 6;
+/** Rows a list shows before “n more” opens the rest in Runs. */
+export const LIST_LIMIT = 12;
 
-const moreLabel = (hidden: number, noun: "project"): string => {
-  const word = hidden === 1 ? noun : `${noun}s`;
-  return `View ${hidden} more ${word}`;
-};
+const targetOf = (run: WorkspaceRunRow): PreviewTarget => ({
+  kind: "run",
+  runId: run.id,
+  projectId: run.projectId,
+  experimentId: run.experimentId,
+  workspaceKey: run.workspaceKey,
+  label: runLabel(run),
+});
 
-export const projectDetail = (
-  summary: string,
-  experimentCount: number | null | undefined,
-): string => {
-  if (summary) return summary;
-  if (experimentCount == null) return "";
-  if (experimentCount === 1) return "1 experiment";
-  if (experimentCount === 0) return "No experiments yet";
-  return `${experimentCount} experiments`;
-};
-
-const SectionLabel = ({ children, count }: { children: string; count: number }): JSX.Element => (
-  <h3 className="flex items-baseline justify-between gap-2 px-1 pt-3 pb-1 text-label font-medium text-foreground">
-    <span className="min-w-0 text-balance">{children}</span>
-    <span className="shrink-0 tabular-nums text-muted-foreground">{count}</span>
-  </h3>
-);
-
-const ExplorerLink = ({
-  to,
+const Section = ({
   title,
-  detail,
+  count,
+  defaultOpen = true,
+  children,
 }: {
-  to: string;
   title: string;
-  detail: string;
-}): JSX.Element => (
-  <Link
-    to={to}
-    className="group flex min-w-0 items-start gap-2 rounded-control px-1 py-row-pad outline-none hover:bg-interactive focus-visible:ring-1 focus-visible:ring-ring"
-  >
-    <Circle aria-hidden className="mt-1 size-2 shrink-0 fill-current text-muted-foreground/45" />
-    <span className="min-w-0 flex-1">
-      <span className="block truncate text-body font-medium text-foreground" title={title}>
-        {title}
-      </span>
-      {detail ? (
-        <span className="block truncate text-label text-muted-foreground" title={detail}>
-          {detail}
-        </span>
+  count: number;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}): JSX.Element => {
+  const [open, setOpen] = useState(defaultOpen);
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <section aria-label={title}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex h-shell-crumbs w-full items-center gap-1 px-1 text-micro font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+      >
+        <Chevron aria-hidden className="size-icon-sm" />
+        <span className="flex-1 text-left">{title}</span>
+        {count > 0 ? (
+          <span className="min-w-4 rounded-full bg-muted px-1 text-center tabular-nums">
+            {count}
+          </span>
+        ) : null}
+      </button>
+      {open ? children : null}
+    </section>
+  );
+};
+
+/** One list of runs, 28px rows; shared with the phone Overview (L01-8). */
+export const RunList = ({
+  runs,
+  more,
+  empty,
+}: {
+  runs: readonly WorkspaceRunRow[];
+  more: string;
+  empty: string;
+}): JSX.Element => {
+  const preview = usePreview();
+  if (runs.length === 0) {
+    return <p className="px-6 py-1 text-label text-muted-foreground">{empty}</p>;
+  }
+  const shown = runs.slice(0, LIST_LIMIT);
+  return (
+    <ul>
+      {shown.map((run) => {
+        const target = targetOf(run);
+        const selected = preview.isPreviewed(target);
+        return (
+          <li key={`${run.workspaceKey}:${run.id}`}>
+            <button
+              type="button"
+              aria-label={`${runLabel(run)} · ${run.experimentName}`}
+              aria-current={selected ? "true" : undefined}
+              className={`flex h-7 w-full min-w-0 items-center gap-2 pr-3 pl-6 text-left hover:bg-interactive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring ${selected ? "bg-accent-muted" : ""}`}
+              onClick={(event) =>
+                event.metaKey || event.ctrlKey
+                  ? preview.open(target, { background: true })
+                  : preview.preview(target)
+              }
+              onDoubleClick={() => preview.open(target)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  preview.open(target);
+                }
+              }}
+            >
+              <StatusIcon status={runPresentationStatus(run)} className="size-icon-sm shrink-0" />
+              <span className="max-w-[55%] shrink-0 truncate font-mono text-label text-foreground">
+                {runLabel(run)}
+              </span>
+              <span className="min-w-0 truncate text-label text-muted-foreground">
+                {run.experimentName}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+      {runs.length > shown.length ? (
+        <li className="px-6 py-1 text-label text-muted-foreground">
+          +{runs.length - shown.length} {more}
+        </li>
       ) : null}
-    </span>
-    <ArrowUpRight className="mt-1 size-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" />
-  </Link>
-);
+    </ul>
+  );
+};
 
-const MoreLink = ({ to, children }: { to: string; children: string }): JSX.Element => (
-  <Link
-    to={to}
-    className="block min-w-0 truncate rounded-control px-1 py-1 text-label text-foreground outline-none hover:underline focus-visible:ring-1 focus-visible:ring-ring"
-  >
-    {children}
-  </Link>
-);
-
-export const DashboardExplorer = ({ snapshot }: NavigationExplorerProps): JSX.Element => {
-  const projects = snapshot.projects.slice(0, PROJECT_LIMIT);
-  const hiddenProjects = snapshot.projects.length - projects.length;
+export const DashboardExplorer = ({ onRefresh }: NavigationExplorerProps): JSX.Element => {
+  const { rows, refresh, loading } = useWorkspaceRuns();
+  const lists = useMemo(() => dashboardLists(rows), [rows]);
 
   const actions = (
-    <WorkbenchIconAction label="Open projects" asChild>
-      <Link to="/projects">
-        <FolderOpen className="size-3.5" />
-      </Link>
+    <WorkbenchIconAction
+      label="Sync now"
+      disabled={loading}
+      onClick={() => {
+        refresh();
+        onRefresh();
+      }}
+    >
+      <RefreshCw className="size-3.5" />
     </WorkbenchIconAction>
   );
 
   return (
-    <LeftExplorer title="Workspace" actions={actions}>
-      <div className="space-y-1">
-        <SectionLabel count={snapshot.projects.length}>Projects</SectionLabel>
-        {projects.length === 0 ? (
-          <p className="px-1 text-label text-muted-foreground">No projects yet.</p>
-        ) : (
-          projects.map((project) => (
-            <ExplorerLink
-              key={project.id}
-              to={projectPath(project.id)}
-              title={project.name}
-              detail={projectDetail(project.summary, project.experimentCount)}
-            />
-          ))
-        )}
-        {hiddenProjects > 0 ? (
-          <MoreLink to="/projects">{moreLabel(hiddenProjects, "project")}</MoreLink>
-        ) : null}
-      </div>
+    <LeftExplorer title="Dashboard" actions={actions} bodyClassName="py-1">
+      <Section title="Needs attention" count={lists.attention.length}>
+        <RunList runs={lists.attention} more="more in Runs" empty="Nothing needs you." />
+      </Section>
+      <Section title="Active" count={lists.active.length}>
+        <RunList runs={lists.active} more="more in Runs" empty="Nothing is running." />
+      </Section>
+      <Section title="Finished · 24h" count={lists.finished.length} defaultOpen={false}>
+        <RunList runs={lists.finished} more="more in Runs" empty="Nothing finished today." />
+      </Section>
     </LeftExplorer>
   );
 };

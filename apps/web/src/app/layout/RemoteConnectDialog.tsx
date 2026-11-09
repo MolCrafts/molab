@@ -2,12 +2,10 @@
  * VS Code quick-input style: top-centered, one line of chrome, enter to submit.
  */
 
-import { Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "@molcrafts/ui";
-import { Loader2 } from "lucide-react";
-import { type JSX, useCallback, useEffect, useId, useState } from "react";
+import { type JSX, useCallback, useEffect, useState } from "react";
 import { workspacesApi } from "@/api";
 import type { ServedWorkspaceSummary } from "@/app/types";
-import { cn } from "@/lib/utils";
+import { QuickInput } from "@/components/dialog/QuickInput";
 import { parseHostQualifiedLabel } from "@/lib/workspace-path";
 export interface RemoteConnectDialogProps {
   workspace: ServedWorkspaceSummary | null;
@@ -34,16 +32,9 @@ export const RemoteConnectDialog = ({
   onDismiss,
   onConnected,
 }: RemoteConnectDialogProps): JSX.Element => {
-  const inputId = useId();
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const inputRef = useCallback(
-    (node: HTMLInputElement | null) => {
-      if (node && open) node.focus();
-    },
-    [open],
-  );
 
   useEffect(() => {
     if (open) {
@@ -72,80 +63,29 @@ export const RemoteConnectDialog = ({
 
   const host = workspace ? (parseHostQualifiedLabel(workspace.label)?.host ?? "remote") : "remote";
 
+  // L13: a quick input that must be answered — no outside click; Esc dismisses.
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        // Match command palette: pin near top, strip padding / radius chrome.
-        className={cn(
-          "top-command-offset max-w-xl -translate-y-0 gap-0 overflow-hidden p-0",
-          "rounded-md shadow-lg sm:max-w-xl",
-        )}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        onInteractOutside={(e) => e.preventDefault()}
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => {
-          e.preventDefault();
-          onDismiss?.();
-          onOpenChange(false);
-        }}
-      >
-        <DialogTitle className="sr-only">Connect to {host}</DialogTitle>
-        <DialogDescription className="sr-only">
-          Enter verification code for {host}
-        </DialogDescription>
-
-        {/* VS Code quick-input: muted prompt line + single field */}
-        <div className="border-b border-border/80 bg-muted/40 px-3 py-row-pad">
-          <p className="truncate font-mono text-micro text-muted-foreground">
-            {host}
-            <span className="text-foreground/50"> · code</span>
-          </p>
-        </div>
-
-        <form
-          className="relative flex items-center"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-        >
-          <Input
-            ref={inputRef}
-            id={inputId}
-            autoComplete="one-time-code"
-            inputMode="numeric"
-            placeholder="Verification code"
-            value={code}
-            disabled={busy}
-            onChange={(e) => {
-              setCode(e.target.value);
-              if (hint) setHint(null);
-            }}
-            className={cn(
-              "h-10 w-full rounded-none border-0 bg-transparent px-3 font-mono tracking-widest",
-              "shadow-none focus-visible:ring-0",
-            )}
-            aria-invalid={Boolean(hint)}
-            aria-describedby={hint ? `${inputId}-hint` : undefined}
-          />
-          {busy ? (
-            <Loader2
-              className="mol-motion-progress-spin pointer-events-none absolute right-3 size-icon-sm text-muted-foreground"
-              aria-hidden
-            />
-          ) : null}
-        </form>
-
-        {hint ? (
-          <p
-            id={`${inputId}-hint`}
-            className="border-t border-border/60 px-3 py-row-pad font-mono text-micro text-muted-foreground"
-          >
-            {hint}
-          </p>
-        ) : null}
-      </DialogContent>
-    </Dialog>
+    <QuickInput
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Connect to ${host}`}
+      prompt={`Connect to ${host} · verification code · ↵ to connect, Esc to dismiss`}
+      value={code}
+      onValueChange={(next) => {
+        setCode(next);
+        if (hint) setHint(null);
+      }}
+      onSubmit={() => void submit()}
+      placeholder="Verification code"
+      error={hint}
+      busy={busy}
+      mono
+      blocking
+      onEscape={() => {
+        onDismiss?.();
+        onOpenChange(false);
+      }}
+      inputProps={{ autoComplete: "one-time-code", inputMode: "numeric" }}
+    />
   );
 };

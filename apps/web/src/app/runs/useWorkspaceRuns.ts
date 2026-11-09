@@ -2,7 +2,6 @@ import { queryOptions, useQuery } from "@tanstack/react-query";
 import { workspacesApi } from "@/api/workspaces";
 import { pulseSync } from "@/app/state/syncPulse";
 import { getWorkspaceQueryScope } from "@/app/state/workspaceSwitchEvents";
-
 import { workspaceRunsApi } from "./api";
 import type { WorkspaceRunRow, WorkspaceRunsResponse, WorkspaceRunsStats } from "./types";
 

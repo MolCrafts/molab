@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from molab import frontmatter
+from molab import frontmatter, htmldoc
 from molab.knowledge import Note
 from molab.knowledge.write import write_knowledge
 from molab.services.workspace_check import (
@@ -236,6 +236,24 @@ class TestCheckPathAllow:
     def test_a_knowledge_document_with_a_class(self, lab: dict[str, Any]) -> None:
         doc = lab["exp"] / "knowledges" / "idea.md"
         assert _verdict(doc, "---\nclass: Note\n---\n# Idea\n").allowed
+
+    def test_an_html_knowledge_document_with_a_class(self, lab: dict[str, Any]) -> None:
+        doc = lab["exp"] / "knowledges" / "idea.html"
+        assert _verdict(doc, htmldoc.dump({"class": "Note"}, "<p>x</p>")).allowed
+        _deny(_verdict(doc, "<p>no record</p>"), "knowledge.class")
+
+    def test_a_figure_under_knowledges_figs(self, lab: dict[str, Any]) -> None:
+        assert _verdict(lab["exp"] / "knowledges" / "figs" / "plot.png").allowed
+        _deny(_verdict(lab["exp"] / "knowledges" / "figs" / "a" / "b.png"), "knowledge.stray")
+        _deny(_verdict(lab["exp"] / "knowledges" / "notes" / "a.md"), "knowledge.stray")
+
+    def test_one_name_in_a_second_format_is_refused(self, lab: dict[str, Any]) -> None:
+        container = lab["exp"] / "knowledges"
+        container.mkdir(parents=True, exist_ok=True)
+        (container / "idea.md").write_text("---\nclass: Note\n---\n")
+        verdict = _verdict(container / "idea.html", htmldoc.dump({"class": "Note"}, ""))
+        _deny(verdict, "knowledge.duplicate")
+        assert "idea.md" in verdict.reason
 
     def test_an_invalid_op_is_refused(self, lab: dict[str, Any]) -> None:
         with pytest.raises(ValueError, match="op must be"):

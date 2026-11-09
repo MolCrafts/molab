@@ -1,6 +1,7 @@
 """Knowledge routes — browse + author the workspace's OKF documents.
 
-Documents are markdown files under a host's ``knowledges/`` directory. Create,
+Documents are ``.md`` (YAML frontmatter + markdown) or ``.html`` files under a
+host's ``knowledges/`` directory. Create,
 embed, rename, move, delete, backlinks and export call the knowledge verbs
 (``write_knowledge`` / ``append_link`` / ``Concept.rename`` / ``move_to`` /
 ``delete`` / ``backlinks`` / ``export``). ``entity_backlinks`` calls
@@ -21,6 +22,7 @@ import logging
 import os
 import re
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path as _StdPath
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -50,6 +52,9 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 _LOG = logging.getLogger(__name__)
 _EXCERPT_CHARS = 320
 
+#: How a listed file is stored: a markdown or HTML document, or a TeX manuscript.
+DocFormat = Literal["md", "html", "tex"]
+
 
 class NoteSummary(BaseModel):
     name: str
@@ -59,6 +64,14 @@ class NoteSummary(BaseModel):
     tags: list[str] = []
     status: str | None = None
     cls: str = "Note"
+    format: DocFormat = "md"
+    updatedAt: str | None = Field(
+        default=None, description="ISO-8601 UTC time the file was last modified."
+    )
+    createdAt: str | None = Field(
+        default=None,
+        description="ISO-8601 UTC creation stamp (`created_at`); absent on older documents.",
+    )
 
 
 class ReferenceSummary(BaseModel):
@@ -99,6 +112,14 @@ class NoteDetailResponse(BaseModel):
     links: list[str]
     cards: list[EntityCard] = []
     record: dict[str, Any] = Field(default_factory=dict)
+    format: DocFormat = "md"
+    updatedAt: str | None = Field(
+        default=None, description="ISO-8601 UTC time the file was last modified."
+    )
+    createdAt: str | None = Field(
+        default=None,
+        description="ISO-8601 UTC creation stamp (`created_at`); absent on older documents.",
+    )
 
 
 class EmbedRequest(BaseModel):
@@ -132,6 +153,10 @@ class DocCreateRequest(BaseModel):
     name: str
     body: str = ""
     hostPath: str | None = None
+    format: Literal["md", "html"] = Field(
+        default="md",
+        description="`md` lands `<slug>.md`; `html` lands `<slug>.html` (body stored verbatim).",
+    )
     cls: Literal[
         "Note",
         "Literature",
@@ -336,6 +361,7 @@ def _source_from_request(workspace: Workspace, source: DocSource) -> object:
 
 
 _IMAGE_LINK = re.compile(r"!\[[^\]]*\]\((<)?([^)\s>]+)(>)?\)")
+_IMAGE_TAG = re.compile(r"<img\b[^>]*?\bsrc\s*=\s*([\"'])([^\"']+)\1", re.IGNORECASE)
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 _MEDIA_LIMIT = 8 * 1024 * 1024
 
@@ -389,9 +415,27 @@ def _require_writable(request: Request) -> None:
     assert_workspace_writable(active_served_key() or "", request.method)
 
 
+def _updated_at(workspace: Workspace, path: object) -> str | None:
+    """The file's mtime as ISO-8601 UTC (seconds), or ``None`` when it cannot be read."""
+    try:
+        mtime = workspace.fs.stat(_path_of(path)).mtime
+    except OSError:
+        return None
+    return datetime.fromtimestamp(mtime, tz=UTC).replace(microsecond=0).isoformat()
+
+
+def _created_at(note: Concept) -> str | None:
+    """The document's ``created_at`` stamp, or ``None`` when it has none."""
+    value = note.frontmatter().get("created_at")
+    return value if isinstance(value, str) and value else None
+
+
 def _note_summary(workspace: Workspace, note: Concept) -> NoteSummary:
-    """Build a :class:`NoteSummary` for *note* (identity + host + excerpt)."""
-    body = note.read() or ""
+    """Build a :class:`NoteSummary` for *note* (identity + host + excerpt + times)."""
+    from molab.knowledge.frontmatter import document_text
+    from molab.knowledge.naming import document_format
+
+    body = document_text(note.read() or "", path=note.path)
     status_val = note.status() if isinstance(note, Note) else None
     return NoteSummary(
         name=note.name,
@@ -401,6 +445,9 @@ def _note_summary(workspace: Workspace, note: Concept) -> NoteSummary:
         tags=note.tags(),
         status=status_val,
         cls=type(note).__name__,
+        format=document_format(note.path),
+        updatedAt=_updated_at(workspace, note.path),
+        createdAt=_created_at(note),
     )
 
 
@@ -439,6 +486,8 @@ def _document_record(note: Concept) -> dict[str, Any]:
 
 def _note_detail(workspace: Workspace, note: Concept, path: str) -> NoteDetailResponse:
     """Build a :class:`NoteDetailResponse` for *note* at its identity *path*."""
+    from molab.knowledge.naming import document_format
+
     return NoteDetailResponse(
         name=note.name,
         relPath=path,
@@ -446,6 +495,9 @@ def _note_detail(workspace: Workspace, note: Concept, path: str) -> NoteDetailRe
         links=list(note.out_edges()),
         cards=_resolve_cards(workspace, note),
         record=_document_record(note),
+        format=document_format(note.path),
+        updatedAt=_updated_at(workspace, note.path),
+        createdAt=_created_at(note),
     )
 
 
@@ -683,12 +735,15 @@ def _tex_text(workspace: Workspace, path: str) -> str:
 
 def _tex_detail(workspace: Workspace, path: str) -> NoteDetailResponse:
     """A TeX file as a read-only note detail. The body is the file itself."""
+    body = _tex_text(workspace, path)
     return NoteDetailResponse(
         name=_StdPath(path).stem,
         relPath=path,
-        body=_tex_text(workspace, path),
+        body=body,
         links=[],
         cards=[],
+        format="tex",
+        updatedAt=_updated_at(workspace, workspace.fs.join(str(workspace.root), path)),
     )
 
 
@@ -710,28 +765,51 @@ class EntityBacklinksResponse(BaseModel):
 
 @router.get("/entity-backlinks", response_model=EntityBacklinksResponse)
 def entity_backlinks(
-    kind: Annotated[Literal["run", "experiment"], Query(description="Entity kind.")],
-    project_id: Annotated[str, Query(alias="projectId")],
-    experiment_id: Annotated[str, Query(alias="experimentId")],
+    kind: Annotated[Literal["run", "experiment", "asset"], Query(description="Entity kind.")],
+    project_id: Annotated[str | None, Query(alias="projectId")] = None,
+    experiment_id: Annotated[str | None, Query(alias="experimentId")] = None,
     run_id: Annotated[str | None, Query(alias="runId")] = None,
+    asset_id: Annotated[str | None, Query(alias="assetId")] = None,
     workspace: Workspace = Depends(get_workspace),
 ) -> EntityBacklinksResponse:
     """Knowledge documents citing one entity.
 
-    Pure derived read (no reverse index persisted): resolves the entity
-    folder, then walks documents whose edges point at its reference.
+    Pure derived read (no reverse index persisted): resolves the entity,
+    then walks documents whose edges point at its reference. A run or an
+    experiment needs ``projectId`` + ``experimentId`` (and ``runId``); an
+    asset needs ``assetId`` alone, since its id is unique in the workspace.
     404 on an unresolvable entity — never an empty-list fallback
     for a bad ref.
     """
-    from molab.knowledge.concept import backlinks_to
-    from molab.knowledge.search import extract_title
     from molab.workspace.errors import (
+        AmbiguousRefError,
         ExperimentNotFoundError,
         ProjectNotFoundError,
+        RefNotFoundError,
         RunNotFoundError,
     )
-    from molab.workspace.refs import ref_of
+    from molab.workspace.refs import MolabRef, ref_of
 
+    if kind == "asset":
+        if not asset_id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "kind=asset requires assetId"
+            )
+        target = MolabRef(asset_id=asset_id)
+        try:
+            workspace.find(target)
+        except RefNotFoundError as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+        except AmbiguousRefError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        return EntityBacklinksResponse(
+            entity=f"asset:{asset_id}", backlinks=_citing_rows(workspace, str(target))
+        )
+    if not project_id or not experiment_id:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"kind={kind} requires projectId and experimentId",
+        )
     try:
         experiment = workspace.get_project(project_id).get_experiment(experiment_id)
         if kind == "run":
@@ -745,12 +823,19 @@ def entity_backlinks(
     except (ProjectNotFoundError, ExperimentNotFoundError, RunNotFoundError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
+    return EntityBacklinksResponse(
+        entity=f"{kind}:{run_id or experiment_id}",
+        backlinks=_citing_rows(workspace, str(ref_of(entity))),
+    )
+
+
+def _citing_rows(workspace: Workspace, ref: str) -> list[EntityBacklinkRow]:
+    """Knowledge documents whose links cite *ref*, one row each."""
+    from molab.knowledge.concept import backlinks_to
+    from molab.knowledge.search import extract_title
+
     rows: list[EntityBacklinkRow] = []
-    for link in backlinks_to(
-        [str(ref_of(entity))],
-        within=workspace.root,
-        fs=workspace.fs,
-    ):
+    for link in backlinks_to([ref], within=workspace.root, fs=workspace.fs):
         narrative = link.source.read() or ""
         front = link.source.frontmatter()
         kind_name = front.get("class") or front.get("type") or type(link.source).__name__
@@ -762,7 +847,7 @@ def entity_backlinks(
                 role=str(link.role),
             )
         )
-    return EntityBacklinksResponse(entity=f"{kind}:{run_id or experiment_id}", backlinks=rows)
+    return rows
 
 
 class KnowledgeSearchRow(BaseModel):
@@ -851,25 +936,13 @@ def list_knowledge(
     notes: list[NoteSummary] = []
     references: list[ReferenceSummary] = []
     for item in root.walk():
-        rel = _rel(workspace, item.path)
-        tags = item.tags()
-        if tag is not None and tag not in tags:
+        summary = _note_summary(workspace, item)
+        if tag is not None and tag not in summary.tags:
             continue
-        status_val = item.status() if isinstance(item, Note) else None
-        if status is not None and status_val != status:
+        if status is not None and summary.status != status:
             continue
-        body = item.read() or ""
-        notes.append(
-            NoteSummary(
-                name=item.name,
-                relPath=rel,
-                hostPath=_host_rel(workspace, item.path),
-                excerpt=body[:_EXCERPT_CHARS],
-                tags=tags,
-                status=status_val,
-                cls=type(item).__name__,
-            )
-        )
+        rel = summary.relPath
+        notes.append(summary)
         if isinstance(item, Literature):
             meta = item.record
             references.append(
@@ -897,6 +970,8 @@ def list_knowledge(
                     hostPath=tex_host_path(rel),
                     excerpt=text[:_EXCERPT_CHARS],
                     cls=TEX_CLASS,
+                    format="tex",
+                    updatedAt=_updated_at(workspace, absolute),
                 )
             )
 
@@ -963,6 +1038,7 @@ def create_doc(
             text=body.body,
             record=record,
             fs=workspace.fs,
+            format=body.format,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
@@ -1175,7 +1251,7 @@ def export_doc(
     ),
     workspace: Workspace = Depends(get_workspace),
 ) -> PlainTextResponse:
-    """Export a document as its narrative markdown, or the TeX file itself."""
+    """Export a document: a markdown narrative, the HTML document, or the TeX file itself."""
     from molab.knowledge.tex_docs import is_tex_file
 
     if is_tex_file(path):
@@ -1185,12 +1261,14 @@ def export_doc(
             media_type="text/plain; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+    from molab.knowledge.naming import is_html_document
+
     doc = _open_doc(workspace, path)
-    markdown = doc.export()
-    filename = f"{doc.name}.md"
+    html = is_html_document(doc.path)
+    filename = f"{doc.name}{PurePosixPath(str(doc.path)).suffix}"
     return PlainTextResponse(
-        content=markdown,
-        media_type="text/markdown",
+        content=doc.export(),
+        media_type="text/html; charset=utf-8" if html else "text/markdown",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
@@ -1249,7 +1327,7 @@ def export_notebook(
     ),
     workspace: Workspace = Depends(get_workspace),
 ) -> StreamingResponse:
-    """Zip one host's markdown documents, the figures they cite, and an embed list."""
+    """Zip one host's documents, the figures they cite, and an embed list."""
     from molab.knowledge import Knowledge
     from molab.knowledge.tex_docs import is_tex_file
 
@@ -1271,8 +1349,10 @@ def export_notebook(
                     "cards": [card.model_dump() for card in _resolve_cards(workspace, item)],
                 }
             )
-            for match in _IMAGE_LINK.finditer(text):
-                image_rel = _image_workspace_rel(rel, match.group(2))
+            sources = [match.group(2) for match in _IMAGE_LINK.finditer(text)]
+            sources += [match.group(2) for match in _IMAGE_TAG.finditer(text)]
+            for source in sources:
+                image_rel = _image_workspace_rel(rel, source)
                 if image_rel is None or image_rel in seen:
                     continue
                 if PurePosixPath(image_rel).suffix.lower() not in _IMAGE_SUFFIXES:

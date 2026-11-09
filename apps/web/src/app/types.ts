@@ -32,9 +32,12 @@ export type SemanticStatus =
   | "archived"
   | "draft"
   | "pending"
+  | "queued"
   | "running"
+  | "finalizing"
   | "succeeded"
   | "failed"
+  | "interrupted"
   | "cancelled"
   | "skipped"
   | "waiting_for_review"
@@ -180,6 +183,8 @@ export interface ExecutionRecordSummary {
 export interface RunSummary {
   id: string;
   name: string;
+  /** What the run is called on screen: its experiment's varying parameter values (`runTitle`). */
+  title?: string;
   /** Workspace-relative directory, as the server reported it — never composed. */
   path: string;
   status: SemanticStatus;
@@ -222,6 +227,21 @@ export interface AssetSummary {
   scopeKind?: string;
   /** Server-composed molab reference. */
   ref?: string;
+  /** Media type the server recorded, when it did. */
+  mediaType?: string | null;
+  /** The payload's file name inside its asset directory (it carries the extension). */
+  file?: string;
+  /** Where the bytes came from: the producing attempt, or an import (L08). */
+  origin?: AssetOrigin;
+}
+
+/** An asset's origin, as the server records it (`ManagedAssetResponse`). */
+export interface AssetOrigin {
+  kind: string;
+  runId: string | null;
+  executionId: string | null;
+  task: string | null;
+  uri: string | null;
 }
 
 export interface WorkflowSummary {
@@ -315,18 +335,17 @@ export type ExperimentView =
   | "parameters"
   | "notebook"
   | "products";
-export type ProjectView =
-  | "overview"
-  | "experiments"
-  | "attention"
-  | "timeline"
-  | "assets"
-  | "settings";
+/** A project's views (L02). Attention, Timeline and Settings left in L02; their old URLs open the Overview. */
+export type ProjectView = "overview" | "experiments" | "assets" | "plan";
 
 export interface ObjectSelection {
   objectType: BaseObjectType;
   objectId: string;
   objectView?: ObjectView;
+  /** Run only: the attempt the page shows (`?attempt=e02`); absent means the latest. */
+  attemptId?: string;
+  /** Run only: the log line the Logs view opens at (`?line=1184`). */
+  logLine?: number;
   /** Route-backed view within an experiment. Only meaningful for experiment selections. */
   experimentView?: ExperimentView;
   /** Route-backed view within a project. Only meaningful for project selections. */
@@ -426,6 +445,8 @@ export type ScopedRendererProps<K extends keyof RendererSnapshot> = Omit<
 };
 
 export interface BreadcrumbItem {
+  /** What the segment names; the breadcrumb row draws the kind's icon. */
+  kind: SemanticObjectType | "section" | "attempt";
   label: string;
   to?: string;
 }

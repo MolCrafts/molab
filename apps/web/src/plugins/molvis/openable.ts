@@ -1,14 +1,28 @@
-import { isChemicalStructureName } from "@/lib/structure-files";
+import {
+  CHEMICAL_STRUCTURE_EXTENSIONS,
+  isChemicalStructureName,
+  isLammpsDataName,
+  LAMMPS_DATA_EXTENSIONS,
+  structureRank,
+} from "@/lib/structure-files";
+
+export { isLammpsDataName } from "@/lib/structure-files";
 
 /** Formats molvis-stage can load in-browser today. Not a file tree. */
 
+/** LAMMPS dump trajectories. */
+const TRAJECTORY_EXTENSIONS = [".lammpstrj", ".lmptrj", ".lammpsdump", ".dump"] as const;
 const TRAJECTORY = /\.(lammpstrj|lmptrj|lammpsdump|dump)$/i;
+
 /**
- * LAMMPS data files: the MD-ready system with its periodic cell and full
- * topology. molvis-stage reads them by extension (format "lammps").
- * `.lammps` is left out: `log.lammps` is LAMMPS's solver log, molplot's.
+ * The run view's file patterns: every single-file format molvis opens. A
+ * `*.mrec` store is a directory, matched by {@link isMolvisZarr} instead.
  */
-const LAMMPS_DATA = /\.(data|lmp|lammpsdata)$/i;
+export const MOLVIS_FILE_PATTERNS: readonly string[] = [
+  ...CHEMICAL_STRUCTURE_EXTENSIONS,
+  ...LAMMPS_DATA_EXTENSIONS,
+  ...TRAJECTORY_EXTENSIONS,
+].map((extension) => `*${extension}`);
 const ZARR_GROUP = /(?:^|\/)(?:frame|trajectory|meta)\/zarr\.json$/i;
 
 const posix = (relPath: string): string => relPath.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -19,8 +33,6 @@ const isMlpZarrPath = (path: string, name: string): boolean =>
 
 const hasMrecAncestor = (path: string): boolean =>
   path.split("/").some((seg) => seg.endsWith(".mrec"));
-
-export const isLammpsDataName = (name: string): boolean => LAMMPS_DATA.test(name);
 
 export const isMolvisTrajectoryName = (name: string): boolean =>
   isChemicalStructureName(name) || TRAJECTORY.test(name) || isLammpsDataName(name);
@@ -57,9 +69,6 @@ export const zarrStoreRoot = (relPath: string): string => {
   }
   return parent;
 };
-
-export const isMolvisTrajectory = (file: { name: string; relPath: string }): boolean =>
-  isMolvisTrajectoryName(file.name) || isMolvisZarr(file);
 
 /**
  * True when molvis can actually open this file (not a nested array sidecar).
@@ -99,4 +108,17 @@ export const uniqueMolvisFiles = <T extends MolvisListedFile>(files: readonly T[
     out.push(file);
   }
   return out;
+};
+
+/**
+ * The file a MolVis view opens first: a connection table (mol2 > sdf > pdb …)
+ * carries the elements and bonds the producer wrote, then a trajectory, then a
+ * store. A LAMMPS data file has no element column, so it is listed but never
+ * the default while anything else is there.
+ */
+export const defaultMolvisFile = <T extends MolvisListedFile>(files: readonly T[]): T | null => {
+  const classic = files
+    .filter((file) => !isMolvisZarr(file) && isMolvisTrajectoryName(file.name))
+    .sort((left, right) => structureRank(left.name) - structureRank(right.name))[0];
+  return classic ?? files.find((file) => isMolvisZarr(file)) ?? files[0] ?? null;
 };

@@ -47,11 +47,14 @@ const getGlobRegex = (pattern: string): RegExp => {
   return cached;
 };
 
-export const matchesFile = (
-  contribution: FileTypeContribution,
+export const matchesFile = (contribution: FileTypeContribution, file: FileMatchContext): boolean =>
+  matchesMatcher(contribution.matcher, file);
+
+/** Whether *file* matches a file matcher (glob patterns on path or name, or a predicate). */
+export const matchesMatcher = (
+  matcher: FileTypeContribution["matcher"],
   file: FileMatchContext,
 ): boolean => {
-  const { matcher } = contribution;
   if (matcher.patterns) {
     for (const pattern of matcher.patterns) {
       if (getGlobRegex(pattern).test(file.relPath) || getGlobRegex(pattern).test(file.name)) {

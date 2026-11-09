@@ -20,7 +20,7 @@ const logData = (text: string, truncated = false): ExecutionLogData => ({
 /** Render with each stream's log already in the cache, as a finished read leaves it. */
 const renderFollowed = (
   logs: Partial<Record<LogStream, ExecutionLogData>>,
-  props: { defaultStream?: LogStream; onOpenFile?: (path: string) => void } = {},
+  props: { defaultStream?: LogStream; onOpenFile?: (path: string) => void; line?: number } = {},
 ): string => {
   const client = new QueryClient();
   for (const [stream, data] of Object.entries(logs)) {
@@ -29,17 +29,7 @@ const renderFollowed = (
   const wrap = (node: ReactNode) => (
     <QueryClientProvider client={client}>{node}</QueryClientProvider>
   );
-  return renderToStaticMarkup(
-    wrap(
-      <RunLogsPanel
-        execution={coords}
-        selectedExecutionId="e01"
-        attemptLabel="e01 (#1) · latest"
-        onViewLatest={() => undefined}
-        {...props}
-      />,
-    ),
-  );
+  return renderToStaticMarkup(wrap(<RunLogsPanel execution={coords} {...props} />));
 };
 
 const pressed = (html: string): string[] =>
@@ -48,83 +38,61 @@ const pressed = (html: string): string[] =>
   );
 
 describe("RunLogsPanel", () => {
-  it("offers stdout, stderr and run, and shows the selected stream's text", () => {
+  it("offers stdout, stderr and run.log, opening on run.log", () => {
     const logs = {
       stdout: logData("epoch 1\n"),
       stderr: logData("warning: drift\n"),
       run: logData("attempt started\n"),
     };
-    const stdout = renderFollowed(logs);
-    expect(stdout).toContain(">stdout</button>");
-    expect(stdout).toContain(">stderr</button>");
-    expect(stdout).toContain(">run</button>");
-    expect(pressed(stdout)).toEqual(["stdout"]);
-    expect(stdout).toContain("epoch 1");
-    expect(stdout).not.toContain("warning: drift");
-    expect(stdout).toContain("e01 (#1) · latest");
+    const run = renderFollowed(logs);
+    expect(run).toContain(">stdout</button>");
+    expect(run).toContain(">stderr</button>");
+    expect(pressed(run)).toEqual(["run.log"]);
+    expect(run).toContain("attempt started");
+    expect(run).not.toContain("epoch 1");
 
     const stderr = renderFollowed(logs, { defaultStream: "stderr" });
     expect(pressed(stderr)).toEqual(["stderr"]);
     expect(stderr).toContain("warning: drift");
-    expect(stderr).not.toContain("epoch 1");
-    // stderr keeps its destructive tint.
-    expect(stderr).toMatch(/<pre class="[^"]*text-destructive\/90[^"]*">warning: drift/);
+  });
 
-    const run = renderFollowed(logs, { defaultStream: "run" });
-    expect(pressed(run)).toEqual(["run"]);
-    expect(run).toContain("attempt started");
+  it("numbers lines, colours errors and warnings, and counts the stops", () => {
+    const text = [
+      "step 1",
+      "WARNING: energy drift above threshold",
+      "Traceback (most recent call last):",
+      '  File "md.py", line 3',
+      "NumericalInstability: drift exceeded",
+    ].join("\n");
+    const html = renderFollowed({ run: logData(text) });
+    expect(html).toContain('data-line="5"');
+    expect(html).toContain("1 error · 1 warning");
+    expect(html).toMatch(/text-status-warning-foreground[^"]*">WARNING/);
+    expect(html).toMatch(/text-status-failed-foreground[^"]*">NumericalInstability/);
+  });
+
+  it("marks the line it was opened at", () => {
+    const html = renderFollowed({ run: logData("a\nb\nc\n") }, { line: 2 });
+    expect(html).toMatch(/data-line="2" class="[^"]*bg-status-failed-soft/);
   });
 
   it("says when a stream captured nothing", () => {
     const empty = { stdout: logData(""), stderr: logData(""), run: logData("") };
-    expect(renderFollowed(empty)).toContain("No stdout captured.");
-    expect(renderFollowed(empty, { defaultStream: "stderr" })).toContain("No stderr captured.");
-    expect(renderFollowed(empty, { defaultStream: "run" })).toContain("No run captured.");
+    expect(renderFollowed(empty, { defaultStream: "stdout" })).toContain("Nothing in stdout.");
+    expect(renderFollowed(empty)).toContain("Nothing in run.log.");
   });
 
   it("shows a loading state before the first read lands", () => {
-    expect(renderFollowed({})).toContain("Loading logs...");
+    expect(renderFollowed({})).toContain("Loading logs…");
   });
 
   it("links the file when the head of a long log was dropped", () => {
     const html = renderFollowed(
-      { stdout: logData("tail line\n", true) },
+      { run: logData("tail line\n", true) },
       { onOpenFile: () => undefined },
     );
     expect(html).toContain("Showing the last 2 MB");
-    expect(html).toContain("open stdout.log");
+    expect(html).toContain("Open run.log");
     expect(html).toContain("tail line");
-  });
-
-  it("keeps a whole-file prop path for a caller with no execution route", () => {
-    const client = new QueryClient();
-    const html = renderToStaticMarkup(
-      <QueryClientProvider client={client}>
-        <RunLogsPanel
-          logs={{ stdout: "printed", stderr: null }}
-          logsError={null}
-          selectedExecutionId={null}
-          attemptLabel="latest"
-          onViewLatest={() => undefined}
-        />
-      </QueryClientProvider>,
-    );
-    expect(html).toContain("printed");
-    expect(html).toContain(">stdout</button>");
-    expect(html).not.toContain(">run</button>");
-    const stderr = renderToStaticMarkup(
-      <QueryClientProvider client={client}>
-        <RunLogsPanel
-          logs={{ stdout: "printed", stderr: null }}
-          selectedExecutionId={null}
-          attemptLabel="latest"
-          onViewLatest={() => undefined}
-          defaultStream="stderr"
-        />
-      </QueryClientProvider>,
-    );
-    expect(stderr).toContain("No stderr captured.");
-    // Nothing is fetched on this path.
-    expect(client.getQueryCache().findAll({ fetchStatus: "fetching" })).toHaveLength(0);
   });
 });

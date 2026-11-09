@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "@rstest/core";
 import type { RunAllSeries } from "@/plugins/molplot";
-import type { ScalarSeries } from "@/plugins/molplot/RunMetricsView";
+import type { ScalarSeries } from "@/plugins/molplot/scalar-series";
 import type { MatrixRow } from "./CompareTable";
 import {
   clampWidth,

@@ -29,7 +29,7 @@ export const RunsExplorer = ({
   );
 
   return (
-    <LeftExplorer title="Runs" actions={actions}>
+    <LeftExplorer title="Runs" actions={actions} bodyClassName="px-1 py-1">
       <RunsFacetPanel
         facets={facets}
         filters={filters}

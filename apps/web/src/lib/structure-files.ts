@@ -1,4 +1,4 @@
-/** Chemical structure files a browser can draw as a 2D formula and a 3D model. */
+/** Chemical structure files a browser can draw as a 3D scene. */
 
 const STRUCTURE = /\.(pdb|ent|brk|xyz|extxyz|exyz|cif|mmcif|sdf|mol|mol2|gro|cube|cub)$/i;
 
@@ -20,7 +20,22 @@ export const CHEMICAL_STRUCTURE_EXTENSIONS = [
   ".cub",
 ] as const;
 
+/**
+ * LAMMPS data files: the periodic cell plus the full topology. molvis-stage
+ * reads them by extension (format "lammps"). `.lammps` stays out — that is
+ * `log.lammps`, a solver log.
+ */
+export const LAMMPS_DATA_EXTENSIONS = [".data", ".lmp", ".lammpsdata"] as const;
+
+const LAMMPS_DATA = /\.(data|lmp|lammpsdata)$/i;
+
 export const isChemicalStructureName = (name: string): boolean => STRUCTURE.test(name);
+
+export const isLammpsDataName = (name: string): boolean => LAMMPS_DATA.test(name);
+
+/** A file the output pane should hand to the 3D structure preview. */
+export const isStructurePreviewName = (name: string): boolean =>
+  isChemicalStructureName(name) || isLammpsDataName(name);
 
 /**
  * Prefer a connection table over bare coordinates when several files describe

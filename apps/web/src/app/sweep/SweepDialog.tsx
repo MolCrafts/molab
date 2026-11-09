@@ -5,20 +5,12 @@
  * calls the seed endpoint, which skips cells that already exist.
  */
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@molcrafts/ui";
-import { Check } from "lucide-react";
 import { type JSX, useEffect, useRef, useState } from "react";
 import { apiErrorMessage } from "@/api/errors";
 import { sweepApi } from "@/api/sweep";
+import { missingCellCount } from "@/app/renderers/experiment/experimentStory";
+import { AppDialog } from "@/components/dialog/AppDialog";
 import { toast } from "@/components/ui/toast";
-import { WorkbenchAction } from "@/components/workbench";
 import { type AxisDraft, compileSweep, draftsFromParameterSpace } from "./grid";
 import { SweepAxesEditor } from "./SweepAxesEditor";
 
@@ -26,6 +18,8 @@ export interface SweepDialogProps {
   projectId: string;
   experimentId: string;
   parameterSpace?: Record<string, unknown>;
+  /** Runs the experiment already has: their combinations are not created again. */
+  runs?: readonly { parameters?: Record<string, unknown> }[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (created: number) => void;
@@ -35,6 +29,7 @@ export const SweepDialog = ({
   projectId,
   experimentId,
   parameterSpace,
+  runs = [],
   open,
   onOpenChange,
   onCreated,
@@ -64,7 +59,9 @@ export const SweepDialog = ({
       const seeded = await sweepApi.seed(projectId, experimentId, compiled.grid.axes);
       const created = seeded.created.length;
       toast.success(
-        created === 0 ? `${seeded.cells} cells already exist` : `${created} runs seeded`,
+        created === 0
+          ? `All ${seeded.cells} combinations already exist`
+          : `${created} runs created`,
       );
       onOpenChange(false);
       onCreated(created);
@@ -76,32 +73,32 @@ export const SweepDialog = ({
   };
 
   const cells = "grid" in compiled ? compiled.grid.cells : null;
+  // The server keeps existing cells; say how many are new before anything is sent.
+  const fresh = "grid" in compiled ? missingCellCount(compiled.grid.axes, runs) : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Sweep</DialogTitle>
-          <DialogDescription>
-            {cells === null
-              ? "One run per combination. Existing cells are kept."
-              : `${cells} run${cells === 1 ? "" : "s"}. Existing cells are kept.`}
-          </DialogDescription>
-        </DialogHeader>
-        <SweepAxesEditor drafts={drafts} disabled={busy} onChange={setDrafts} />
-        {error ? <p className="text-body text-destructive">{error}</p> : null}
-        <DialogFooter>
-          <WorkbenchAction
-            icon={<Check aria-hidden />}
-            kind="primary"
-            size="default"
-            disabled={busy || cells === null}
-            onClick={() => void submit()}
-          >
-            {busy ? "Seeding…" : "Seed runs"}
-          </WorkbenchAction>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <AppDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Sweep"
+      // Axes are typed value by value: ↵ must not seed a grid half-written.
+      submitOnEnter={false}
+      message={
+        cells === null || fresh === null
+          ? "One run per combination of the values below."
+          : `${cells} ${cells === 1 ? "combination" : "combinations"} · ${cells - fresh} already run · ${fresh} new`
+      }
+      size="wide"
+      primaryLabel={
+        fresh === null ? "Create runs" : `Create ${fresh} ${fresh === 1 ? "run" : "runs"}`
+      }
+      busyLabel="Creating…"
+      busy={busy}
+      primaryDisabled={cells === null || fresh === 0}
+      onPrimary={submit}
+      error={error}
+    >
+      <SweepAxesEditor drafts={drafts} disabled={busy} onChange={setDrafts} />
+    </AppDialog>
   );
 };

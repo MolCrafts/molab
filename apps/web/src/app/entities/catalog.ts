@@ -3,6 +3,7 @@
 // "jump to anything" surface — one list, every kind, ranked uniformly.
 
 import type { EntityRef } from "@/app/entities/kinds";
+import { runLabel } from "@/app/runs/runTitle";
 import type { WorkspaceSnapshot } from "@/app/types";
 
 /** The minimal knowledge-doc shape the catalog indexes (from listKnowledge). */
@@ -39,9 +40,7 @@ export const buildCatalog = (
     );
   }
   for (const r of snapshot.runs) {
-    entries.push(
-      entry({ kind: "run", id: r.id, label: r.name || r.id, status: r.status }, r.summary),
-    );
+    entries.push(entry({ kind: "run", id: r.id, label: runLabel(r), status: r.status }, r.summary));
   }
   for (const w of snapshot.workflows) {
     entries.push(entry({ kind: "workflow", id: w.id, label: w.name, status: w.status }, w.summary));

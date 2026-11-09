@@ -1,18 +1,9 @@
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  Input,
-  Label,
-} from "@molcrafts/ui";
-import { Check, Plus } from "lucide-react";
+import { Input, Label } from "@molcrafts/ui";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 import { projectsApi } from "@/api";
-import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
+import { AppDialog } from "@/components/dialog/AppDialog";
+import { WorkbenchIconAction } from "@/components/workbench";
 
 interface CreateProjectDialogProps {
   onProjectCreated: () => void;
@@ -39,8 +30,7 @@ export function CreateProjectDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
     if (writeDeniedReason) return;
     setIsLoading(true);
     setError(null);
@@ -61,20 +51,8 @@ export function CreateProjectDialog({
     }
   };
 
-  const dialog = (
-    <Dialog open={open} onOpenChange={setOpen}>
-      {showTrigger && !writeDeniedReason ? (
-        <DialogTrigger asChild>
-          <WorkbenchIconAction
-            label="New project"
-            kind="ghost"
-            className="h-control-compact w-control-compact"
-            aria-label="New project"
-          >
-            <Plus className="size-icon" />
-          </WorkbenchIconAction>
-        </DialogTrigger>
-      ) : null}
+  return (
+    <>
       {showTrigger && writeDeniedReason ? (
         <WorkbenchIconAction
           label="New project"
@@ -86,46 +64,35 @@ export function CreateProjectDialog({
           <Plus className="size-icon" />
         </WorkbenchIconAction>
       ) : null}
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Create Project</DialogTitle>
-          <DialogDescription className="sr-only">Create a project.</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={(e) => void handleSubmit(e)}>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
-              <Label htmlFor="name" className="text-left sm:text-right">
-                Name
-              </Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="col-span-3"
-                required
-              />
-            </div>
-            {error && (
-              <div className="text-body-lg text-status-failed-foreground col-span-4 text-center">
-                {error}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <WorkbenchAction
-              icon={<Check aria-hidden />}
-              kind="primary"
-              size="default"
-              type="submit"
-              disabled={isLoading}
+      <AppDialog
+        open={open}
+        onOpenChange={setOpen}
+        title="New project"
+        size="form"
+        primaryLabel="Create project"
+        busyLabel="Creating…"
+        busy={isLoading}
+        primaryDisabled={!name}
+        onPrimary={handleSubmit}
+        error={error}
+        trigger={
+          showTrigger && !writeDeniedReason ? (
+            <WorkbenchIconAction
+              label="New project"
+              kind="ghost"
+              className="h-control-compact w-control-compact"
+              aria-label="New project"
             >
-              {isLoading ? "Creating..." : "Create Project"}
-            </WorkbenchAction>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+              <Plus className="size-icon" />
+            </WorkbenchIconAction>
+          ) : undefined
+        }
+      >
+        <div className="grid gap-2">
+          <Label htmlFor="name">Name</Label>
+          <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
+        </div>
+      </AppDialog>
+    </>
   );
-
-  return dialog;
 }

@@ -1,6 +1,5 @@
 export type { EmptyStateDensity, EmptyStateProps } from "@molcrafts/ui";
 export { EmptyState } from "@molcrafts/ui";
-export type { StatusCountRollup } from "./Dashboard";
 export {
   CopyButton,
   DashboardCanvas,
@@ -19,13 +18,18 @@ export { DataTable } from "./DataTable";
 export type { BreakdownGroup, ScheduleItem } from "./Encodings";
 export {
   Histogram,
-  MagnitudeBar,
   Schedule,
   StatusBreakdown,
   StatusLegend,
 } from "./Encodings";
 export type { EntityPageTab } from "./EntityPage";
-export { EntityHeader, EntityMetric, EntityPage, KeyValueGrid } from "./EntityPage";
+export {
+  EntityHeader,
+  EntityPage,
+  KeyValueGrid,
+  type PropertyEntry,
+  PropertyList,
+} from "./EntityPage";
 export type { EntityTabItem } from "./EntityTabs";
 export { EntityTabBar, EntityTabContent, EntityTabs } from "./EntityTabs";
 export { EMPTY_COPY } from "./emptyStateCopy";
@@ -37,13 +41,7 @@ export {
   OverviewPage,
   OverviewSection,
 } from "./OverviewPage";
-export type { StatusBadgeProps, StatusBadgeSize, StatusTone } from "./StatusBadge";
+export type { StatusBadgeProps, StatusBadgeSize } from "./StatusBadge";
 export { StatusBadge } from "./StatusBadge";
-export {
-  StatusIcon,
-  type StatusIconTone,
-  type StatusKey,
-  statusIconMeta,
-  statusKey,
-} from "./StatusIcon";
-export { type CanonicalStatus, canonicalStatusFor } from "./status";
+export { StatusIcon } from "./StatusIcon";
+export { ViewLabel } from "./ViewLabel";

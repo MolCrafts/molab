@@ -89,6 +89,13 @@ export const activitySpec = (
             field: "y0",
             type: "quantitative",
             axis: {
+              // Which side is which: starts rise, finishes hang (L01 decision 4).
+              title: "finished ↓   started ↑",
+              titleFont: p.font,
+              titleFontSize: 11,
+              titleFontWeight: "normal",
+              titleColor: p.muted,
+              titlePadding: 8,
               labelExpr: "abs(datum.value)",
               tickCount: 4,
               tickMinStep: 1,
@@ -177,6 +184,40 @@ export const mixSpec = (p: OverviewPalette, rows: number): VegaLiteSpec => {
   });
 };
 
+export const STATUS_BAR_HEIGHT = 14;
+
+/**
+ * One group's status composition as a single stacked bar, for a Preview-width
+ * column (the mix layout needs ~560px for its labels). Counts are in the
+ * tooltip; the key under it names the colours.
+ */
+export const statusBarSpec = (p: OverviewPalette): VegaLiteSpec =>
+  asSpec({
+    height: STATUS_BAR_HEIGHT,
+    autosize: { type: "fit", contains: "padding" },
+    padding: 0,
+    data: { name: "mix" },
+    mark: { type: "bar", height: STATUS_BAR_HEIGHT, strokeWidth: 1 },
+    encoding: {
+      x: { field: "count", type: "quantitative", stack: "normalize", axis: null },
+      order: { field: "sorder" },
+      fill: {
+        condition: { test: "datum.outline", value: p.ground },
+        field: "color",
+        type: "nominal",
+        scale: null,
+        legend: null,
+      },
+      // An outlined state (queued) keeps its colour as the stroke, or it would vanish.
+      stroke: {
+        condition: { test: "datum.outline", field: "color", type: "nominal", scale: null },
+        value: p.ground,
+      },
+      tooltip,
+    },
+    config: baseConfig(p),
+  });
+
 // ── Durations per group ──────────────────────────────────────────────────────
 
 export const DURATION_ROW = 44;
@@ -257,69 +298,6 @@ export const durationSpec = (
     config: baseConfig(p),
   });
 };
-
-// ── Timeline ─────────────────────────────────────────────────────────────────
-
-export const TIMELINE_ROW = 24;
-
-/** When each run ran, on one clock, with a rule at now. Click opens the run. */
-export const timelineSpec = (
-  p: OverviewPalette,
-  rows: number,
-  window: { from: number; to: number },
-  /** Draw the dashed "now" rule — only while something is still going. */
-  showNow = true,
-): VegaLiteSpec =>
-  asSpec({
-    height: Math.max(1, rows) * TIMELINE_ROW,
-    autosize: { type: "fit", contains: "padding" },
-    padding: { left: 16, right: 8, top: 0, bottom: 0 },
-    data: { name: "spans" },
-    layer: [
-      {
-        params: [hoverParam],
-        mark: { type: "bar", height: 10, cornerRadius: 2, strokeWidth: 1 },
-        encoding: {
-          y: {
-            field: "label",
-            type: "nominal",
-            sort: { field: "order", op: "min" },
-            axis: groupAxis(p, 280),
-          },
-          x: {
-            field: "start",
-            type: "temporal",
-            scale: { domain: [window.from, window.to] },
-            axis: {
-              orient: "top",
-              format: clockFormat(window.to - window.from),
-              tickCount: 6,
-              grid: true,
-              gridOpacity: 0.6,
-              domain: false,
-              ticks: false,
-              labelPadding: 8,
-            },
-          },
-          x2: { field: "end" },
-          fill: { field: "color", type: "nominal", scale: null, legend: null },
-          stroke: { field: "color", type: "nominal", scale: null, legend: null },
-          opacity: emphasis,
-          tooltip,
-        },
-      },
-      ...(showNow
-        ? [
-            {
-              data: { values: [{}] },
-              mark: { type: "rule", strokeDash: [3, 3], color: p.ink, opacity: 0.7 },
-              encoding: { x: { datum: window.to, type: "temporal" } },
-            },
-          ]
-        : []),
-    ],
-    config: baseConfig(p),
-  });
 
 // ── Counts per category ──────────────────────────────────────────────────────
 
@@ -410,63 +388,294 @@ export const barsSpec = (
   });
 };
 
-// ── One run among its siblings ───────────────────────────────────────────────
+// ── Tasks on a clock ─────────────────────────────────────────────────────────
 
-export const POSITION_HEIGHT = 72;
+export const CLOCK_ROW = 24;
+/** What the time axis takes below the rows (label + padding). */
+export const CLOCK_AXIS = 18;
 
 /**
- * Every finished run of the experiment on one duration axis, the run on the
- * page drawn larger and ringed (its tooltip names it). Siblings recede; hover names them,
- * click opens them. `lane` stacks coincident dots.
+ * One attempt's tasks on its clock (L04): neutral bars, the status only as a
+ * mark at the end (a failure's red tick), live work in the running colour to
+ * now, and a word where a task that never started would be. Row labels live
+ * beside the chart (glyph + name), so the y axis draws nothing.
  */
-export const positionSpec = (p: OverviewPalette, axis: DurationAxis): VegaLiteSpec => {
+export const taskClockSpec = (
+  p: OverviewPalette,
+  rows: number,
+  window: { from: number; to: number },
+): VegaLiteSpec => {
+  const y = {
+    field: "order",
+    type: "ordinal",
+    scale: { paddingInner: 0, paddingOuter: 0 },
+    axis: null,
+  } as const;
   const x = {
-    type: "quantitative",
-    scale: { type: axis.log ? "log" : "linear", domain: axis.domain, nice: false, zero: false },
+    type: "temporal",
+    scale: { domain: [window.from, window.to] },
     axis: {
-      values: axis.ticks,
-      labelExpr: SPAN_EXPR("datum.value"),
+      orient: "bottom",
+      format: clockFormat(window.to - window.from),
+      tickCount: 5,
+      labelOverlap: "greedy",
+      labelSeparation: 12,
+      labelFlush: true,
       grid: true,
-      gridOpacity: 0.6,
+      gridOpacity: 0.5,
       domain: false,
       ticks: false,
       labelPadding: 8,
     },
   } as const;
-  const y = {
-    field: "lane",
-    type: "quantitative",
-    scale: { domain: [-4, 4] },
-    axis: null,
-  } as const;
   return asSpec({
-    height: POSITION_HEIGHT,
+    height: Math.max(1, rows) * CLOCK_ROW,
     autosize: { type: "fit", contains: "padding" },
-    padding: { left: 8, right: 8, top: 16, bottom: 0 },
-    data: { name: "siblings" },
+    // Fit takes the axis out of the height it is given (rows + CLOCK_AXIS), leaving 24px a row.
+    padding: { left: 0, right: 48, top: 0, bottom: 0 },
+    data: { name: "tasks" },
     layer: [
       {
         params: [hoverParam],
-        transform: [{ filter: "!datum.self" }],
-        mark: { type: "point", filled: true, size: 46, strokeWidth: 1.5, stroke: p.ground },
+        transform: [{ filter: "datum.bar" }],
+        mark: { type: "bar", height: 8, cornerRadius: 1 },
         encoding: {
-          x: { ...x, field: "seconds" },
           y,
-          fill: { field: "color", type: "nominal", scale: null, legend: null },
-          opacity: { condition: { param: "hover", empty: false, value: 1 }, value: 0.45 },
+          x: { ...x, field: "start" },
+          x2: { field: "end" },
+          fill: {
+            condition: { test: "datum.live", value: p.status.running },
+            value: p.muted,
+          },
+          fillOpacity: { condition: { test: "datum.live", value: 0.9 }, value: 0.45 },
+          opacity: emphasis,
+          tooltip,
+        },
+      },
+      {
+        transform: [{ filter: "datum.bar && datum.mark" }],
+        mark: { type: "tick", orient: "vertical", thickness: 2, size: 14 },
+        encoding: {
+          y,
+          x: { ...x, field: "end" },
+          color: { field: "mark", type: "nominal", scale: null, legend: null },
+          tooltip,
+        },
+      },
+      {
+        transform: [{ filter: "!datum.bar" }],
+        mark: { type: "text", align: "left", baseline: "middle", dx: 6, fontSize: 11 },
+        encoding: {
+          y,
+          x: { ...x, field: "anchor" },
+          text: { field: "note" },
+          color: { value: p.muted },
+        },
+      },
+    ],
+    config: baseConfig(p),
+  });
+};
+
+// ── One run among its siblings, on the swept axis ────────────────────────────
+
+export const SWEEP_HEIGHT = 168;
+
+/**
+ * The experiment's key result along its swept parameter (L04): one line per
+ * combination of the other varying values, the run's own line in the accent
+ * and its point ringed. A run without the result (failed, still going) sits
+ * at the top edge in its status colour. Hover names a run, click opens it.
+ */
+export const sweepSpec = (
+  p: OverviewPalette,
+  axis: { labels: string[]; log: boolean; domain: [number, number]; small: boolean },
+): VegaLiteSpec => {
+  // A quantitative axis over the swept values' order, labelled with the values:
+  // a discrete scale would size the chart by its own step instead of the column.
+  const x = {
+    field: "xOrder",
+    type: "quantitative",
+    scale: {
+      domain: [-0.25, Math.max(1, axis.labels.length - 1) + 0.25],
+      nice: false,
+      zero: false,
+    },
+    axis: {
+      values: axis.labels.map((_label, index) => index),
+      labelExpr: `${JSON.stringify(axis.labels)}[datum.value]`,
+      domain: false,
+      ticks: false,
+      grid: true,
+      gridOpacity: 0.5,
+      labelPadding: 8,
+    },
+  } as const;
+  const y = {
+    field: "plotY",
+    type: "quantitative",
+    scale: { type: axis.log ? "log" : "linear", domain: axis.domain, nice: false, zero: false },
+    axis: {
+      labelExpr:
+        axis.log || axis.small
+          ? "datum.value == 0 ? '0' : format(datum.value, '.1~e')"
+          : "format(datum.value, '~g')",
+      tickCount: 3,
+      grid: true,
+      gridOpacity: 0.5,
+      domain: false,
+      ticks: false,
+      labelPadding: 6,
+    },
+  } as const;
+  return asSpec({
+    height: SWEEP_HEIGHT,
+    autosize: { type: "fit", contains: "padding" },
+    padding: { left: 0, right: 96, top: 12, bottom: 0 },
+    data: { name: "points" },
+    layer: [
+      {
+        transform: [{ filter: "datum.y != null && !datum.own" }],
+        mark: { type: "line", strokeWidth: 1, color: p.muted, opacity: 0.55 },
+        encoding: { x, y, detail: { field: "series" } },
+      },
+      {
+        transform: [{ filter: "datum.y != null && datum.own" }],
+        mark: { type: "line", strokeWidth: 2, color: p.accent },
+        // One line per series: on an experiment's chart every series is "own".
+        encoding: { x, y, detail: { field: "series" } },
+      },
+      {
+        params: [hoverParam],
+        transform: [{ filter: "datum.y != null && !datum.self" }],
+        mark: { type: "point", filled: true, size: 28 },
+        encoding: {
+          x,
+          y,
+          fill: { condition: { test: "datum.own", value: p.accent }, value: p.muted },
+          opacity: emphasis,
           tooltip,
         },
       },
       {
         transform: [{ filter: "datum.self" }],
-        mark: { type: "point", filled: true, size: 150, strokeWidth: 3, stroke: p.ink },
+        mark: { type: "point", filled: true, size: 110, strokeWidth: 2.5, stroke: p.ink },
         encoding: {
-          x: { ...x, field: "seconds" },
-          y: { ...y, datum: 0 },
+          x,
+          y,
           fill: { field: "color", type: "nominal", scale: null, legend: null },
           tooltip,
         },
       },
+      {
+        transform: [{ filter: "datum.label != null" }],
+        mark: {
+          type: "text",
+          align: "left",
+          baseline: "middle",
+          dx: 8,
+          fontSize: 10,
+          font: MONO_FONT,
+        },
+        encoding: {
+          x,
+          y,
+          text: { field: "label" },
+          color: { condition: { test: "datum.own", value: p.ink }, value: p.muted },
+        },
+      },
+    ],
+    config: baseConfig(p),
+  });
+};
+
+// ── One result across compared runs ─────────────────────────────────────────
+
+export const COMPARE_ROW = 28;
+
+/**
+ * One result per compared run (L05-5): a bar per run on one axis — log when it
+ * spans decades — a dashed rule at the baseline's value, and the value printed
+ * past the bar. A run without the result says so in words where its bar would
+ * be. Hover names the run, click opens its Preview.
+ */
+export const compareBarsSpec = (
+  p: OverviewPalette,
+  rows: number,
+  axis: { domain: [number, number]; log: boolean; baseline: number | null },
+): VegaLiteSpec => {
+  const y = {
+    field: "label",
+    type: "nominal",
+    sort: { field: "order", op: "min" },
+    axis: { ...groupAxis(p, 240), labelFont: MONO_FONT, labelFontSize: 11 },
+  } as const;
+  const x = {
+    type: "quantitative",
+    scale: { type: axis.log ? "log" : "linear", domain: axis.domain, nice: false, zero: !axis.log },
+    axis: {
+      labelExpr:
+        axis.log || Math.abs(axis.domain[1]) < 1e-2
+          ? "datum.value == 0 ? '0' : format(datum.value, '.1~e')"
+          : "format(datum.value, '~g')",
+      tickCount: 4,
+      grid: true,
+      gridOpacity: 0.5,
+      domain: false,
+      ticks: false,
+      labelPadding: 6,
+    },
+  } as const;
+  return asSpec({
+    height: Math.max(1, rows) * COMPARE_ROW,
+    autosize: { type: "fit", contains: "padding" },
+    padding: { left: 0, right: 80, top: 4, bottom: 0 },
+    data: { name: "bars" },
+    layer: [
+      {
+        params: [hoverParam],
+        transform: [{ filter: "datum.value != null" }],
+        mark: { type: "bar", height: 10, cornerRadius: 1, color: p.accent },
+        encoding: {
+          y,
+          x: { ...x, field: "value" },
+          x2: { datum: axis.domain[0] },
+          opacity: emphasis,
+          tooltip,
+        },
+      },
+      {
+        transform: [{ filter: "datum.value != null" }],
+        mark: {
+          type: "text",
+          align: "left",
+          baseline: "middle",
+          dx: 6,
+          fontSize: 10,
+          font: MONO_FONT,
+          color: p.ink,
+        },
+        encoding: { y, x: { ...x, field: "value" }, text: { field: "printed" } },
+      },
+      {
+        transform: [{ filter: "datum.value == null" }],
+        mark: { type: "text", align: "left", baseline: "middle", dx: 4, fontSize: 11 },
+        encoding: {
+          y,
+          x: { ...x, datum: axis.domain[0] },
+          text: { field: "printed" },
+          color: { field: "color", type: "nominal", scale: null, legend: null },
+        },
+      },
+      ...(axis.baseline === null
+        ? []
+        : [
+            {
+              data: { values: [{}] },
+              mark: { type: "rule", strokeDash: [3, 3], color: p.ink, opacity: 0.6 },
+              encoding: { x: { ...x, datum: axis.baseline } },
+            },
+          ]),
     ],
     config: baseConfig(p),
   });

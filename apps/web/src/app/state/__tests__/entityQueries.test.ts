@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { artifactPreviewText, journalRefetchInterval, runKeys } from "@/app/state/entityQueries";
+import {
+  artifactPreviewText,
+  journalRefetchInterval,
+  runKeys,
+  structurePreviewText,
+} from "@/app/state/entityQueries";
 import { getWorkspaceQueryScope } from "../workspaceSwitchEvents";
 
 describe("runKeys.journal", () => {
@@ -60,5 +65,17 @@ describe("artifactPreviewText", () => {
 
   it("caps the preview at 300 000 characters", () => {
     expect(artifactPreviewText("x".repeat(300_001))).toHaveLength(300_000);
+  });
+});
+
+describe("structurePreviewText", () => {
+  it("keeps a structure that the log preview would cut", () => {
+    const text = "BOND\n".repeat(80_000);
+    expect(text.length).toBeGreaterThan(300_000);
+    expect(structurePreviewText(text)).toBe(text);
+  });
+
+  it("refuses a structure past the whole-file limit", () => {
+    expect(() => structurePreviewText("x".repeat(8_000_001))).toThrow(/preview limit/);
   });
 });

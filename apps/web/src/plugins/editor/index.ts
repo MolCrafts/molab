@@ -1,7 +1,7 @@
 /**
- * Internal `editor` UI plugin — peer of `molvis`, `molq`, `metrics`,
- * `tensorboard`. Owns the `panelKind:"editor"` renderer slot for workspace
- * files, which used to be registered by `core` (`registerDefaultRenderers`).
+ * Internal `editor` UI plugin — peer of `molvis`, `molq`, `metrics`. Owns the
+ * `panelKind:"editor"` renderer slot for workspace files, which used to be
+ * registered by `core` (`registerDefaultRenderers`).
  *
  * Extension point: the editor registers each contribution under a stable,
  * non-colliding id (`editor:default:<registryKey>`) with an explicit low

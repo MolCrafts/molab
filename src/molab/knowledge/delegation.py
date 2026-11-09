@@ -7,7 +7,8 @@ the worker attempts made so far. A supervising agent (Tack) reads and writes
 it; molab only validates and stores it. The narrative is the human summary.
 
 The record is the frontmatter of the document, minus the keys every document
-carries (``class`` / ``name`` / ``created_by`` / ``tags`` / ``status``). A
+carries (``class`` / ``name`` / ``created_by`` / ``created_at`` / ``tags`` /
+``status``). A
 document-level ``status`` is the lifecycle status shared with Note; the
 delegation's own lifecycle is ``state``: ``open`` and ``waiting`` (on compute)
 take steps, ``blocked`` waits on a person (its ``questions``), ``paused`` is

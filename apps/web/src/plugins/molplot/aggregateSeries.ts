@@ -1,7 +1,7 @@
 import type { LineChartConfig, LineSeriesConfig } from "@/plugins/molplot";
 import { smoothEma } from "@/plugins/molplot/smoothing";
 
-import { PALETTE, type ScalarSeries } from "./RunMetricsView";
+import { PALETTE, type ScalarSeries } from "./scalar-series";
 
 /**
  * Pure builders for Mode-A multi-run metrics aggregation: take per-run scalar
@@ -116,7 +116,7 @@ const sampleStd = (xs: number[]): number => {
   return Math.sqrt(variance);
 };
 
-/** Shared axis / theme block, mirroring RunMetricsView's chart config. */
+/** Shared axis / theme block of every overlay config. */
 const X_LABEL: Record<XMode, string> = {
   step: "step",
   wall: "wall time",

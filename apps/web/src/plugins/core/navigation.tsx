@@ -1,6 +1,5 @@
 import type { PluginAPI } from "@molcrafts/molab-plugin";
 import {
-  Activity,
   Archive,
   Blocks,
   FolderTree,
@@ -8,7 +7,6 @@ import {
   LayoutDashboard,
   PlayCircle,
   Settings,
-  Workflow,
 } from "lucide-react";
 import type { NavigationContribution } from "@/app/navigation/sections";
 import { lazyWithPrefetch } from "@/lib/lazy-with-prefetch";
@@ -25,11 +23,10 @@ const ComparePane = lazyWithPrefetch(() =>
 const SettingsPage = lazyWithPrefetch(() =>
   import("@/app/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })),
 );
-const ActivityPage = lazyWithPrefetch(() =>
-  import("@/app/runs/ActivityPage").then((module) => ({ default: module.ActivityPage })),
-);
-const WorkflowsPage = lazyWithPrefetch(() =>
-  import("@/app/workflows/WorkflowsPage").then((module) => ({ default: module.WorkflowsPage })),
+const SettingsExplorer = lazyWithPrefetch(() =>
+  import("@/app/settings/SettingsExplorer").then((module) => ({
+    default: module.SettingsExplorer,
+  })),
 );
 const RunsExplorer = lazyWithPrefetch(() =>
   import("@/app/runs/RunsExplorer").then((module) => ({ default: module.RunsExplorer })),
@@ -42,6 +39,9 @@ const DashboardExplorer = lazyWithPrefetch(() =>
 const AssetsExplorer = lazyWithPrefetch(() =>
   import("@/app/assets/AssetsExplorer").then((module) => ({ default: module.AssetsExplorer })),
 );
+const AssetsLanding = lazyWithPrefetch(() =>
+  import("@/app/assets/AssetsLanding").then((module) => ({ default: module.AssetsLanding })),
+);
 const FilesExplorer = lazyWithPrefetch(() =>
   import("@/app/files/FilesExplorer").then((module) => ({ default: module.FilesExplorer })),
 );
@@ -50,22 +50,12 @@ const ProjectsExplorer = lazyWithPrefetch(() =>
     default: module.ProjectsExplorer,
   })),
 );
-const WorkflowExplorer = lazyWithPrefetch(() =>
-  import("@/app/workflows/WorkflowExplorer").then((module) => ({
-    default: module.WorkflowExplorer,
-  })),
-);
-const ActivityExplorer = lazyWithPrefetch(() =>
-  import("@/app/runs/ActivityExplorer").then((module) => ({
-    default: module.ActivityExplorer,
-  })),
-);
 
 export const CORE_NAVIGATION: readonly NavigationContribution[] = [
   {
     id: "dashboard",
     label: "Dashboard",
-    explorerTitle: "Workspace",
+    explorerTitle: "Dashboard",
     breadcrumbLabel: "Dashboard",
     icon: LayoutDashboard,
     route: "/",
@@ -139,10 +129,7 @@ export const CORE_NAVIGATION: readonly NavigationContribution[] = [
     order: 60,
     shellMode: "explorer",
     explorer: AssetsExplorer,
-    emptySelection: {
-      title: "No asset selected",
-      description: "Choose an asset from the explorer to inspect its metadata and files.",
-    },
+    landing: AssetsLanding,
     retainSelectionFor: ["asset"],
     matches: (pathname) => pathname.startsWith("/assets"),
   },
@@ -173,40 +160,11 @@ export const CORE_NAVIGATION: readonly NavigationContribution[] = [
     route: "/settings",
     placement: "management",
     order: 80,
-    shellMode: "rail-only",
+    shellMode: "explorer",
+    explorer: SettingsExplorer,
     landing: SettingsPage,
     retainSelectionFor: [],
     matches: (pathname) => pathname.startsWith("/settings"),
-  },
-  {
-    id: "activity",
-    label: "Activity",
-    explorerTitle: "Activity",
-    breadcrumbLabel: "Activity",
-    icon: Activity,
-    route: "/activity",
-    placement: "legacy",
-    order: 90,
-    shellMode: "explorer",
-    explorer: ActivityExplorer,
-    landing: ActivityPage,
-    retainSelectionFor: [],
-    matches: (pathname) => pathname.startsWith("/activity"),
-  },
-  {
-    id: "workflow",
-    label: "Workflows",
-    explorerTitle: "Workflows",
-    breadcrumbLabel: "Workflows",
-    icon: Workflow,
-    route: "/workflows",
-    placement: "legacy",
-    order: 100,
-    shellMode: "explorer",
-    explorer: WorkflowExplorer,
-    landing: WorkflowsPage,
-    retainSelectionFor: ["workflow"],
-    matches: (pathname) => pathname.startsWith("/workflows"),
   },
 ];
 

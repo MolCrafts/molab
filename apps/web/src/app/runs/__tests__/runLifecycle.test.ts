@@ -60,6 +60,18 @@ describe("executionModeOptions", () => {
     expect(options.map((option) => option.enabled)).toEqual([false, false, false, false]);
     expect(options[1]?.reason ?? "").toContain("cancel");
   });
+
+  it("refuses a new attempt while another attempt is still active", () => {
+    const options = executionModeOptions({
+      attempts: 2,
+      basedOnStatus: "succeeded",
+      blockingExecutionId: "e04",
+    });
+    expect(options.map((option) => option.enabled)).toEqual([false, false, false, false]);
+    expect(options[1]?.reason ?? "").toContain("e04");
+    expect(options[1]?.reason ?? "").toContain("still running");
+    expect(options[3]?.reason ?? "").toContain("e04");
+  });
 });
 
 describe("defaultExecutionMode", () => {
@@ -87,9 +99,11 @@ describe("bypassCacheFor", () => {
 
 describe("canCancel", () => {
   it("stops an active attempt, including queued and finalizing", () => {
-    for (const status of ["queued", "pending", "running", "finalizing", "QUEUED"]) {
+    for (const status of ["queued", "running", "finalizing", "QUEUED"]) {
       expect(canCancel(status)).toBe(true);
     }
+    // A run that has not started has no attempt to stop.
+    expect(canCancel("pending")).toBe(false);
     for (const status of ["succeeded", "failed", "cancelled", "interrupted", "skipped"]) {
       expect(canCancel(status)).toBe(false);
     }

@@ -8,12 +8,14 @@ import {
   Check,
   ChevronsLeftRight,
   CloudOff,
-  HardDrive,
+  GitCommitHorizontal,
   Info,
+  Laptop,
   Loader2,
   RefreshCw,
   Server,
   X,
+  XCircle,
 } from "lucide-react";
 import { type JSX, type ReactNode, useEffect, useRef, useState } from "react";
 import { getWorkspaceQueryScope } from "@/app/state/workspaceSwitchEvents";
@@ -41,7 +43,25 @@ export interface WorkbenchStatusStripProps {
   onReconnect?: () => void;
   /** Right-aligned plugin status-bar items. */
   extras?: ReactNode;
+  /**
+   * Runs that need attention (failed / interrupted). Zero hides the item;
+   * the click opens the workspace Runs table filtered to them (L00).
+   */
+  attention?: { count: number; onOpen: () => void } | null;
+  /** When the workspace was last read; shown while nothing else is reporting. */
+  lastSyncedAt?: Date | null;
 }
+
+const LOADING_TIP = "Loading workspace…";
+
+const relativeAge = (since: Date, now: number): string => {
+  const seconds = Math.max(0, Math.round((now - since.getTime()) / 1000));
+  if (seconds < 45) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+};
 
 interface CacheStatus {
   cached: boolean;
@@ -161,6 +181,8 @@ export const WorkbenchStatusStrip = ({
   activeWorkspace = null,
   onReconnect,
   extras,
+  attention = null,
+  lastSyncedAt = null,
 }: WorkbenchStatusStripProps): JSX.Element => {
   const { activity, dismissActivity } = useStatusMessage();
   const cacheQuery = useQuery({
@@ -210,6 +232,9 @@ export const WorkbenchStatusStrip = ({
   // full fetch. progress=0 is sticky in the status bus; the strip maps 0 →
   // indeterminate so the bar shimmers instead of freezing as a zero-width fill.
   const wasRefreshing = useRef(false);
+  // The tip on the line now, so the end of a load clears only its own tip.
+  const activityText = useRef(activity.text);
+  activityText.current = activity.text;
   useEffect(() => {
     if (isRemoteIndexing(cacheStatus)) {
       // Remote index owns the line — keep refresh edge tracking in sync so we
@@ -221,18 +246,18 @@ export const WorkbenchStatusStrip = ({
       if (!wasRefreshing.current) {
         // progress=0 keeps the tip sticky (no 5s auto-clear); strip treats 0
         // as indeterminate so the bar shimmers instead of freezing at 0%.
-        reportStatus("Loading workspace…", "info", 0);
+        reportStatus(LOADING_TIP, "info", 0);
       }
       wasRefreshing.current = true;
       return;
     }
     if (wasRefreshing.current) {
       wasRefreshing.current = false;
-      // Replace the bootstrap tip (auto-clears). Avoid dismissActivity — it
-      // would also wipe an unrelated warning/error that landed mid-refresh.
-      reportStatus("Workspace ready", "success");
+      // A finished load says nothing (retrofit R4: no “Workspace ready”); clear
+      // only the bootstrap tip — a warning that landed mid-refresh stays.
+      if (activityText.current === LOADING_TIP) dismissActivity();
     }
-  }, [isRefreshing, cacheStatus]);
+  }, [isRefreshing, cacheStatus, dismissActivity]);
 
   const remoteBusy = isRemoteIndexing(cacheStatus);
   const remotePercent: number | undefined = (() => {
@@ -298,7 +323,8 @@ export const WorkbenchStatusStrip = ({
     hasWorkspace: Boolean(activeWorkspace),
   });
   const WorkspaceIcon =
-    unreachable && !needsAuth ? CloudOff : activeWorkspace?.isRemote ? Server : HardDrive;
+    unreachable && !needsAuth ? CloudOff : activeWorkspace?.isRemote ? Server : Laptop;
+  const disconnected = unreachable && !needsAuth;
 
   const host = activeWorkspace ? parseHostQualifiedLabel(activeWorkspace.label)?.host : null;
   const connectionLabel = activeWorkspace?.isRemote
@@ -308,18 +334,26 @@ export const WorkbenchStatusStrip = ({
       : "Open folder";
 
   return (
-    <div
+    <footer
       className={cn(
-        "flex h-6 shrink-0 items-center border-t border-border bg-statusbar text-statusbar-foreground",
+        "flex h-shell-status shrink-0 items-center border-t border-border bg-statusbar text-statusbar-foreground",
+        // A lost connection turns the whole line red (VS Code's offline status bar).
+        disconnected && "border-destructive bg-destructive text-destructive-foreground",
         className,
       )}
+      data-shell-region="statusbar"
     >
       <div className="flex h-full min-w-0 shrink-0 items-center">
         <Popover open={statusOpen} onOpenChange={setStatusOpen}>
           <PopoverTrigger asChild>
             <Button
               variant="ghost"
-              className="h-full max-w-52 gap-2 rounded-none border-0 bg-accent px-2 text-micro text-accent-foreground hover:bg-accent-hover hover:text-accent-foreground"
+              className={cn(
+                "h-full max-w-52 gap-2 rounded-none border-0 px-2 text-micro",
+                disconnected
+                  ? "bg-transparent text-destructive-foreground hover:bg-destructive-foreground/15 hover:text-destructive-foreground"
+                  : "bg-accent text-accent-foreground hover:bg-accent-hover hover:text-accent-foreground",
+              )}
               aria-label={`${connectionLabel} — ${connection.label}. Connection status`}
               title={`${connectionLabel} — ${connection.label}`}
             >
@@ -328,7 +362,7 @@ export const WorkbenchStatusStrip = ({
               ) : activeWorkspace?.isRemote ? (
                 <ChevronsLeftRight className="size-3.5 shrink-0" aria-hidden />
               ) : (
-                <HardDrive className="size-3.5 shrink-0" aria-hidden />
+                <Laptop className="size-3.5 shrink-0" aria-hidden />
               )}
               <span className="truncate">{connectionLabel}</span>
             </Button>
@@ -414,6 +448,16 @@ export const WorkbenchStatusStrip = ({
               {lineText}
             </span>
           </div>
+        ) : lastSyncedAt ? (
+          // Icon only (retrofit R4); the words are the tooltip.
+          <span
+            role="img"
+            aria-label={`Synced ${relativeAge(lastSyncedAt, Date.now())}`}
+            className="flex items-center text-statusbar-foreground"
+            title={`Synced ${relativeAge(lastSyncedAt, Date.now())} · read at ${lastSyncedAt.toLocaleTimeString()}`}
+          >
+            <GitCommitHorizontal className="size-3.5 shrink-0" aria-hidden />
+          </span>
         ) : (
           <div className="min-w-0 max-w-[40%]" />
         )}
@@ -433,7 +477,22 @@ export const WorkbenchStatusStrip = ({
           </span>
         ) : null}
       </div>
+      {attention && attention.count > 0 ? (
+        <button
+          type="button"
+          className="flex h-full shrink-0 items-center gap-1 px-2 text-micro tabular-nums hover:bg-statusbar-foreground/10"
+          title={`${attention.count} ${attention.count === 1 ? "run needs" : "runs need"} attention — show them`}
+          aria-label={`${attention.count} runs need attention`}
+          onClick={attention.onOpen}
+        >
+          <XCircle
+            className={cn("size-3.5 shrink-0", !disconnected && "text-status-failed")}
+            aria-hidden
+          />
+          {attention.count}
+        </button>
+      ) : null}
       {extras ? <div className="flex shrink-0 items-center gap-1 px-1">{extras}</div> : null}
-    </div>
+    </footer>
   );
 };

@@ -35,6 +35,8 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .record import COMMON_KEYS
+
 if TYPE_CHECKING:
     from molab.fs import FileSystem
 
@@ -89,7 +91,6 @@ _VERSIONED_RE = re.compile(r"[-_ ]v\d+$", re.I)
 _ANCHOR_RE = re.compile(r"molab:(?:asset/[0-9a-f-]+|experiment/[0-9a-z-]+/run/[0-9a-z-]+)")
 
 _PLANNING_RECORD_ROLES = frozenset({"roadmap", "todo", "milestone"})
-_COMMON_KEYS = frozenset({"class", "name", "created_by", "tags", "status"})
 
 
 @dataclass(frozen=True)
@@ -103,7 +104,7 @@ class ContentIssue:
 
 
 def _record(doc: Concept) -> dict[str, object]:
-    return {key: value for key, value in doc.frontmatter().items() if key not in _COMMON_KEYS}
+    return {key: value for key, value in doc.frontmatter().items() if key not in COMMON_KEYS}
 
 
 def _record_issue(doc: Concept) -> ContentIssue | None:

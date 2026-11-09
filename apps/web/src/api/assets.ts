@@ -52,4 +52,24 @@ export const assetsApi = {
     projectAssetView(await ProjectsService.getProjectAsset(projectId, assetId)),
   downloadUrl: (projectId: string, assetId: string): string =>
     `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/download`,
+  /** The asset's bytes as text, cut at `limit` characters (`partial` when cut). */
+  getText: async (
+    projectId: string,
+    assetId: string,
+    limit: number,
+  ): Promise<{ text: string; partial: boolean }> => {
+    const response = await fetch(assetsApi.downloadUrl(projectId, assetId), {
+      credentials: "same-origin",
+    });
+    if (!response.ok) {
+      throw new Error(`Could not read the asset (HTTP ${response.status})`);
+    }
+    const text = await response.text();
+    return text.length > limit
+      ? { text: text.slice(0, limit), partial: true }
+      : { text, partial: false };
+  },
+  /** Import a file already in the served workspace as a project asset. */
+  importFile: async (projectId: string, name: string, path: string): Promise<ApiAssetResponse> =>
+    projectAssetView(await ProjectsService.importProjectAsset(projectId, { name, path })),
 };

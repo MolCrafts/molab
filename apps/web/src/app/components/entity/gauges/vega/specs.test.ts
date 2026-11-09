@@ -4,10 +4,11 @@ import { describe, expect, it } from "@rstest/core";
 import {
   activitySpec,
   barsSpec,
+  compareBarsSpec,
   durationSpec,
   mixSpec,
-  positionSpec,
-  timelineSpec,
+  sweepSpec,
+  taskClockSpec,
 } from "./chartSpecs";
 import { brushedWindow, clickedKey, type OverviewPalette } from "./common";
 import { DIAL, dialRows, dialSpec, rangeSpec, unitSpec } from "./instrumentSpecs";
@@ -15,7 +16,8 @@ import { DIAL, dialRows, dialSpec, rangeSpec, unitSpec } from "./instrumentSpecs
 const palette: OverviewPalette = {
   status: {
     running: "rgb(0, 0, 255)",
-    pending: "rgb(100, 100, 140)",
+    queued: "rgb(100, 100, 140)",
+    interrupted: "rgb(200, 150, 0)",
     succeeded: "rgb(0, 160, 0)",
     failed: "rgb(220, 0, 0)",
     cancelled: "rgb(120, 120, 120)",
@@ -43,8 +45,20 @@ describe("overview chart specs", () => {
     ["activity", activitySpec(palette, window)],
     ["status mix", mixSpec(palette, 3)],
     ["durations", durationSpec(palette, { ...axis, log: true }, ["NVE Drift", "Protein Folding"])],
-    ["timeline", timelineSpec(palette, 5, window)],
-    ["position among siblings", positionSpec(palette, axis)],
+    ["tasks on a clock", taskClockSpec(palette, 3, window)],
+    [
+      "compare bars",
+      compareBarsSpec(palette, 3, { domain: [1e-5, 1e-3], log: true, baseline: 3e-5 }),
+    ],
+    [
+      "sweep",
+      sweepSpec(palette, {
+        labels: ["0.5 fs", "1 fs"],
+        log: true,
+        domain: [1e-5, 1e-3],
+        small: true,
+      }),
+    ],
   ])("%s compiles to Vega", async (_name, spec) => {
     await expect(compileVegaLite(spec)).resolves.toBeTruthy();
   });
@@ -54,9 +68,6 @@ describe("overview chart specs", () => {
     expect(await signalNames(mixSpec(palette, 2))).toEqual(expect.arrayContaining(["hover"]));
     expect(await signalNames(activitySpec(palette, window))).toEqual(
       expect.arrayContaining(["hover", "brush"]),
-    );
-    expect(await signalNames(timelineSpec(palette, 2, window))).toEqual(
-      expect.arrayContaining(["hover"]),
     );
   });
 });

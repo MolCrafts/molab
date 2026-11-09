@@ -1,13 +1,15 @@
 /**
- * Status-bar façade — same call sites as a toast API, but every message
- * lands in the bottom workbench status strip (MolVis-aligned).
+ * One feedback API, two channels (L13-8). An error, or a result that offers
+ * a follow-up `action`, becomes a notification bottom-right; a plain
+ * confirmation ("Copied") stays a one-line report in the status bar.
  *
- * Call `toast("Copied")` or `toast.error("…")` from anywhere. There is no
- * floating card host; {@link ToastProvider} is a passthrough for legacy mounts.
+ * Call `toast("Copied")`, `toast.success("Attempt e02 created", { action })`
+ * or `toast.error("…")` from anywhere.
  */
 
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 
+import { pushNotification, routeOf } from "@/components/notifications/notificationStore";
 import { reportStatus, type StatusReportType } from "@/lib/status-report";
 
 export type ToastKind = "default" | "success" | "error";
@@ -20,7 +22,7 @@ export interface ToastAction {
 export interface ToastOptions {
   kind?: ToastKind;
   durationMs?: number;
-  /** Ignored — status bar is one-line; keep for call-site compatibility. */
+  /** A follow-up ("Open attempt") — makes the message a notification. */
   action?: ToastAction;
 }
 
@@ -38,10 +40,15 @@ function kindToType(kind: ToastKind | undefined): StatusReportType {
 function push(message: string, options?: ToastOptions): void {
   const text = message.trim();
   if (!text) return;
-  reportStatus(text, kindToType(options?.kind));
+  const kind = options?.kind ?? "default";
+  if (routeOf(kind, Boolean(options?.action)) === "notification") {
+    pushNotification({ kind, message: text, action: options?.action }, options?.durationMs);
+    return;
+  }
+  reportStatus(text, kindToType(kind));
 }
 
-/** Imperative API (usable outside React trees). Routes to the status bus. */
+/** Imperative API (usable outside React trees). */
 export const toast: ToastFn = Object.assign(
   (message: string, options?: ToastOptions) => {
     push(message, options);

@@ -5,10 +5,12 @@ The workspace validator holds the tree to the layout law and does not know
 checks what lives inside it, at every host (the root, each project,
 experiment and run):
 
-* ``knowledge.class`` (error) — a document whose frontmatter has no ``class:``
+* ``knowledge.class`` (error) — a document whose record has no ``class:``
   or names a class that is not a knowledge class.
 * ``knowledge.stray`` (error) — an entry of ``knowledges/`` that is not a
-  markdown document (a directory, a data file).
+  document (``.md`` / ``.html``) or the ``figs/`` figure directory.
+* ``knowledge.duplicate`` (error) — two documents with one stem (``a.md``
+  beside ``a.html``): one name, one file.
 * the content rules of :mod:`molab.knowledge.content_rules` — malformed
   records, campaign gaps, uncited planning documents, missing experiments,
   links that leave the workspace, Literature without bibliographic fields.
@@ -32,7 +34,7 @@ from typing import TYPE_CHECKING
 from molab.fs import FileSystem, LocalFS, PathArg
 
 from .content_rules import CONTENT_RULE_HINTS, content_issues
-from .naming import KNOWLEDGE_CONTAINER, is_knowledge_file
+from .naming import KNOWLEDGE_CONTAINER, KNOWLEDGE_MEDIA_DIR, is_knowledge_file, knowledge_stem
 
 if TYPE_CHECKING:
     from molab.workspace import Workspace
@@ -40,6 +42,7 @@ if TYPE_CHECKING:
 __all__ = [
     "RULE_HINTS",
     "classify_document",
+    "duplicate_documents",
     "known_classes",
     "validate_knowledge",
 ]
@@ -52,8 +55,13 @@ RULE_HINTS: dict[str, str] = {
         "(Note, Literature, Report, Finding, Plan, Roadmap, Todo, Milestone, Observation, or Delegation)."
     ),
     "knowledge.stray": (
-        "knowledges/ holds markdown documents only. Keep data with the run that "
-        "made it (`molab runs adopt`) or import it as an asset (`molab asset import`)."
+        "knowledges/ holds documents (<slug>.md or <slug>.html) and figs/ only. Keep data "
+        "with the run that made it (`molab runs adopt`) or import it as an asset "
+        "(`molab asset import`)."
+    ),
+    "knowledge.duplicate": (
+        "A document name has one file: keep either <slug>.md or <slug>.html and "
+        "delete the other (`molab knowledge delete`)."
     ),
     "knowledge.section_drift": (
         "The index.knowledges section disagrees with the documents; run `molab index sync`."
@@ -72,11 +80,29 @@ def known_classes() -> frozenset[str]:
 def classify_document(name: str, is_dir: bool) -> str | None:
     """Whether *name* may sit in a ``knowledges/`` container; the rule it breaks.
 
-    Pure: the content (its ``class:``) is judged separately.
+    A document file and the ``figs/`` directory may. Pure: the content (its
+    ``class:``) is judged separately.
     """
-    if is_dir or not is_knowledge_file(name):
+    if is_dir:
+        return None if name == KNOWLEDGE_MEDIA_DIR else "knowledge.stray"
+    if not is_knowledge_file(name):
         return "knowledge.stray"
     return None
+
+
+def duplicate_documents(names: Iterable[str], name: str) -> list[str]:
+    """The entries of *names* that share *name*'s document stem, *name* excluded.
+
+    ``a.md`` and ``a.html`` are one document name stored twice.
+    """
+    if not is_knowledge_file(name):
+        return []
+    stem = knowledge_stem(name)
+    return sorted(
+        other
+        for other in names
+        if other != name and is_knowledge_file(other) and knowledge_stem(other) == stem
+    )
 
 
 def _issue(root: str, path: str, rule: str, detail: str, severity: str) -> dict[str, str]:
@@ -91,16 +117,18 @@ def _issue(root: str, path: str, rule: str, detail: str, severity: str) -> dict[
     }
 
 
-def class_problem(text: str) -> str | None:
-    """Why *text* is not a knowledge document of a known class, or ``None``."""
+def class_problem(text: str, *, path: object = None) -> str | None:
+    """Why *text* (the document at *path*) is not of a known class, or ``None``."""
     from .frontmatter import split_frontmatter
+    from .naming import is_html_document
 
-    meta, _body = split_frontmatter(text)
+    meta, _body = split_frontmatter(text, path=path)
+    head = "record" if path is not None and is_html_document(path) else "frontmatter"
     declared = meta.get("class")
     if not isinstance(declared, str) or not declared:
-        return "frontmatter has no class:"
+        return f"{head} has no class:"
     if declared not in known_classes():
-        return f"frontmatter class {declared!r} is not one of {sorted(known_classes())}"
+        return f"{head} class {declared!r} is not one of {sorted(known_classes())}"
     return None
 
 
@@ -189,16 +217,23 @@ def validate_knowledge(
             entries = disk.ls(container, A=True, l=True)
         except OSError:
             entries = []
+        names = [entry.name for entry in entries if not entry.is_dir]
         for entry in sorted(entries, key=lambda item: item.name):
             path = disk.join(container, entry.name)
             rule = classify_document(entry.name, entry.is_dir)
             if rule is not None:
                 kind = "directory" if entry.is_dir else "file"
                 issues.append(
-                    _issue(base, path, rule, f"{entry.name!r} is not a markdown {kind}", "error")
+                    _issue(base, path, rule, f"{entry.name!r} is not a document {kind}", "error")
                 )
                 continue
-            problem = class_problem(read_text_or_none(path, fs=disk) or "")
+            if entry.is_dir:
+                continue
+            twins = duplicate_documents(names, entry.name)
+            if twins:
+                detail = f"{entry.name!r} and {', '.join(map(repr, twins))} are one document name"
+                issues.append(_issue(base, path, "knowledge.duplicate", detail, "error"))
+            problem = class_problem(read_text_or_none(path, fs=disk) or "", path=path)
             if problem is not None:
                 issues.append(_issue(base, path, "knowledge.class", problem, "error"))
             else:

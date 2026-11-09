@@ -172,7 +172,7 @@ Click any run in the tree to open the run page:
 - **Logs** — captured stdout/stderr per attempt, with a "view latest"
   shortcut.
 
-Result-type plugins (e.g. LAMMPS logs, TensorBoard) contribute extra
+Result-type plugins (e.g. MolPlot for LAMMPS logs, MolVis for structures) contribute extra
 tabs automatically when matching files exist in the run directory.
 
 For a fleet-level view, switch to the **Runs** panel and filter the

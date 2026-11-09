@@ -5,7 +5,6 @@
  * only shared chrome, accessibility, and layout behavior.
  */
 import {
-  Button,
   ContextMenu,
   ContextMenuContent,
   ContextMenuTrigger,
@@ -13,8 +12,11 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
   ScrollArea,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
 } from "@molcrafts/ui";
-import type { ComponentType, JSX, ReactNode, SVGProps } from "react";
+import type { ButtonHTMLAttributes, ComponentType, JSX, ReactNode, SVGProps } from "react";
 import { cn } from "@/lib/utils";
 
 export interface LeftIconRailItem {
@@ -33,67 +35,97 @@ export interface LeftIconRailProps {
   onSelect: (id: string) => void;
   /** Optional item pinned to the bottom of the rail. */
   footer?: LeftIconRailItem | null;
+  /** Controls above the footer item (the account menu). */
+  footerSlot?: ReactNode;
   ariaLabel?: string;
   className?: string;
 }
 
+/** One activity-bar cell: 48px square, 24px glyph, 2px accent bar when active. */
+export const ActivityBarButton = ({
+  label,
+  active = false,
+  icon: Icon,
+  className,
+  ...rest
+}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
+  label: string;
+  active?: boolean;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
+}): JSX.Element => (
+  <Tooltip delayDuration={500}>
+    <TooltipTrigger asChild>
+      <button
+        type="button"
+        aria-label={label}
+        className={cn(
+          "relative flex size-12 flex-none items-center justify-center text-muted-foreground outline-none",
+          "hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+          "before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-transparent",
+          active && "text-foreground before:bg-accent",
+          className,
+        )}
+        {...rest}
+      >
+        <Icon className="size-6" aria-hidden />
+      </button>
+    </TooltipTrigger>
+    <TooltipContent
+      side="right"
+      sideOffset={2}
+      className="rounded-hairline border border-border px-2 py-1 text-label"
+    >
+      {label}
+    </TooltipContent>
+  </Tooltip>
+);
+
+/** VS Code activity bar: section switcher, account and settings at the foot. */
 export const LeftIconRail = ({
   items,
   activeId,
   onSelect,
   footer = null,
-  ariaLabel = "Explorer views",
+  footerSlot,
+  ariaLabel = "Activity bar",
   className,
 }: LeftIconRailProps): JSX.Element => {
-  const itemButton = (item: LeftIconRailItem): JSX.Element => {
-    const Icon = item.icon;
-    return (
-      <Button
-        key={item.id}
-        type="button"
-        variant="ghost"
-        size="icon"
-        title={item.label}
-        aria-label={item.label}
-        aria-pressed={activeId === item.id}
-        className={cn(
-          "relative size-8 rounded-control text-muted-foreground",
-          "after:absolute after:-left-1 after:inset-y-1 after:w-px after:rounded-full after:bg-transparent",
-          activeId === item.id &&
-            "bg-background text-foreground after:bg-accent hover:bg-background",
-        )}
-        onClick={() => onSelect(item.id)}
-        onPointerEnter={() => item.onIntent?.()}
-        onFocus={() => item.onIntent?.()}
-      >
-        <Icon className="size-icon" />
-      </Button>
-    );
-  };
+  const itemButton = (item: LeftIconRailItem): JSX.Element => (
+    <ActivityBarButton
+      key={item.id}
+      label={item.label}
+      icon={item.icon}
+      active={activeId === item.id}
+      aria-pressed={activeId === item.id}
+      onClick={() => onSelect(item.id)}
+      onPointerEnter={() => item.onIntent?.()}
+      onFocus={() => item.onIntent?.()}
+    />
+  );
 
   return (
     <nav
       className={cn(
-        "flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-surface-subtle py-1",
+        "flex w-12 shrink-0 flex-col border-r border-border bg-surface-subtle",
         className,
       )}
       aria-label={ariaLabel}
+      data-shell-region="activitybar"
     >
       {items.map((item) => (
-        <div
-          key={item.id}
-          className={cn(
-            "flex flex-col items-center",
-            item.separatorBefore && "mt-1 border-t border-border pt-2",
-          )}
-        >
+        <div key={item.id} className="flex flex-col">
+          {item.separatorBefore ? <div className="mx-3 my-1 h-px bg-border" aria-hidden /> : null}
           {itemButton(item)}
         </div>
       ))}
-      {footer ? <div className="mt-auto">{itemButton(footer)}</div> : null}
+      <div className="mt-auto flex flex-col">
+        {footerSlot}
+        {footer ? itemButton(footer) : null}
+      </div>
     </nav>
   );
 };
+
 export interface LeftExplorerProps {
   title: string;
   actions?: ReactNode;
@@ -120,15 +152,19 @@ export const LeftExplorer = ({
         // h-full: a resizable panel wraps its child in a block, so flex-1 alone
         // lets the column grow to its content and the whole column (header
         // included) scrolls instead of the body.
-        "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background outline-none",
+        "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-subtle outline-none",
         className,
       )}
     >
-      <header className="flex h-8 shrink-0 items-center border-b border-border px-2">
+      <header className="flex min-h-shell-row shrink-0 items-center pr-1 pl-3">
         <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-          <h2 className="min-w-0 truncate text-label font-medium text-foreground">{title}</h2>
+          <h2 className="min-w-0 truncate text-micro font-semibold uppercase tracking-wide text-foreground">
+            {title}
+          </h2>
           {actions ? (
-            <div className="flex shrink-0 items-center gap-hairline">{actions}</div>
+            <div className="flex shrink-0 items-center gap-hairline [&_button]:size-shell-action [&_button]:rounded-action">
+              {actions}
+            </div>
           ) : null}
         </div>
         {toolbar ? <div className="space-y-2">{toolbar}</div> : null}
@@ -137,7 +173,7 @@ export const LeftExplorer = ({
       {/* Radix wraps the body in display:table, which sizes rows to their
           content and defeats truncate; block keeps rows at the column width. */}
       <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
-        <div className={cn("min-h-full px-1 py-row-pad", bodyClassName)}>{children}</div>
+        <div className={cn("min-h-full", bodyClassName)}>{children}</div>
       </ScrollArea>
     </div>
   );
@@ -176,6 +212,12 @@ export interface ExplorerDockProps {
   id?: string;
   /** Storage key for the persisted split. Defaults to `${id}.size`. */
   autoSaveId?: string;
+  /**
+   * Fold the dock to its header (`collapsedSize`) without unmounting the
+   * explorer above it; the persisted split is left alone while folded.
+   */
+  collapsed?: boolean;
+  collapsedSize?: string;
 }
 
 /**
@@ -191,11 +233,13 @@ export const ExplorerDock = ({
   dock,
   id = "explorer-dock",
   autoSaveId,
+  collapsed = false,
+  collapsedSize = "23px",
 }: ExplorerDockProps): JSX.Element => (
   <ResizablePanelGroup
     id={id}
     direction="vertical"
-    autoSaveId={autoSaveId ?? `${id}.size`}
+    autoSaveId={collapsed ? undefined : (autoSaveId ?? `${id}.size`)}
     autoSavePanelIds={["explorer", "dock"]}
     className="min-h-0 min-w-0 flex-1"
   >
@@ -204,12 +248,12 @@ export const ExplorerDock = ({
     <ResizablePanel id="explorer" minSize="88px">
       {children}
     </ResizablePanel>
-    <ResizableHandle className={HORIZONTAL_HANDLE} />
+    <ResizableHandle className={HORIZONTAL_HANDLE} disabled={collapsed} />
     <ResizablePanel
       id="dock"
-      defaultSize={DOCK_SIZE.default}
-      minSize={DOCK_SIZE.min}
-      maxSize={DOCK_SIZE.max}
+      defaultSize={collapsed ? collapsedSize : DOCK_SIZE.default}
+      minSize={collapsed ? collapsedSize : DOCK_SIZE.min}
+      maxSize={collapsed ? collapsedSize : DOCK_SIZE.max}
     >
       {dock}
     </ResizablePanel>

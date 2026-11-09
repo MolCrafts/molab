@@ -1,5 +1,6 @@
 import type { ZarrDirectorySource } from "./host-zarr";
 
+type Stage = typeof import("@molcrafts/molvis-stage");
 type LoadFileContent = typeof import("@molcrafts/molvis-stage/io")["loadFileContent"];
 type MolvisApp = Parameters<LoadFileContent>[0];
 
@@ -21,19 +22,28 @@ export const directoryLoader = (
   io: Pick<MolvisIo, "loadMrecSource" | "loadZarrSource">,
 ): DirectoryLoader | undefined => io.loadMrecSource ?? io.loadZarrSource;
 
-export const loadMolvisCore = async (): Promise<{
-  mountMolvis: typeof import("@molcrafts/molvis-stage")["mountMolvis"];
+export interface MolvisCore {
+  mountMolvis: Stage["mountMolvis"];
   loadFileContent: LoadFileContent;
   loadDirectory: DirectoryLoader | undefined;
-}> => {
-  const [{ mountMolvis }, ioModule] = await Promise.all([
+  /** The stage's representation presets — the only models a view offers. */
+  representations: Stage["REPRESENTATIONS"];
+  findRepresentation: Stage["findRepresentation"];
+  ColorByPropertyModifier: Stage["ColorByPropertyModifier"];
+}
+
+export const loadMolvisCore = async (): Promise<MolvisCore> => {
+  const [stage, ioModule] = await Promise.all([
     import("@molcrafts/molvis-stage"),
     import("@molcrafts/molvis-stage/io"),
   ]);
   const io = ioModule as unknown as MolvisIo;
   return {
-    mountMolvis,
+    mountMolvis: stage.mountMolvis,
     loadFileContent: io.loadFileContent,
     loadDirectory: directoryLoader(io),
+    representations: stage.REPRESENTATIONS,
+    findRepresentation: stage.findRepresentation,
+    ColorByPropertyModifier: stage.ColorByPropertyModifier,
   };
 };

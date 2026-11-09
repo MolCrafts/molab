@@ -1,6 +1,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { type JSX, Suspense, useMemo, useState } from "react";
 import { EmptyState, InventoryCanvas, OverviewSurface } from "@/app/components/entity";
+import { runLabel } from "@/app/runs/runTitle";
 import {
   artifactContentQueryOptions,
   executionOutputsQueryOptions,
@@ -26,8 +27,8 @@ const latestExecutionId = (run: RunSummary): string | null =>
   run.executionHistory.at(-1)?.executionId ?? null;
 
 /**
- * Every structure file from the latest attempt of each run, with one 2D formula
- * and 3D model open at a time.
+ * Every structure file from the latest attempt of each run, one MolVis scene
+ * open at a time.
  */
 export const ExperimentStructures = ({ runs }: { runs: readonly RunSummary[] }): JSX.Element => {
   const generation = useContributionGeneration();
@@ -53,7 +54,7 @@ export const ExperimentStructures = ({ runs }: { runs: readonly RunSummary[] }):
         if (!isChemicalStructureName(asset.title)) continue;
         rows.push({
           key: `${run.id}:${asset.id}`,
-          runName: run.name || run.id,
+          runName: runLabel(run),
           runId: run.id,
           executionId,
           label: asset.title,
@@ -65,7 +66,7 @@ export const ExperimentStructures = ({ runs }: { runs: readonly RunSummary[] }):
         if (!isChemicalStructureName(file.name)) continue;
         rows.push({
           key: `${run.id}:file:${file.relPath}`,
-          runName: run.name || run.id,
+          runName: runLabel(run),
           runId: run.id,
           executionId,
           label: file.name,

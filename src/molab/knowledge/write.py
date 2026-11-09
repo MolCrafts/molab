@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from .concept import Concept
     from .concepts import _SourcedKnowledge
     from .edges import EdgeRole
+    from .naming import KnowledgeFormat
 
 _LOG = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ def write_knowledge(
     record: object | None = None,
     fs: FileSystem | None = None,
     replaces: Sequence[PathArg] = (),
+    format: KnowledgeFormat | None = None,
 ) -> Concept:
     """Write one document under *host*. The single create path.
 
@@ -51,7 +53,8 @@ def write_knowledge(
     Every write inside a workspace is one history commit (``knowledge.created``
     or ``knowledge.rewritten``) that also carries the deletion of each
     *replaces* document, so a superseded document leaves the tree instead of
-    piling up beside its successor. A history failure never fails the write. The host's ``index.knowledges`` section (in its
+    piling up beside its successor. A new document is stamped ``created_at``
+    (ISO-8601 UTC, seconds) unless *record* already carries one. A history failure never fails the write. The host's ``index.knowledges`` section (in its
     ``index.md``) is rebuilt after the write.
 
     Args:
@@ -67,14 +70,18 @@ def write_knowledge(
         fs: Disk to write through. Defaults to the host's own disk.
         replaces: Documents this one supersedes. Each is deleted after the
             write; git keeps its text.
+        format: ``"md"`` (``<slug>.md``, YAML frontmatter + markdown) or
+            ``"html"`` (``<slug>.html``). ``None`` keeps an existing
+            document's format and writes markdown for a new one.
 
     Returns:
         The written document.
 
     Raises:
         TypeError: If *host* is not a recognised host.
-        ValueError: If *of* requires sources and *sources* is empty, or a
-            *replaces* entry is not a knowledge document or is the written one.
+        ValueError: If *of* requires sources and *sources* is empty, a
+            *replaces* entry is not a knowledge document or is the written one,
+            or the name already exists in the other *format*.
     """
     from contextlib import suppress
 
@@ -87,13 +94,14 @@ def write_knowledge(
     from .worker_report import check_worker_record
 
     preview = _record_as_dict(record) if record is not None else None
+    path = _landed_path(host, name, of, format, disk)
     sourced = _sourced_class(of)
     if sourced is not None:
         # A dummy source lets an existing file answer ``exists`` before the
         # real source list is checked. It is never written.
-        probe = sourced(host, name, sources=list(sources) or [object()], fs=disk)  # ty: ignore[invalid-argument-type]
+        probe = sourced(path, sources=list(sources) or [object()], fs=disk)  # ty: ignore[invalid-argument-type]
     else:
-        probe = of(host, name, fs=disk)  # ty: ignore[invalid-argument-type]
+        probe = of(path, fs=disk)
     existing = probe.frontmatter() if probe.exists() else None
     check_planning_record(of, preview, creating=existing is None)
     check_worker_record(of, preview, existing=existing)
@@ -101,12 +109,11 @@ def write_knowledge(
     if check_record is not None:
         check_record(preview, existing=existing)
     if sourced is not None and not sources:
-        item = sourced(host, name, sources=list(sources), fs=disk)  # ty: ignore[invalid-argument-type]
-    else:
-        item = probe
+        raise ValueError(f"{of.__name__} requires at least one SourceRef")
+    item = probe
     created = not item.exists()
     retired = _replaced_paths(replaces, item.path, disk)
-    payload = _merged_record(record, created_by=created_by, name=name)
+    payload = _merged_record(record, created_by=created_by, name=name, created=created)
     if item.exists() and text == "":
         item.write(None, payload)
     else:
@@ -137,6 +144,33 @@ def write_knowledge(
                 paths=tuple(touched),
             )
     return item
+
+
+def _landed_path(
+    host: Folder | Concept | PathArg,
+    name: str,
+    of: type[Concept],
+    format: KnowledgeFormat | None,
+    disk: FileSystem,
+) -> str:
+    """Where the *of* document *name* lands under *host*, in one format only.
+
+    Raises:
+        ValueError: *format* is given and the name exists in the other format.
+    """
+    from .location import _folder
+    from .naming import KNOWLEDGE_FORMATS
+
+    paths = {fmt: str(_folder(host, name, of, format=fmt)) for fmt in KNOWLEDGE_FORMATS}
+    on_disk = [fmt for fmt in KNOWLEDGE_FORMATS if disk.is_file(paths[fmt])]
+    if format is None:
+        return paths[on_disk[0] if on_disk else "md"]
+    clash = [fmt for fmt in on_disk if fmt != format]
+    if clash:
+        raise ValueError(
+            f"{name!r} already exists as {paths[clash[0]]}; one document has one format"
+        )
+    return paths[format]
 
 
 def _replaced_paths(replaces: Sequence[PathArg], written: PathArg, disk: FileSystem) -> list[str]:
@@ -186,13 +220,19 @@ def mount_note(host: Folder | Concept | PathArg, name: str, *, body: str = "") -
     return write_knowledge(host, name=name, of=Note, created_by="", text=body)
 
 
-def _merged_record(record: object | None, *, created_by: str, name: str) -> dict[str, object]:
-    """Frontmatter for a write: *record* under ``created_by`` and ``name``."""
+def _merged_record(
+    record: object | None, *, created_by: str, name: str, created: bool
+) -> dict[str, object]:
+    """Frontmatter for a write: *record* under ``created_by``, ``name`` and, on create, ``created_at``."""
     from .concept import _record_as_dict
 
     payload = _record_as_dict(record) if record is not None else {}
     payload["created_by"] = created_by
     payload["name"] = name
+    if created and not payload.get("created_at"):
+        from molab.workspace.timestamps import utc_now
+
+        payload["created_at"] = utc_now().replace(microsecond=0).isoformat()
     return payload
 
 

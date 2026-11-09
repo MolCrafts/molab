@@ -2,16 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
   Blocks,
-  Copy,
-  Download,
-  ExternalLink,
   FilePlus,
   FileText,
   FlaskConical,
   Folder,
   FolderOpen,
   FolderPlus,
-  FolderSync,
   PlayCircle,
   RefreshCw,
   Upload,
@@ -98,6 +94,8 @@ interface WorkspaceTreeActions {
   onIntentDirectory?: (dirPath: string) => void;
   onCreateDirectory: (path: string) => void;
   onCreateFile: (path: string) => void;
+  /** Upload into this folder (workspace-relative; "" is the root). */
+  onUpload?: (folder: string) => void;
   pathContext: PathDisplayContext;
   onRefresh: () => void;
   writeDeniedReason: string | null;
@@ -170,7 +168,6 @@ export const buildFilesExplorerNodes = (
           {
             id: "sync",
             label: "Sync…",
-            icon: FolderSync,
             separatorBefore: true,
             onSelect: () =>
               actions.onSync?.({
@@ -197,15 +194,13 @@ export const buildFilesExplorerNodes = (
     return {
       id: node.id,
       label: node.name,
+      preview: isFile
+        ? { kind: "file", filePath: node.path, fileKind: fileSelection.fileKind }
+        : undefined,
       icon,
       iconClassName: iconClass,
       right: rule ? (
         <SyncMark when={rule.when} intervalMinutes={rule.intervalMinutes} />
-      ) : undefined,
-      meta: semantic ? (
-        <span className="uppercase tracking-tighter opacity-50 group-hover:opacity-100">
-          {semantic.type.substring(0, 3)}
-        </span>
       ) : undefined,
       onPrefetch: () => {
         if (isFile) {
@@ -241,16 +236,15 @@ export const buildFilesExplorerNodes = (
         ? [
             {
               id: "open",
-              label: "Open file",
-              icon: ExternalLink,
+              label: "Open",
+              shortcut: "↵",
               onSelect: () => actions.onSelect(fileSelection),
             },
             ...(actions.onDownload
               ? [
                   {
                     id: "download",
-                    label: "Download file",
-                    icon: Download,
+                    label: "Download",
                     onSelect: () => actions.onDownload?.(node.path),
                   },
                 ]
@@ -258,7 +252,6 @@ export const buildFilesExplorerNodes = (
             {
               id: "copy-path",
               label: "Copy path",
-              icon: Copy,
               onSelect: () => void copyText(formatQualifiedPath(node.path, actions.pathContext)),
             },
             ...syncAction,
@@ -269,7 +262,6 @@ export const buildFilesExplorerNodes = (
                   {
                     id: "open",
                     label: `Open ${semantic.type}`,
-                    icon: ExternalLink,
                     onSelect: () =>
                       actions.onSelect({ objectType: semantic.type, objectId: semantic.id }),
                   } satisfies TreeNodeAction,
@@ -278,8 +270,7 @@ export const buildFilesExplorerNodes = (
             withWriteGate<TreeNodeAction>(
               {
                 id: "new-file",
-                label: "New file here",
-                icon: FilePlus,
+                label: "New file…",
                 onSelect: () => actions.onCreateFile(node.path),
               },
               actions.writeDeniedReason,
@@ -287,22 +278,31 @@ export const buildFilesExplorerNodes = (
             withWriteGate<TreeNodeAction>(
               {
                 id: "new-folder",
-                label: "New folder here",
-                icon: FolderPlus,
+                label: "New folder…",
                 onSelect: () => actions.onCreateDirectory(node.path),
               },
               actions.writeDeniedReason,
             ),
+            ...(actions.onUpload
+              ? [
+                  withWriteGate<TreeNodeAction>(
+                    {
+                      id: "upload",
+                      label: "Upload…",
+                      onSelect: () => actions.onUpload?.(relative),
+                    },
+                    actions.writeDeniedReason,
+                  ),
+                ]
+              : []),
             {
               id: "copy-path",
               label: "Copy path",
-              icon: Copy,
               onSelect: () => void copyText(formatQualifiedPath(node.path, actions.pathContext)),
             },
             {
               id: "refresh",
               label: "Refresh",
-              icon: RefreshCw,
               separatorBefore: true,
               onSelect: actions.onRefresh,
             },
@@ -330,6 +330,8 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
   const { fileSystem } = props;
   const uploadInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  // The folder an upload goes into: a folder's “Upload…” sets it; the header icon uses the root.
+  const uploadFolder = useRef("");
   const { writeDeniedReason } = usePermissions();
   const { prompt, dialog: promptDialog } = usePrompt();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -423,6 +425,10 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
     onIntentDirectory: fileSystem.onExpandDirectory,
     onCreateDirectory: (path) => void createDirectory(path),
     onCreateFile: (path) => void createFile(path),
+    onUpload: (folder) => {
+      uploadFolder.current = folder;
+      uploadInput.current?.click();
+    },
     pathContext,
     onRefresh: props.onRefresh,
     writeDeniedReason,
@@ -466,7 +472,10 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
         kind="ghost"
         disabled={uploading}
         deniedReason={writeDeniedReason}
-        onClick={() => uploadInput.current?.click()}
+        onClick={() => {
+          uploadFolder.current = "";
+          uploadInput.current?.click();
+        }}
       >
         <Upload className="size-icon" />
       </WorkbenchIconAction>
@@ -490,7 +499,7 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
           const path = await prompt({
             title: "Upload file",
             label: "Destination path",
-            defaultValue: file.name,
+            defaultValue: uploadFolder.current ? `${uploadFolder.current}/${file.name}` : file.name,
             confirmLabel: "Upload",
           });
           if (!path) return;

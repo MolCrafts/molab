@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
-import { discoverPluginsForObject } from "@/lib/file-type-discovery";
+import { applicableRunViews } from "@/app/renderers/run/useRunViews";
+import { listRunViewContributions } from "@/lib/contribution-runtime";
 import { createPluginAPI } from "@/plugins/api/create_api";
 import { resetContributionRuntimeForTests } from "@/plugins/contribution-runtime";
 import molvisPlugin from "@/plugins/molvis";
@@ -18,28 +19,25 @@ beforeEach(() => {
   void molvisPlugin.activate(createPluginAPI("molvis").api);
 });
 
-describe("sidecar-backed dataset discovery", () => {
-  it("does not put sidecar datasets on the molvis run tab", () => {
-    const file = ctx("data/qm9.tar.bz2", { hasPreviewSidecar: true });
-    const discovered = discoverPluginsForObject("run", [file]);
+const molvisView = (file: FileMatchContext) =>
+  applicableRunViews(listRunViewContributions(), [file]).find(
+    (view) => view.contribution.id === "molvis",
+  );
 
-    const molvis = discovered.find((d) => d.contribution.id === "molvis:run-tab");
-    expect(molvis).toBeUndefined();
+describe("sidecar-backed dataset discovery", () => {
+  it("does not put sidecar datasets on the MolVis run view", () => {
+    const file = ctx("data/qm9.tar.bz2", { hasPreviewSidecar: true });
+    expect(molvisView(file)).toBeUndefined();
   });
 
   it("does not discover an unflagged, non-matching file", () => {
     const file = ctx("data/qm9.tar.bz2", { hasPreviewSidecar: false });
-    const discovered = discoverPluginsForObject("run", [file]);
-
-    const molvis = discovered.find((d) => d.contribution.id === "molvis:run-tab");
-    expect(molvis).toBeUndefined();
+    expect(molvisView(file)).toBeUndefined();
   });
 
   it("still discovers extension-matched trajectories without the flag", () => {
     const file = ctx("run/traj.lammpstrj");
-    const discovered = discoverPluginsForObject("run", [file]);
-
-    const molvis = discovered.find((d) => d.contribution.id === "molvis:run-tab");
+    const molvis = molvisView(file);
     expect(molvis).toBeDefined();
     expect(molvis?.files.map((f) => f.relPath)).toContain("run/traj.lammpstrj");
   });

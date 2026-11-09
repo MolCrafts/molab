@@ -1,9 +1,10 @@
+import type { StatusCounts } from "@/app/status/vocabulary";
 // ─────────────────────────────────────────────────────────────────────────────
 // Scale arithmetic for the overview gauges. Pure functions, no React: the part
 // of a chart that can be wrong without looking wrong lives here, under test.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { StatusGroupId } from "@/app/runs/statusGroups";
+import type { ChartGroupId } from "@/app/status/vocabulary";
 
 /** Seconds per unit — the candidate tick steps a duration axis may land on. */
 const DURATION_STEPS = [
@@ -107,18 +108,9 @@ export const stackLanes = (positions: readonly number[], gap = 0.018): number[] 
   return lanes;
 };
 
-export interface StatusCounts {
-  total: number;
-  running: number;
-  pending: number;
-  succeeded: number;
-  failed: number;
-  cancelled: number;
-}
-
 /** Share of finished work that succeeded. `null` until something has finished. */
 export const successShare = (counts: StatusCounts): number | null => {
-  const finished = counts.succeeded + counts.failed + counts.cancelled;
+  const finished = counts.succeeded + counts.failed + counts.interrupted + counts.cancelled;
   return finished === 0 ? null : counts.succeeded / finished;
 };
 
@@ -132,7 +124,7 @@ export interface TimeBucket {
 export interface TimedEvent {
   startedAt: number | null;
   finishedAt: number | null;
-  outcome: StatusGroupId | null;
+  outcome: ChartGroupId | null;
 }
 
 /** Equal time buckets ending at `now`; starts and finishes counted separately. */

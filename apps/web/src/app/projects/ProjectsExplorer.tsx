@@ -10,9 +10,7 @@ import {
   FolderOpen,
   FolderPlus,
   PlayCircle,
-  Plus,
   RefreshCw,
-  Trash2,
   Workflow,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -33,11 +31,13 @@ import { CreateExperimentDialog } from "@/app/components/CreateExperimentDialog"
 import { CreateProjectDialog } from "@/app/components/CreateProjectDialog";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import { EMPTY_COPY } from "@/app/components/entity";
+import { StatusIcon } from "@/app/components/entity/StatusIcon";
 import { buildRunListActions } from "@/app/entities/runListActions";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
 import { TreeMenuItems, type TreeNode, type TreeNodeAction, TreeView } from "@/app/panels/TreeView";
 import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
 import { defaultExecutionId } from "@/app/renderers/useRunViewer";
+import { runLabel } from "@/app/runs/runTitle";
 import { experimentWorkflowLabel } from "@/app/state/api";
 import { executionOutputsQueryOptions } from "@/app/state/entityQueries";
 import type {
@@ -71,29 +71,33 @@ const errorDetail = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
 };
 
-const statusTextClass = (status: SemanticStatus): string => {
-  switch (status) {
-    case "active":
-    case "approved":
-    case "succeeded":
-      return "text-foreground";
-    case "failed":
-    case "rejected":
-      return "font-medium text-destructive";
-    case "running":
-      return "font-medium text-info";
-    case "draft":
-    case "expired":
-    case "waiting_for_review":
-      return "font-medium text-warning";
-    case "archived":
-    case "cancelled":
-    case "skipped":
-      return "text-muted-foreground";
-    case "pending":
-      return "text-muted-foreground";
-  }
-};
+/**
+ * Tree decoration (L00): a trailing status glyph, never a coloured name. A run
+ * shows its state unless it simply succeeded; a project or experiment shows a
+ * glyph only when something inside failed (failures roll up, nothing else).
+ */
+const RUN_DECORATED: ReadonlySet<SemanticStatus> = new Set([
+  "failed",
+  "interrupted",
+  "rejected",
+  "running",
+  "finalizing",
+  "queued",
+  "pending",
+  "cancelled",
+  "expired",
+]);
+const CONTAINER_DECORATED: ReadonlySet<SemanticStatus> = new Set([
+  "failed",
+  "interrupted",
+  "rejected",
+]);
+
+const treeStatusGlyph = (
+  status: SemanticStatus,
+  decorated: ReadonlySet<SemanticStatus>,
+): ReactNode =>
+  decorated.has(status) ? <StatusIcon status={status} className="size-icon" /> : undefined;
 
 const copyText = async (text: string): Promise<void> => {
   try {
@@ -200,10 +204,6 @@ const buildRunActions = (run: RunSummary, actions: ProjectTreeActions): TreeNode
     onSelect: action.onSelect,
   }));
 
-const CompactCount = ({ children }: { children: ReactNode }): JSX.Element => (
-  <span className="font-mono text-micro text-muted-foreground">{children}</span>
-);
-
 export const buildProjectNodes = (
   snapshot: WorkspaceSnapshot,
   actions: ProjectTreeActions,
@@ -233,6 +233,7 @@ export const buildProjectNodes = (
           experiment.summary.toLowerCase().includes(lowerQuery) ||
           experiment.runs.some(
             (run) =>
+              runLabel(run).toLowerCase().includes(lowerQuery) ||
               run.name.toLowerCase().includes(lowerQuery) ||
               run.id.toLowerCase().includes(lowerQuery) ||
               run.summary.toLowerCase().includes(lowerQuery),
@@ -252,14 +253,14 @@ export const buildProjectNodes = (
       id: project.id,
       selectionKey: itemKey({ kind: "project", workspaceKey, projectId: project.id }),
       label: project.name,
-      labelClassName: statusTextClass(project.status),
+      preview: { kind: "project", projectId: project.id },
+      hoverTitle:
+        projectExpanded || project.experimentCount != null
+          ? `${project.name} · ${countLabel(expCount, "experiment")}`
+          : project.name,
       icon: Blocks,
       iconClassName: "text-muted-foreground",
-      right: (
-        <CompactCount>
-          {projectExpanded || project.experimentCount != null ? countLabel(expCount, "exp") : "…"}
-        </CompactCount>
-      ),
+      right: treeStatusGlyph(project.status, CONTAINER_DECORATED),
       onPrefetch: () => {
         if (!actions.pathContext.workspace?.isRemote) actions.onExpandProject?.(project.id);
         actions.onIntentProject?.(project.id);
@@ -282,7 +283,6 @@ export const buildProjectNodes = (
           {
             id: "new-experiment",
             label: "New Experiment…",
-            icon: FlaskConical,
             onSelect: () => actions.onCreateExperiment(project.id),
           },
           actions.writeDeniedReason,
@@ -306,8 +306,7 @@ export const buildProjectNodes = (
         gateTreeWrite(
           {
             id: "delete",
-            label: "Delete",
-            icon: Trash2,
+            label: "Delete…",
             destructive: true,
             separatorBefore: true,
             onSelect: () => actions.onDeleteProject(project.id),
@@ -339,13 +338,18 @@ export const buildProjectNodes = (
             experimentId: experiment.id,
           }),
           label: experiment.name,
-          labelClassName: statusTextClass(experiment.status),
+          preview: { kind: "experiment", projectId: project.id, experimentId: experiment.id },
+          hoverTitle: experiment.runsError
+            ? `${experiment.name} · runs could not be loaded`
+            : hasRunCount
+              ? `${experiment.name} · ${countLabel(runCount, "run")}`
+              : experiment.name,
           icon: FlaskConical,
           iconClassName: "text-muted-foreground",
-          right: (
-            <CompactCount>
-              {experiment.runsError ? "!" : hasRunCount ? countLabel(runCount, "run") : "…"}
-            </CompactCount>
+          right: experiment.runsError ? (
+            <StatusIcon status="failed" label="Runs could not be loaded" className="size-icon" />
+          ) : (
+            treeStatusGlyph(experiment.status, CONTAINER_DECORATED)
           ),
           onPrefetch: () => {
             if (!actions.pathContext.workspace?.isRemote) {
@@ -373,7 +377,6 @@ export const buildProjectNodes = (
               {
                 id: "new-run",
                 label: "New Run…",
-                icon: PlayCircle,
                 onSelect: () => actions.onCreateRun(experiment.id),
               },
               actions.writeDeniedReason,
@@ -388,9 +391,9 @@ export const buildProjectNodes = (
                 );
                 if (workflow) {
                   actions.onSelect({
-                    objectType: "workflow",
-                    objectId: workflow.id,
-                    workflowId: workflow.id,
+                    objectType: "experiment",
+                    objectId: workflow.experimentId,
+                    experimentView: "workflow",
                   });
                 }
               },
@@ -406,8 +409,7 @@ export const buildProjectNodes = (
             gateTreeWrite(
               {
                 id: "delete",
-                label: "Delete",
-                icon: Trash2,
+                label: "Delete…",
                 destructive: true,
                 separatorBefore: true,
                 onSelect: () => actions.onDeleteExperiment(experiment),
@@ -430,8 +432,16 @@ export const buildProjectNodes = (
               experimentId: experiment.id,
               runId: run.id,
             }),
-            label: run.name || run.id,
-            labelClassName: statusTextClass(run.status),
+            label: runLabel(run),
+            preview: {
+              kind: "run",
+              runId: run.id,
+              projectId: project.id,
+              experimentId: experiment.id,
+              workspaceKey,
+              label: runLabel(run),
+            },
+            right: treeStatusGlyph(run.status, RUN_DECORATED),
             icon: PlayCircle,
             iconClassName: "text-muted-foreground",
             onPrefetch: () => actions.onIntentRun?.(run),
@@ -460,7 +470,7 @@ const buildShallowProjectNodes = (
     .map((project) => ({
       id: `${workspaceKey}/${project.id}`,
       label: project.name,
-      labelClassName: statusTextClass(project.status),
+      right: treeStatusGlyph(project.status, CONTAINER_DECORATED),
       icon: Blocks,
       iconClassName: "text-muted-foreground/50",
       onSelect: onActivate,
@@ -501,7 +511,6 @@ const buildWorkspaceGroupedNodes = (
               {
                 id: "new-project",
                 label: "New Project…",
-                icon: Plus,
                 onSelect: () => actions.onCreateProject?.(),
               },
               actions.writeDeniedReason,
@@ -511,14 +520,12 @@ const buildWorkspaceGroupedNodes = (
             {
               id: "open-workspace",
               label: "Open Workspace",
-              icon: FolderOpen,
               onSelect: () => onActivateWorkspace(ws),
             },
           ]),
       {
         id: "copy-path",
         label: "Copy Path",
-        icon: Copy,
         onSelect: () =>
           actions.onCopyText(
             ws.isRemote || !ws.path
@@ -533,7 +540,6 @@ const buildWorkspaceGroupedNodes = (
         {
           id: "add-folder",
           label: "Add Folder to Workspace…",
-          icon: FolderPlus,
           separatorBefore: true,
           onSelect: () => actions.onAddWorkspace?.(),
         },
@@ -542,7 +548,6 @@ const buildWorkspaceGroupedNodes = (
       {
         id: "refresh",
         label: "Refresh Explorer",
-        icon: RefreshCw,
         onSelect: actions.onRefresh,
       },
       ...(canRemoveRoot
@@ -550,8 +555,7 @@ const buildWorkspaceGroupedNodes = (
             gateTreeWrite(
               {
                 id: "remove-folder",
-                label: "Remove Folder from Workspace",
-                icon: Trash2,
+                label: "Remove folder from workspace…",
                 destructive: true,
                 separatorBefore: true,
                 onSelect: () => onRemoveWorkspace?.(ws),
@@ -570,7 +574,7 @@ const buildWorkspaceGroupedNodes = (
       iconClassName: ws.unreachable
         ? "text-status-failed-foreground"
         : ws.active
-          ? "text-accent"
+          ? "text-link"
           : "text-muted-foreground",
       emptyChildLabel: ws.unreachable ? "Unreachable" : "No projects",
       hoverTitle: ws.label,
@@ -631,8 +635,15 @@ export const buildServedRootNodes = (
           experimentId: run.experimentId,
           runId: run.id,
         }),
-        label: run.name || run.id,
-        labelClassName: statusTextClass(run.status),
+        label: runLabel(run),
+        preview: {
+          kind: "run",
+          runId: run.id,
+          projectId: run.projectId,
+          experimentId: run.experimentId,
+          label: runLabel(run),
+        },
+        right: treeStatusGlyph(run.status, RUN_DECORATED),
         icon: PlayCircle,
         iconClassName: "text-muted-foreground",
         onSelect: () => actions.onOpenRunView(run),
@@ -741,15 +752,11 @@ export const ProjectsExplorer = ({
   }, [snapshot.workspaces]);
 
   const deleteProject = async (projectId: string): Promise<void> => {
+    const name = snapshot.projects.find((project) => project.id === projectId)?.name;
     const confirmed = await confirm({
-      title: "Delete project?",
-      description: (
-        <>
-          {snapshot.projects.find((project) => project.id === projectId)?.name ?? "This project"}{" "}
-          and its experiments will be removed from the workspace.
-        </>
-      ),
-      confirmLabel: "Delete",
+      title: name ? `Delete project “${name}”?` : "Delete this project?",
+      description: "Its experiments, runs and attempts are removed from the workspace.",
+      confirmLabel: "Delete project",
       destructive: true,
     });
     if (!confirmed) return;
@@ -767,9 +774,10 @@ export const ProjectsExplorer = ({
 
   const deleteExperiment = async (experiment: ExperimentSummary): Promise<void> => {
     const confirmed = await confirm({
-      title: "Delete experiment?",
-      description: <>{experiment.name} and its runs will be removed.</>,
-      confirmLabel: "Delete",
+      title: `Delete experiment “${experiment.name}”?`,
+      description:
+        "Its runs and their attempts are removed from the workspace. Registered assets stay.",
+      confirmLabel: "Delete experiment",
       destructive: true,
     });
     if (!confirmed) return;
@@ -871,7 +879,6 @@ export const ProjectsExplorer = ({
             {
               id: "add-folder",
               label: "Add Folder to Workspace…",
-              icon: FolderPlus,
               onSelect: () => setAddWorkspaceOpen(true),
             },
             writeDeniedReason,
@@ -880,7 +887,6 @@ export const ProjectsExplorer = ({
             {
               id: "new-project",
               label: "New Project…",
-              icon: Plus,
               onSelect: () => setCreateProjectOpen(true),
             },
             writeDeniedReason,
@@ -890,7 +896,6 @@ export const ProjectsExplorer = ({
     {
       id: "refresh",
       label: "Refresh Explorer",
-      icon: RefreshCw,
       separatorBefore: true,
       onSelect: onRefresh,
     },

@@ -45,10 +45,10 @@ molrec (protocol)  — never imported; products follow the spec by convention
 
 ### Ingest foreign logs into the host metrics surface
 
-Scientific packages may leave **LAMMPS logs**, **TensorBoard event dirs**, or
-**CSV** tables beside a run. :mod:`molab.plugins.metrics_ingest` classifies
-them by content and **normalizes** into the run-local metrics surface
-(JSONL WAL at ``executions/<id>/*.mlp.jsonl``, beside ``run.log``).
+Scientific packages may leave **LAMMPS logs** or **CSV** tables beside a run.
+:mod:`molab.plugins.metrics_ingest` classifies them by content and
+**normalizes** into the run-local metrics surface (JSONL WAL at
+``executions/<id>/*.mlp.jsonl``, beside ``run.log``).
 Source files are never deleted or rewritten. A molab Run remains a **host** —
 ingest does not write MolRec ``meta`` / ``status``.
 
@@ -63,7 +63,8 @@ POST /api/projects/{p}/experiments/{e}/runs/{r}/metrics/ingest
 ```
 
 Unrecognised files are skipped with a reason (never guessed). Missing optional
-dependencies (e.g. TensorBoard) skip that format without failing the call.
+dependencies skip that format without failing the call. TensorBoard
+``tfevents`` files are not supported.
 
 ---
 

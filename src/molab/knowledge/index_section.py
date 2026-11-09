@@ -60,7 +60,7 @@ def _title(meta: dict[str, object], body: str, fallback: str) -> str:
 def section_rows(host_dir: PathArg, *, fs: FileSystem) -> list[dict[str, JSONValue]]:
     """The ``index.knowledges`` rows for the host at *host_dir*, built from the files.
 
-    Only markdown files directly under ``knowledges/`` are documents; anything
+    Only document files (``.md`` / ``.html``) directly under ``knowledges/`` are documents; anything
     else there is reported by :mod:`molab.knowledge.validate`, not listed.
     """
     from .concept import read_text_or_none
@@ -76,7 +76,7 @@ def section_rows(host_dir: PathArg, *, fs: FileSystem) -> list[dict[str, JSONVal
         if entry.is_dir or not is_knowledge_file(entry.name):
             continue
         text = read_text_or_none(fs.join(container, entry.name), fs=fs) or ""
-        meta, body = split_frontmatter(text)
+        meta, body = split_frontmatter(text, path=entry.name)
         declared = meta.get("class")
         stem = entry.name.rsplit(".", 1)[0]
         rows.append(

@@ -9,8 +9,7 @@ export {
   type ParameterFieldDescriptor,
   type ParameterFieldProps,
 } from "./ParameterField";
-export { ParameterGroup, type ParameterGroupProps } from "./ParameterGroup";
-export { type RunStatus, RunStatusBadge, type RunStatusBadgeProps } from "./RunStatusBadge";
+export { RunStatusBadge, type RunStatusBadgeProps } from "./RunStatusBadge";
 export {
   WorkbenchAction,
   type WorkbenchActionKind,

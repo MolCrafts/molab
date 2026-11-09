@@ -11,16 +11,12 @@
  * - {@link WorkflowPreview} — the composable graph + node-details surface.
  * - {@link WorkflowGraph} — the read-only canvas alone.
  * - {@link WorkflowNodeDetails} — the read-only node-detail card.
- * - {@link FlowgramCanvas} / {@link FlowgramCanvasToolbar} — lower-level canvas.
+ * - {@link FlowgramCanvas} — lower-level canvas (its tools go in a host toolbar, L06).
  * - IR types + pure graph utilities + the flowgram-document builder.
  */
 
 import "@/plugins/workflow/side-effects";
 
-export {
-  FlowgramCanvasToolbar,
-  type FlowgramCanvasToolbarProps,
-} from "@/components/workflow/flowgram-canvas-toolbar";
 export {
   analyzePaths,
   type GraphEdgeInput,

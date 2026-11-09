@@ -1,156 +1,163 @@
+/**
+ * The MolVis scene of a run view: one structure or trajectory of the attempt,
+ * drawn by molvis-stage on the page ground with none of the stage's own chrome,
+ * and the frame player under it when there is more than one frame.
+ */
+
+import type { Molvis } from "@molcrafts/molvis-stage";
 import { useEffect, useRef, useState } from "react";
-import { runsApi } from "@/api";
-import { cn } from "@/lib/utils";
-import type { DiscoveredFile } from "@/plugins/types";
+import { FramePlayer } from "./FramePlayer";
 import { collectZarrStore, scopedZarrSource, workspaceZarrSource } from "./host-zarr";
-import { loadMolvisCore } from "./loadMolvisCore";
-import { isMolvisZarr, zarrStoreRoot } from "./openable";
+import { loadMolvisCore, type MolvisCore } from "./loadMolvisCore";
+import {
+  applyAxes,
+  applyGround,
+  applyPipelineStyle,
+  applyProjection,
+  atomColumns,
+  SCENE_CONFIG,
+} from "./sceneControls";
+import { useSceneGround } from "./sceneGround";
+import type { MolvisStyle } from "./sceneStyle";
+
+/** What the scene draws: a file's text, or a `*.mrec` store under the attempt. */
+export type SceneSource =
+  | { kind: "text"; name: string; content: string }
+  | { kind: "mrec"; name: string; storeRoot: string; attemptDir: string };
+
+/** What the loaded scene can be styled with. */
+export interface SceneInfo {
+  representations: readonly { id: string; name: string }[];
+  columns: readonly string[];
+}
 
 interface TrajectoryViewerProps {
-  projectId: string;
-  experimentId: string;
-  runId: string;
-  /**
-   * The attempt's workspace-relative directory, from the server.
-   *
-   * A discovered ``relPath`` is relative to this. Rooting the Zarr source at
-   * the *run* instead drops the ``executions/<id>/`` segment, and every read
-   * 404s against a directory that does not exist.
-   */
-  executionDir: string;
-  executionId: string;
-  file: DiscoveredFile;
-  /** Outer container classes. Defaults to a fixed-height card; pass ``h-full``
-   *  to let the canvas fill a flex parent. */
-  className?: string;
+  source: SceneSource;
+  style: MolvisStyle;
+  onLoaded: (info: SceneInfo) => void;
+  onFailed: (message: string) => void;
 }
 
-type LoadState =
-  | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "ready" }
-  | { kind: "error"; message: string };
-
-interface MolvisHandle {
-  destroy?: () => void;
-  enableFitContainer?: (enabled: boolean) => void;
-  start?: () => Promise<void> | void;
+interface Stage {
+  app: Molvis;
+  core: MolvisCore;
 }
+
+const message = (reason: unknown): string =>
+  reason instanceof Error ? reason.message : String(reason);
+
+const loadSource = async (core: MolvisCore, app: Molvis, source: SceneSource): Promise<void> => {
+  const target = app as unknown as Parameters<MolvisCore["loadFileContent"]>[0];
+  if (source.kind === "text") {
+    await core.loadFileContent(target, source.content, source.name);
+    return;
+  }
+  const store = scopedZarrSource(workspaceZarrSource(source.attemptDir), source.storeRoot);
+  if (core.loadDirectory) {
+    await core.loadDirectory(target, store, source.name);
+    return;
+  }
+  await core.loadFileContent(target, await collectZarrStore(store), source.name);
+};
 
 export const TrajectoryViewer = ({
-  projectId,
-  experimentId,
-  runId,
-  executionDir,
-  executionId,
-  file,
-  className,
+  source,
+  style,
+  onLoaded,
+  onFailed,
 }: TrajectoryViewerProps): JSX.Element => {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const appRef = useRef<MolvisHandle | null>(null);
-  const [state, setState] = useState<LoadState>({ kind: "idle" });
+  const [stage, setStage] = useState<Stage | null>(null);
+  const ground = useSceneGround();
+  const groundRef = useRef(ground);
+  groundRef.current = ground;
+  const callbacks = useRef({ onLoaded, onFailed });
+  callbacks.current = { onLoaded, onFailed };
 
+  const sourceKey =
+    source.kind === "text"
+      ? `text:${source.name}:${source.content}`
+      : `mrec:${source.attemptDir}:${source.storeRoot}`;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `sourceKey` is the source's identity
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) {
-      return;
-    }
-
+    if (!container) return;
     let cancelled = false;
-    setState({ kind: "loading" });
-
-    const fileName = file.name;
-    const fileRelPath = file.relPath;
-    const zarrFile = { name: fileName, relPath: fileRelPath };
-
+    let mounted: Molvis | null = null;
+    const lost = (): void => callbacks.current.onFailed("The 3D view lost its graphics context.");
+    setStage(null);
     const run = async (): Promise<void> => {
       try {
-        const { mountMolvis, loadFileContent, loadDirectory } = await loadMolvisCore();
+        const core = await loadMolvisCore();
         if (cancelled) return;
-
-        const app = mountMolvis(container) as unknown as MolvisHandle;
-        appRef.current = app;
-        if (typeof app.enableFitContainer === "function") {
-          app.enableFitContainer(true);
-        }
-        if (typeof app.start === "function") {
-          await app.start();
-        }
+        const app = core.mountMolvis(container, SCENE_CONFIG);
+        mounted = app;
+        app.canvas.addEventListener("webglcontextlost", lost);
+        applyGround(app, groundRef.current);
+        app.enableFitContainer(true);
+        await app.start();
         if (cancelled) return;
-
-        const molvisApp = app as unknown as Parameters<typeof loadFileContent>[0];
-        if (isMolvisZarr(zarrFile)) {
-          const storeRoot = zarrStoreRoot(fileRelPath);
-          const source = scopedZarrSource(workspaceZarrSource(executionDir), storeRoot);
-          const storeName = storeRoot.split("/").pop() || fileName;
-          if (loadDirectory) {
-            await loadDirectory(molvisApp, source, storeName);
-          } else {
-            const files = await collectZarrStore(source);
-            await loadFileContent(molvisApp, files, storeName);
-          }
-        } else {
-          const response = await runsApi.getRunFileText(
-            projectId,
-            experimentId,
-            runId,
-            executionId,
-            fileRelPath,
-          );
-          if (cancelled) return;
-          const content = response.content;
-          if (typeof content !== "string" || content.length === 0) {
-            throw new Error(`Empty file: ${fileRelPath}`);
-          }
-          await loadFileContent(molvisApp, content, fileName);
-        }
+        await loadSource(core, app, source);
         if (cancelled) return;
-
-        setState({ kind: "ready" });
+        setStage({ app, core });
+        callbacks.current.onLoaded({
+          representations: core.representations.map(({ id, name }) => ({ id, name })),
+          columns: atomColumns(app),
+        });
       } catch (reason) {
-        if (cancelled) return;
-        const message = reason instanceof Error ? reason.message : String(reason);
-        setState({ kind: "error", message });
+        if (!cancelled) callbacks.current.onFailed(message(reason));
       }
     };
-
-    run();
-
+    void run();
     return () => {
       cancelled = true;
-      const app = appRef.current;
-      appRef.current = null;
-      if (app && typeof app.destroy === "function") {
-        try {
-          app.destroy();
-        } catch {
-          // best-effort cleanup
-        }
+      if (!mounted) return;
+      mounted.canvas.removeEventListener("webglcontextlost", lost);
+      try {
+        applyAxes(mounted, true);
+        mounted.destroy();
+      } catch {
+        // The canvas goes away with the view.
       }
     };
-  }, [projectId, experimentId, runId, executionDir, executionId, file.relPath, file.name]);
+  }, [sourceKey]);
+
+  useEffect(() => {
+    if (stage) applyGround(stage.app, ground);
+  }, [stage, ground]);
+
+  const { model, bonds, cell, colourBy, projection, axes } = style;
+  useEffect(() => {
+    if (!stage) return;
+    applyPipelineStyle(stage.app, stage.core, { model, bonds, cell, colourBy }).catch((reason) =>
+      callbacks.current.onFailed(message(reason)),
+    );
+  }, [stage, model, bonds, cell, colourBy]);
+
+  useEffect(() => {
+    if (stage) applyProjection(stage.app, projection);
+  }, [stage, projection]);
+
+  useEffect(() => {
+    if (stage) applyAxes(stage.app, axes);
+  }, [stage, axes]);
 
   return (
-    // ``isolate`` establishes a new stacking context so molvis-core's injected
-    // overlays (``.molvis-ui-overlay`` z-index:1000, context menu z-index:10000)
-    // stay scoped to the canvas and never paint above the molab UI chrome.
-    <div
-      className={cn(
-        "relative isolate w-full overflow-hidden bg-surface/65",
-        className ?? "h-chart-lg",
-      )}
-    >
-      <div ref={containerRef} className="absolute inset-0" />
-      {state.kind === "loading" && (
-        <div className="absolute inset-0 flex items-center justify-center text-label text-muted-foreground">
-          Loading {file.name}…
-        </div>
-      )}
-      {state.kind === "error" && (
-        <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-label text-destructive">
-          Failed to render trajectory: {state.message}
-        </div>
-      )}
+    <div className="flex h-full min-h-0 flex-col">
+      {/* `isolate` keeps the stage's own layers (its context menu) under the molab chrome. */}
+      <div className="relative isolate min-h-0 flex-1 overflow-hidden bg-background">
+        <div ref={containerRef} className="absolute inset-0" />
+        {stage ? null : (
+          <div
+            role="status"
+            className="absolute inset-0 flex items-center justify-center text-label text-muted-foreground"
+          >
+            Loading {source.name}…
+          </div>
+        )}
+      </div>
+      {stage ? <FramePlayer app={stage.app} speed={style.speed} /> : null}
     </div>
   );
 };

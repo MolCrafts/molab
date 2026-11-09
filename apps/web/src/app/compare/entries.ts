@@ -6,6 +6,7 @@
  * knows which one it asked.
  */
 
+import { runLabel } from "@/app/runs/runTitle";
 import type { WorkspaceRunRow } from "@/app/runs/types";
 import type {
   ExperimentSummary,
@@ -13,7 +14,6 @@ import type {
   RunSummary,
   ServedWorkspaceSummary,
 } from "@/app/types";
-
 import type { CompareItem } from "./types";
 
 export const activeWorkspace = (
@@ -81,7 +81,7 @@ export const itemFromRunSummary = (run: RunSummary, scope: Scope): CompareItem =
   workspaceLabel: scope.workspaceLabel,
   projectName: scope.projectName,
   experimentName: scope.experimentName,
-  runName: run.name,
+  runName: runLabel(run),
   parameters: run.parameters ?? {},
   category: null,
   addedAt: nowIso(),
@@ -102,7 +102,7 @@ export const itemFromWorkspaceRunRow = (
   workspaceLabel: workspace.label,
   projectName: row.projectName,
   experimentName: row.experimentName,
-  runName: row.name,
+  runName: runLabel(row),
   parameters: row.parameters ?? {},
   category: null,
   addedAt: nowIso(),

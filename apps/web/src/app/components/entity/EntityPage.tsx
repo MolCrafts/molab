@@ -1,31 +1,8 @@
 import type { ComponentType, JSX, ReactNode } from "react";
-import { DetailsInspectorButton } from "@/app/layout/detailsInspector";
-import type { SemanticStatus } from "@/app/types";
+import { EditorActions } from "@/app/shell/editorActions";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { cn } from "@/lib/utils";
 import { EntityTabBar, EntityTabContent, EntityTabs } from "./EntityTabs";
-import { StatusBadge } from "./StatusBadge";
-
-interface SemanticStatusBadgeProps {
-  status: SemanticStatus;
-}
-
-export const SemanticStatusBadge = ({ status }: SemanticStatusBadgeProps): JSX.Element => {
-  return <StatusBadge status={status} />;
-};
-
-interface EntityMetricProps {
-  label: string;
-  value: number | string;
-}
-
-export const EntityMetric = ({ label, value }: EntityMetricProps): JSX.Element => {
-  return (
-    <span className="flex items-baseline gap-1 text-label">
-      <span className="font-semibold tabular-nums text-foreground">{value}</span>
-      <span className="text-muted-foreground">{label}</span>
-    </span>
-  );
-};
 
 interface EntityHeaderProps {
   icon: ComponentType<{ className?: string }>;
@@ -78,6 +55,49 @@ export const KeyValueGrid = ({ items }: KeyValueGridProps): JSX.Element => {
   );
 };
 
+export interface PropertyEntry {
+  label: string;
+  value: ReactNode;
+}
+
+/**
+ * One object's fields as a definition list: a label column, values as code. A
+ * two-column `<Table>` with a header row is chrome around what is really this.
+ */
+export const PropertyList = ({
+  entries,
+  monoLabels = false,
+  className,
+}: {
+  entries: readonly PropertyEntry[];
+  /** Parameter keys read as code; field names read as words. */
+  monoLabels?: boolean;
+  className?: string;
+}): JSX.Element => (
+  <dl
+    className={cn("grid gap-x-6 gap-y-2 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]", className)}
+  >
+    {entries.map((entry) => (
+      <div key={entry.label} className="contents">
+        <dt
+          className={cn(
+            "min-w-0 truncate text-label text-muted-foreground",
+            monoLabels && "font-mono",
+          )}
+        >
+          {entry.label}
+        </dt>
+        <dd
+          className="min-w-0 break-all font-mono text-label text-foreground"
+          title={typeof entry.value === "string" ? entry.value : undefined}
+        >
+          {entry.value}
+        </dd>
+      </div>
+    ))}
+  </dl>
+);
+
 // ── EntityPage ──────────────────────────────────────────────────────────────
 //
 // One template every entity viewer renders into. Owns the outer flex column,
@@ -93,9 +113,13 @@ export interface EntityPageTab {
   content: ReactNode;
   /** Disable the tab trigger; used for plugin-discovered tabs that haven't loaded. */
   disabled?: boolean;
+  /** A rule before this tab (the entity's own views end, plugin views begin). */
+  dividerBefore?: boolean;
 }
 
 interface EntityPageProps {
+  /** Right end of the view row (the run's attempt, L14). */
+  tabsTrailing?: ReactNode;
   // Header — forwarded verbatim to :class:`EntityHeader`.
   icon: ComponentType<{ className?: string }>;
   title: string;
@@ -128,24 +152,23 @@ export const EntityPage = ({
   activeTab,
   defaultTab,
   onActiveTabChange,
+  tabsTrailing,
   children,
 }: EntityPageProps): JSX.Element => {
+  // L00: the editor tab and the breadcrumb name the page; its actions sit at
+  // the right end of the tab row. `icon` / `title` still label the region for
+  // assistive tech and a page rendered outside the shell.
+  void icon;
+  const facts = afterTitle || meta;
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-      <EntityHeader
-        icon={icon}
-        title={title}
-        titleTooltip={titleTooltip}
-        afterTitle={afterTitle}
-        actions={
-          <>
-            {actions}
-            <DetailsInspectorButton />
-          </>
-        }
-      />
-      {meta ? (
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-border px-4 py-2 font-mono text-micro tabular-nums text-muted-foreground">
+    <section
+      aria-label={titleTooltip ?? title}
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+    >
+      <EditorActions>{actions}</EditorActions>
+      {facts ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-6 py-1 font-mono text-micro tabular-nums text-muted-foreground">
+          {afterTitle}
           {meta}
         </div>
       ) : null}
@@ -157,7 +180,13 @@ export const EntityPage = ({
           onValueChange={onActiveTabChange}
         >
           <EntityTabBar
-            tabs={tabs.map(({ value, label, disabled }) => ({ value, label, disabled }))}
+            trailing={tabsTrailing}
+            tabs={tabs.map(({ value, label, disabled, dividerBefore }) => ({
+              value,
+              label,
+              disabled,
+              dividerBefore,
+            }))}
           />
           {tabs.map((tab) => (
             <EntityTabContent key={tab.value} value={tab.value}>
@@ -168,6 +197,6 @@ export const EntityPage = ({
       ) : (
         children && <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
       )}
-    </div>
+    </section>
   );
 };

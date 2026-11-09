@@ -14,7 +14,7 @@ import {
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { formatBytes } from "@/lib/format-bytes";
-import { isChemicalStructureName, structureRank } from "@/lib/structure-files";
+import { isStructurePreviewName, structureRank } from "@/lib/structure-files";
 import { useObjectUrl } from "@/lib/use-object-url";
 
 type SelectedOutput =
@@ -32,10 +32,24 @@ interface RunExecutionOutputsProps {
   /** Fill the parent instead of the fixed chart height. */
   fill?: boolean;
   /**
+   * Label for files this attempt registered. "Run products" only when this
+   * attempt is the sealed run result; otherwise they are just its registrations.
+   */
+  assetGroupLabel?: string;
+  /**
    * Open this output until the user picks one for the current execution.
    * A later click wins, and survives switching away and back.
    */
   preferred?: SelectedOutput | null;
+  /**
+   * Read `preferred` from this attempt when it is not the one whose tree is open.
+   * A click in the tree returns the preview to `selectedExecutionId`.
+   */
+  preferredExecutionId?: string | null;
+  /** Title of a preferred artifact that is not in this attempt's tree. */
+  preferredTitle?: string | null;
+  /** The user picked a node in this attempt's tree. */
+  onUserPick?: () => void;
 }
 
 const formatSize = (size: number | null | undefined): string | undefined =>
@@ -101,11 +115,21 @@ export const RunExecutionOutputs = ({
   selectedExecutionId,
   fill = false,
   preferred = null,
+  preferredExecutionId = null,
+  preferredTitle = null,
+  onUserPick,
+  assetGroupLabel = "Run products",
 }: RunExecutionOutputsProps): JSX.Element => {
   const [picked, setPicked] = useState<{
     executionId: string;
     selected: SelectedOutput;
   } | null>(null);
+  const preferredArtifactId = preferred?.kind === "artifact" ? preferred.id : null;
+  const [trackedPreferred, setTrackedPreferred] = useState(preferredArtifactId);
+  if (trackedPreferred !== preferredArtifactId) {
+    setTrackedPreferred(preferredArtifactId);
+    if (preferredArtifactId) setPicked(null);
+  }
   const userPick =
     picked && selectedExecutionId !== null && picked.executionId === selectedExecutionId
       ? picked.selected
@@ -115,11 +139,11 @@ export const RunExecutionOutputs = ({
     if (!outputs || !selectedExecutionId) return null;
     const ranked: { rank: number; selected: SelectedOutput }[] = [];
     for (const item of outputs.assets ?? []) {
-      if (!isChemicalStructureName(item.title)) continue;
+      if (!isStructurePreviewName(item.title)) continue;
       ranked.push({ rank: structureRank(item.title), selected: { kind: "artifact", id: item.id } });
     }
     for (const row of outputs.unregistered ?? []) {
-      if (!isChemicalStructureName(row.name)) continue;
+      if (!isStructurePreviewName(row.name)) continue;
       ranked.push({
         rank: structureRank(row.name),
         selected: { kind: "file", path: row.relPath },
@@ -130,35 +154,53 @@ export const RunExecutionOutputs = ({
   }, [outputs, selectedExecutionId]);
   const selected =
     userPick ?? (selectedExecutionId !== null ? (preferred ?? defaultStructure) : null);
+  const readingExecutionId =
+    !userPick && preferredExecutionId ? preferredExecutionId : (selectedExecutionId ?? "");
   const frameClass = fill ? "h-full min-h-0" : "h-chart-lg";
   const choose = (next: SelectedOutput): void => {
     if (!selectedExecutionId) return;
     setPicked({ executionId: selectedExecutionId, selected: next });
+    onUserPick?.();
   };
 
   const artifactId = selected?.kind === "artifact" ? selected.id : "";
   const filePath = selected?.kind === "file" ? selected.path : "";
+  const previewName =
+    selected?.kind === "artifact"
+      ? (outputs?.assets?.find((item) => item.id === selected.id)?.title ??
+        (preferred?.kind === "artifact" && preferred.id === selected.id
+          ? (preferredTitle ?? "")
+          : ""))
+      : selected?.kind === "file"
+        ? (selected.path.split("/").pop() ?? selected.path)
+        : "";
+  const structure = isStructurePreviewName(previewName);
   const artifactQuery = useQuery({
     ...artifactContentQueryOptions(
       projectId,
       experimentId,
       runId,
-      selectedExecutionId ?? "",
+      readingExecutionId,
       artifactId,
+      structure,
     ),
-    enabled: selected?.kind === "artifact" && selectedExecutionId !== null,
+    enabled: selected?.kind === "artifact" && readingExecutionId !== "",
   });
   const binaryKind = selected?.kind === "file" ? binaryKindOf(filePath) : null;
   const fileQuery = useQuery({
-    ...runFileTextQueryOptions(projectId, experimentId, runId, selectedExecutionId ?? "", filePath),
-    enabled: selected?.kind === "file" && binaryKind === null && selectedExecutionId !== null,
+    ...runFileTextQueryOptions(projectId, experimentId, runId, readingExecutionId, filePath),
+    enabled: selected?.kind === "file" && binaryKind === null && readingExecutionId !== "",
   });
   const blobQuery = useQuery({
-    ...runFileBlobQueryOptions(projectId, experimentId, runId, selectedExecutionId ?? "", filePath),
-    enabled: binaryKind !== null && selectedExecutionId !== null,
+    ...runFileBlobQueryOptions(projectId, experimentId, runId, readingExecutionId, filePath),
+    enabled: binaryKind !== null && readingExecutionId !== "",
   });
   const blobUrl = useObjectUrl(binaryKind ? blobQuery.data : undefined);
   const fileError = binaryKind ? blobQuery.error : fileQuery.error;
+  const previewPending =
+    (selected?.kind === "artifact" && artifactQuery.isPending) ||
+    (selected?.kind === "file" && binaryKind === null && fileQuery.isPending) ||
+    (binaryKind !== null && blobQuery.isPending);
 
   const previewError =
     selected?.kind === "artifact"
@@ -184,24 +226,18 @@ export const RunExecutionOutputs = ({
         : selected?.kind === "file"
           ? (fileQuery.data ?? null)
           : null;
-  const previewName =
-    selected?.kind === "artifact"
-      ? (outputs?.assets?.find((item) => item.id === selected.id)?.title ?? "")
-      : selected?.kind === "file"
-        ? (selected.path.split("/").pop() ?? selected.path)
-        : "";
   const structurePlugin = useMemo(() => {
     void contributionGeneration;
-    if (!previewName || !isChemicalStructureName(previewName)) return null;
+    if (!structure) return null;
     return filePreviewPluginRegistry.getPluginForFile(previewName, previewName);
-  }, [contributionGeneration, previewName]);
+  }, [contributionGeneration, previewName, structure]);
 
   if (!selectedExecutionId) {
     return (
       <div
         className={`flex ${frameClass} items-center justify-center rounded-md border border-border bg-canvas`}
       >
-        <EmptyState title="Select an execution" description="Outputs belong to one execution." />
+        <EmptyState title="Select an attempt" description="Files belong to one attempt." />
       </div>
     );
   }
@@ -240,7 +276,7 @@ export const RunExecutionOutputs = ({
       ? [
           {
             id: "assets",
-            label: "Assets",
+            label: assetGroupLabel,
             icon: Archive,
             children: assetNodes,
           } satisfies TreeNode,
@@ -250,7 +286,7 @@ export const RunExecutionOutputs = ({
       ? [
           {
             id: "files",
-            label: "Files",
+            label: "Attempt files",
             icon: Folder,
             children: buildFileTree(files, (path) => choose({ kind: "file", path })),
           } satisfies TreeNode,
@@ -264,13 +300,15 @@ export const RunExecutionOutputs = ({
     },
   ];
 
-  const activeId = selected
-    ? selected.kind === "artifact"
-      ? `artifact:${selected.id}`
-      : selected.kind === "file"
-        ? `file:${selected.path}`
-        : `stdio:${selected.name}`
-    : undefined;
+  const showingThisAttempt = readingExecutionId === selectedExecutionId;
+  const activeId =
+    selected && showingThisAttempt
+      ? selected.kind === "artifact"
+        ? `artifact:${selected.id}`
+        : selected.kind === "file"
+          ? `file:${selected.path}`
+          : `stdio:${selected.name}`
+      : undefined;
 
   return (
     <div
@@ -287,6 +325,10 @@ export const RunExecutionOutputs = ({
       <div className="relative min-h-0 overflow-auto">
         {binaryKind && !previewError ? (
           <BinaryPreview kind={binaryKind} url={blobUrl} name={filePath} />
+        ) : previewPending && preview == null && !previewError ? (
+          <div className="flex h-full items-center justify-center text-label text-muted-foreground">
+            Loading preview…
+          </div>
         ) : structurePlugin &&
           typeof preview === "string" &&
           preview.length > 0 &&

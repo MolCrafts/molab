@@ -1,6 +1,8 @@
-import { runExecutorFacet } from "./projections";
-import { groupForStatus } from "./statusGroups";
-import type { RunsQuickView, WorkspaceRunRow, WorkspaceRunsFilters } from "./types";
+import { filterRuns } from "@/app/runs/runsFilter";
+import { CHART_GROUPS, chartGroupOf, normalizeStatus } from "@/app/status/vocabulary";
+import { runExecutorFacet, runPresentationStatus, runStartedAt } from "./projections";
+import { runLabel } from "./runTitle";
+import type { RunsStartedWindow, WorkspaceRunRow, WorkspaceRunsFilters } from "./types";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -16,32 +18,31 @@ const includesValue = (filter: string[] | undefined, value: string | null): bool
   return filter.includes(value);
 };
 
-const matchesQuickView = (run: WorkspaceRunRow, view: RunsQuickView, now: number): boolean => {
-  switch (view) {
-    case "active":
-      return run.statusSummary.active > 0;
-    case "failed24h": {
-      return run.executions.some((execution) => {
-        if (groupForStatus(execution.status) !== "failed") return false;
-        const finished = safeDate(execution.finishedAt);
-        return finished !== null && now - finished.getTime() <= 24 * HOUR_MS;
-      });
-    }
-    case "longRunning": {
-      const earliestStart = run.executions
-        .filter((execution) => groupForStatus(execution.status) === "running")
-        .reduce<number | null>((min, exec) => {
-          const start = safeDate(exec.startedAt);
-          if (!start) return min;
-          return min === null ? start.getTime() : Math.min(min, start.getTime());
-        }, null);
-      if (earliestStart === null) return false;
-      return now - earliestStart >= HOUR_MS;
-    }
-    default:
-      return true;
-  }
+const WINDOW_MS: Record<RunsStartedWindow, number> = {
+  "24h": 24 * HOUR_MS,
+  "7d": 7 * 24 * HOUR_MS,
 };
+
+/** The run started (or, never started, was created) within the window. */
+const startedWithin = (run: WorkspaceRunRow, window: RunsStartedWindow, now: number): boolean => {
+  const at = safeDate(runStartedAt(run) ?? run.createdAt);
+  return at !== null && now - at.getTime() <= WINDOW_MS[window];
+};
+
+/** The bar's free tokens, read by the same language as an experiment's Runs filter. */
+const matchesTokens = (run: WorkspaceRunRow, q: string | undefined): boolean =>
+  !q ||
+  filterRuns(
+    [
+      {
+        id: run.id,
+        title: `${runLabel(run)} ${run.projectName} ${run.experimentName}`,
+        status: runPresentationStatus(run),
+        parameters: run.parameters ?? {},
+      },
+    ],
+    q,
+  ).length > 0;
 
 interface FilterPredicates {
   status: (run: WorkspaceRunRow) => boolean;
@@ -50,45 +51,49 @@ interface FilterPredicates {
   backend: (run: WorkspaceRunRow) => boolean;
   cluster: (run: WorkspaceRunRow) => boolean;
   target: (run: WorkspaceRunRow) => boolean;
-  quickView: (run: WorkspaceRunRow) => boolean;
+  started: (run: WorkspaceRunRow) => boolean;
+  q: (run: WorkspaceRunRow) => boolean;
 }
 
 const buildPredicates = (filters: WorkspaceRunsFilters, now: number): FilterPredicates => ({
+  // A run is filtered by its status now — its latest attempt — so a run that
+  // failed and was resumed to success is not "failed". A word also matches its
+  // chart group ("running" includes finalizing).
   status: (run) => {
     if (!filters.status || filters.status.length === 0) return true;
-    const observed = run.statusSummary.notStarted
-      ? ["not_started"]
-      : Object.keys(run.statusSummary.byStatus);
+    const current = runPresentationStatus(run);
+    const currentGroup = chartGroupOf(current);
     return filters.status.some((filter) => {
-      const filterGroup = groupForStatus(filter);
-      return observed.some(
-        (status) =>
-          status === filter || (filterGroup !== null && groupForStatus(status) === filterGroup),
+      const filterGroup = chartGroupOf(filter);
+      return (
+        normalizeStatus(filter) === current ||
+        (filterGroup !== null && filterGroup === currentGroup)
       );
     });
   },
   projectId: (run) => includesValue(filters.projectId, run.projectId),
   experimentId: (run) => includesValue(filters.experimentId, run.experimentId),
   backend: (run) => {
+    if (!filters.backend?.length) return true;
     const values = runExecutorFacet(run, "backend");
-    return !filters.backend?.length || filters.backend.some((value) => values.includes(value));
+    return filters.backend.some((value) => values.includes(value));
   },
   cluster: (run) => {
+    if (!filters.cluster?.length) return true;
     const values = runExecutorFacet(run, "cluster_name");
-    return !filters.cluster?.length || filters.cluster.some((value) => values.includes(value));
+    return filters.cluster.some((value) => values.includes(value));
   },
   target: (run) => {
+    if (!filters.target?.length) return true;
     const values = [
       ...runExecutorFacet(run, "target"),
       ...(run.targetHint ? [run.targetHint] : []),
     ];
-    return !filters.target?.length || filters.target.some((value) => values.includes(value));
+    return filters.target.some((value) => values.includes(value));
   },
-  quickView: (run) => {
-    const views = filters.quickView;
-    if (!views || views.length === 0) return true;
-    return views.some((view) => matchesQuickView(run, view, now));
-  },
+  started: (run) =>
+    !filters.started?.length || filters.started.some((window) => startedWithin(run, window, now)),
+  q: (run) => matchesTokens(run, filters.q),
 });
 
 export const applyFilters = (
@@ -105,7 +110,8 @@ export const applyFilters = (
       predicates.backend(run) &&
       predicates.cluster(run) &&
       predicates.target(run) &&
-      predicates.quickView(run),
+      predicates.started(run) &&
+      predicates.q(run),
   );
 };
 
@@ -122,7 +128,7 @@ export interface FacetSnapshot {
   target: FacetCount[];
   projectId: FacetCount[];
   experimentId: FacetCount[];
-  quickView: Record<RunsQuickView, number>;
+  started: Record<RunsStartedWindow, number>;
 }
 
 const tally = (
@@ -143,6 +149,14 @@ const tally = (
     return a.label.localeCompare(b.label);
   });
 };
+
+/** Status facets in the vocabulary's chart order, not by count. */
+const sortByGroup = (counts: FacetCount[]): FacetCount[] =>
+  [...counts].sort(
+    (left, right) =>
+      CHART_GROUPS.findIndex((group) => group.id === left.value) -
+      CHART_GROUPS.findIndex((group) => group.id === right.value),
+  );
 
 const omit = <K extends keyof FilterPredicates>(
   predicates: FilterPredicates,
@@ -173,16 +187,17 @@ export const computeFacetCounts = (
   const targetRuns = filterFor("target");
   const projectRuns = filterFor("projectId");
   const experimentRuns = filterFor("experimentId");
-  const quickRuns = filterFor("quickView");
+  const startedRuns = filterFor("started");
 
   return {
-    status: tally(statusRuns, (run) =>
-      run.statusSummary.notStarted
-        ? [{ value: "not_started", label: "not started" }]
-        : Object.keys(run.statusSummary.byStatus).map((status) => ({
-            value: status,
-            label: status,
-          })),
+    // One count per run, by its latest attempt's chart group — what a pick shows.
+    status: sortByGroup(
+      tally(statusRuns, (run) => {
+        const group = chartGroupOf(runPresentationStatus(run));
+        if (!group) return [];
+        const spec = CHART_GROUPS.find((candidate) => candidate.id === group);
+        return [{ value: group, label: spec?.label ?? group }];
+      }),
     ),
     backend: tally(backendRuns, (run) =>
       runExecutorFacet(run, "backend").map((value) => ({ value, label: value })),
@@ -202,57 +217,9 @@ export const computeFacetCounts = (
     experimentId: tally(experimentRuns, (run) => [
       { value: run.experimentId, label: run.experimentName },
     ]),
-    quickView: {
-      active: quickRuns.filter((run) => matchesQuickView(run, "active", now)).length,
-      failed24h: quickRuns.filter((run) => matchesQuickView(run, "failed24h", now)).length,
-      longRunning: quickRuns.filter((run) => matchesQuickView(run, "longRunning", now)).length,
+    started: {
+      "24h": startedRuns.filter((run) => startedWithin(run, "24h", now)).length,
+      "7d": startedRuns.filter((run) => startedWithin(run, "7d", now)).length,
     },
   };
-};
-
-export type RecentEventKind = "submitted" | "started" | "finished";
-
-export interface RecentEvent {
-  kind: RecentEventKind;
-  at: string;
-  executionId?: string;
-  /** For finished events, mirrors execution.status (succeeded/failed/cancelled). */
-  outcome?: string;
-}
-
-/**
- * Derives a "Recent events" list for a single run strictly from data the
- * backend already exposes — `createdAt`, plus per-execution `startedAt` /
- * `finishedAt`. Emits ONLY `submitted | started | finished`; never invents
- * synthetic events ("checkpoint saved", "stdout streaming", etc.).
- */
-export const computeRecentEventsForRun = (run: WorkspaceRunRow): RecentEvent[] => {
-  const events: RecentEvent[] = [];
-
-  if (run.createdAt) {
-    events.push({ kind: "submitted", at: run.createdAt });
-  }
-
-  for (const exec of run.executions) {
-    if (exec.startedAt) {
-      events.push({ kind: "started", at: exec.startedAt, executionId: exec.executionId });
-    }
-    if (exec.finishedAt) {
-      events.push({
-        kind: "finished",
-        at: exec.finishedAt,
-        executionId: exec.executionId,
-        outcome: exec.status,
-      });
-    }
-  }
-
-  return events.sort((a, b) => {
-    const ta = new Date(a.at).getTime();
-    const tb = new Date(b.at).getTime();
-    if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
-    if (Number.isNaN(ta)) return 1;
-    if (Number.isNaN(tb)) return -1;
-    return tb - ta;
-  });
 };

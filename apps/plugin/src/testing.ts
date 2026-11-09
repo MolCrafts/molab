@@ -35,6 +35,7 @@ export function fakePluginAPI(overrides: Partial<PluginAPI> = {}): PluginAPI {
     panels: { register() {} },
     statusBar: { register() {} },
     settings: { registerSection() {} },
+    runViews: { register() {} },
     fileTypes: { register() {} },
     entityTabs: { register() {} },
     execution: { registerColumn() {}, registerDetail() {} },

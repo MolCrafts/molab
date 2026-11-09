@@ -4,7 +4,7 @@ import { defaultExecutionId } from "@/app/renderers/useRunViewer";
 /**
  * A run must open on an attempt.
  *
- * Every file-discovered tab — molplot, molvis, tensorboard — takes its
+ * Every file-discovered tab — molplot, molvis, molq — takes its
  * coordinates from the selected execution. When none was selected the run
  * rendered with no plugin tabs at all, which is indistinguishable from the
  * plugins being broken. That is the regression this guards.

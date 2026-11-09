@@ -35,8 +35,11 @@ export const eventMatchesKeybinding = (event: KeyboardEvent, binding: string): b
   );
   if (!key) return false;
 
-  const eventKey = event.key.length === 1 ? event.key.toLowerCase() : event.key.toLowerCase();
-  if (eventKey !== key && event.code.toLowerCase() !== `key${key}`) return false;
+  // ⌥ composes a glyph on macOS (⌥B → "∫"), so the physical key decides too:
+  // `KeyB` for a letter, the code itself for a named key (`BracketLeft`, `F6`).
+  const eventKey = event.key.toLowerCase();
+  const code = event.code.toLowerCase();
+  if (eventKey !== key && code !== `key${key}` && code !== key) return false;
   if (Boolean(event.shiftKey) !== wantShift) return false;
   if (Boolean(event.altKey) !== wantAlt) return false;
 

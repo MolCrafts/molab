@@ -1,11 +1,4 @@
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
   Input,
   Label,
   Select,
@@ -19,7 +12,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@molcrafts/ui";
-import { Check, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { experimentsApi } from "@/api";
@@ -27,7 +20,8 @@ import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import { TargetsService } from "@/api/generated/services/TargetsService";
 import { parseWorkflowDocumentInput } from "@/app/components/workflowDocumentInput";
 import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
-import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
+import { AppDialog } from "@/components/dialog/AppDialog";
+import { WorkbenchIconAction } from "@/components/workbench";
 
 const NO_TARGET_VALUE = "__none__";
 
@@ -55,6 +49,7 @@ export function CreateExperimentDialog({
   const [targets, setTargets] = useState<TargetResponse[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = onOpenChange ?? setUncontrolledOpen;
 
@@ -72,13 +67,13 @@ export function CreateExperimentDialog({
     void refreshTargets();
   }, [open, refreshTargets]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
     const parsed = parseWorkflowDocumentInput(workflow);
     if (!parsed.ok) {
-      setError(parsed.error);
+      setWorkflowError(parsed.error);
       return;
     }
+    setWorkflowError(null);
     setIsLoading(true);
     setError(null);
 
@@ -106,123 +101,105 @@ export function CreateExperimentDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      {trigger === undefined ? (
-        <DialogTrigger asChild>
+    <AppDialog
+      open={open}
+      onOpenChange={setOpen}
+      title="New experiment"
+      size="wide"
+      primaryLabel="Create experiment"
+      busyLabel="Creating…"
+      busy={isLoading}
+      primaryDisabled={!name}
+      onPrimary={handleSubmit}
+      error={error}
+      trigger={
+        trigger === undefined ? (
           <WorkbenchIconAction label="New experiment">
             <Plus className="size-3.5" />
           </WorkbenchIconAction>
-        </DialogTrigger>
-      ) : (
-        trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>
-      )}
-      <DialogContent className="sm:max-w-dialog-lg">
-        <DialogHeader>
-          <DialogTitle>Create Experiment</DialogTitle>
-          <DialogDescription className="sr-only">Create an experiment.</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
-              <Label htmlFor="exp-name" className="text-left sm:text-right">
-                Name
+        ) : (
+          trigger
+        )
+      }
+    >
+      <div className="grid gap-2">
+        <Label htmlFor="exp-name">Name</Label>
+        <Input id="exp-name" value={name} onChange={(e) => setName(e.target.value)} required />
+      </div>
+      <div className="grid gap-2">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Label htmlFor="exp-workflow" className="w-fit">
+                Workflow IR (JSON)
               </Label>
-              <Input
-                id="exp-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="col-span-3"
-                required
-              />
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Label htmlFor="exp-workflow" className="text-left sm:text-right">
-                      Workflow IR (JSON)
-                    </Label>
-                  </TooltipTrigger>
-                  <TooltipContent side="left">
-                    Optional. Leave blank to start with an empty canvas.
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <Textarea
-                id="exp-workflow"
-                value={workflow}
-                onChange={(e) => setWorkflow(e.target.value)}
-                className="col-span-3 font-mono text-label"
-                rows={4}
-              />
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
-              <Label htmlFor="exp-params" className="text-left sm:text-right">
-                Parameters (JSON)
-              </Label>
-              <Textarea
-                id="exp-params"
-                value={parameterSpace}
-                onChange={(e) => setParameterSpace(e.target.value)}
-                className="col-span-3 font-mono text-label"
-                rows={4}
-              />
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
-              <Label htmlFor="exp-target" className="pt-2 text-left sm:text-right">
-                Default target
-              </Label>
-              <div className="col-span-3 space-y-2">
-                <Select value={defaultTarget} onValueChange={setDefaultTarget}>
-                  <SelectTrigger id="exp-target">
-                    <SelectValue placeholder="No default — pick at run time" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_TARGET_VALUE}>No default</SelectItem>
-                    {targets.map((t) => (
-                      <SelectItem key={t.name} value={t.name}>
-                        <span className="flex items-center gap-2">
-                          <span className="font-medium">{t.name}</span>
-                          <span className="text-micro uppercase tracking-wide text-muted-foreground">
-                            {t.isRemote ? "remote" : "local"}
-                          </span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <AddTargetDialog
-                  trigger={
-                    <WorkbenchIconAction label="Add new target">
-                      <Plus className="size-3.5" />
-                    </WorkbenchIconAction>
-                  }
-                  onCreated={(t) => {
-                    void refreshTargets();
-                    setDefaultTarget(t.name);
-                  }}
-                />
-              </div>
-            </div>
-            {error && (
-              <div className="text-body-lg text-status-failed-foreground col-span-4 text-center">
-                {error}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <WorkbenchAction
-              icon={<Check aria-hidden />}
-              kind="primary"
-              size="default"
-              type="submit"
-              disabled={isLoading}
-            >
-              {isLoading ? "Creating..." : "Create Experiment"}
-            </WorkbenchAction>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              Optional. Leave blank to start with an empty canvas.
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <Textarea
+          id="exp-workflow"
+          value={workflow}
+          onChange={(e) => setWorkflow(e.target.value)}
+          className="font-mono text-label"
+          rows={4}
+          aria-invalid={workflowError ? true : undefined}
+        />
+        {workflowError ? (
+          <p
+            className="flex items-center gap-1 text-label text-status-failed-foreground"
+            role="alert"
+          >
+            {workflowError}
+          </p>
+        ) : null}
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="exp-params">Parameters (JSON)</Label>
+        <Textarea
+          id="exp-params"
+          value={parameterSpace}
+          onChange={(e) => setParameterSpace(e.target.value)}
+          className="font-mono text-label"
+          rows={4}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="exp-target">Default target</Label>
+        <div className="flex items-center gap-2">
+          <Select value={defaultTarget} onValueChange={setDefaultTarget}>
+            <SelectTrigger id="exp-target" className="min-w-0 flex-1">
+              <SelectValue placeholder="No default — pick at run time" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_TARGET_VALUE}>No default</SelectItem>
+              {targets.map((t) => (
+                <SelectItem key={t.name} value={t.name}>
+                  <span className="flex items-center gap-2">
+                    <span className="font-medium">{t.name}</span>
+                    <span className="text-micro uppercase tracking-wide text-muted-foreground">
+                      {t.isRemote ? "remote" : "local"}
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <AddTargetDialog
+            trigger={
+              <WorkbenchIconAction label="Add new target">
+                <Plus className="size-3.5" />
+              </WorkbenchIconAction>
+            }
+            onCreated={(t) => {
+              void refreshTargets();
+              setDefaultTarget(t.name);
+            }}
+          />
+        </div>
+      </div>
+    </AppDialog>
   );
 }

@@ -29,6 +29,8 @@ export default defineConfig(({ command }) => {
 
   return {
     plugins: [pluginReact()],
+    // The browser tab names the product (L15); the login page sets its own.
+    html: { title: 'molab' },
     dev: {
       // Compiling dynamic imports on demand rewrites module ids while the
       // first page is still loading Project Overview and the project tree.

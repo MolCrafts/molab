@@ -1,14 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
 
 import {
-  distinguishingParameters,
+  clockWindow,
+  errorLine,
   resultFigures,
+  runResultExecution,
   runVerdict,
-  siblingStanding,
-  taskSpans,
-  unstartedTasks,
+  taskClock,
 } from "@/app/renderers/run/runStory";
-import type { WorkspaceRunRow } from "@/app/runs/types";
 import type { ExecutionRecordSummary, RunSummary } from "@/app/types";
 import type { TaskGraphJson } from "@/plugins/workflow/task-graph-ir";
 
@@ -58,91 +57,123 @@ const graph: TaskGraphJson = {
   links: [],
 };
 
-const sibling = (id: string, minutes: number, parameters: Record<string, unknown>) =>
-  ({
-    id,
-    name: id,
-    parameters,
-    statusSummary: { total: 1, active: 0, notStarted: false, byStatus: { succeeded: 1 } },
-    executions: [
-      {
-        executionId: "e01",
-        status: "succeeded",
-        createdAt: "2026-03-01T12:00:00Z",
-        startedAt: "2026-03-01T12:00:00Z",
-        finishedAt: new Date(Date.parse("2026-03-01T12:00:00Z") + minutes * 60_000).toISOString(),
-      },
-    ],
-  }) as unknown as WorkspaceRunRow;
-
 describe("runVerdict", () => {
-  it("names the failing task, the time, and the attempt's own error", () => {
+  it("names the failing task and keeps the error's message as the evidence", () => {
     const verdict = runVerdict(runOf([attempt("failed")]), graph);
     expect(verdict.status).toBe("failed");
-    expect(verdict.headline).toBe("Failed at Train model after 48m");
-    expect(verdict.subject).toBe("Train model");
+    expect(verdict.word).toBe("Failed");
+    expect(verdict.subject).toBe("at Train model");
     expect(verdict.elapsed).toBe("48m");
-    expect(verdict.tasks).toEqual({ done: 1, total: 3 });
-    expect(verdict.attempt).toBeNull();
+    expect(verdict.evidence).toBe("CUDA out of memory");
     expect(verdict.error).toBe("RuntimeError: CUDA out of memory");
+    expect(verdict.taskId).toBe("train");
   });
 
-  it("says a running attempt is running, and where", () => {
+  it("says an interrupted attempt was interrupted, and how far it got", () => {
+    const verdict = runVerdict(runOf([attempt("interrupted")]), graph);
+    expect(verdict.word).toBe("Interrupted");
+    expect(verdict.subject).toBe("at Train model");
+    expect(verdict.evidence).toBe(
+      "Train model failed · 1 of 3 tasks finished".replace(
+        "Train model failed",
+        "RuntimeError: CUDA out of memory",
+      ),
+    );
+  });
+
+  it("reads the latest attempt, not an earlier success", () => {
+    const verdict = runVerdict(runOf([attempt("succeeded"), attempt("failed")]), graph);
+    expect(verdict.status).toBe("failed");
+  });
+
+  it("puts a success's time in its subject and its results in the evidence", () => {
+    const verdict = runVerdict(runOf([attempt("succeeded")]), graph, Date.now(), [
+      { key: "energy_drift", value: "1.50e-4" },
+      { key: "frames", value: "51" },
+    ]);
+    expect(verdict.subject).toBe("in 48m");
+    expect(verdict.elapsed).toBeNull();
+    expect(verdict.evidence).toBe("energy_drift 1.50e-4 · frames 51");
+  });
+
+  it("says a running attempt is running, which task, and for how long", () => {
     const running = {
       ...graph,
       task_configs: [{ id: "train", type: "t", label: "Train model", status: "running" }],
     };
     const now = Date.parse("2026-03-01T12:12:00Z");
-    expect(runVerdict(runOf([attempt("running")]), running, now).headline).toBe(
-      "Running Train model · 12m so far",
-    );
+    const verdict = runVerdict(runOf([attempt("running")]), running, now);
+    expect(verdict.subject).toBe("Train model");
+    expect(verdict.elapsed).toBe("12m so far");
   });
-});
 
-describe("taskSpans", () => {
-  it("draws started tasks on a clock and counts the ones that never started", () => {
-    const spans = taskSpans(graph);
-    expect(spans.map((span) => [span.key, span.status])).toEqual([
-      ["prepare", "succeeded"],
-      ["train", "failed"],
+  it("says where a queued resume waits and what it reuses", () => {
+    const queued = {
+      ...attempt("queued", "resume"),
+      executionId: "e02",
+      basedOnExecutionId: "e01",
+      finishedAt: null,
+      executor: { target: "hpc-slurm" },
+    };
+    const journal = {
+      ...graph,
+      task_configs: [
+        { id: "prepare", type: "p", label: "Prepare", status: "cached" },
+        { id: "train", type: "t", label: "Train model" },
+        { id: "evaluate", type: "e", label: "Evaluate" },
+      ],
+    };
+    const verdict = runVerdict(runOf([attempt("failed"), queued]), journal);
+    expect(verdict.subject).toBe("on hpc-slurm");
+    expect(verdict.evidence).toBe("Resume of e01 · 1 reused · 2 tasks to run");
+    expect(taskClock(journal, queued).map((row) => row.note)).toEqual([
+      "reused from e01",
+      "waiting",
+      "waiting",
     ]);
-    expect(spans[1]?.tip).toContain("CUDA out of memory");
-    expect(unstartedTasks(graph)).toBe(1);
   });
 });
 
-describe("siblingStanding", () => {
-  it("ranks the run's duration against the experiment's other finished runs", () => {
-    const rows = [sibling("run-a", 30, {}), sibling("run-b", 48, {}), sibling("run-c", 60, {})];
-    const standing = siblingStanding("run-b", rows);
-    expect(standing.points.find((point) => point.self)?.seconds).toBe(48 * 60);
-    expect(standing.rank).toBe("faster than 1 of 2 other runs");
-    expect(standing.place).toBe("2/3");
-  });
-
-  it("says a tie is a tie", () => {
-    const rows = [sibling("run-a", 48, {}), sibling("run-b", 48, {})];
-    expect(siblingStanding("run-b", rows).rank).toBe("as long as the 1 other run");
+describe("taskClock", () => {
+  it("draws every task in order: a bar for the ones that ran, a word for the rest", () => {
+    const rows = taskClock(graph, attempt("failed"));
+    expect(rows.map((row) => [row.key, row.status, row.note])).toEqual([
+      ["prepare", "succeeded", null],
+      ["train", "failed", null],
+      ["evaluate", rows[2]?.status, "not run"],
+    ]);
+    expect(rows[1]?.tip).toContain("CUDA out of memory");
+    expect(clockWindow(rows)).toMatch(/^\d\d:\d\d → \d\d:\d\d$/);
   });
 });
 
-describe("distinguishingParameters", () => {
-  it("keeps the parameters that set this run apart from its siblings", () => {
-    const rows = [
-      sibling("run-a", 30, { lr: 0.001, seed: 1 }),
-      sibling("run-b", 48, { lr: 0.002, seed: 1 }),
+describe("errorLine", () => {
+  it("finds the line that carries the error, else the last traceback", () => {
+    const text = "step 1\nTraceback (most recent call last):\nRuntimeError: CUDA out of memory\n";
+    expect(errorLine(text, "RuntimeError: CUDA out of memory")).toBe(3);
+    expect(errorLine(text, "something else entirely")).toBe(2);
+    expect(errorLine(null, "x")).toBeNull();
+  });
+});
+
+describe("run result", () => {
+  it("keeps the latest sealed success when a later attempt is still running", () => {
+    const history = [
+      { ...attempt("succeeded"), executionId: "e01" },
+      { ...attempt("running"), executionId: "e02", finishedAt: null },
     ];
-    expect(distinguishingParameters({ lr: 0.002, seed: 1 }, rows)).toEqual([
-      { key: "lr", value: "0.002" },
-    ]);
+    expect(runResultExecution(history)?.execution.executionId).toBe("e01");
+    expect(runResultExecution(history)?.index).toBe(1);
+    expect(runResultExecution([attempt("failed")])).toBeNull();
   });
 });
 
 describe("resultFigures", () => {
   it("puts numbers first and leaves structured results to their tab", () => {
     expect(resultFigures({ label: "ok", rmse: 0.0123456, nested: { a: 1 } })).toEqual([
-      { key: "rmse", value: "0.01235" },
+      { key: "rmse", value: "0.012346" },
       { key: "label", value: "ok" },
     ]);
+    expect(resultFigures({ energy_drift: 0.00015 })[0]?.value).toBe("1.50e-4");
   });
 });

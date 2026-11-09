@@ -118,23 +118,6 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
     setInspectorTarget(buildDefaultInspectorTarget(selection));
   }, [selection]);
 
-  // Preserve old shared links without keeping Workflow as a competing top-level
-  // workspace. Once its owner is available, replace `/workflows/:id` with the
-  // canonical experiment-scoped Workflow tab.
-  useEffect(() => {
-    if (selection?.objectType !== "workflow") return;
-    const workflow = snapshot.workflows.find((item) => item.id === selection.workflowId);
-    const experiment = workflow
-      ? snapshot.experiments.find((item) => item.id === workflow.experimentId)
-      : undefined;
-    if (!experiment) return;
-    setSelection({
-      objectType: "experiment",
-      objectId: experiment.id,
-      experimentView: "workflow",
-    });
-  }, [selection, setSelection, snapshot.experiments, snapshot.workflows]);
-
   const handleSelectionChange = (nextSelection: Selection): void => {
     setSelection(nextSelection);
   };

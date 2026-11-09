@@ -1,18 +1,11 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@molcrafts/ui";
-import { Check, X } from "lucide-react";
+/**
+ * Promise-style confirm and alert (L13): one dialog shape for every "are you
+ * sure" — Cancel · Primary text buttons, a destructive primary in danger, focus
+ * starting on Cancel. Replaces the icon-only ✓ ✕ and the native `confirm`.
+ */
 import type { ReactNode } from "react";
 import { useCallback, useState } from "react";
-import { WorkbenchIconAction } from "@/components/workbench";
-import { cn } from "@/lib/utils";
+import { AppDialog } from "@/components/dialog/AppDialog";
 
 export interface ConfirmOptions {
   title: ReactNode;
@@ -26,7 +19,7 @@ interface InternalState extends ConfirmOptions {
   resolve: (value: boolean) => void;
 }
 
-interface UseConfirmReturn {
+export interface UseConfirmReturn {
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   dialog: ReactNode;
 }
@@ -50,53 +43,19 @@ export const useConfirm = (): UseConfirmReturn => {
   };
 
   const dialog = (
-    <AlertDialog
+    <AppDialog
       open={state !== null}
       onOpenChange={(open) => {
         if (!open) close(false);
       }}
-    >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{state?.title}</AlertDialogTitle>
-          {state?.description !== undefined && (
-            <AlertDialogDescription asChild>
-              <div>{state.description}</div>
-            </AlertDialogDescription>
-          )}
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel
-            className="size-control-compact bg-transparent p-0 text-foreground hover:bg-interactive"
-            asChild
-          >
-            <WorkbenchIconAction
-              label={state?.cancelLabel ?? "Cancel"}
-              onClick={() => close(false)}
-            >
-              <X aria-hidden />
-            </WorkbenchIconAction>
-          </AlertDialogCancel>
-          <AlertDialogAction
-            className={cn(
-              "size-control-compact bg-transparent p-0 hover:bg-interactive",
-              state?.destructive
-                ? "text-destructive hover:text-destructive"
-                : "text-foreground hover:text-foreground",
-            )}
-            asChild
-          >
-            <WorkbenchIconAction
-              label={state?.confirmLabel ?? "Confirm"}
-              kind={state?.destructive ? "danger" : "ghost"}
-              onClick={() => close(true)}
-            >
-              <Check aria-hidden />
-            </WorkbenchIconAction>
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      size="confirm"
+      title={state?.title}
+      message={state?.description}
+      primaryLabel={state?.confirmLabel ?? "Confirm"}
+      cancelLabel={state?.cancelLabel ?? "Cancel"}
+      danger={Boolean(state?.destructive)}
+      onPrimary={() => close(true)}
+    />
   );
 
   return { confirm, dialog };
@@ -112,7 +71,7 @@ interface InternalAlertState extends AlertOptions {
   resolve: () => void;
 }
 
-interface UseAlertReturn {
+export interface UseAlertReturn {
   alert: (options: AlertOptions) => Promise<void>;
   dialog: ReactNode;
 }
@@ -136,33 +95,18 @@ export const useAlert = (): UseAlertReturn => {
   };
 
   const dialog = (
-    <AlertDialog
+    <AppDialog
       open={state !== null}
       onOpenChange={(open) => {
         if (!open) close();
       }}
-    >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{state?.title}</AlertDialogTitle>
-          {state?.description !== undefined && (
-            <AlertDialogDescription asChild>
-              <div>{state.description}</div>
-            </AlertDialogDescription>
-          )}
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogAction
-            className="size-control-compact bg-transparent p-0 text-foreground hover:bg-interactive hover:text-foreground"
-            asChild
-          >
-            <WorkbenchIconAction label={state?.confirmLabel ?? "OK"} onClick={() => close()}>
-              <Check aria-hidden />
-            </WorkbenchIconAction>
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      size="confirm"
+      alert
+      title={state?.title}
+      message={state?.description}
+      primaryLabel={state?.confirmLabel ?? "OK"}
+      onPrimary={() => close()}
+    />
   );
 
   return { alert, dialog };

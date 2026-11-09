@@ -30,6 +30,8 @@ export interface RunStatusSummary {
 export interface WorkspaceRunRow {
   id: string;
   name: string;
+  /** Stamped by the client (`runTitle`): its experiment's varying parameter values. */
+  title?: string;
   /**
    * Served-workspace key this row was fetched from.
    *
@@ -77,7 +79,8 @@ export interface WorkspaceRunsResponse {
   truncated: boolean;
 }
 
-export type RunsQuickView = "active" | "failed24h" | "longRunning";
+/** How recently a run started (or was created): the Started facet. */
+export type RunsStartedWindow = "24h" | "7d";
 
 export interface WorkspaceRunsFilters {
   projectId?: string[];
@@ -86,6 +89,8 @@ export interface WorkspaceRunsFilters {
   cluster?: string[];
   target?: string[];
   status?: string[];
-  quickView?: RunsQuickView[];
+  started?: RunsStartedWindow[];
+  /** The filter bar's free tokens (`driver:ase timestep_fs>1 nve`), as `runsFilter` reads them. */
+  q?: string;
   limit?: number;
 }

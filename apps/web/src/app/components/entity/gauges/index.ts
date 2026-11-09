@@ -1,8 +1,5 @@
-export { type Attempt, AttemptChain } from "./AttemptChain";
-export { OverviewSheet } from "./Composition";
 export { DurationRange } from "./DurationRange";
-export { type DurationPoint, type DurationSeries, DurationStrip } from "./DurationStrip";
-export { Figure, Gauge, STATUS_FILL, STATUS_INK } from "./Gauge";
+export { Figure, Gauge } from "./Gauge";
 export { StatusGlyphLegend, StatusTallies, StatusTally, Tally } from "./Glyph";
 export { Instrument, InstrumentStrip } from "./InstrumentStrip";
 export {
@@ -12,13 +9,10 @@ export {
   OverviewCanvas,
   OverviewColumn,
 } from "./OverviewLayout";
-export { StatusLedger } from "./StatusLedger";
 export { SuccessDial } from "./SuccessDial";
-export { type SweepAxis, type SweepCell, SweepMatrix } from "./SweepMatrix";
 export {
   formatSpan,
   quantile,
-  type StatusCounts,
   spanScale,
   stackLanes,
   successShare,
@@ -30,12 +24,16 @@ export { type UnitMark, UnitMeter } from "./UnitMeter";
 export {
   ActivityChart,
   BYTES_EXPR,
+  type ClockTask,
+  type CompareBar,
+  CompareBarsChart,
   type CountBar,
   CountBars,
   DurationDots,
+  type DurationPoint,
+  type DurationSeries,
   MixChart,
-  PositionChart,
-  type SiblingPoint,
-  TimelineChart,
-  type TimelineSpan,
+  SweepChart,
+  type SweepChartPoint,
+  TaskClockChart,
 } from "./vega/charts";

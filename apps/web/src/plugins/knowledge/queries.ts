@@ -1,5 +1,6 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { knowledgeApi } from "@/api";
+import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
 
 export interface KnowledgeListFilters {
   tag?: string | null;
@@ -14,7 +15,36 @@ export const knowledgeKeys = {
   notes: () => [...knowledgeKeys.all, "note"] as const,
   note: (path: string) => [...knowledgeKeys.notes(), path] as const,
   backlinks: (path: string) => [...knowledgeKeys.all, "backlinks", path] as const,
+  /** Documents citing a run or an experiment. */
+  citations: (kind: "run" | "experiment", experimentId: string, runId: string | null) =>
+    [...knowledgeKeys.all, "citations", kind, experimentId, runId] as const,
+  /** Documents citing an asset (`molab:asset/<id>`). */
+  assetCitations: (assetId: string) =>
+    [...knowledgeKeys.all, "citations", "asset", assetId] as const,
 };
+
+/** Knowledge documents that cite a run (or an experiment). */
+export const entityCitationsQueryOptions = (
+  kind: "run" | "experiment",
+  projectId: string,
+  experimentId: string,
+  runId: string | null,
+) =>
+  queryOptions({
+    queryKey: knowledgeKeys.citations(kind, experimentId, runId),
+    queryFn: async () =>
+      (await KnowledgeService.entityBacklinks(kind, projectId, experimentId, runId)).backlinks,
+    staleTime: 30_000,
+  });
+
+/** Knowledge documents whose links cite an asset (L08 Cited in). */
+export const assetCitationsQueryOptions = (assetId: string) =>
+  queryOptions({
+    queryKey: knowledgeKeys.assetCitations(assetId),
+    queryFn: async () =>
+      (await KnowledgeService.entityBacklinks("asset", null, null, null, assetId)).backlinks,
+    staleTime: 60_000,
+  });
 
 export const knowledgeListQueryOptions = (filters: KnowledgeListFilters = {}) =>
   queryOptions({

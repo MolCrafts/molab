@@ -239,10 +239,5 @@ describe("offline showcase contracts", () => {
     ).toContain("data:");
     const history = await json<unknown[]>("/history");
     expect(history.length).toBeGreaterThan(10);
-    const scalar = await json<{ series: Array<{ points: unknown[] }> }>(
-      `${base}/tensorboard/scalars?tag=loss/train`,
-    );
-    expect(scalar.series).toHaveLength(1);
-    expect(scalar.series[0].points).toHaveLength(60);
   });
 });

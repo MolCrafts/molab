@@ -1,7 +1,8 @@
 import { experimentPath, projectPath, runPath } from "@/app/entities/paths";
 import { runActivityAt, runPresentationStatus } from "@/app/runs/projections";
-import { groupForStatus } from "@/app/runs/statusGroups";
+import { runLabel } from "@/app/runs/runTitle";
 import type { WorkspaceRunRow } from "@/app/runs/types";
+import { chartGroupOf } from "@/app/status/vocabulary";
 import type { WorkspaceSnapshot } from "@/app/types";
 
 const MAX_ATTENTION_ITEMS = 5;
@@ -239,14 +240,14 @@ export const buildDashboardModel = (
   }
 
   const failedRuns = runs
-    .filter((run) => groupForStatus(runPresentationStatus(run)) === "failed")
+    .filter((run) => chartGroupOf(runPresentationStatus(run)) === "failed")
     .sort(newestRunsFirst);
   for (const run of failedRuns) {
     addAttention(
       {
         id: `failed-run-${run.workspaceKey}:${run.id}`,
         kind: "failed-run",
-        title: run.name || run.id,
+        title: runLabel(run),
         detail: `${run.projectName} · ${run.experimentName}`,
         href: runPath(run.projectId, run.experimentId, run.id),
         actionLabel: "Inspect",
@@ -304,13 +305,15 @@ export const buildDashboardModel = (
     })),
     ...runs
       .filter((run) => {
-        const group = groupForStatus(runPresentationStatus(run));
-        return group !== "running" && group !== "pending" && group !== "failed";
+        const group = chartGroupOf(runPresentationStatus(run));
+        return (
+          group !== "running" && group !== "queued" && group !== "failed" && group !== "interrupted"
+        );
       })
       .map((run) => ({
         id: `run-${run.workspaceKey}:${run.id}`,
         type: "Run" as const,
-        title: run.name || run.id,
+        title: runLabel(run),
         detail: `${run.projectName} · ${run.experimentName}`,
         href: runPath(run.projectId, run.experimentId, run.id),
         timestamp: runActivityTimestamp(run),

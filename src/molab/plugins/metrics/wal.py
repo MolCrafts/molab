@@ -11,7 +11,7 @@ Leftover ``*.mlp.zarr/`` and ``*.mlp.index.json`` are ignored.
 
 **Layering**
 
-* Foreign dialects (event JSONL, CSV, LAMMPS log, TensorBoard, …) convert
+* Foreign dialects (event JSONL, CSV, LAMMPS log, …) convert
   into this module's writer and land in the WAL via :class:`FileStore`.
 * A molab Run is a workspace host (an ``index.md`` record + run-root ``alive``), not a
   MolRec record. Filename gate ``*.mlp.jsonl`` is the host surface; the WAL

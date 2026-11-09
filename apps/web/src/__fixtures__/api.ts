@@ -51,11 +51,27 @@ export const fixtureExperimentNoDescription: ExperimentResponse = {
   ref: "molab:experiment/exp-002",
 };
 
-const fixtureStatus = (status: string) => ({
-  total: status === "pending" ? 0 : 1,
-  active: status === "running" ? 1 : 0,
-  notStarted: status === "pending",
-  byStatus: status === "pending" ? {} : { [status]: 1 },
+/** A run as the server sends it: the summary counts and the attempts they count. */
+const fixtureAttempts = (runId: string, statuses: readonly string[]) => ({
+  statusSummary: {
+    total: statuses.length,
+    active: statuses.filter((status) => ["queued", "running", "finalizing"].includes(status))
+      .length,
+    notStarted: statuses.length === 0,
+    byStatus: Object.fromEntries(
+      [...new Set(statuses)].map((status) => [
+        status,
+        statuses.filter((item) => item === status).length,
+      ]),
+    ),
+  },
+  executions: statuses.map((status, index) => ({
+    id: `e0${index + 1}`,
+    runId,
+    mode: index === 0 ? "initial" : "rerun",
+    status,
+    createdAt: `2026-03-01T1${index + 1}:00:00Z`,
+  })),
 });
 
 export const fixtureRun: ApiRunResponse = {
@@ -66,7 +82,7 @@ export const fixtureRun: ApiRunResponse = {
   experimentId: "exp-001",
   definitionHash: "def-run-abc",
   experimentRevisionId: "rev-exp-001",
-  statusSummary: fixtureStatus("succeeded"),
+  ...fixtureAttempts("run-abc", ["succeeded"]),
   created: "2026-03-01T11:00:00Z",
   finished: "2026-03-01T12:00:00Z",
   parameters: { lr: 0.001 },
@@ -81,7 +97,7 @@ export const fixtureRunPending: ApiRunResponse = {
   experimentId: "exp-001",
   definitionHash: "def-run-def",
   experimentRevisionId: "rev-exp-001",
-  statusSummary: fixtureStatus("pending"),
+  ...fixtureAttempts("run-def", []),
   created: "2026-03-01T13:00:00Z",
 };
 
@@ -93,7 +109,7 @@ export const fixtureRunFailed: ApiRunResponse = {
   experimentId: "exp-001",
   definitionHash: "def-run-ghi",
   experimentRevisionId: "rev-exp-001",
-  statusSummary: fixtureStatus("failed"),
+  ...fixtureAttempts("run-ghi", ["failed"]),
   created: "2026-03-01T14:00:00Z",
 };
 
@@ -105,8 +121,21 @@ export const fixtureRunCancelled: ApiRunResponse = {
   experimentId: "exp-001",
   definitionHash: "def-run-jkl",
   experimentRevisionId: "rev-exp-001",
-  statusSummary: fixtureStatus("cancelled"),
+  ...fixtureAttempts("run-jkl", ["cancelled"]),
   created: "2026-03-01T15:00:00Z",
+};
+
+/** An earlier success followed by a failure: the run reads failed. */
+export const fixtureRunFailedAfterSuccess: ApiRunResponse = {
+  id: "run-mno",
+  name: "lr=2",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=2",
+  projectId: "proj-alpha",
+  experimentId: "exp-001",
+  definitionHash: "def-run-mno",
+  experimentRevisionId: "rev-exp-001",
+  ...fixtureAttempts("run-mno", ["succeeded", "failed"]),
+  created: "2026-03-01T16:00:00Z",
 };
 
 export const fixtureAsset: ApiAssetResponse = {

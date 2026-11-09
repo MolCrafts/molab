@@ -1,7 +1,7 @@
 import { Code as InlineCode } from "@molcrafts/ui";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp } from "lucide-react";
 import { useMemo } from "react";
-import { useInspectedTask } from "@/app/state/inspectedTask";
+import { usePreview } from "@/app/preview/PreviewContext";
 import type { ScopedRendererProps, TaskSelection } from "@/app/types";
 import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
 
@@ -50,7 +50,7 @@ const TaskChips = ({
       {ids.map((id) => (
         <div key={id} className="flex min-w-0 items-center gap-2 py-1">
           <span className="min-w-0 flex-1 truncate font-mono text-label text-foreground">{id}</span>
-          <WorkbenchIconAction label={`Inspect task ${id}`} onClick={() => onInspect(id, runId)}>
+          <WorkbenchIconAction label={`Preview task ${id}`} onClick={() => onInspect(id, runId)}>
             <ArrowRight className="size-icon-sm" />
           </WorkbenchIconAction>
         </div>
@@ -62,7 +62,7 @@ export const TaskViewer = ({
   selection,
   snapshot,
 }: ScopedRendererProps<"runs" | "workflows" | "experiments">): JSX.Element | null => {
-  const { inspectTask, clearInspectedTask } = useInspectedTask();
+  const preview = usePreview();
 
   const task = selection.objectType === "task" ? (selection as TaskSelection) : null;
   const runId = task?.runId ?? "";
@@ -80,6 +80,29 @@ export const TaskViewer = ({
   const node = workflow?.graph?.task_configs.find((n) => n.id === taskId) ?? null;
   const links = workflow?.graph?.links ?? [];
   const upstream = links.filter((e) => e.to === taskId).map((e) => e.from);
+  // An edge previews the neighbouring task (L12); the breadcrumb leads back.
+  const inspectTask = (id: string, owner: string): void => {
+    if (run) {
+      preview.preview({
+        kind: "task",
+        runId: owner,
+        projectId: run.projectId,
+        experimentId: run.experimentId,
+        taskId: id,
+      });
+      return;
+    }
+    const experiment = workflow
+      ? snapshot.experiments.find((item) => item.id === workflow.experimentId)
+      : undefined;
+    if (experiment)
+      preview.preview({
+        kind: "node",
+        projectId: experiment.projectId,
+        experimentId: experiment.id,
+        taskId: id,
+      });
+  };
   const downstream = links.filter((e) => e.from === taskId).map((e) => e.to);
 
   if (!task) return null;
@@ -103,17 +126,6 @@ export const TaskViewer = ({
           <p className="mt-1 font-mono text-micro text-muted-foreground">
             [{node?.label ?? node?.type ?? "—"}]
           </p>
-          {run && (
-            <div className="mt-1 flex items-center gap-1 text-label text-muted-foreground">
-              <WorkbenchIconAction
-                label={`Back to ${run.name ?? run.id}`}
-                onClick={clearInspectedTask}
-              >
-                <ArrowLeft className="size-icon-sm" />
-              </WorkbenchIconAction>
-              <span className="truncate">{run.name ?? run.id}</span>
-            </div>
-          )}
         </Section>
 
         {node?.source ? (

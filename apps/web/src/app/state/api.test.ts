@@ -17,6 +17,7 @@ import {
   fixtureRun,
   fixtureRunCancelled,
   fixtureRunFailed,
+  fixtureRunFailedAfterSuccess,
   fixtureRunPending,
 } from "@/__fixtures__/api";
 import {
@@ -176,6 +177,11 @@ describe("mapRuns", () => {
     expect(pending.status).toBe("pending");
     expect(failed.status).toBe("failed");
     expect(cancelled.status).toBe("cancelled");
+  });
+
+  it("reads a run by its latest attempt, so a later failure is not hidden", () => {
+    const [run] = mapRuns("p", "e", [fixtureRunFailedAfterSuccess]);
+    expect(run.status).toBe("failed");
   });
 
   it("uses finished for updatedAt, falling back to created", () => {

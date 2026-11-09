@@ -1,11 +1,4 @@
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
   Input,
   Label,
   Select,
@@ -14,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@molcrafts/ui";
-import { Check, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { runsApi } from "@/api";
@@ -29,7 +22,8 @@ import {
   schemaDefaults,
 } from "@/app/runs/SchemaForm";
 import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
-import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
+import { AppDialog } from "@/components/dialog/AppDialog";
+import { WorkbenchIconAction } from "@/components/workbench";
 
 const NO_TARGET_VALUE = "__none__";
 
@@ -88,8 +82,7 @@ export function CreateRunDialog({
       });
   }, [open, projectId, experimentId, refreshTargets]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
     setIsLoading(true);
     setError(null);
 
@@ -113,118 +106,86 @@ export function CreateRunDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      {trigger === undefined ? (
-        <DialogTrigger asChild>
+    <AppDialog
+      open={open}
+      onOpenChange={setOpen}
+      title="New run"
+      size="wide"
+      primaryLabel="Create run"
+      busyLabel="Creating…"
+      busy={isLoading}
+      onPrimary={handleSubmit}
+      error={error}
+      trigger={
+        trigger === undefined ? (
           <WorkbenchIconAction label="New run">
             <Plus className="size-3.5" />
           </WorkbenchIconAction>
-        </DialogTrigger>
-      ) : (
-        trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>
-      )}
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>New run</DialogTitle>
-          <DialogDescription className="sr-only">
-            Parameters and optional compute target.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
-              <Label htmlFor="run-workflow" className="text-left sm:text-right">
-                Workflow
-              </Label>
-              <Input
-                id="run-workflow"
-                value={workflowFile}
-                disabled
-                className="col-span-3 bg-muted"
-              />
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
-              <p className="pt-2 text-left text-label font-medium sm:text-right">
-                {inputSchema ? "Inputs" : "Parameters"}
-              </p>
-              <div className="col-span-3">
-                {inputSchema ? (
-                  <SchemaForm schema={inputSchema} value={parameters} onChange={setParameters} />
-                ) : (
-                  <ParametersForm value={parameters} onChange={setParameters} />
-                )}
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
-              <Label htmlFor="run-assets" className="pt-2 text-left sm:text-right">
-                Assets
-              </Label>
-              <div className="col-span-3 grid gap-1">
-                <Input
-                  id="run-assets"
-                  value={assetInputs}
-                  onChange={(event) => setAssetInputs(event.target.value)}
-                  placeholder="Asset ids, separated by space"
-                />
-                <p className="text-micro text-muted-foreground">
-                  Files this run opens. Each id is bound into the root task as a path.
-                </p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
-              <Label htmlFor="run-target" className="pt-2 text-left sm:text-right">
-                Target
-              </Label>
-              <div className="col-span-3 space-y-2">
-                <Select value={target} onValueChange={setTarget}>
-                  <SelectTrigger id="run-target">
-                    <SelectValue placeholder="No target — local in-process" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_TARGET_VALUE}>No target (local)</SelectItem>
-                    {targets.map((t) => (
-                      <SelectItem key={t.name} value={t.name}>
-                        <span className="flex items-center gap-2">
-                          <span className="font-medium">{t.name}</span>
-                          <span className="text-micro uppercase tracking-wide text-muted-foreground">
-                            {t.isRemote ? "remote" : "local"}
-                          </span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <AddTargetDialog
-                  trigger={
-                    <WorkbenchIconAction label="Add new target">
-                      <Plus className="size-3.5" />
-                    </WorkbenchIconAction>
-                  }
-                  onCreated={(t) => {
-                    void refreshTargets();
-                    setTarget(t.name);
-                  }}
-                />
-              </div>
-            </div>
-            {error && (
-              <div className="text-body-lg text-status-failed-foreground col-span-4 text-center">
-                {error}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <WorkbenchAction
-              icon={<Check aria-hidden />}
-              kind="primary"
-              type="submit"
-              disabled={isLoading}
-            >
-              {isLoading ? "…" : "Create"}
-            </WorkbenchAction>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+        ) : (
+          trigger
+        )
+      }
+    >
+      <div className="grid gap-2">
+        <Label htmlFor="run-workflow">Workflow</Label>
+        <Input id="run-workflow" value={workflowFile} disabled className="bg-muted" />
+      </div>
+      <div className="grid gap-2">
+        <p className="text-label font-medium">{inputSchema ? "Inputs" : "Parameters"}</p>
+        {inputSchema ? (
+          <SchemaForm schema={inputSchema} value={parameters} onChange={setParameters} />
+        ) : (
+          <ParametersForm value={parameters} onChange={setParameters} />
+        )}
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="run-assets">Assets</Label>
+        <div className="grid gap-1">
+          <Input
+            id="run-assets"
+            value={assetInputs}
+            onChange={(event) => setAssetInputs(event.target.value)}
+            placeholder="Asset ids, separated by space"
+          />
+          <p className="text-micro text-muted-foreground">
+            Files this run opens. Each id is bound into the root task as a path.
+          </p>
+        </div>
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="run-target">Target</Label>
+        <div className="flex items-center gap-2">
+          <Select value={target} onValueChange={setTarget}>
+            <SelectTrigger id="run-target" className="min-w-0 flex-1">
+              <SelectValue placeholder="No target — local in-process" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_TARGET_VALUE}>No target (local)</SelectItem>
+              {targets.map((t) => (
+                <SelectItem key={t.name} value={t.name}>
+                  <span className="flex items-center gap-2">
+                    <span className="font-medium">{t.name}</span>
+                    <span className="text-micro uppercase tracking-wide text-muted-foreground">
+                      {t.isRemote ? "remote" : "local"}
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <AddTargetDialog
+            trigger={
+              <WorkbenchIconAction label="Add new target">
+                <Plus className="size-3.5" />
+              </WorkbenchIconAction>
+            }
+            onCreated={(t) => {
+              void refreshTargets();
+              setTarget(t.name);
+            }}
+          />
+        </div>
+      </div>
+    </AppDialog>
   );
 }

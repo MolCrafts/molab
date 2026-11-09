@@ -781,6 +781,40 @@ class TestEntityBacklinks:
         assert response.status_code == 200, response.text
         assert response.json()["backlinks"] == []
 
+    def test_a_note_citing_an_asset_is_listed(
+        self, served: ServedFactory, lab: RunFixture, tmp_path: Path
+    ) -> None:
+        ws, exp, _run = lab
+        source = tmp_path / "ligands.csv"
+        source.write_text("ligand,smiles\nL-001,CCO\n")
+        asset = exp.project.import_asset("ligands", source)
+        note = Note(Path(str(ws.root)) / "knowledges" / "screen")
+        note.write(f"# Screen\n\n[@cites ligands]({MolabRef(asset_id=asset.id)})\n")
+        with served(ws) as client:
+            response = client.get(
+                "/api/knowledge/entity-backlinks",
+                params={"kind": "asset", "assetId": asset.id},
+            )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["entity"] == f"asset:{asset.id}"
+        assert [row["title"] for row in body["backlinks"]] == ["Screen"]
+
+    def test_an_unknown_asset_is_404(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            response = client.get(
+                "/api/knowledge/entity-backlinks",
+                params={"kind": "asset", "assetId": "no-such-asset"},
+            )
+        assert response.status_code == 404, response.text
+
+    def test_kind_asset_requires_asset_id(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            response = client.get("/api/knowledge/entity-backlinks", params={"kind": "asset"})
+        assert response.status_code == 422, response.text
+
 
 def _seed_note(ws: Workspace) -> None:
     """Same markdown note the ``lab`` fixture writes at ``knowledges/idea.md``."""
@@ -1192,3 +1226,126 @@ class TestDelegationRecordRoutes:
                 json={"record": {"x": 1}},
             )
         assert response.status_code == 422, response.text
+
+
+class TestHtmlDocumentsAndTimes:
+    """An HTML document over the wire, and the ``format`` / ``createdAt`` / ``updatedAt`` fields."""
+
+    _BODY = (
+        "<molab-markdown>\n# Page\n\nGlass forms on cooling.\n</molab-markdown>\n"
+        '<molab-chart series="rho"></molab-chart>\n'
+    )
+
+    def _create(self, client: TestClient, **extra: object) -> dict[str, object]:
+        response = client.post(
+            "/api/knowledge/doc",
+            json={"name": "page", "body": self._BODY, "format": "html", **extra},
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    def test_create_lists_and_reads_an_html_document(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        from datetime import datetime
+
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            created = self._create(client)
+            listed = client.get("/api/knowledge").json()["notes"]
+            detail = client.get("/api/knowledge/note", params={"path": "knowledges/page.html"})
+        assert created["relPath"] == "knowledges/page.html"
+        assert created["format"] == "html"
+        assert isinstance(created["createdAt"], str)
+        datetime.fromisoformat(created["createdAt"])
+        rows = {row["relPath"]: row for row in listed}
+        page = rows["knowledges/page.html"]
+        assert page["format"] == "html"
+        assert page["createdAt"] == created["createdAt"]
+        assert datetime.fromisoformat(page["updatedAt"]).utcoffset().total_seconds() == 0
+        assert "<molab" not in page["excerpt"]
+        assert "Glass forms on cooling." in page["excerpt"]
+        idea = rows["knowledges/idea.md"]
+        assert idea["format"] == "md"
+        assert idea["createdAt"] is None
+        assert isinstance(idea["updatedAt"], str)
+        assert detail.status_code == 200, detail.text
+        body = detail.json()
+        assert body["body"] == self._BODY
+        assert body["format"] == "html"
+        assert body["createdAt"] == created["createdAt"]
+        assert isinstance(body["updatedAt"], str)
+
+    def test_markdown_create_carries_created_at(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            response = client.post("/api/knowledge/doc", json={"name": "plain", "body": "x"})
+        assert response.status_code == 201, response.text
+        assert response.json()["format"] == "md"
+        assert isinstance(response.json()["createdAt"], str)
+
+    def test_create_refuses_the_other_format(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc", json={"name": "idea", "body": "<p>x</p>", "format": "html"}
+            )
+        assert response.status_code == 422, response.text
+        assert "already exists" in response.text
+
+    def test_edit_keeps_the_html_form(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            self._create(client)
+            edited = client.put(
+                "/api/knowledge/doc",
+                params={"path": "knowledges/page.html"},
+                json={"body": "<p>rewritten</p>"},
+            )
+        assert edited.status_code == 200, edited.text
+        assert edited.json()["body"] == "<p>rewritten</p>"
+        text = Path(str(ws.root)).joinpath("knowledges", "page.html").read_text()
+        assert text.startswith("<!doctype html>")
+        assert "<body>\n<p>rewritten</p>\n</body>" in text
+
+    def test_export_is_text_html_with_an_html_filename(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            self._create(client)
+            response = client.get(
+                "/api/knowledge/doc/export", params={"path": "knowledges/page.html"}
+            )
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"].startswith("text/html")
+        assert 'filename="page.html"' in response.headers["content-disposition"]
+        assert response.text == Path(str(ws.root)).joinpath("knowledges", "page.html").read_text()
+
+    def test_notebook_export_carries_an_img_figure(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        import io
+        import zipfile
+
+        ws, _exp, _run = lab
+        png = b"\x89PNG\r\n\x1a\n" + b"z" * 4
+        with served(ws) as client:
+            self._create(client)
+            uploaded = client.post(
+                "/api/knowledge/doc/media",
+                params={"path": "knowledges/page.html"},
+                files={"file": ("plot.png", png, "image/png")},
+            )
+            assert uploaded.status_code == 201, uploaded.text
+            client.put(
+                "/api/knowledge/doc",
+                params={"path": "knowledges/page.html"},
+                json={"body": self._BODY + '<img src="figs/plot.png" alt="plot">\n'},
+            )
+            response = client.get("/api/knowledge/export")
+        archive = zipfile.ZipFile(io.BytesIO(response.content))
+        assert "knowledges/page.html" in archive.namelist()
+        assert archive.read("knowledges/figs/plot.png") == png

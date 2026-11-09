@@ -1,6 +1,6 @@
-// Shell-level breadcrumb bar. Driven by ``buildTrail`` from the current
-// selection, it lives once in the AppShell instead of being re-derived and
-// re-rendered inside every entity viewer.
+// Breadcrumb row (L00): 22px under the editor tabs — project › experiment ›
+// run › attempt, names only (retrofit R10: icon OR text), each ancestor a link.
+// Driven by ``buildTrail`` from the active editor; it lives once in the shell.
 
 import { ChevronRight } from "lucide-react";
 import { Fragment, type JSX } from "react";
@@ -10,37 +10,44 @@ import { cn } from "@/lib/utils";
 
 interface BreadcrumbProps {
   items: BreadcrumbItem[];
-  /** Entity pages own the current title; show only navigable ancestors. */
-  omitCurrent?: boolean;
 }
 
-export const Breadcrumb = ({ items, omitCurrent = false }: BreadcrumbProps): JSX.Element => {
-  const visibleItems = omitCurrent ? items.slice(0, -1) : items;
+export const Breadcrumb = ({ items }: BreadcrumbProps): JSX.Element | null => {
+  // One segment is the editor tab's own name: the row would only repeat it.
+  if (items.length < 2) return null;
   return (
     <nav
       aria-label="Breadcrumb"
-      className="flex min-w-0 items-center gap-1 overflow-hidden text-label text-muted-foreground"
+      className="box-content flex h-shell-crumbs min-w-0 flex-none items-center gap-hairline overflow-hidden bg-background px-6 pt-1 text-label text-muted-foreground"
     >
-      {visibleItems.map((item, index) => {
-        const isLast = index === visibleItems.length - 1;
-        const isCurrent = isLast && !omitCurrent;
+      {items.map((item, index) => {
+        const isLast = index === items.length - 1;
+        const body = (
+          <span className={cn("truncate", item.kind === "attempt" && "font-mono")}>
+            {item.label}
+          </span>
+        );
         return (
-          <Fragment key={`${item.label}-${item.to ?? index}`}>
-            {index > 0 && <ChevronRight className="h-3 w-3 flex-none opacity-50" />}
-            {item.to && !isCurrent ? (
+          <Fragment key={`${item.kind}:${item.label}`}>
+            {index > 0 && (
+              <ChevronRight className="size-icon-sm flex-none opacity-60" aria-hidden />
+            )}
+            {item.to ? (
               <Link
                 to={item.to}
-                className="min-w-0 truncate rounded-control px-1 py-1 transition-colors hover:bg-muted/60 hover:text-foreground"
+                title={item.label}
+                aria-current={isLast ? "page" : undefined}
+                className="flex min-w-0 items-center gap-1 rounded-hairline px-1 hover:bg-interactive hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
-                {item.label}
+                {body}
               </Link>
             ) : (
               <span
                 title={item.label}
-                className={cn("min-w-0 truncate", isCurrent && "font-medium text-foreground")}
-                aria-current={isCurrent ? "page" : undefined}
+                aria-current={isLast ? "page" : undefined}
+                className={cn("flex min-w-0 items-center gap-1 px-1", isLast && "text-foreground")}
               >
-                {item.label}
+                {body}
               </span>
             )}
           </Fragment>

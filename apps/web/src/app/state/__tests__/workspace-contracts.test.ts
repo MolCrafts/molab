@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient } from "@tanstack/react-query";
 import { projectsWsApi, workspaceApi } from "@/api";
 import { workspacesApi } from "@/api/workspaces";
-import { workspaceRunKey } from "@/app/runs/jobsTable";
 import { workspaceRunsQueryOptions } from "@/app/runs/useWorkspaceRuns";
+import { workspaceRunKey } from "@/app/runs/WorkspaceRunsTable";
 import { buildEmptySnapshot } from "../api";
 import { runKeys } from "../entityQueries";
 import {

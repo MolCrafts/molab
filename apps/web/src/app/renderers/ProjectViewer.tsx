@@ -1,253 +1,191 @@
-import { Table, TableBody, TableCell, TableRow } from "@molcrafts/ui";
+/**
+ * The project page (Figma L02): views Overview · Experiments (n) · Assets (n)
+ * · Plan (when the project hosts a roadmap). New experiment and ⋯ sit at the
+ * right of the editor tab row. The Overview's counts open the workspace Runs
+ * filtered to this project; Attention, Timeline and Settings left the page.
+ */
+
 import { useQuery } from "@tanstack/react-query";
 import {
-  Archive,
+  Activity,
   Copy,
   ExternalLink,
+  FileText,
   FlaskConical,
   FolderKanban,
-  Play,
-  PlayCircle,
-  Trash2,
-  Workflow,
+  ListChecks,
+  Package,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { type JSX, useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { experimentsApi, projectsApi } from "@/api";
 import { activeNeedsAuth, shouldShowFailure } from "@/api/errors";
+import { useCompareSet } from "@/app/compare";
+import { activeWorkspace, itemFromWorkspaceRunRow } from "@/app/compare/entries";
+import { CreateExperimentDialog } from "@/app/components/CreateExperimentDialog";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
 import {
-  DashboardCanvas,
-  DashboardCard,
   DataTable,
   EMPTY_COPY,
   EmptyState,
   EntityPage,
-  InventoryCanvas,
-  OverviewSurface,
-  StatusDistribution,
-  Tally,
+  StatusIcon,
+  ViewLabel,
 } from "@/app/components/entity";
-import {
-  attentionRuns,
-  NeedsAttention,
-  RunTimeline,
-  rollupExecutions,
-} from "@/app/dashboard/dashboardWidgets";
-import { ExecutionOverview } from "@/app/dashboard/ExecutionOverview";
 import { useScopeRuns } from "@/app/dashboard/useScopeRuns";
-import {
-  buildProjectWorkbenchData,
-  experimentRunCompleteness,
-  projectSnapshotCompleteness,
-} from "@/app/renderers/entityWorkbenchData";
+import { runPath } from "@/app/entities/paths";
+import { usePreview } from "@/app/preview/PreviewContext";
+import { projectSnapshotCompleteness } from "@/app/renderers/entityWorkbenchData";
+import { declaredCellCount, experimentVerdict } from "@/app/renderers/experiment/experimentStory";
+import { ProjectEditorActions } from "@/app/renderers/project/ProjectEditorActions";
+import { ProjectOverview } from "@/app/renderers/project/ProjectOverview";
+import { runsHref, type ScopeRun, scopeRunsOf } from "@/app/renderers/scopeStory";
+import { runLabel } from "@/app/runs/runTitle";
 import { experimentWorkflowLabel } from "@/app/state/api";
 import { projectAssetsQueryOptions } from "@/app/state/entityQueries";
 import { useNavigationState } from "@/app/state/useNavigationState";
+import { isActiveStatus, normalizeStatus } from "@/app/status/vocabulary";
 import type {
   ApiAssetResponse,
   ExperimentSummary,
   ProjectView,
   ScopedRendererProps,
 } from "@/app/types";
-import {
-  WorkbenchAction,
-  WorkbenchIconAction,
-  WorkbenchOperationState,
-  WorkbenchRetryAction,
-} from "@/components/workbench";
-import { formatDateTime } from "@/lib/datetime";
-import { PlanProgress } from "@/plugins/knowledge/PlanProgress";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { toast } from "@/components/ui/toast";
+import { WorkbenchOperationState, WorkbenchRetryAction } from "@/components/workbench";
+import { formatBytes } from "@/lib/format-bytes";
+import { formatRelative } from "@/lib/format-time";
+import { PlanProgress, usePlanCampaigns } from "@/plugins/knowledge/PlanProgress";
 
 type ProjectRendererProps = ScopedRendererProps<
   "projects" | "experiments" | "runs" | "workflows" | "assets" | "workspaces"
 >;
+
+const VIEWS: readonly ProjectView[] = ["overview", "experiments", "assets", "plan"];
+
+const Muted = ({ children, mono }: { children: string; mono?: boolean }): JSX.Element => (
+  <span
+    className={`block truncate text-label text-muted-foreground ${mono ? "font-mono" : ""}`}
+    title={children}
+  >
+    {children}
+  </span>
+);
+
+const assetExtra = (asset: ApiAssetResponse): Record<string, unknown> =>
+  (asset.extra as Record<string, unknown> | undefined) ?? {};
 
 export const ProjectViewer = ({
   selection,
   snapshot,
   onRefresh,
 }: ProjectRendererProps): JSX.Element => {
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [deletingExperimentId, setDeletingExperimentId] = useState<string | null>(null);
-  const [experimentDeleteError, setExperimentDeleteError] = useState<{
-    experiment: ExperimentSummary;
-    message: string;
-  } | null>(null);
+  const [newExperimentOpen, setNewExperimentOpen] = useState(false);
   const [createRunExperimentId, setCreateRunExperimentId] = useState<string | null>(null);
   const { setSelection } = useNavigationState(snapshot);
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const navigate = useNavigate();
+  const preview = usePreview();
+  const compare = useCompareSet();
 
   const projectId = selection.objectId;
   const project = snapshot.projects.find((p) => p.id === projectId);
-  const requestedView: ProjectView =
+  const requested: ProjectView =
     selection.objectType === "project" ? (selection.projectView ?? "overview") : "overview";
-  const activeTab: ProjectView = requestedView;
+
   const assetsQuery = useQuery({
     ...projectAssetsQueryOptions(projectId),
-    enabled: Boolean(projectId) && activeTab === "assets",
+    enabled: Boolean(projectId),
   });
-  const { query: overviewRuns, rows: overviewRows } = useScopeRuns(
-    { projectId },
-    Boolean(projectId) &&
-      (activeTab === "overview" || activeTab === "attention" || activeTab === "timeline"),
-  );
+  const { campaigns } = usePlanCampaigns(project?.path ?? projectId);
+  const activeTab: ProjectView =
+    requested === "plan" && campaigns.length === 0 ? "overview" : requested;
+  // The run inventory, not the lazy snapshot: a project's runs load per experiment.
+  const {
+    query: inventory,
+    rows,
+    truncated,
+  } = useScopeRuns({ projectId }, Boolean(projectId) && activeTab !== "plan");
   const needsAuth = activeNeedsAuth(snapshot.workspaces);
-  const projectAssets = assetsQuery.data ?? [];
-  const projectAssetsPending =
-    assetsQuery.isPending || (needsAuth && assetsQuery.data === undefined);
-  const projectAssetsError = shouldShowFailure(assetsQuery.error, {
-    fetching: assetsQuery.isFetching,
-    needsAuth,
-  })
-    ? assetsQuery.error instanceof Error
-      ? assetsQuery.error.message
-      : "Failed to load project assets"
-    : null;
+
   const setProjectTab = useCallback(
     (value: string): void => {
-      const projectView: ProjectView =
-        value === "experiments" ||
-        value === "attention" ||
-        value === "timeline" ||
-        value === "assets" ||
-        value === "settings"
-          ? value
-          : "overview";
+      const projectView = (VIEWS as readonly string[]).includes(value)
+        ? (value as ProjectView)
+        : "overview";
       setSelection({ objectType: "project", objectId: projectId, projectView });
     },
     [projectId, setSelection],
   );
 
-  const projectExperiments = useMemo(
+  const experiments = useMemo(
     () => snapshot.experiments.filter((e) => e.projectId === projectId),
     [snapshot.experiments, projectId],
   );
-
-  const projectRuns = useMemo(
-    () => snapshot.runs.filter((r) => r.projectId === projectId),
-    [snapshot.runs, projectId],
+  const runs = useMemo(() => scopeRunsOf(rows, snapshot.runs, "experiment"), [rows, snapshot.runs]);
+  const runsOf = useCallback(
+    (experimentId: string): ScopeRun[] => runs.filter((run) => run.groupId === experimentId),
+    [runs],
+  );
+  const verdicts = useMemo(
+    () =>
+      new Map(
+        experiments.map((experiment) => [
+          experiment.id,
+          experimentVerdict(runsOf(experiment.id), {
+            declaredCells: declaredCellCount(experiment.parameterSpace),
+          }),
+        ]),
+      ),
+    [experiments, runsOf],
   );
 
-  const workbench = useMemo(
-    () => buildProjectWorkbenchData(projectId, snapshot, projectAssets),
-    [projectId, snapshot, projectAssets],
-  );
-
-  const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to delete project "${project?.name ?? "this project"}"?`)) {
-      return;
-    }
-    setIsDeleting(true);
-    setDeleteError(null);
-    try {
-      await projectsApi.deleteProject(projectId);
-      onRefresh();
-      setSelection(null);
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Failed to delete project");
-    } finally {
-      setIsDeleting(false);
-    }
+  const openExperiment = (experimentId: string): void =>
+    setSelection({ objectType: "experiment", objectId: experimentId });
+  const previewExperiment = (experimentId: string): void =>
+    preview.preview({ kind: "experiment", projectId, experimentId });
+  const openRuns = (filter?: string): void => {
+    void navigate(runsHref(filter, projectId));
   };
 
-  const navigateToExperiment = (experimentId: string) => {
-    setSelection({
-      objectType: "experiment",
-      objectId: experimentId,
+  const compareAll = useMemo(() => {
+    const ws = activeWorkspace(snapshot.workspaces);
+    if (!ws || !project) return null;
+    return () => {
+      compare.addMany(rows.map((row) => itemFromWorkspaceRunRow(row, ws)));
+      void navigate("/compare");
+    };
+  }, [snapshot.workspaces, project, compare, rows, navigate]);
+
+  const deleteProject = async (): Promise<void> => {
+    await projectsApi.deleteProject(projectId);
+    onRefresh();
+    setSelection(null);
+  };
+
+  const deleteExperiment = async (experiment: ExperimentSummary): Promise<void> => {
+    const count = runsOf(experiment.id).length;
+    const confirmed = await confirm({
+      title: `Delete experiment “${experiment.name}”?`,
+      description: `Its ${count} ${count === 1 ? "run is" : "runs are"} removed with it.`,
+      confirmLabel: "Delete experiment",
+      destructive: true,
     });
-  };
-
-  const handleDeleteExperiment = async (experiment: ExperimentSummary) => {
-    if (!confirm(`Are you sure you want to delete experiment "${experiment.name}"?`)) {
-      return;
-    }
-    setDeletingExperimentId(experiment.id);
-    setExperimentDeleteError(null);
+    if (!confirmed) return;
     try {
       await experimentsApi.deleteExperiment(experiment.projectId, experiment.id);
       onRefresh();
     } catch (error) {
-      setExperimentDeleteError({
-        experiment,
-        message: error instanceof Error ? error.message : "Failed to delete experiment",
-      });
-    } finally {
-      setDeletingExperimentId(null);
+      toast.error(error instanceof Error ? error.message : "Could not delete the experiment");
     }
   };
 
-  const copyToClipboard = (text: string) => {
+  const copy = (text: string, what: string): void => {
     void navigator.clipboard.writeText(text);
+    toast(`Copied ${what}`);
   };
-
-  const experimentRowActions = (
-    exp: ExperimentSummary,
-  ): DataTableRowAction<ExperimentSummary>[] => {
-    const workflow = snapshot.workflows.find((item) => item.experimentId === exp.id);
-    return [
-      {
-        id: "open",
-        label: "Open experiment",
-        icon: ExternalLink,
-        onSelect: () => navigateToExperiment(exp.id),
-      },
-      {
-        id: "new-run",
-        label: "New run",
-        icon: Play,
-        onSelect: () => setCreateRunExperimentId(exp.id),
-      },
-      {
-        id: "open-workflow",
-        label: "Open workflow",
-        icon: Workflow,
-        disabled: !workflow,
-        title: workflow ? undefined : "No workflow is configured for this experiment.",
-        onSelect: () => {
-          if (workflow) {
-            setSelection({
-              objectType: "experiment",
-              objectId: exp.id,
-              experimentView: "workflow",
-            });
-          }
-        },
-      },
-      {
-        id: "copy-id",
-        label: "Copy experiment ID",
-        icon: Copy,
-        onSelect: () => copyToClipboard(exp.id),
-      },
-      {
-        id: "delete",
-        label: "Delete experiment",
-        disabled: deletingExperimentId === exp.id,
-        title: deletingExperimentId === exp.id ? "This experiment is being deleted." : undefined,
-        destructive: true,
-        separatorBefore: true,
-        onSelect: (experiment) => {
-          void handleDeleteExperiment(experiment);
-        },
-      },
-    ];
-  };
-
-  const assetRowActions = (asset: ApiAssetResponse): DataTableRowAction<ApiAssetResponse>[] => [
-    {
-      id: "open",
-      label: "Open asset",
-      icon: ExternalLink,
-      onSelect: () => setSelection({ objectType: "asset", objectId: asset.id }),
-    },
-    {
-      id: "copy-id",
-      label: "Copy asset ID",
-      icon: Copy,
-      onSelect: () => copyToClipboard(asset.id),
-    },
-  ];
 
   if (!project) {
     return (
@@ -259,475 +197,340 @@ export const ProjectViewer = ({
     );
   }
 
-  const completeness = projectSnapshotCompleteness(project, projectExperiments, projectRuns);
+  const completeness = projectSnapshotCompleteness(project, experiments, runs);
+
+  const experimentRowActions = (
+    experiment: ExperimentSummary,
+  ): DataTableRowAction<ExperimentSummary>[] => {
+    const workflow = snapshot.workflows.find((item) => item.experimentId === experiment.id);
+    return [
+      {
+        id: "open",
+        label: "Open experiment",
+        onSelect: () => openExperiment(experiment.id),
+      },
+      {
+        id: "new-run",
+        label: "New run…",
+        onSelect: () => setCreateRunExperimentId(experiment.id),
+      },
+      {
+        id: "open-workflow",
+        label: "Open workflow",
+        disabled: !workflow,
+        title: workflow ? undefined : "No workflow is bound to this experiment.",
+        onSelect: () =>
+          setSelection({
+            objectType: "experiment",
+            objectId: experiment.id,
+            experimentView: "workflow",
+          }),
+      },
+      {
+        id: "copy-id",
+        label: "Copy experiment id",
+        onSelect: () => copy(experiment.id, "experiment id"),
+      },
+      {
+        id: "delete",
+        label: "Delete experiment…",
+        destructive: true,
+        separatorBefore: true,
+        onSelect: (row) => void deleteExperiment(row),
+      },
+    ];
+  };
 
   const experimentColumns: DataTableColumn<ExperimentSummary>[] = [
     {
+      key: "status",
+      header: <span className="sr-only">Status</span>,
+      width: "w-8",
+      cell: (experiment) => {
+        const verdict = verdicts.get(experiment.id);
+        return verdict ? <StatusIcon status={verdict.status} className="size-icon-sm" /> : null;
+      },
+    },
+    {
       key: "name",
-      header: "Name",
-      cell: (exp) => (
-        <div className="flex min-w-0 items-center gap-2" title={exp.name}>
-          <FlaskConical className="size-icon-sm shrink-0 text-muted-foreground" />
-          <span className="truncate text-body font-medium text-foreground">{exp.name}</span>
-        </div>
+      header: "experiment",
+      cell: (experiment) => (
+        <span className="block truncate text-body text-foreground" title={experiment.name}>
+          {experiment.name}
+        </span>
       ),
     },
     {
-      key: "runs",
-      header: "Runs",
-      width: "w-40",
-      cell: (exp) => {
-        const rollup = workbench.experiments.find((item) => item.experiment.id === exp.id);
-        const loadedRunCount = rollup?.counts.total ?? 0;
-        const { runCount, runsComplete } = experimentRunCompleteness(exp, loadedRunCount);
-        if (!runsComplete || runCount === 0) {
-          return (
-            <span
-              className="tabular-nums text-foreground"
-              title={runCount === null ? "Loaded runs; total unknown" : undefined}
-            >
-              {runCount ?? (loadedRunCount > 0 ? `≥${loadedRunCount}` : "—")}
-            </span>
-          );
-        }
-        return (
-          <div className="flex items-center gap-3">
-            <span className="w-control-compact font-medium tabular-nums text-foreground">
-              {runCount}
-            </span>
-            <div className="min-w-32 flex-1">
-              {rollup && <StatusDistribution counts={rollup.counts} legend={false} />}
-            </div>
-          </div>
-        );
-      },
+      key: "state",
+      header: "state",
+      cell: (experiment) => <Muted>{verdicts.get(experiment.id)?.subject ?? "—"}</Muted>,
     },
     {
       key: "workflow",
-      header: "Tasks",
-      width: "w-20",
-      align: "right",
-      cell: (exp) => {
-        const rollup = workbench.experiments.find((item) => item.experiment.id === exp.id);
-        return (
-          <span className="text-label tabular-nums text-muted-foreground">
-            {rollup?.workflowSummary.exists ? rollup.workflowSummary.taskCount : "—"}
-          </span>
-        );
-      },
+      header: "workflow",
+      width: "w-56",
+      cell: (experiment) => <Muted mono>{experimentWorkflowLabel(experiment) || "—"}</Muted>,
     },
     {
       key: "updated",
-      header: "Updated",
-      width: "w-40",
-      cell: (exp) => (
+      header: "updated",
+      width: "w-24",
+      align: "right",
+      cell: (experiment) => (
         <span
-          className="whitespace-nowrap text-label tabular-nums text-muted-foreground"
-          title={exp.updatedAt}
+          className="text-label tabular-nums text-muted-foreground"
+          title={experiment.updatedAt}
         >
-          {formatDateTime(exp.updatedAt)}
+          {formatRelative(experiment.updatedAt)}
         </span>
       ),
     },
-    {
-      key: "action",
-      header: "",
-      width: "w-14",
-      align: "right",
-      cell: (exp) => (
-        <WorkbenchIconAction
-          label={`New run in ${exp.name}`}
-          kind="ghost"
-          size="default"
-          className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
-          onClick={(event) => {
-            event.stopPropagation();
-            setCreateRunExperimentId(exp.id);
-          }}
-        >
-          <Play className="size-icon text-muted-foreground hover:text-foreground" />
-        </WorkbenchIconAction>
-      ),
-    },
   ];
+
+  const assetFrom = (asset: ApiAssetResponse): JSX.Element => {
+    const extra = assetExtra(asset);
+    if (extra.originKind !== "execution") return <Muted>imported</Muted>;
+    const runId = typeof extra.runId === "string" ? extra.runId : null;
+    const run = runId ? rows.find((item) => item.id === runId) : undefined;
+    const label = run ? runLabel(run) : (runId ?? "execution");
+    return run ? (
+      <button
+        type="button"
+        className="block max-w-full truncate font-mono text-label text-primary hover:underline"
+        title={`Open ${label}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          void navigate(runPath(run.projectId, run.experimentId, run.id));
+        }}
+      >
+        {label}
+      </button>
+    ) : (
+      <Muted mono>{label}</Muted>
+    );
+  };
 
   const assetColumns: DataTableColumn<ApiAssetResponse>[] = [
     {
+      key: "icon",
+      header: <span className="sr-only">Kind</span>,
+      width: "w-8",
+      cell: () => <FileText aria-hidden className="size-icon-sm text-muted-foreground" />,
+    },
+    {
       key: "name",
-      header: "Name",
+      header: "asset",
       cell: (asset) => (
-        <div className="flex items-center gap-2 text-body-lg font-medium text-foreground">
-          <Archive className="size-icon text-muted-foreground" />
+        <span className="block truncate text-body text-foreground" title={asset.name}>
           {asset.name}
-        </div>
+        </span>
       ),
     },
     {
-      key: "kind",
-      header: "Kind",
-      width: "w-36",
-      cell: (asset) => <span className="text-muted-foreground">{asset.kind}</span>,
-    },
-    {
-      key: "scope",
-      header: "Scope",
-      width: "w-40",
-      cell: (asset) => <span className="text-label text-muted-foreground">{asset.scopeKind}</span>,
+      key: "type",
+      header: "type",
+      width: "w-44",
+      cell: (asset) => <Muted mono>{asset.kind}</Muted>,
     },
     {
       key: "size",
-      header: "Size",
-      width: "w-32",
+      header: "size",
+      width: "w-20",
+      align: "right",
       cell: (asset) => {
-        const size = (asset.extra as Record<string, unknown> | undefined)?.size;
+        const size = assetExtra(asset).size;
         return (
-          <span className="font-mono text-label">
-            {typeof size === "number" ? `${size} B` : "—"}
+          <span className="text-label tabular-nums text-foreground">
+            {typeof size === "number" ? formatBytes(size) : "—"}
           </span>
         );
       },
     },
+    { key: "from", header: "from", width: "w-64", cell: assetFrom },
     {
-      key: "updated",
-      header: "Updated",
-      width: "w-44",
+      key: "added",
+      header: "added",
+      width: "w-24",
+      align: "right",
       cell: (asset) => (
-        <span className="text-muted-foreground" title={asset.updatedAt}>
-          {formatDateTime(asset.updatedAt)}
+        <span className="text-label tabular-nums text-muted-foreground" title={asset.createdAt}>
+          {formatRelative(asset.createdAt)}
         </span>
       ),
     },
   ];
 
-  const createRunExperiment = createRunExperimentId
-    ? snapshot.experiments.find((experiment) => experiment.id === createRunExperimentId)
-    : null;
-  const experimentCountValue =
-    completeness.experimentCount ??
-    (projectExperiments.length > 0 ? `≥${projectExperiments.length}` : "—");
-  const executionCounts = rollupExecutions(overviewRows);
-  const flaggedCount = attentionRuns(overviewRows).length;
-  const activityPartial = Boolean(overviewRuns.data?.truncated);
-  const activityError = shouldShowFailure(overviewRuns.error, {
-    fetching: overviewRuns.isFetching,
+  const assets = assetsQuery.data ?? [];
+  const assetsError = shouldShowFailure(assetsQuery.error, {
+    fetching: assetsQuery.isFetching,
     needsAuth,
   })
-    ? overviewRuns.error instanceof Error
-      ? overviewRuns.error.message
-      : "Could not load project activity"
+    ? assetsQuery.error instanceof Error
+      ? assetsQuery.error.message
+      : "Failed to load project assets"
     : null;
-  const activityPending = overviewRuns.isPending || (needsAuth && overviewRuns.data === undefined);
-  const activityState = (body: JSX.Element): JSX.Element =>
-    activityError ? (
+
+  const experimentsView = project.experimentsError ? (
+    <WorkbenchOperationState
+      kind="error"
+      title="Could not load experiments"
+      detail={project.experimentsError}
+      action={<WorkbenchRetryAction onClick={onRefresh} />}
+    />
+  ) : !completeness.experimentsComplete &&
+    experiments.length === 0 &&
+    (completeness.experimentCount ?? 0) > 0 ? (
+    <WorkbenchOperationState kind="loading" title="Loading experiments…" skeletonRows={3} />
+  ) : (
+    <DataTable
+      columns={experimentColumns}
+      data={experiments}
+      getRowKey={(experiment) => experiment.id}
+      getRowLabel={(experiment) => `Experiment ${experiment.name}`}
+      onRowActivate={(experiment) => openExperiment(experiment.id)}
+      getRowPreview={(experiment) => ({
+        kind: "experiment",
+        projectId: experiment.projectId,
+        experimentId: experiment.id,
+      })}
+      rowActions={experimentRowActions}
+      empty={
+        <EmptyState
+          title={EMPTY_COPY.experiments.title}
+          description={EMPTY_COPY.experiments.description}
+        />
+      }
+    />
+  );
+
+  const assetsView =
+    assetsQuery.isPending || (needsAuth && assetsQuery.data === undefined) ? (
+      <WorkbenchOperationState kind="loading" title="Loading project assets…" skeletonRows={5} />
+    ) : assetsError ? (
       <WorkbenchOperationState
         kind="error"
-        density="compact"
-        title="Could not load project activity"
-        detail={activityError}
-        action={<WorkbenchRetryAction onClick={() => void overviewRuns.refetch()} />}
-      />
-    ) : activityPending ? (
-      <WorkbenchOperationState
-        kind="loading"
-        density="compact"
-        title="Loading project activity…"
-        skeletonRows={3}
+        title="Could not load project assets"
+        detail={assetsError}
+        action={<WorkbenchRetryAction onClick={() => void assetsQuery.refetch()} />}
       />
     ) : (
-      body
+      <DataTable
+        columns={assetColumns}
+        data={assets}
+        getRowKey={(asset) => asset.id}
+        getRowLabel={(asset) => `Asset ${asset.name}`}
+        onRowActivate={(asset) => setSelection({ objectType: "asset", objectId: asset.id })}
+        getRowPreview={(asset) => ({ kind: "asset", assetId: asset.id })}
+        rowActions={(asset) => [
+          {
+            id: "open",
+            label: "Open asset",
+            icon: ExternalLink,
+            onSelect: () => setSelection({ objectType: "asset", objectId: asset.id }),
+          },
+          {
+            id: "copy-id",
+            label: "Copy asset id",
+            icon: Copy,
+            onSelect: () => copy(asset.id, "asset id"),
+          },
+        ]}
+        empty={<EmptyState title={EMPTY_COPY.assets.title} />}
+      />
     );
+
+  const tabs = [
+    {
+      value: "overview",
+      label: <ViewLabel icon={Activity}>Overview</ViewLabel>,
+      content: (
+        <ProjectOverview
+          experiments={experiments}
+          runs={runs}
+          rows={rows}
+          partial={truncated}
+          loading={inventory.isPending}
+          onOpenRuns={openRuns}
+          onPreviewExperiment={previewExperiment}
+          onOpenExperiment={openExperiment}
+          onNewExperiment={() => setNewExperimentOpen(true)}
+        />
+      ),
+    },
+    {
+      value: "experiments",
+      label: (
+        <ViewLabel icon={FlaskConical} count={completeness.experimentCount ?? experiments.length}>
+          Experiments
+        </ViewLabel>
+      ),
+      content: <div className="flex h-full min-h-0 flex-col bg-background">{experimentsView}</div>,
+    },
+    {
+      value: "assets",
+      label: (
+        <ViewLabel icon={Package} count={assets.length}>
+          Assets
+        </ViewLabel>
+      ),
+      content: <div className="flex h-full min-h-0 flex-col bg-background">{assetsView}</div>,
+    },
+    ...(campaigns.length > 0
+      ? [
+          {
+            value: "plan",
+            label: <ViewLabel icon={ListChecks}>Plan</ViewLabel>,
+            content: (
+              <div className="h-full min-h-0 overflow-auto bg-background px-6 py-6">
+                <PlanProgress
+                  campaigns={campaigns}
+                  onOpenExperiment={(name) => {
+                    const match = experiments.find(
+                      (item) => item.name === name || item.path.endsWith(`/${name}`),
+                    );
+                    if (match) openExperiment(match.id);
+                  }}
+                  onOpenDoc={(path) => setSelection({ objectType: "knowledge", objectId: path })}
+                />
+              </div>
+            ),
+          },
+        ]
+      : []),
+  ];
+
+  const createRunExperiment = createRunExperimentId
+    ? experiments.find((experiment) => experiment.id === createRunExperimentId)
+    : null;
 
   return (
     <>
       <EntityPage
         icon={FolderKanban}
         title={project.name}
-        meta={
-          <>
-            <Tally
-              icon={FlaskConical}
-              value={experimentCountValue}
-              label={`${experimentCountValue} experiments`}
-            />
-            {completeness.runCount !== null ? (
-              <Tally
-                icon={PlayCircle}
-                value={completeness.runCount}
-                label={`${completeness.runCount} runs`}
-              />
-            ) : null}
-          </>
+        actions={
+          <ProjectEditorActions
+            projectId={project.id}
+            projectName={project.name}
+            experimentCount={completeness.experimentCount ?? experiments.length}
+            runCount={completeness.runCount ?? runs.length}
+            active={runs.some((run) => isActiveStatus(normalizeStatus(run.status)))}
+            onNewExperiment={() => setNewExperimentOpen(true)}
+            onOpenRuns={() => openRuns()}
+            onCompareAll={compareAll}
+            onDelete={deleteProject}
+          />
         }
         activeTab={activeTab}
         onActiveTabChange={setProjectTab}
-        tabs={[
-          {
-            value: "overview",
-            label: "Overview",
-            content: (
-              <OverviewSurface>
-                <DashboardCanvas className="px-4 py-6 sm:px-8 sm:py-8">
-                  <PlanProgress
-                    onOpenExperiment={(name) => {
-                      const match = projectExperiments.find((item) => item.name === name);
-                      if (match) navigateToExperiment(match.id);
-                    }}
-                    onOpenDoc={(path) => setSelection({ objectType: "knowledge", objectId: path })}
-                  />
-                  {activityState(
-                    executionCounts.total === 0 ? (
-                      <div className="max-w-xl">
-                        <p className="text-label text-muted-foreground">No executions yet.</p>
-                        {projectExperiments.length > 0 && (
-                          <ul className="mt-3 divide-y divide-border/70 border-y border-border/70">
-                            {projectExperiments.map((experiment) => (
-                              <li key={experiment.id}>
-                                <WorkbenchAction
-                                  kind="ghost"
-                                  size="content"
-                                  type="button"
-                                  className="flex h-auto w-full items-center justify-start gap-2 rounded-none px-1 py-2 text-left font-normal"
-                                  onClick={() => navigateToExperiment(experiment.id)}
-                                >
-                                  <FlaskConical className="size-icon-sm shrink-0 text-muted-foreground" />
-                                  <span className="min-w-0 truncate text-body font-medium text-foreground">
-                                    {experiment.name}
-                                  </span>
-                                </WorkbenchAction>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    ) : (
-                      <ExecutionOverview
-                        rows={overviewRows}
-                        partial={activityPartial}
-                        inventoryBlocked={activityPartial}
-                        groupBy="experiment"
-                        onGroupSelect={navigateToExperiment}
-                        onOpenAttention={() => setProjectTab("attention")}
-                        onOpenTimeline={() => setProjectTab("timeline")}
-                      />
-                    ),
-                  )}
-                </DashboardCanvas>
-              </OverviewSurface>
-            ),
-          },
-          {
-            value: "experiments",
-            label:
-              (completeness.experimentCount ?? projectExperiments.length) > 0
-                ? `Experiments (${completeness.experimentCount ?? projectExperiments.length})`
-                : "Experiments",
-            content: (
-              <OverviewSurface>
-                <InventoryCanvas>
-                  <div aria-busy={deletingExperimentId !== null}>
-                    {deletingExperimentId && (
-                      <WorkbenchOperationState
-                        kind="running"
-                        density="compact"
-                        title="Deleting experiment…"
-                        detail={
-                          projectExperiments.find((item) => item.id === deletingExperimentId)?.name
-                        }
-                      />
-                    )}
-                    {experimentDeleteError && (
-                      <WorkbenchOperationState
-                        kind="error"
-                        density="compact"
-                        title="Could not delete experiment"
-                        detail={experimentDeleteError.message}
-                        action={
-                          <WorkbenchRetryAction
-                            onClick={() =>
-                              void handleDeleteExperiment(experimentDeleteError.experiment)
-                            }
-                          />
-                        }
-                      />
-                    )}
-                    {project?.experimentsError ? (
-                      <WorkbenchOperationState
-                        kind="error"
-                        title="Could not load experiments"
-                        detail={project.experimentsError}
-                        action={<WorkbenchRetryAction onClick={onRefresh} />}
-                      />
-                    ) : !completeness.experimentsComplete &&
-                      projectExperiments.length === 0 &&
-                      (completeness.experimentCount ?? 0) > 0 ? (
-                      <WorkbenchOperationState
-                        kind="loading"
-                        title="Loading experiments…"
-                        skeletonRows={3}
-                      />
-                    ) : (
-                      <DataTable
-                        columns={experimentColumns}
-                        data={projectExperiments}
-                        getRowKey={(exp) => exp.id}
-                        getRowLabel={(exp) => `Open experiment ${exp.name}`}
-                        onRowActivate={(exp) => navigateToExperiment(exp.id)}
-                        rowActions={experimentRowActions}
-                        empty={
-                          <EmptyState
-                            title={EMPTY_COPY.experiments.title}
-                            description={EMPTY_COPY.experiments.description}
-                          />
-                        }
-                      />
-                    )}
-                  </div>
-                </InventoryCanvas>
-              </OverviewSurface>
-            ),
-          },
-          {
-            value: "attention",
-            label: flaggedCount > 0 ? `Attention (${flaggedCount})` : "Attention",
-            content: (
-              <OverviewSurface>
-                <DashboardCanvas className="px-4 py-6 sm:px-8 sm:py-8">
-                  {activityState(
-                    <div className="mx-auto w-full max-w-6xl">
-                      <NeedsAttention rows={overviewRows} inventoryBlocked={activityPartial} />
-                    </div>,
-                  )}
-                </DashboardCanvas>
-              </OverviewSurface>
-            ),
-          },
-          {
-            value: "timeline",
-            label: "Timeline",
-            content: (
-              <OverviewSurface>
-                <DashboardCanvas className="px-4 py-6 sm:px-8 sm:py-8">
-                  {activityState(
-                    <div className="mx-auto w-full max-w-6xl">
-                      <RunTimeline rows={overviewRows} inventoryBlocked={activityPartial} />
-                    </div>,
-                  )}
-                </DashboardCanvas>
-              </OverviewSurface>
-            ),
-          },
-          {
-            value: "assets",
-            label: "Assets",
-            content: (
-              <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
-                <InventoryCanvas fill className="min-h-0 flex-1">
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    {projectAssetsPending ? (
-                      <WorkbenchOperationState
-                        kind="loading"
-                        title="Loading project assets…"
-                        skeletonRows={5}
-                      />
-                    ) : projectAssetsError ? (
-                      <WorkbenchOperationState
-                        kind="error"
-                        title="Could not load project assets"
-                        detail={projectAssetsError}
-                        action={<WorkbenchRetryAction onClick={() => void assetsQuery.refetch()} />}
-                      />
-                    ) : (
-                      <div className="min-h-0 flex-1 overflow-auto">
-                        <DataTable
-                          columns={assetColumns}
-                          data={projectAssets}
-                          getRowKey={(asset) => asset.id}
-                          getRowLabel={(asset) => `Open asset ${asset.name}`}
-                          onRowActivate={(asset) =>
-                            setSelection({ objectType: "asset", objectId: asset.id })
-                          }
-                          rowActions={assetRowActions}
-                          empty={<EmptyState title={EMPTY_COPY.assets.title} />}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </InventoryCanvas>
-              </OverviewSurface>
-            ),
-          },
-          {
-            value: "settings",
-            label: "Settings",
-            content: (
-              <OverviewSurface>
-                <DashboardCanvas>
-                  <DashboardCard title="Project">
-                    <Table>
-                      <TableBody>
-                        <TableRow>
-                          <TableCell className="w-36 text-label text-muted-foreground">
-                            Name
-                          </TableCell>
-                          <TableCell className="text-label text-foreground">
-                            {project.name}
-                          </TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell className="text-label text-muted-foreground">
-                            Contents
-                          </TableCell>
-                          <TableCell className="text-label text-muted-foreground">
-                            {experimentCountValue} experiments
-                            {completeness.runCount !== null
-                              ? ` · ${completeness.runCount} runs`
-                              : ""}
-                          </TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
-                  </DashboardCard>
-
-                  <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4">
-                    <div className="min-w-0">
-                      <p className="text-body text-foreground">Delete project</p>
-                      <p className="mt-1 text-label text-muted-foreground">
-                        Removes this project, its experiments, and its runs.
-                      </p>
-                    </div>
-                    <WorkbenchAction
-                      icon={<Trash2 aria-hidden />}
-                      kind="danger"
-                      size="compact"
-                      onClick={handleDelete}
-                      disabled={isDeleting}
-                      aria-busy={isDeleting}
-                    >
-                      {isDeleting ? "Deleting…" : "Delete project"}
-                    </WorkbenchAction>
-                  </div>
-                  {isDeleting && (
-                    <WorkbenchOperationState
-                      kind="running"
-                      density="compact"
-                      title="Deleting project…"
-                      detail={project.name}
-                    />
-                  )}
-                  {deleteError && (
-                    <WorkbenchOperationState
-                      kind="error"
-                      density="compact"
-                      title="Could not delete project"
-                      detail={deleteError}
-                      action={<WorkbenchRetryAction onClick={() => void handleDelete()} />}
-                    />
-                  )}
-                </DashboardCanvas>
-              </OverviewSurface>
-            ),
-          },
-        ]}
+        tabs={tabs}
+      />
+      <CreateExperimentDialog
+        projectId={projectId}
+        open={newExperimentOpen}
+        onOpenChange={setNewExperimentOpen}
+        trigger={null}
+        onExperimentCreated={onRefresh}
       />
       {createRunExperiment && (
         <CreateRunDialog
@@ -746,6 +549,7 @@ export const ProjectViewer = ({
           }}
         />
       )}
+      {confirmDialog}
     </>
   );
 };

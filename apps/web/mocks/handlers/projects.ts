@@ -4,7 +4,7 @@
 
 import { HttpResponse, http } from "msw";
 import type { ProjectCreateRequest } from "../../src/api/generated/models/ProjectCreateRequest";
-import type { ApiProjectResponse } from "../../src/app/types";
+import type { ApiAssetResponse, ApiProjectResponse } from "../../src/app/types";
 import {
   deleteProject,
   getAllProjects,
@@ -13,8 +13,10 @@ import {
   getExperimentsByProject,
   getFile,
   getProject,
+  setAsset,
   setProject,
   toManagedAsset,
+  writeFile,
 } from "../db";
 import { workspaceRoute } from "./workspaceRoute";
 
@@ -58,6 +60,38 @@ export const projectHandlers = [
   http.get(workspaceRoute(`${API_BASE}/projects/:id/assets`), ({ params }) => {
     const assets = getAssetsByProject(params.id as string);
     return HttpResponse.json(assets.map(toManagedAsset));
+  }),
+
+  // POST /api/projects/:id/assets — import a workspace file as a project asset.
+  http.post(workspaceRoute(`${API_BASE}/projects/:id/assets`), async ({ params, request }) => {
+    const body = (await request.json()) as { name?: string; path?: string };
+    const path = String(body.path ?? "").replace(/^\/+/, "");
+    const file = getFile(`/${path}`);
+    if (!body.name || !path || path.split("/").includes("..") || !file || file.type !== "file")
+      return HttpResponse.json(
+        { detail: `'${path}' is not a file in the served directory` },
+        { status: 422 },
+      );
+    const id = `asset-import-${Date.now().toString(36)}`;
+    const content = file.content ?? "";
+    const asset: ApiAssetResponse = {
+      id,
+      projectId: String(params.id),
+      title: body.name,
+      name: body.name,
+      kind: "data",
+      scopeKind: "project",
+      scopeIds: [String(params.id)],
+      path,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      producer: null,
+      tags: { role: "import" },
+      extra: { size: new TextEncoder().encode(content).byteLength, source_path: path },
+    };
+    setAsset(asset);
+    writeFile(`/managed-assets/${id}/payload`, content);
+    return HttpResponse.json(toManagedAsset(asset), { status: 201 });
   }),
 
   http.get(workspaceRoute(`${API_BASE}/projects/:projectId/assets/:assetId`), ({ params }) => {

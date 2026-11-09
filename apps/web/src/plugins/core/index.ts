@@ -54,6 +54,34 @@ const corePlugin: MolabPluginModule = {
       category: "View",
       isVisible: () => getHostActions().isRemote(),
     });
+
+    // Shell layout (L00). Web-safe keys only: ⌘B ⌘J ⌘W ⌘T stay with the browser.
+    const shell = (
+      id: string,
+      title: string,
+      keybinding: string,
+      run: () => void,
+      isVisible?: () => boolean,
+    ): void => {
+      api.commands.register(id, run, { title, category: "View", keybinding, isVisible });
+    };
+    shell("toggle-side-bar", "Toggle Side Bar", "alt+b", () => getHostActions().toggleSideBar());
+    shell(
+      "toggle-panel",
+      "Toggle Panel",
+      "alt+j",
+      () => getHostActions().togglePanel(),
+      () => getHostActions().hasPanel(),
+    );
+    shell("close-editor", "Close Editor", "alt+w", () => getHostActions().closeEditor());
+    shell("previous-editor", "Previous Editor", "alt+bracketleft", () =>
+      getHostActions().cycleEditor(-1),
+    );
+    shell("next-editor", "Next Editor", "alt+bracketright", () => getHostActions().cycleEditor(1));
+    shell("focus-next-region", "Focus Next Region", "f6", () => getHostActions().focusRegion(1));
+    shell("focus-previous-region", "Focus Previous Region", "shift+f6", () =>
+      getHostActions().focusRegion(-1),
+    );
   },
 };
 

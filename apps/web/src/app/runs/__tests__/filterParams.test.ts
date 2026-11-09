@@ -5,10 +5,11 @@
 import { describe, expect, it } from "@rstest/core";
 
 import {
+  absorbFacetTokens,
   hasActiveFilters,
   parseFilterParams,
   toggleArrayFilter,
-  toggleQuickView,
+  toggleStarted,
   writeFilterParams,
 } from "@/app/runs/filterParams";
 
@@ -21,14 +22,9 @@ describe("parseFilterParams", () => {
     });
   });
 
-  it("ignores unknown quickView values", () => {
-    const params = new URLSearchParams("quickView=bogus");
-    expect(parseFilterParams(params)).toEqual({});
-  });
-
-  it("preserves valid quickView values and drops invalid ones", () => {
-    const params = new URLSearchParams("quickView=active,bogus,failed24h");
-    expect(parseFilterParams(params)).toEqual({ quickView: ["active", "failed24h"] });
+  it("keeps known Started windows and the free tokens", () => {
+    const params = new URLSearchParams("started=24h,bogus&q=driver:ase");
+    expect(parseFilterParams(params)).toEqual({ started: ["24h"], q: "driver:ase" });
   });
 });
 
@@ -66,18 +62,24 @@ describe("toggleArrayFilter", () => {
   });
 });
 
-describe("toggleQuickView", () => {
-  it("adds a view not present", () => {
-    const next = toggleQuickView({}, "active");
-    expect(next.quickView).toEqual(["active"]);
+describe("toggleStarted", () => {
+  it("adds and removes a window, clearing the field when empty", () => {
+    expect(toggleStarted({}, "24h").started).toEqual(["24h"]);
+    expect(toggleStarted({ started: ["24h"] }, "24h").started).toBeUndefined();
   });
-  it("removes a view already present", () => {
-    const next = toggleQuickView({ quickView: ["active", "failed24h"] }, "active");
-    expect(next.quickView).toEqual(["failed24h"]);
-  });
-  it("clears the field entirely when the last view is removed", () => {
-    const next = toggleQuickView({ quickView: ["active"] }, "active");
-    expect(next.quickView).toBeUndefined();
+});
+
+describe("absorbFacetTokens", () => {
+  it("turns facet tokens into picks and keeps the rest as free tokens", () => {
+    const next = absorbFacetTokens({}, "status:failed,interrupted project:NVE target:laptop nve", [
+      { id: "nve-drift", name: "NVE" },
+    ]);
+    expect(next).toEqual({
+      status: ["failed", "interrupted"],
+      projectId: ["nve-drift"],
+      target: ["laptop"],
+      q: "nve",
+    });
   });
 });
 
@@ -87,6 +89,7 @@ describe("hasActiveFilters", () => {
   });
   it("is true once any filter is set", () => {
     expect(hasActiveFilters({ status: ["running"] })).toBe(true);
-    expect(hasActiveFilters({ quickView: ["active"] })).toBe(true);
+    expect(hasActiveFilters({ started: ["7d"] })).toBe(true);
+    expect(hasActiveFilters({ q: "nve" })).toBe(true);
   });
 });

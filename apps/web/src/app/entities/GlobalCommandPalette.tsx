@@ -5,26 +5,37 @@
 //   ⌘⇧P / Ctrl+Shift+P → Commands (reload, reconnect, …)  — same as molvis
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Dialog, DialogContent, Input } from "@molcrafts/ui";
-import { Search, Terminal } from "lucide-react";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  Kbd,
+} from "@molcrafts/ui";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { StatusBadge } from "@/app/components/entity";
-import { buildCatalog, searchCatalog } from "@/app/entities/catalog";
-import { entityMeta } from "@/app/entities/kinds";
+import { StatusIcon } from "@/app/components/entity/StatusIcon";
+import { buildCatalog, type CatalogEntry, searchCatalog } from "@/app/entities/catalog";
+import { type EntityRef, entityMeta } from "@/app/entities/kinds";
 import { entityPath } from "@/app/entities/paths";
-import type { SemanticStatus, WorkspaceSnapshot } from "@/app/types";
-import {
-  WorkbenchAction,
-  WorkbenchOperationState,
-  WorkbenchRetryAction,
-} from "@/components/workbench";
+import { usePreview } from "@/app/preview/PreviewContext";
+import type { PreviewTarget } from "@/app/preview/target";
+import type { WorkspaceSnapshot } from "@/app/types";
+import { WorkbenchOperationState, WorkbenchRetryAction } from "@/components/workbench";
+
 import { listCommands, useWorkbenchGeneration } from "@/plugins/contributions/workbench";
 import { useKnowledgeListQuery } from "@/plugins/knowledge/queries";
 export interface PaletteCommand {
   id: string;
   label: string;
   detail?: string;
+  /** Registry spelling ("alt+b"); shown as ⌥B. */
+  keybinding?: string;
   run: () => void;
 }
 
@@ -34,7 +45,14 @@ interface GlobalCommandPaletteProps {
   commands?: PaletteCommand[];
 }
 
-type PaletteMode = "goto" | "commands";
+export type PaletteMode = "goto" | "commands";
+
+const paletteRequests = new Set<(mode: PaletteMode) => void>();
+
+/** Open the palette from chrome (the title-bar command centre, the mobile search). */
+export const openCommandPalette = (mode: PaletteMode = "goto"): void => {
+  for (const request of paletteRequests) request(mode);
+};
 
 function scoreCommand(query: string, label: string, detail?: string): number {
   const q = query.trim().toLowerCase();
@@ -51,6 +69,113 @@ function scoreCommand(query: string, label: string, detail?: string): number {
   return 0;
 }
 
+// ── Go to rows (L13-5) ─────────────────────────────────────────────────────────
+
+const GROUP_ORDER: readonly { kind: string; heading: string }[] = [
+  { kind: "run", heading: "Runs" },
+  { kind: "experiment", heading: "Experiments" },
+  { kind: "project", heading: "Projects" },
+  { kind: "knowledge", heading: "Documents" },
+  { kind: "asset", heading: "Assets" },
+  { kind: "workflow", heading: "Workflows" },
+];
+
+const entryValue = (entry: CatalogEntry): string => `${entry.ref.kind}:${entry.ref.id}`;
+
+/** Results grouped by kind, each group keeping the search's own order. */
+const groupResults = (entries: readonly CatalogEntry[]): [string, CatalogEntry[]][] =>
+  GROUP_ORDER.flatMap(({ kind, heading }) => {
+    const members = entries.filter((entry) => entry.ref.kind === kind);
+    return members.length > 0 ? [[heading, members] as [string, CatalogEntry[]]] : [];
+  });
+
+/** Where the entry lives, read as a path: project › experiment. */
+const whereOf = (ref: EntityRef, snapshot: WorkspaceSnapshot): string => {
+  if (ref.kind === "run") {
+    const run = snapshot.runs.find((item) => item.id === ref.id);
+    const project = snapshot.projects.find((item) => item.id === run?.projectId);
+    const experiment = snapshot.experiments.find((item) => item.id === run?.experimentId);
+    return [project?.name, experiment?.name, run?.id].filter(Boolean).join(" › ");
+  }
+  if (ref.kind === "experiment") {
+    const experiment = snapshot.experiments.find((item) => item.id === ref.id);
+    return snapshot.projects.find((item) => item.id === experiment?.projectId)?.name ?? "";
+  }
+  if (ref.kind === "knowledge") return ref.id.split("/knowledges/")[0] ?? "";
+  return "";
+};
+
+/** What ⇧↵ previews; null where the kind has no Preview (workflow). */
+const previewTargetOf = (ref: EntityRef, snapshot: WorkspaceSnapshot): PreviewTarget | null => {
+  switch (ref.kind) {
+    case "run": {
+      const run = snapshot.runs.find((item) => item.id === ref.id);
+      return run
+        ? { kind: "run", runId: run.id, projectId: run.projectId, experimentId: run.experimentId }
+        : null;
+    }
+    case "experiment": {
+      const experiment = snapshot.experiments.find((item) => item.id === ref.id);
+      return experiment
+        ? { kind: "experiment", projectId: experiment.projectId, experimentId: experiment.id }
+        : null;
+    }
+    case "project":
+      return { kind: "project", projectId: ref.id };
+    case "asset":
+      return { kind: "asset", assetId: ref.id };
+    case "knowledge":
+      return { kind: "knowledge", path: ref.id };
+    default:
+      return null;
+  }
+};
+
+const EntryGlyph = ({ entry }: { entry: CatalogEntry }): JSX.Element => {
+  if (entry.ref.kind === "run" && entry.ref.status) {
+    return <StatusIcon status={entry.ref.status} className="size-icon" />;
+  }
+  const Icon = entityMeta(entry.ref.kind).icon;
+  return <Icon className="size-icon flex-none text-muted-foreground" />;
+};
+
+/** The first match of the query, marked in the link colour. */
+const Marked = ({ text, query }: { text: string; query: string }): JSX.Element => {
+  const needle = query.trim().toLowerCase();
+  const at = needle ? text.toLowerCase().indexOf(needle) : -1;
+  if (at < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark className="bg-transparent font-semibold text-link">
+        {text.slice(at, at + needle.length)}
+      </mark>
+      {text.slice(at + needle.length)}
+    </>
+  );
+};
+
+const KEY_GLYPH: Record<string, string> = {
+  alt: "⌥",
+  option: "⌥",
+  shift: "⇧",
+  mod: "⌘",
+  meta: "⌘",
+  cmd: "⌘",
+  ctrl: "⌃",
+  bracketleft: "[",
+  bracketright: "]",
+  enter: "↵",
+};
+
+/** "alt+bracketleft" → "⌥[" — the registry's spelling, read as keys. */
+export const prettyKeys = (binding: string): string =>
+  binding
+    .split("+")
+    .map((part) => part.trim().toLowerCase())
+    .map((part) => KEY_GLYPH[part] ?? part.toUpperCase())
+    .join("");
+
 export const GlobalCommandPalette = ({
   snapshot,
   commands = [],
@@ -60,13 +185,24 @@ export const GlobalCommandPalette = ({
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<PaletteMode>("goto");
   const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [selected, setSelected] = useState("");
+  const preview = usePreview();
 
   const modeRef = useRef(mode);
   const openRef = useRef(open);
   modeRef.current = mode;
   openRef.current = open;
+
+  useEffect(() => {
+    const request = (next: PaletteMode): void => {
+      setMode(next);
+      setOpen(true);
+    };
+    paletteRequests.add(request);
+    return () => {
+      paletteRequests.delete(request);
+    };
+  }, []);
 
   // ⌘K → go to; ⌘⇧P → commands (molvis / VS Code parity).
   useEffect(() => {
@@ -106,238 +242,204 @@ export const GlobalCommandPalette = ({
     : null;
 
   const catalog = useMemo(() => buildCatalog(snapshot, knowledgeDocs), [snapshot, knowledgeDocs]);
-  const gotoResults = useMemo(() => searchCatalog(catalog, query), [catalog, query]);
+
+  // ">" in Go to switches to Commands, as in VS Code (L13-6).
+  const commandMode = mode === "commands" || query.startsWith(">");
+  const commandQuery = mode === "commands" ? query : query.replace(/^>\s*/, "");
+  const gotoResults = useMemo(
+    () => (commandMode ? [] : searchCatalog(catalog, query)),
+    [catalog, query, commandMode],
+  );
 
   const allCommands: PaletteCommand[] = [
-    ...listCommands().map((command) => ({
-      id: command.id,
-      label: command.title,
-      detail: command.category,
-      run: () => {
-        void command.run();
-      },
-    })),
+    ...listCommands()
+      .filter((command) => command.isVisible?.() ?? true)
+      .map((command) => ({
+        id: command.id,
+        label: command.title,
+        detail: command.category,
+        keybinding: command.keybinding,
+        run: () => {
+          void command.run();
+        },
+      })),
     ...commands,
   ];
   const commandResults = allCommands
-    .map((c) => ({ cmd: c, score: scoreCommand(query, c.label, c.detail) }))
+    .map((c) => ({ cmd: c, score: scoreCommand(commandQuery, c.label, c.detail) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score || a.cmd.label.localeCompare(b.cmd.label))
     .map((x) => x.cmd);
 
-  const resultsLen = mode === "goto" ? gotoResults.length : commandResults.length;
-
+  // Each open starts clean: no query, and the top row highlighted (cmdk picks
+  // the first item when nothing is selected). A mode switch starts clean too.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `mode` is the trigger, not a value read
   useEffect(() => {
-    if (open) {
-      setQuery("");
-      setActiveIndex(0);
-    }
-    // Re-run when mode flips so goto/command each start with a clean query.
-    void mode;
+    if (!open) return;
+    setQuery("");
+    setSelected("");
   }, [open, mode]);
 
-  const onQueryChange = (value: string): void => {
-    setQuery(value);
-    setActiveIndex(0);
-  };
-
-  const commitGoto = (index: number): void => {
-    const entry = gotoResults[index];
-    if (!entry) return;
+  const close = (): void => setOpen(false);
+  const openEntry = (entry: CatalogEntry, asPreview: boolean): void => {
+    const target = asPreview ? previewTargetOf(entry.ref, snapshot) : null;
+    if (target) {
+      preview.preview(target);
+      close();
+      return;
+    }
     const path = entityPath(entry.ref, snapshot);
     if (!path) return;
+    preview.close();
     navigate(path);
-    setOpen(false);
+    close();
   };
-
-  const commitCommand = (index: number): void => {
-    const cmd = commandResults[index];
-    if (!cmd) return;
-    setOpen(false);
+  const runCommandEntry = (cmd: PaletteCommand): void => {
+    close();
     cmd.run();
   };
 
-  const commit = (index: number): void => {
-    if (mode === "goto") commitGoto(index);
-    else commitCommand(index);
-  };
-
-  const onInputKeyDown = (event: React.KeyboardEvent): void => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, Math.max(resultsLen - 1, 0)));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((i) => Math.max(i - 1, 0));
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      commit(activeIndex);
-    }
-  };
-
-  const placeholder =
-    mode === "commands" ? "Type a command…" : "Jump to a project, experiment, run…";
+  const groups = groupResults(gotoResults);
+  const findEntry = (value: string): CatalogEntry | undefined =>
+    gotoResults.find((entry) => entryValue(entry) === value);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
-        className="top-command-offset max-w-xl gap-0 overflow-hidden p-0"
-        onOpenAutoFocus={(e) => {
-          e.preventDefault();
-          inputRef.current?.focus();
-        }}
+        showCloseButton={false}
+        aria-describedby={undefined}
+        className="top-1 max-w-overlay-viewport -translate-y-0 gap-0 overflow-hidden rounded-panel p-2 sm:max-w-quick-input"
       >
-        <div className="flex items-center gap-2 border-b border-border px-3">
-          {mode === "commands" ? (
-            <Terminal className="size-icon flex-none text-muted-foreground" />
-          ) : (
-            <Search className="size-icon flex-none text-muted-foreground" />
-          )}
-          <Input
-            ref={inputRef}
-            role="combobox"
-            aria-label={mode === "commands" ? "Run a command" : "Search workspace"}
-            aria-autocomplete="list"
-            aria-expanded="true"
-            aria-controls="global-command-results"
-            aria-activedescendant={
-              resultsLen > 0 ? `global-command-option-${activeIndex}` : undefined
+        <DialogTitle className="sr-only">{commandMode ? "Commands" : "Go to"}</DialogTitle>
+        <Command
+          shouldFilter={false}
+          loop
+          value={selected}
+          onValueChange={setSelected}
+          className="bg-transparent"
+          onKeyDown={(event) => {
+            // ⇧↵ previews the highlighted entry (L12) instead of opening it.
+            if (event.key === "Enter" && event.shiftKey && !commandMode) {
+              const entry = findEntry(selected);
+              if (entry) {
+                event.preventDefault();
+                openEntry(entry, true);
+              }
             }
-            value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
-            onKeyDown={onInputKeyDown}
-            placeholder={placeholder}
-            className="h-control-comfortable w-full rounded-none border-0 bg-transparent px-0 text-body focus-visible:ring-0"
-          />
-          <kbd className="hidden flex-none rounded-control border border-border bg-muted px-1 py-1 font-mono text-micro text-muted-foreground sm:inline">
-            {mode === "commands" ? "⌘⇧P" : "⌘K"}
-          </kbd>
-        </div>
-
-        {mode === "goto" && knowledgeLoading && knowledgeDocs.length === 0 && (
-          <WorkbenchOperationState
-            kind="loading"
-            density="inline"
-            title="Loading knowledge entries…"
-            className="border-b border-border px-3 py-2"
-          />
-        )}
-        {mode === "goto" && knowledgeError && (
-          <WorkbenchOperationState
-            kind="error"
-            density="compact"
-            title="Knowledge entries unavailable"
-            detail={`${knowledgeError} Projects, experiments, runs, workflows, and assets remain searchable.`}
-            action={<WorkbenchRetryAction onClick={() => void knowledgeQuery.refetch()} />}
-          />
-        )}
-
-        <div
-          id="global-command-results"
-          role="listbox"
-          aria-label={mode === "commands" ? "Commands" : "Workspace search results"}
-          className="max-h-80 overflow-y-auto p-1"
+          }}
         >
-          {mode === "commands" ? (
-            commandResults.length === 0 ? (
+          {/* The field chrome is the palette's own (L13-5): the shared input's
+              wrapper loses its border, height and icon here. */}
+          <div
+            className={`flex h-control-compact items-center gap-2 rounded-hairline border border-accent px-2 ring-1 ring-accent [&_[data-slot=command-input-wrapper]]:h-full [&_[data-slot=command-input-wrapper]]:min-w-0 [&_[data-slot=command-input-wrapper]]:flex-1 [&_[data-slot=command-input-wrapper]]:border-0 [&_[data-slot=command-input-wrapper]]:px-0 ${commandMode ? "[&_[data-slot=command-input-wrapper]_svg]:hidden" : ""}`}
+          >
+            {commandMode ? (
+              <span className="font-mono text-label text-muted-foreground" aria-hidden>
+                &gt;
+              </span>
+            ) : null}
+            <CommandInput
+              value={query}
+              onValueChange={setQuery}
+              placeholder={
+                commandMode ? "Type a command" : "Go to a project, experiment, run, document…"
+              }
+              aria-label={commandMode ? "Run a command" : "Go to"}
+              className="h-full"
+            />
+            {commandMode ? null : (
+              <span className="hidden flex-none text-label text-muted-foreground sm:inline">
+                type <span className="font-mono">&gt;</span> for commands
+              </span>
+            )}
+          </div>
+          {!commandMode && knowledgeError ? (
+            <WorkbenchOperationState
+              kind="error"
+              density="compact"
+              title="Documents unavailable"
+              detail={`${knowledgeError} Projects, experiments, runs and assets are still searched.`}
+              action={<WorkbenchRetryAction onClick={() => void knowledgeQuery.refetch()} />}
+            />
+          ) : null}
+          <CommandList className="mt-1 max-h-scroll-compact">
+            <CommandEmpty>
               <WorkbenchOperationState
-                kind="empty"
+                kind={!commandMode && knowledgeLoading ? "loading" : "empty"}
                 density="compact"
-                title="No commands"
-                detail={query ? "No matching commands." : "No commands registered."}
+                title={
+                  commandMode
+                    ? commandQuery
+                      ? "No matching commands"
+                      : "No commands registered"
+                    : knowledgeLoading
+                      ? "Searching…"
+                      : "No matches"
+                }
+                detail={commandMode || knowledgeLoading ? undefined : "Try another name or id."}
               />
-            ) : (
-              commandResults.map((cmd, index) => {
-                const isActive = index === activeIndex;
-                return (
-                  <WorkbenchAction
-                    kind="ghost"
-                    size="content"
-                    type="button"
-                    role="option"
-                    id={`global-command-option-${index}`}
-                    aria-selected={isActive}
-                    tabIndex={-1}
+            </CommandEmpty>
+            {commandMode
+              ? commandResults.map((cmd) => (
+                  <CommandItem
                     key={cmd.id}
-                    onMouseEnter={() => setActiveIndex(index)}
-                    onClick={() => commitCommand(index)}
-                    className={`flex w-full items-center gap-3 rounded-control px-3 py-2 text-left ${
-                      isActive ? "bg-muted" : ""
-                    }`}
+                    value={`command:${cmd.id}`}
+                    onSelect={() => runCommandEntry(cmd)}
+                    className="h-shell-button gap-2 rounded-hairline px-2 data-[selected=true]:bg-accent-muted data-[selected=true]:text-foreground"
                   >
-                    <Terminal className="size-icon flex-none text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate text-body-lg text-foreground">
-                      {cmd.label}
-                    </span>
                     {cmd.detail ? (
-                      <span className="flex-none font-mono text-micro text-muted-foreground">
-                        {cmd.detail}
+                      <span className="flex-none text-label text-muted-foreground">
+                        {cmd.detail}:
                       </span>
                     ) : null}
-                  </WorkbenchAction>
-                );
-              })
-            )
-          ) : resultsLen === 0 ? (
-            knowledgeLoading ? (
-              <WorkbenchOperationState
-                kind="loading"
-                density="compact"
-                title="Searching available workspace entries…"
-              />
-            ) : (
-              <WorkbenchOperationState
-                kind="empty"
-                density="compact"
-                title="No matches"
-                detail={
-                  knowledgeError
-                    ? "No matches in the available workspace entries."
-                    : "Try another name, ID, or entity kind."
-                }
-              />
-            )
-          ) : (
-            gotoResults.map((entry, index) => {
-              const meta = entityMeta(entry.ref.kind);
-              const Icon = meta.icon;
-              const isActive = index === activeIndex;
-              return (
-                <WorkbenchAction
-                  kind="ghost"
-                  size="content"
-                  type="button"
-                  role="option"
-                  id={`global-command-option-${index}`}
-                  aria-selected={isActive}
-                  tabIndex={-1}
-                  key={`${entry.ref.kind}:${entry.ref.id}`}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => commitGoto(index)}
-                  className={`flex w-full items-center gap-3 rounded-control px-3 py-2 text-left ${
-                    isActive ? "bg-muted" : ""
-                  }`}
-                >
-                  <Icon className={`size-icon flex-none ${meta.iconClassName}`} />
-                  <span className="min-w-0 flex-1 truncate text-body-lg text-foreground">
-                    {entry.ref.label ?? entry.ref.id}
-                  </span>
-                  <span className="flex-none text-micro uppercase tracking-wide text-muted-foreground">
-                    {meta.label}
-                  </span>
-                  {entry.ref.status && (
-                    <StatusBadge
-                      status={entry.ref.status as SemanticStatus}
-                      size="sm"
-                      dot
-                      showLabel={false}
-                    />
-                  )}
-                </WorkbenchAction>
-              );
-            })
-          )}
-        </div>
+                    <span className="min-w-0 flex-1 truncate">{cmd.label}</span>
+                    {cmd.keybinding ? <Kbd>{prettyKeys(cmd.keybinding)}</Kbd> : null}
+                  </CommandItem>
+                ))
+              : groups.map(([heading, entries]) => (
+                  <CommandGroup
+                    key={heading}
+                    heading={heading}
+                    className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-micro [&_[cmdk-group-heading]]:text-muted-foreground"
+                  >
+                    {entries.map((entry) => (
+                      <CommandItem
+                        key={entryValue(entry)}
+                        value={entryValue(entry)}
+                        onSelect={() => openEntry(entry, false)}
+                        className="h-shell-button gap-2 rounded-hairline px-2 data-[selected=true]:bg-accent-muted data-[selected=true]:text-foreground"
+                      >
+                        <EntryGlyph entry={entry} />
+                        <span
+                          className={`flex-none truncate ${entry.ref.kind === "run" ? "font-mono text-label" : ""}`}
+                        >
+                          <Marked text={entry.ref.label ?? entry.ref.id} query={query} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-label text-muted-foreground">
+                          {whereOf(entry.ref, snapshot)}
+                        </span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                ))}
+          </CommandList>
+          <div className="mt-1 flex h-7 items-center gap-3 border-t border-border px-2 text-label text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <Kbd>↑↓</Kbd> move
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>↵</Kbd> {commandMode ? "run" : "open"}
+            </span>
+            {commandMode ? null : (
+              <span className="flex items-center gap-1">
+                <Kbd>⇧↵</Kbd> preview
+              </span>
+            )}
+            <span className="flex items-center gap-1">
+              <Kbd>Esc</Kbd> close
+            </span>
+          </div>
+        </Command>
       </DialogContent>
     </Dialog>
   );

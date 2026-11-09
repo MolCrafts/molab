@@ -240,7 +240,7 @@ Each piece has a single job. They compose without coupling.
 
 `import molab` stays lightweight — heavy integrations load only when you reach for
 them. The core features connect to the wider molcrafts stack through optional extras
-(such as `molab[tensorboard]`) and to your own code through three independent
+(such as `molab[molvis]`) and to your own code through three independent
 plugin channels (CLI, server, UI).
 
 </div>

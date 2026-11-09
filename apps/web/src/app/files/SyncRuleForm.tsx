@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Clock } from "lucide-react";
 import { type JSX, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { WorkbenchAction, WorkbenchDismissAction } from "@/components/workbench";
 import { reportStatus } from "@/lib/status-report";
 import { cn } from "@/lib/utils";
@@ -127,6 +128,9 @@ export const SyncRuleForm = ({
   const queryClient = useQueryClient();
   const panelRef = useRef<HTMLFormElement>(null);
   const dirty = useRef(false);
+  // While the remove confirm is open, a click in it is not a click outside the panel.
+  const confirming = useRef(false);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [placed, setPlaced] = useState(false);
   const [direction, setDirection] = useState<Draft["direction"]>(rule?.direction ?? "pull");
   const [content, setContent] = useState<SyncContent>(rule?.content ?? "everything");
@@ -197,6 +201,7 @@ export const SyncRuleForm = ({
 
   useEffect(() => {
     const onPointer = (event: PointerEvent): void => {
+      if (confirming.current) return;
       if (!panelRef.current?.contains(event.target as Node)) onClose();
     };
     window.addEventListener("pointerdown", onPointer);
@@ -283,6 +288,19 @@ export const SyncRuleForm = ({
 
   const remove = async (): Promise<void> => {
     if (!ruleId || running) return;
+    confirming.current = true;
+    const confirmed = await confirm({
+      title: `Remove the sync rule for “${name}”?`,
+      description: "Syncing this path stops. Files already synced stay where they are.",
+      confirmLabel: "Remove rule",
+      destructive: true,
+    });
+    // Released a frame later: the click that closed the confirm is still being
+    // dispatched and must not read as a click outside this panel.
+    requestAnimationFrame(() => {
+      confirming.current = false;
+    });
+    if (!confirmed) return;
     setRunning(true);
     try {
       await deleteSyncRule(ruleId);
@@ -296,7 +314,9 @@ export const SyncRuleForm = ({
 
   const noun = folder ? "folder" : "file";
 
-  return createPortal(
+  // The confirm renders beside the portal, not inside the form, so its submit
+  // and Escape never reach the form's own handlers.
+  const panel = createPortal(
     <form
       ref={panelRef}
       tabIndex={-1}
@@ -519,5 +539,12 @@ export const SyncRuleForm = ({
       </fieldset>
     </form>,
     document.body,
+  );
+
+  return (
+    <>
+      {panel}
+      {confirmDialog}
+    </>
   );
 };

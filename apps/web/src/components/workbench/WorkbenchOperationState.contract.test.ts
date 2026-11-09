@@ -11,9 +11,8 @@ const ASYNC_SURFACES = [
   "app/renderers/ProjectViewer.tsx",
   "app/renderers/AssetViewer.tsx",
   "plugins/workflow/WorkflowFileViewer.tsx",
-  "plugins/workflow/WorkflowSourceViewer.tsx",
+  "plugins/workflow/WorkflowSource.tsx",
   "plugins/knowledge/DocTree.tsx",
-  "plugins/knowledge/KnowledgeDocPanel.tsx",
   // KnowledgeBacklinksCard only mounts when rows exist (no loading/error chrome).
   "app/entities/GlobalCommandPalette.tsx",
 ] as const;

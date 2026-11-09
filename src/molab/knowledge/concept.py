@@ -1,7 +1,10 @@
 """``Concept`` — a knowledge document whose **path is its identity**.
 
-A product document is one markdown file, ``knowledges/<name>.md``. YAML
-frontmatter names the class; the narrative's markdown links are the graph.
+A product document is one file, ``knowledges/<name>.md`` (YAML frontmatter +
+markdown) or ``knowledges/<name>.html`` (the record as JSON in
+``<script id="molab-record">``, a body of ``<molab-markdown>`` blocks and
+``<molab-…>`` elements). The record names the class; the narrative's markdown
+links are the graph.
 A bare :class:`Concept` is only a root handle for ``walk`` / ``search`` /
 ``import_zotero``. It does not construct a subclass.
 
@@ -101,8 +104,8 @@ class Concept:
 
     A bare ``Knowledge`` is a root handle: it walks, searches and opens
     documents, and it is not a document itself. Product subclasses are one
-    markdown file, ``knowledges/<name>.md``, whose YAML frontmatter names
-    the class.
+    file, ``knowledges/<name>.md`` or ``knowledges/<name>.html``, whose
+    record names the class.
     """
 
     #: Declared type of a bare root handle. A file document uses its own.
@@ -188,14 +191,10 @@ class Concept:
 
     @property
     def name(self) -> str:
-        """Directory name, or markdown stem for a file document."""
-        name = PurePosixPath(self._path).name
-        lower = name.lower()
-        if lower.endswith(".md"):
-            return name[:-3]
-        if lower.endswith(".mdx"):
-            return name[:-4]
-        return name
+        """Directory name, or the file stem (no ``.md`` / ``.html``) for a file document."""
+        from .naming import knowledge_stem
+
+        return knowledge_stem(PurePosixPath(self._path).name)
 
     @property
     def fs(self) -> FileSystem:
@@ -311,10 +310,13 @@ class Concept:
 
         Returns:
             The ranked hits. Each entry path is relative to this handle and
-            keeps the ``.md`` suffix. ``type`` is the Knowledge class name.
+            keeps its ``.md`` / ``.html`` suffix. ``type`` is the Knowledge
+            class name. An HTML document is titled by its record ``name`` (or
+            ``title``) and ranked on its text without tags.
         """
         from .concepts import _PRODUCTS
-        from .frontmatter import split_frontmatter
+        from .frontmatter import document_text, split_frontmatter
+        from .naming import is_html_document
         from .search import ConceptIndexEntry, extract_title, search_index
 
         entries: list[ConceptIndexEntry] = []
@@ -323,7 +325,7 @@ class Concept:
             raw = read_text_or_none(path, fs=self._fs)
             if raw is None:
                 continue
-            meta, body = split_frontmatter(raw)
+            meta, body = split_frontmatter(raw, path=path)
             raw_class = meta.get("class")
             class_name = raw_class if isinstance(raw_class, str) and raw_class else "Note"
             if class_name not in _PRODUCTS:
@@ -335,7 +337,9 @@ class Concept:
             tags = tuple(str(item) for item in tags_raw) if isinstance(tags_raw, list) else ()
             if tag is not None and tag not in tags:
                 continue
-            title = extract_title(body) or PurePosixPath(path).stem
+            body = document_text(body, path=path)
+            named = _meta_text(meta, "name", "title") if is_html_document(path) else None
+            title = named or extract_title(body) or PurePosixPath(path).stem
             rel = PurePosixPath(os.path.relpath(path, self._path)).as_posix()
             bodies[rel] = body if include_text else ""
             entries.append(
@@ -372,18 +376,18 @@ class Concept:
         text = read_text_or_none(self._path, fs=self._fs)
         if text is None:
             return {}
-        meta, _body = split_frontmatter(text)
+        meta, _body = split_frontmatter(text, path=self._path)
         return meta
 
     def read(self) -> str:
-        """This document's narrative (markdown body, frontmatter stripped)."""
+        """This document's narrative: the markdown body, or the HTML ``<body>`` content."""
         from .frontmatter import split_frontmatter
 
         self._require_document("read")
         text = read_text_or_none(self._path, fs=self._fs)
         if text is None:
             return ""
-        _meta, body = split_frontmatter(text)
+        _meta, body = split_frontmatter(text, path=self._path)
         return body
 
     def ref(
@@ -506,8 +510,9 @@ class Concept:
 
         Args:
             host: A Folder, a path, or a bare Knowledge handle.
-            stem: Filename stem kept exactly as ``<stem>.md``, with no slug.
-                ``None`` keeps the slug derived from this document's name.
+            stem: Filename stem kept exactly as ``<stem>.md`` (or ``.html``,
+                this document's own suffix), with no slug. ``None`` keeps the
+                slug derived from this document's name.
             relink: When false, move the bytes and update this handle only.
                 Outbound and inbound links stay as they were.
             within: Tree whose inbound links are rewritten.
@@ -521,9 +526,12 @@ class Concept:
         if stem is not None and (stem == "" or "/" in stem or stem in {".", ".."}):
             raise ValueError(f"stem {stem!r} is not a single path segment")
         from .location import _folder
+        from .naming import document_format
 
-        planned = str(_folder(host, self.name, type(self)))  # ty: ignore[invalid-argument-type]
-        dst = planned if stem is None else self._fs.join(self._fs.dirname(planned), f"{stem}.md")
+        fmt = document_format(self._path)
+        planned = str(_folder(host, self.name, type(self), format=fmt))  # ty: ignore[invalid-argument-type]
+        suffix = PurePosixPath(planned).suffix
+        dst = planned if stem is None else self._fs.join(self._fs.dirname(planned), stem + suffix)
         if self._norm(dst) == self._norm(self._path):
             return
         if self._fs.exists(dst):
@@ -573,7 +581,17 @@ class Concept:
         return sorted({str(link.source.path) for link in inbound})
 
     def export(self) -> str:
-        """This document's narrative, without frontmatter."""
+        """This document as a file to hand out.
+
+        A markdown document exports its narrative, without frontmatter. An
+        HTML document exports the whole file: it is already a standalone page,
+        and its record is an inert script element.
+        """
+        from .naming import is_html_document
+
+        if is_html_document(self._path):
+            self._require_document("export")
+            return read_text_or_none(self._path, fs=self._fs) or ""
         return self.read()
 
     def _scan_root(self, within: Concept | PathArg | None) -> Concept:
@@ -643,7 +661,8 @@ class Concept:
 
         A string is the narrative, or a full markdown document with YAML
         frontmatter. Structured records (``ReferenceMeta``, sources, tags)
-        fold into the frontmatter. One file: ``knowledges/<name>.md``.
+        fold into the frontmatter. One file: ``knowledges/<name>.md``, or
+        ``.html`` for an HTML document (the record and body in that format).
 
         With ``replace=True``, *text* is the whole file. It is persisted
         verbatim: no frontmatter merge and no source rendering. Equal bytes
@@ -671,7 +690,7 @@ class Concept:
                 raise TypeError(
                     f"replace=True requires the whole document as str, got {type(text).__name__}"
                 )
-            meta, _body = split_frontmatter(text)
+            meta, _body = split_frontmatter(text, path=self._path)
             declared = meta.get("class")
             if declared != type(self).__name__:
                 raise ValueError(
@@ -692,7 +711,7 @@ class Concept:
         if text is None:
             narrative = None
         elif isinstance(text, str):
-            incoming_fm, body = split_frontmatter(text)
+            incoming_fm, body = split_frontmatter(text, path=self._path)
             if incoming_fm:
                 narrative = body
             else:
@@ -719,8 +738,10 @@ class Concept:
             narrative = self.read()
         parent = str(PurePosixPath(self._path).parent)
         self._fs.mkdir(parent, parents=True, exist_ok=True)
-        body, _appended = append_source_links(narrative or "", sources, base_dir=parent)
-        self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body))
+        body, _appended = append_source_links(
+            narrative or "", sources, base_dir=parent, path=self._path
+        )
+        self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body, path=self._path))
 
     def _accept_written_record(self, merged: Mapping[str, object], *, creating: bool) -> None:
         """Refuse a record ``write_knowledge`` would refuse. Nothing is written yet."""
@@ -1043,6 +1064,7 @@ def append_source_links(
     sources: Sequence[object],
     *,
     base_dir: str,
+    path: PathArg | None = None,
 ) -> tuple[str, int]:
     """Append each source's link line once.
 
@@ -1055,6 +1077,8 @@ def append_source_links(
         sources: Source rows. Each must provide ``link_target``, ``link_role``
             and ``link_line``.
         base_dir: Directory ``link_target`` relativizes file paths against.
+        path: The document *body* belongs to. An HTML document gets the
+            lines as one ``<molab-markdown>`` block.
 
     Returns:
         The new body and how many lines were appended.
@@ -1079,10 +1103,9 @@ def append_source_links(
         lines.append(source.link_line(base_dir))  # ty: ignore[unresolved-attribute]
     if not lines:
         return body, 0
-    text = body
-    if text and not text.endswith("\n"):
-        text += "\n"
-    return text + "\n".join(lines) + "\n", len(lines)
+    from .frontmatter import append_markdown
+
+    return append_markdown(body, "\n".join(lines) + "\n", path=path), len(lines)
 
 
 def remove_legacy_files(
@@ -1200,10 +1223,7 @@ def append_link(
     if isinstance(dst, MolabRef) or (isinstance(dst, str) and is_ref(dst)):
         target = str(dst)
         label = text if text is not None else target.rstrip("/").rsplit("/", 1)[-1]
-        encoded = encode_label(role, label)
-        existing = src.read()
-        prefix = existing if not existing or existing.endswith("\n") else existing + "\n"
-        src.write(prefix + link_line(encoded, target) + "\n")
+        _append_line(src, link_line(encode_label(role, label), target))
         return
     if isinstance(dst, Concept):
         dst_path = str(dst.path)
@@ -1222,10 +1242,23 @@ def append_link(
     rel = os.path.relpath(dst_path, src_base)
     rel_posix = PurePosixPath(rel).as_posix()
     label = text if text is not None else PurePosixPath(dst_path).name
-    encoded = encode_label(role, label)
-    existing = src.read()
-    prefix = existing if not existing or existing.endswith("\n") else existing + "\n"
-    src.write(prefix + link_line(encoded, rel_posix) + "\n")
+    _append_line(src, link_line(encode_label(role, label), rel_posix))
+
+
+def _append_line(src: Concept, line: str) -> None:
+    """Append one markdown *line* to *src*'s narrative, in its own format."""
+    from .frontmatter import append_markdown
+
+    src.write(append_markdown(src.read(), line + "\n", path=src.path))
+
+
+def _meta_text(meta: Mapping[str, object], *keys: str) -> str | None:
+    """The first non-blank string among *keys* of *meta*."""
+    for key in keys:
+        value = meta.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def read_text_or_none(path: PathArg, *, fs: FileSystem) -> str | None:

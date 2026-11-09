@@ -166,6 +166,30 @@ export const executionHandlers = [
       stderr: getFile(`${root}/traceback.txt`)?.content ?? null,
     });
   }),
+  // One stream, window by window (`useExecutionLog`): stdout.log, stderr.log, run.log.
+  http.get(workspaceRoute(`${ATTEMPT}/logs/:stream`), ({ params, request }) => {
+    const run = findRun(params);
+    if (!run?.executions?.some((e) => e.id === params.executionId)) return missing();
+    const root = `${run.path}/executions/${params.executionId}`;
+    const stream = String(params.stream);
+    const file =
+      getFile(`${root}/${stream}.log`) ??
+      (stream === "stderr" ? getFile(`${root}/traceback.txt`) : null) ??
+      (stream === "stdout" ? getFile(`${root}/run.log`) : null);
+    const content = file?.content ?? "";
+    const offset = Math.min(
+      content.length,
+      Math.max(0, Number(new URL(request.url).searchParams.get("offset") ?? 0) || 0),
+    );
+    return HttpResponse.json({
+      stream,
+      text: content.slice(offset),
+      offset,
+      nextOffset: content.length,
+      size: content.length,
+      eof: true,
+    });
+  }),
   http.get(workspaceRoute(`${ATTEMPT}/workflow`), ({ params }) => {
     const run = findRun(params);
     const execution = run?.executions?.find((e) => e.id === params.executionId);
@@ -245,25 +269,4 @@ export const executionHandlers = [
   http.post(workspaceRoute(`${ATTEMPT}/molplot/ingest`), ({ params }) =>
     findRun(params) ? HttpResponse.json({ ingested: 51, warnings: [] }) : missing(),
   ),
-  http.get(workspaceRoute(`${RUN}/tensorboard/scalars`), ({ params, request }) => {
-    const run = findRun(params);
-    if (!run) return missing();
-    const tags = new URL(request.url).searchParams.getAll("tag");
-    return HttpResponse.json({
-      runId: run.id,
-      runDir: run.path,
-      logdirs: ["tensorboard"],
-      series: ["loss/train", "loss/validation"]
-        .filter((tag) => !tags.length || tags.includes(tag))
-        .map((tag, index) => ({
-          logdir: "tensorboard",
-          tag,
-          points: Array.from({ length: 60 }, (_, i) => ({
-            step: i * 100,
-            wallTime: Date.parse(run.created) / 1000 + i,
-            value: 0.1 + index * 0.03 + Math.exp(-i / 12) * 0.6 + Math.sin(i) * 0.01,
-          })),
-        })),
-    });
-  }),
 ];

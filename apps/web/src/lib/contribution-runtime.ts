@@ -1,3 +1,4 @@
+import type { RunViewContribution } from "@molcrafts/molab-plugin";
 import { useSyncExternalStore } from "react";
 import type { RendererKey } from "@/app/types";
 import { ContributionRegistry } from "@/lib/contribution-registry";
@@ -20,6 +21,7 @@ const entityTabRegistry = new ContributionRegistry<EntityTabContribution>(
   "Entity tab contribution",
 );
 const fileTypeRegistry = new ContributionRegistry<FileTypeContribution>("File type contribution");
+const runViewRegistry = new ContributionRegistry<RunViewContribution>("Run view contribution");
 const executionColumnRegistry = new ContributionRegistry<ExecutionColumnContribution>(
   "Execution column contribution",
 );
@@ -163,6 +165,28 @@ export const listEntityTabContributions = (
     .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0));
 };
 
+/** Run page views (L14). */
+export const registerRunViewContribution = (contribution: RunViewContribution): void => {
+  runViewRegistry.register(stampPluginId(contribution), { onDuplicate: "skip" });
+  notifyContributionChange();
+};
+
+export const unregisterRunViewContribution = (contributionId: string): boolean => {
+  const removed = runViewRegistry.unregister(contributionId);
+  if (removed) notifyContributionChange();
+  return removed;
+};
+
+/** Enabled run views in tab order (`order`, then label). */
+export const listRunViewContributions = (): RunViewContribution[] =>
+  runViewRegistry
+    .getAll()
+    .filter((contribution) => contributionEnabled(contribution.pluginId))
+    .sort(
+      (left, right) =>
+        (left.order ?? 100) - (right.order ?? 100) || left.label.localeCompare(right.label),
+    );
+
 export const registerFileTypeContribution = (contribution: FileTypeContribution): void => {
   fileTypeRegistry.register(stampPluginId(contribution), { onDuplicate: "skip" });
   notifyContributionChange();
@@ -235,6 +259,7 @@ export const resetContributionRuntimeForTests = (): void => {
   filePreviewRegistry.clear();
   entityTabRegistry.clear();
   fileTypeRegistry.clear();
+  runViewRegistry.clear();
   executionColumnRegistry.clear();
   executionDetailRegistry.clear();
   activePluginId = null;
@@ -321,4 +346,26 @@ const globToRegExp = (pattern: string): RegExp => {
     source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
   }
   return new RegExp(`^${source}$`);
+};
+
+/**
+ * What a plugin adds, in words, read from every registry that records the
+ * owning plugin (L11 Settings › Plugins). A plugin that never activated has
+ * registered nothing, so it reads as an empty list — the registries are the
+ * only source, nothing is declared twice.
+ */
+export const describePluginContributions = (pluginId: string): string[] => {
+  const owned = <T extends { pluginId?: string }>(items: readonly T[]): number =>
+    items.filter((item) => item.pluginId === pluginId).length;
+  const kinds: [number, string, string][] = [
+    [owned(runViewRegistry.getAll()), "a run view", "run views"],
+    [owned(filePreviewRegistry.getAll()), "a file preview", "file previews"],
+    [owned(rendererRegistry.getAll()), "a page", "pages"],
+    [owned(entityTabRegistry.getAll()), "a tab", "tabs"],
+    [owned(fileTypeRegistry.getAll()), "a file type", "file types"],
+    [owned(executionColumnRegistry.getAll()), "an execution column", "execution columns"],
+    [owned(executionDetailRegistry.getAll()), "execution details", "execution details"],
+    [owned(metricReaderRegistry.getAll()), "a metric reader", "metric readers"],
+  ];
+  return kinds.flatMap(([count, one, many]) => (count === 0 ? [] : [count === 1 ? one : many]));
 };

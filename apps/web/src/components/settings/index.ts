@@ -1,6 +1,11 @@
 /**
- * Settings chrome (molvis-aligned). Domain-free — candidate for a shared
- * MolCrafts UI package (shadcn-style extraction).
+ * Settings chrome (L11). Domain-free: a category page is a stack of
+ * `SettingItem`s under a `SettingsPageHeader`.
  */
-export { SettingsRow, SettingsSection } from "./SettingsSection";
-export { type SettingsNavEntry, SettingsShell } from "./SettingsShell";
+export {
+  SettingActions,
+  SettingItem,
+  type SettingItemProps,
+  SettingsPageHeader,
+  SettingTag,
+} from "./SettingItem";

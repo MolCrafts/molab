@@ -124,6 +124,25 @@ class TestKnowledgeWrite:
         assert "RDF converged" in landed.read_text(encoding="utf-8")
         assert "knowledges/rdf.md" in result.stdout
 
+    def test_write_format_html_lands_an_html_document(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        args = ["write", "page", "<p>hello</p>", "--path", str(ws.root)]
+        result = CliRunner().invoke(knowledge_app, [*args, "--format", "html"])
+        assert result.exit_code == 0, result.output
+        landed = Path(str(ws.root)) / "knowledges" / "page.html"
+        assert landed.read_text(encoding="utf-8").startswith("<!doctype html>")
+        assert "knowledges/page.html" in result.stdout
+
+        again = CliRunner().invoke(knowledge_app, [*args, "--format", "md"])
+        assert again.exit_code == 1
+        assert "already exists" in again.output
+        bad = CliRunner().invoke(knowledge_app, [*args, "--format", "rst"])
+        assert bad.exit_code == 1
+        assert "--format" in bad.output
+
     def test_write_plan_records_a_file_and_a_doi(self, tmp_path: Path) -> None:
         from molab.workspace import Workspace
 

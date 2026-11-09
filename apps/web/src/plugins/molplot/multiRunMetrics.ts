@@ -23,8 +23,8 @@ import {
   buildOverlayConfig,
   type RunSeries,
 } from "./aggregateSeries";
-import { buildScalarSeries, type ScalarSeries } from "./RunMetricsView";
 import type { ExecutionCoords } from "./read-metrics";
+import { buildScalarSeries, type ScalarSeries } from "./scalar-series";
 
 export type AggregateOp = "overlay" | "mean" | "errorbar";
 

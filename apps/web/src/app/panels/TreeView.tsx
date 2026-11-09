@@ -1,26 +1,25 @@
 import { ChevronRight } from "lucide-react";
-import type { ComponentType, JSX, MouseEvent, ReactNode } from "react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import type { ComponentType, JSX, KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface TreeClickModifiers {
   shift: boolean;
   meta: boolean;
 }
 
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@molcrafts/ui";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@molcrafts/ui";
 import { EMPTY_COPY, EmptyState } from "@/app/components/entity";
+import { usePreview } from "@/app/preview/PreviewContext";
+import type { PreviewTarget } from "@/app/preview/target";
+import { ContextMenuItems } from "@/components/menu/MenuItems";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
+import { cn } from "@/lib/utils";
 
 export interface TreeNodeAction {
   id: string;
   label: string;
-  icon?: ComponentType<{ className?: string }>;
+  /** Shown at the right of the menu item, e.g. "⌥R". */
+  shortcut?: string;
   disabled?: boolean;
   destructive?: boolean;
   separatorBefore?: boolean;
@@ -42,7 +41,10 @@ export interface TreeNode {
   children?: TreeNode[];
   emptyChildLabel?: string;
   actions?: TreeNodeAction[];
+  /** Open the row's page (double-click, ↵). Without `preview`, a click opens too. */
   onSelect?: () => void;
+  /** What a single click shows in the Preview (L12). */
+  preview?: PreviewTarget;
   /**
    * Intent (hover / keyboard focus): start async work the click will need
    * so the row does not stall after activation.
@@ -97,43 +99,16 @@ export const visiblePreorder = (
 /** @deprecated Prefer visiblePreorder. */
 export const flattenVisibleIds = visiblePreorder;
 
-/** Shared action renderer for tree row menus and panel blank-area menus. */
+/** Tree row and blank-area menus render through the one menu renderer (L13). */
 export const TreeMenuItems = ({ actions }: { actions: TreeNodeAction[] }): JSX.Element => (
-  <>
-    {actions.map((action) => {
-      const ActionIcon = action.icon;
-      return (
-        <Fragment key={action.id}>
-          {action.separatorBefore && <ContextMenuSeparator />}
-          <ContextMenuItem
-            disabled={action.disabled}
-            title={action.title}
-            className={
-              action.destructive
-                ? "text-destructive focus:text-destructive data-[highlighted]:[&_svg]:text-destructive"
-                : undefined
-            }
-            onSelect={() => {
-              if (!action.disabled) {
-                action.onSelect();
-              }
-            }}
-          >
-            {ActionIcon ? <ActionIcon /> : null}
-            <span className="min-w-0 flex-1 truncate">{action.label}</span>
-            {action.disabled && action.title ? (
-              <span className="sr-only">{action.title}</span>
-            ) : null}
-          </ContextMenuItem>
-        </Fragment>
-      );
-    })}
-  </>
+  <ContextMenuItems actions={actions} />
 );
 
-const INDENT = 14;
+const INDENT = 16;
+/** Leading space before the first chevron. */
+const ROW_INSET = 8;
 /** Always-reserved gutter so sibling expandability never shifts indent. */
-const CHEVRON_COL = 24;
+const CHEVRON_COL = 16 + ROW_INSET;
 
 interface RowProps {
   node: TreeNode;
@@ -146,6 +121,8 @@ interface RowProps {
   dataEpoch?: number;
   selectedIds?: ReadonlySet<string>;
   onRowClick?: (node: TreeNode, event: MouseEvent<HTMLButtonElement>) => void;
+  /** The one row Tab lands on (roving tabindex); arrows move from there. */
+  tabStopId?: string;
 }
 
 const TreeRow = ({
@@ -158,7 +135,16 @@ const TreeRow = ({
   dataEpoch = 0,
   selectedIds,
   onRowClick,
+  tabStopId,
 }: RowProps): JSX.Element => {
+  const previewApi = usePreview();
+  // Single click (L12): preview when the row has a target, else open; a
+  // folder-like row also shows what is inside it.
+  const clickNode = (target: TreeNode): void => {
+    if (target.preview) previewApi.preview(target.preview);
+    else target.onSelect?.();
+    if (target.children !== undefined && !expanded.has(target.id)) onToggle(target.id);
+  };
   const hasChildren = node.children !== undefined;
   const isExpanded = expanded.has(node.id);
   const isActive = activeId === node.id;
@@ -187,37 +173,34 @@ const TreeRow = ({
       kind="ghost"
       size="content"
       type="button"
-      className={`group flex h-control-compact min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-hairline px-2 text-left text-body transition-colors ${
-        // Soft lavender wash — solid bg-accent is for buttons, too dark on day mode rows.
-        isActive
-          ? "bg-accent-muted text-accent-muted-foreground"
-          : isBagSelected
-            ? "bg-muted/60"
-            : "hover:bg-muted/40"
-      }`}
+      role="treeitem"
+      aria-level={depth + 1}
+      aria-expanded={hasChildren ? isExpanded : undefined}
+      aria-selected={isActive}
+      tabIndex={tabStopId === node.id ? 0 : -1}
+      // The row's wash lives on the full-width line below; the button stays clear.
+      className="group flex h-shell-row min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-none bg-transparent px-1 text-left text-body font-normal text-foreground hover:bg-transparent focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
       onClick={(event) => {
         if (onRowClick) {
           onRowClick(node, event);
           return;
         }
-        if (node.onSelect) {
-          node.onSelect();
-          if (hasChildren && !isExpanded) onToggle(node.id);
-        } else if (hasChildren) {
-          onToggle(node.id);
-        }
+        clickNode(node);
+      }}
+      onDoubleClick={() => {
+        // Opening the row's page retires the Preview of it.
+        previewApi.close();
+        node.onSelect?.();
       }}
       onContextMenu={() => {
-        node.onSelect?.();
+        if (node.preview) previewApi.preview(node.preview);
       }}
       onPointerEnter={() => node.onPrefetch?.()}
       onFocus={() => node.onPrefetch?.()}
       title={node.hoverTitle ?? node.label}
     >
       {Icon && (
-        <Icon
-          className={`size-icon-sm flex-none ${node.iconClassName ?? "text-muted-foreground"}`}
-        />
+        <Icon className={`size-icon flex-none ${node.iconClassName ?? "text-muted-foreground"}`} />
       )}
       {node.leadingAccessory && <span className="flex-none">{node.leadingAccessory}</span>}
       <span className={`min-w-0 flex-1 truncate ${node.labelClassName ?? ""}`}>{node.label}</span>
@@ -255,27 +238,36 @@ const TreeRow = ({
           : undefined
       }
     >
-      <div className="flex items-center gap-1" style={{ paddingLeft: `${depth * INDENT}px` }}>
+      <div
+        className={cn(
+          // VS Code list row: full width, 22px, one selection wash (DS v1.4).
+          "flex h-shell-row items-center pr-2",
+          isActive ? "bg-accent-muted" : isBagSelected ? "bg-muted" : "hover:bg-interactive",
+        )}
+        style={{ paddingLeft: `${depth * INDENT + ROW_INSET}px` }}
+      >
         {hasChildren ? (
           <WorkbenchIconAction
             label={isExpanded ? "Collapse" : "Expand"}
-            className="size-6 flex-none text-muted-foreground"
+            className="h-shell-row w-4 flex-none rounded-none text-foreground hover:bg-transparent"
+            tabIndex={-1}
             onClick={(event) => {
               event.stopPropagation();
               onToggle(node.id);
             }}
           >
             <ChevronRight
-              className={`size-icon-sm transition-transform ${isExpanded ? "rotate-90" : ""}`}
+              className={`size-icon transition-transform ${isExpanded ? "rotate-90" : ""}`}
             />
           </WorkbenchIconAction>
         ) : (
-          <span className="h-6 w-6 flex-none" aria-hidden />
+          <span className="w-4 flex-none" aria-hidden />
         )}
         {wrappedRow}
       </div>
       {node.children !== undefined && isExpanded && (
-        <div>
+        // biome-ignore lint/a11y/useSemanticElements: an ARIA tree's child list is a group, not a fieldset
+        <div role="group">
           {node.children.length === 0 && node.emptyChildLabel ? (
             <p
               className="text-label text-muted-foreground"
@@ -296,6 +288,7 @@ const TreeRow = ({
                 dataEpoch={dataEpoch}
                 selectedIds={selectedIds}
                 onRowClick={onRowClick}
+                tabStopId={tabStopId}
               />
             ))
           )}
@@ -304,6 +297,20 @@ const TreeRow = ({
     </div>
   );
 };
+
+/** Whether `id` is on screen: every ancestor of it is expanded. */
+const isRendered = (
+  nodes: readonly TreeNode[],
+  expanded: ReadonlySet<string>,
+  id: string,
+): boolean =>
+  nodes.some(
+    (node) =>
+      node.id === id ||
+      (expanded.has(node.id) &&
+        node.children !== undefined &&
+        isRendered(node.children, expanded, id)),
+  );
 
 export const TreeView = ({
   nodes,
@@ -318,6 +325,7 @@ export const TreeView = ({
   onModifierSelect,
 }: TreeViewProps): JSX.Element => {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(expandPath ?? []));
+  const previewApi = usePreview();
   const onExpandRef = useRef(onExpand);
   onExpandRef.current = onExpand;
   const shiftAnchor = useRef<number | null>(null);
@@ -377,12 +385,70 @@ export const TreeView = ({
       const ordered = visiblePreorder(nodes, expanded);
       shiftAnchor.current = ordered.indexOf(node.selectionKey);
     }
-    if (node.onSelect) {
-      node.onSelect();
-      // Opening a folder-like row also shows what is inside it.
-      if (node.children !== undefined && !expanded.has(node.id)) toggle(node.id);
-    } else if (node.children !== undefined) {
-      toggle(node.id);
+    if (node.preview) previewApi.preview(node.preview);
+    else node.onSelect?.();
+    // A folder-like row also shows what is inside it.
+    if (node.children !== undefined && !expanded.has(node.id)) toggle(node.id);
+  };
+
+  const tabStopId =
+    activeId && isRendered(nodes, expanded, activeId) ? activeId : (nodes[0]?.id ?? undefined);
+
+  // ARIA tree keys (L00): ↑↓ Home End move, → opens / enters, ← closes / climbs.
+  const onTreeKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    const current = (event.target as HTMLElement).closest<HTMLElement>('[role="treeitem"]');
+    const index = current ? items.indexOf(current) : -1;
+    if (!current || index < 0) return;
+    const id = current.closest<HTMLElement>("[data-tree-id]")?.dataset.treeId;
+    const level = Number(current.getAttribute("aria-level") ?? "1");
+    const state = current.getAttribute("aria-expanded");
+    const move = (target: number): void => {
+      event.preventDefault();
+      items[Math.max(0, Math.min(items.length - 1, target))]?.focus();
+    };
+    switch (event.key) {
+      case "Enter":
+        // ↵ opens the page; a click (or Space) only previews (L12).
+        event.preventDefault();
+        current.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        return;
+      case "ArrowDown":
+        move(index + 1);
+        return;
+      case "ArrowUp":
+        move(index - 1);
+        return;
+      case "Home":
+        move(0);
+        return;
+      case "End":
+        move(items.length - 1);
+        return;
+      case "ArrowRight":
+        event.preventDefault();
+        if (state === "false" && id) toggle(id);
+        else if (
+          state === "true" &&
+          Number(items[index + 1]?.getAttribute("aria-level")) === level + 1
+        ) {
+          move(index + 1);
+        }
+        return;
+      case "ArrowLeft": {
+        event.preventDefault();
+        if (state === "true" && id) {
+          toggle(id);
+          return;
+        }
+        for (let i = index - 1; i >= 0; i -= 1) {
+          if (Number(items[i]?.getAttribute("aria-level")) === level - 1) {
+            move(i);
+            return;
+          }
+        }
+        return;
+      }
     }
   };
 
@@ -398,7 +464,7 @@ export const TreeView = ({
   }
 
   return (
-    <div className="space-y-1">
+    <div role="tree" aria-label="Explorer" onKeyDown={onTreeKeyDown}>
       {nodes.map((node) => (
         <TreeRow
           key={node.id}
@@ -411,6 +477,7 @@ export const TreeView = ({
           dataEpoch={dataEpoch}
           selectedIds={selectedIds}
           onRowClick={onModifierSelect ? handleRowClick : undefined}
+          tabStopId={tabStopId}
         />
       ))}
     </div>

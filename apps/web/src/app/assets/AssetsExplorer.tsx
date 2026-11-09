@@ -1,16 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  Archive,
-  Blocks,
-  Copy,
-  ExternalLink,
-  FlaskConical,
-  FolderTree,
-  PlayCircle,
-  RefreshCw,
-} from "lucide-react";
-import type { ReactNode } from "react";
-import { EMPTY_COPY, StatusBadge } from "@/app/components/entity";
+import { Blocks, FlaskConical, FolderTree, PlayCircle, RefreshCw, Upload } from "lucide-react";
+import { type ReactNode, useState } from "react";
+import { usePermissions } from "@/app/auth";
+import { EMPTY_COPY } from "@/app/components/entity";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
 import { type TreeNode, TreeView } from "@/app/panels/TreeView";
 import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
@@ -18,6 +10,9 @@ import { assetDetailQueryOptions } from "@/app/state/entityQueries";
 import type { AssetSummary } from "@/app/types";
 import { LeftExplorer } from "@/components/layout/ExplorerShell";
 import { WorkbenchIconAction } from "@/components/workbench";
+import { formatBytes } from "@/lib/format-bytes";
+import { ASSET_KIND_META, kindOfAsset } from "./assetKinds";
+import { ImportAssetDialog } from "./ImportAssetDialog";
 
 const copyText = async (text: string): Promise<void> => {
   try {
@@ -61,29 +56,34 @@ export const buildAssetExplorerNodes = ({
     snapshot.experiments.find((experiment) => experiment.id === id)?.name ?? id;
   const runName = (id: string): string => snapshot.runs.find((run) => run.id === id)?.name ?? id;
 
-  const assetLeaf = (asset: AssetSummary): TreeNode => ({
-    id: asset.id,
-    label: asset.name,
-    icon: Archive,
-    iconClassName: "text-muted-foreground",
-    right: <StatusBadge status={asset.status} size="sm" />,
-    onPrefetch: () => onPrefetchAsset?.(asset),
-    onSelect: () => onSelect({ objectType: "asset", objectId: asset.id }),
-    actions: [
-      {
-        id: "open",
-        label: "Open asset",
-        icon: ExternalLink,
-        onSelect: () => onSelect({ objectType: "asset", objectId: asset.id }),
-      },
-      {
-        id: "copy-id",
-        label: "Copy asset ID",
-        icon: Copy,
-        onSelect: () => void copyText(asset.id),
-      },
-    ],
-  });
+  const assetLeaf = (asset: AssetSummary): TreeNode => {
+    const kind = ASSET_KIND_META[kindOfAsset(asset)];
+    return {
+      id: asset.id,
+      label: asset.name,
+      icon: kind.icon,
+      iconClassName: kind.ink,
+      meta: asset.sizeBytes != null ? formatBytes(asset.sizeBytes) : undefined,
+      onPrefetch: () => onPrefetchAsset?.(asset),
+      onSelect: () => onSelect({ objectType: "asset", objectId: asset.id }),
+      preview: { kind: "asset", assetId: asset.id },
+      actions: [
+        {
+          id: "open",
+          label: "Open asset",
+          onSelect: () => onSelect({ objectType: "asset", objectId: asset.id }),
+        },
+        ...(asset.ref
+          ? [{ id: "copy-ref", label: "Copy ref", onSelect: () => void copyText(asset.ref ?? "") }]
+          : []),
+        {
+          id: "copy-id",
+          label: "Copy asset ID",
+          onSelect: () => void copyText(asset.id),
+        },
+      ],
+    };
+  };
 
   const groupBy = <T,>(rows: AssetSummary[], key: (asset: AssetSummary) => T | undefined) => {
     const direct: AssetSummary[] = [];
@@ -181,10 +181,22 @@ export const AssetsExplorer = (
       void queryClient.prefetchQuery(assetDetailQueryOptions(asset.projectId, asset.id));
     },
   });
+  const { writeDeniedReason } = usePermissions();
+  const [importOpen, setImportOpen] = useState(false);
   const actions = (
-    <WorkbenchIconAction label="Refresh assets" kind="ghost" onClick={props.onRefresh}>
-      <RefreshCw className="size-4" />
-    </WorkbenchIconAction>
+    <>
+      <WorkbenchIconAction
+        label="Import asset"
+        kind="ghost"
+        deniedReason={writeDeniedReason}
+        onClick={() => setImportOpen(true)}
+      >
+        <Upload className="size-4" />
+      </WorkbenchIconAction>
+      <WorkbenchIconAction label="Refresh assets" kind="ghost" onClick={props.onRefresh}>
+        <RefreshCw className="size-4" />
+      </WorkbenchIconAction>
+    </>
   );
 
   return (
@@ -193,6 +205,12 @@ export const AssetsExplorer = (
         nodes={nodes}
         activeId={props.selection?.objectId}
         emptyTitle={EMPTY_COPY.assets.title}
+      />
+      <ImportAssetDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        projects={props.snapshot.projects}
+        onImported={props.onRefresh}
       />
     </LeftExplorer>
   );

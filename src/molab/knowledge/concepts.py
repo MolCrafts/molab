@@ -150,10 +150,12 @@ class _SourcedKnowledge(Concept):
         """
         from pathlib import PurePosixPath
 
+        from .naming import is_knowledge_file
+
         if (
             self.exists()
             and self.FILE_DOCUMENT
-            and PurePosixPath(self._path).suffix.lower() in {".md", ".mdx"}
+            and is_knowledge_file(PurePosixPath(self._path).name)
         ):
             from molab.workspace.refs import InvalidRefError
 
@@ -426,10 +428,11 @@ def _product(name: str) -> type[Concept]:
 
 
 def _open_document(path: PathArg, *, fs: FileSystem | None = None) -> Concept:
-    """Open the markdown file at *path* as the class named in its frontmatter.
+    """Open the document file at *path* as the class named in its record.
 
-    A ``.md`` / ``.mdx`` path is opened as written. A suffix-less path is the
-    same file with ``.md`` appended. A directory is not a document. An unknown
+    A ``.md`` / ``.mdx`` / ``.html`` path is opened as written. A suffix-less
+    path is the same file with ``.md`` appended, or with ``.html`` when only
+    that exists. A directory is not a document. An unknown
     ``class`` opens as :class:`Note`. This function lives beside the classes.
     :class:`~molab.knowledge.concept.Concept` does not construct them.
 
@@ -439,19 +442,26 @@ def _open_document(path: PathArg, *, fs: FileSystem | None = None) -> Concept:
     from .concept import read_text_or_none
     from .errors import KnowledgeNotFoundError
     from .frontmatter import split_frontmatter
-    from .naming import as_knowledge_file, is_knowledge_file
+    from .naming import KNOWLEDGE_FORMATS, as_knowledge_file, is_knowledge_file
 
     disk = fs if fs is not None else LocalFS()
     raw = str(path)
     if not is_knowledge_file(raw):
-        md = as_knowledge_file(raw)
-        if not disk.is_file(md):
+        found = next(
+            (
+                candidate
+                for candidate in (as_knowledge_file(raw, fmt) for fmt in KNOWLEDGE_FORMATS)
+                if disk.is_file(candidate)
+            ),
+            None,
+        )
+        if found is None:
             raise KnowledgeNotFoundError(str(path))
-        raw = md
+        raw = found
     text = read_text_or_none(raw, fs=disk)
     if text is None:
         raise KnowledgeNotFoundError(raw)
-    meta, _body = split_frontmatter(text)
+    meta, _body = split_frontmatter(text, path=raw)
     raw_class = meta.get("class")
     class_name = raw_class if isinstance(raw_class, str) and raw_class else "Note"
     if class_name not in _PRODUCTS:
@@ -474,7 +484,7 @@ def _write_document(path: PathArg, text: str, *, fs: FileSystem | None = None) -
     """
     from .frontmatter import split_frontmatter
 
-    meta, _body = split_frontmatter(text)
+    meta, _body = split_frontmatter(text, path=path)
     class_name = meta.get("class")
     if not isinstance(class_name, str) or class_name == "":
         raise ValueError("knowledge document requires a frontmatter class")

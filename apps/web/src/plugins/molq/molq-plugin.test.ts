@@ -1,66 +1,166 @@
 /**
- * Tests for the molq plugin module — formatters, the API client, and the
- * execution column / detail contribution registration surface.
+ * Tests for the molq plugin module — its registrations (the run view by
+ * scheduler files, the execution columns and detail) and what the run view
+ * reads off an attempt's record.
  */
 
-import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { beforeEach, describe, expect, it } from "@rstest/core";
 
+import type { ExecutionResponse } from "@/api/generated/models/ExecutionResponse";
 import {
-  listEntityTabs,
   listExecutionColumns,
   listExecutionDetails,
-  registerEntityTabContribution,
   registerExecutionColumn,
   registerExecutionDetail,
 } from "@/app/registry";
+import { applicableRunViews } from "@/app/renderers/run/useRunViews";
+import { listRunViewContributions } from "@/lib/contribution-runtime";
+import { matchesMatcher } from "@/lib/file-type-discovery";
+import { createPluginAPI } from "@/plugins/api/create_api";
 import { resetContributionRuntimeForTests } from "@/plugins/contribution-runtime";
-import { molqApi } from "@/plugins/molq/api";
-import { formatDuration, formatRelative } from "@/plugins/molq/format";
-import type {
-  EntityTabContribution,
-  ExecutionColumnContribution,
-  ExecutionDetailContribution,
-} from "@/plugins/types";
+import {
+  executorText,
+  isMolqExecutor,
+  jobLabel,
+  jobSeconds,
+  jobVerdict,
+  lifetime,
+  SCHEDULER_FILES,
+  sortSchedulerFiles,
+  submissionFacts,
+} from "@/plugins/molq/job";
+import molqPlugin from "@/plugins/molq/plugin";
+import type { ExecutionColumnContribution, ExecutionDetailContribution } from "@/plugins/types";
 
 beforeEach(() => {
   resetContributionRuntimeForTests();
 });
 
-afterEach(() => {
-  rs.restoreAllMocks();
+const file = (relPath: string, size = 10) => ({
+  name: relPath.split("/").pop() ?? relPath,
+  relPath,
+  type: "file",
+  size,
 });
 
-describe("formatDuration", () => {
-  it("returns dash for null/negative/NaN", () => {
-    expect(formatDuration(null)).toBe("—");
-    expect(formatDuration(-5)).toBe("—");
-    expect(formatDuration(Number.NaN)).toBe("—");
+const record = (overrides: Partial<ExecutionResponse> = {}): ExecutionResponse => ({
+  id: "e01",
+  runId: "run-001",
+  mode: "initial",
+  status: "succeeded",
+  createdAt: "2026-03-01T14:02:00Z",
+  startedAt: "2026-03-01T14:05:00Z",
+  finishedAt: "2026-03-01T14:58:00Z",
+  executor: {
+    backend: "molq",
+    scheduler: "slurm",
+    cluster_name: "hpc-slurm",
+    scheduler_job_id: "421337",
+    target: "hpc-slurm",
+  },
+  ...overrides,
+});
+
+describe("molq run view registration", () => {
+  it("registers one run view matched by scheduler files, and no entity tab", async () => {
+    const { api } = createPluginAPI("molq");
+    await molqPlugin.activate(api);
+    const view = listRunViewContributions().find((item) => item.id === "molq");
+    expect(view?.label).toBe("Molq");
+    expect(view?.order).toBe(30);
+    expect(view?.files).toBe(SCHEDULER_FILES);
   });
 
-  it("formats seconds, minutes, and hours separately", () => {
-    expect(formatDuration(45)).toBe("45s");
-    expect(formatDuration(125)).toBe("2m 05s");
-    expect(formatDuration(3725)).toBe("1h 02m 05s");
+  it("applies to an attempt with jobs/ scheduler files, not to one without", () => {
+    const view = { id: "molq", label: "Molq", files: SCHEDULER_FILES, Component: () => null };
+    const molq = applicableRunViews(
+      [view],
+      [file("jobs/train.sh"), file("jobs/train.out"), file("run.log"), file("out/a.out")],
+    );
+    expect(molq.map((v) => v.files.map((f) => f.relPath))).toEqual([
+      ["jobs/train.sh", "jobs/train.out"],
+    ]);
+    expect(applicableRunViews([view], [file("run.log"), file("out/train.sh")])).toEqual([]);
+  });
+
+  it("matches only flat scheduler files", () => {
+    expect(matchesMatcher(SCHEDULER_FILES, file("jobs/train.err"))).toBe(true);
+    expect(matchesMatcher(SCHEDULER_FILES, file("jobs/sub/train.err"))).toBe(false);
+    expect(matchesMatcher(SCHEDULER_FILES, file("jobs/train.log"))).toBe(false);
+  });
+
+  it("orders a job's script, stdout and stderr together", () => {
+    const sorted = sortSchedulerFiles([
+      file("jobs/train.err"),
+      file("jobs/eval.out"),
+      file("jobs/train.sh"),
+      file("jobs/train.out"),
+      file("jobs/eval.sh"),
+    ]);
+    expect(sorted.map((f) => f.relPath)).toEqual([
+      "jobs/eval.sh",
+      "jobs/eval.out",
+      "jobs/train.sh",
+      "jobs/train.out",
+      "jobs/train.err",
+    ]);
   });
 });
 
-describe("formatRelative", () => {
-  it("returns dash when input is null", () => {
-    expect(formatRelative(null)).toBe("—");
+describe("the job, from the execution record", () => {
+  it("names the job by the scheduler's id and where it ran", () => {
+    const executor = executorText(record());
+    expect(isMolqExecutor(executor)).toBe(true);
+    expect(jobLabel(executor)).toBe("Job 421337");
+    expect(jobVerdict(executor)).toBe("Job 421337 on hpc-slurm");
+    expect(jobVerdict({ backend: "molq", job_id: "a1b2" })).toBe("Job a1b2");
+    expect(jobLabel({})).toBe("Job");
+    expect(isMolqExecutor(executorText(record({ executor: { backend: "local" } })))).toBe(false);
   });
 
-  it("falls back to the raw string when not a date", () => {
-    expect(formatRelative("not-a-date")).toBe("not-a-date");
+  it("lists submission facts in sentence case, known keys first", () => {
+    const executor = executorText(
+      record({ executor: { ...record().executor, partition: "gpu", job_id: "j-9", empty: null } }),
+    );
+    expect(submissionFacts(executor)).toEqual([
+      ["Backend", "molq"],
+      ["Cluster", "hpc-slurm"],
+      ["Scheduler", "slurm"],
+      ["Job id", "421337"],
+      ["Molq job id", "j-9"],
+      ["Target", "hpc-slurm"],
+      ["Partition", "gpu"],
+    ]);
   });
 
-  it("returns 'just now' for recent timestamps", () => {
-    const recent = new Date(Date.now() - 5_000).toISOString();
-    expect(formatRelative(recent)).toBe("just now");
+  it("draws the lifetime from submitted, started and ended", () => {
+    const value = lifetime(record());
+    expect(value.points.map((p) => [p.key, Number(p.fraction.toFixed(3))])).toEqual([
+      ["submitted", 0],
+      ["started", 0.054],
+      ["ended", 1],
+    ]);
+    expect(value.segments.map((s) => s.kind)).toEqual(["wait", "run"]);
+    // submitted and started are too close to print apart: one label.
+    expect(value.labels).toHaveLength(2);
+    expect(value.labels[0]?.text).toMatch(/^submitted \d\d:\d\d · started \d\d:\d\d$/);
+    expect(value.labels[1]?.text).toMatch(/^ended \d\d:\d\d$/);
   });
 
-  it("returns minutes when delta is < 1 hour", () => {
-    const t = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    expect(formatRelative(t)).toBe("5m ago");
+  it("omits the times the record does not hold", () => {
+    const running = lifetime(record({ status: "running", finishedAt: null }));
+    expect(running.points.map((p) => p.key)).toEqual(["submitted", "started"]);
+    expect(running.segments.map((s) => s.kind)).toEqual(["wait"]);
+    const queued = lifetime(record({ status: "queued", startedAt: null, finishedAt: null }));
+    expect(queued.points.map((p) => [p.key, p.fraction])).toEqual([["submitted", 0]]);
+    expect(queued.segments).toEqual([]);
+    expect(lifetime(undefined).points).toEqual([]);
+  });
+
+  it("times the job from started to ended only", () => {
+    expect(jobSeconds(record())).toBe(53 * 60);
+    expect(jobSeconds(record({ finishedAt: null }))).toBeNull();
+    expect(jobSeconds(undefined)).toBeNull();
   });
 });
 
@@ -112,113 +212,6 @@ describe("execution column registry", () => {
   });
 });
 
-describe("molq entity tab gate", () => {
-  it("listEntityTabs filters by matches so Molq only appears for molq backends", () => {
-    const isMolq = (
-      runId: string,
-      runs: Array<{ id: string; executionHistory: Array<{ executor: Record<string, unknown> }> }>,
-    ) =>
-      runs
-        .find((r) => r.id === runId)
-        ?.executionHistory.some((e) => e.executor.backend === "molq") ?? false;
-
-    registerEntityTabContribution({
-      id: "molq:run-tab",
-      objectType: "run",
-      value: "molq",
-      label: "Molq",
-      matches: ({ selection, snapshot }) => isMolq(selection.objectId, snapshot.runs),
-      Component: (() => null) as EntityTabContribution["Component"],
-    });
-
-    const baseRun = {
-      name: "r",
-      path: "projects/p/experiments/e/runs/r",
-      status: "succeeded" as const,
-      summary: "",
-      updatedAt: "",
-      projectId: "p",
-      experimentId: "e",
-      definitionHash: "def-r",
-      experimentRevisionId: "rev-e",
-      statusSummary: { total: 1, active: 0, notStarted: false, byStatus: { succeeded: 1 } },
-      parameters: {},
-      workflowSource: null,
-      workflowSnapshot: null,
-      startedAt: null,
-      finishedAt: null,
-      errorMessage: null,
-    };
-
-    const molqTabs = listEntityTabs("run", {
-      selection: { objectType: "run", objectId: "r1" },
-      snapshot: {
-        workspaces: [],
-        projects: [],
-        experiments: [],
-        runs: [
-          {
-            ...baseRun,
-            id: "r1",
-            name: "r1",
-            executionHistory: [
-              {
-                executionId: "x1",
-                mode: "initial",
-                createdAt: "",
-                startedAt: null,
-                finishedAt: null,
-                status: "succeeded",
-                basedOnExecutionId: null,
-                executor: { backend: "molq" },
-                environment: {},
-                error: null,
-              },
-            ],
-          },
-        ],
-        assets: [],
-        workflows: [],
-      },
-    });
-    expect(molqTabs.map((t) => t.value)).toEqual(["molq"]);
-    expect(molqTabs[0]?.label).toBe("Molq");
-
-    const localTabs = listEntityTabs("run", {
-      selection: { objectType: "run", objectId: "r2" },
-      snapshot: {
-        workspaces: [],
-        projects: [],
-        experiments: [],
-        runs: [
-          {
-            ...baseRun,
-            id: "r2",
-            name: "r2",
-            executionHistory: [
-              {
-                executionId: "x2",
-                mode: "initial",
-                createdAt: "",
-                startedAt: null,
-                finishedAt: null,
-                status: "succeeded",
-                basedOnExecutionId: null,
-                executor: { backend: "local" },
-                environment: {},
-                error: null,
-              },
-            ],
-          },
-        ],
-        assets: [],
-        workflows: [],
-      },
-    });
-    expect(localTabs.map((t) => t.value)).toEqual([]);
-  });
-});
-
 describe("execution detail registry", () => {
   it("returns backend-scoped detail contributions", () => {
     const Component = (() => null) as ExecutionDetailContribution["Component"];
@@ -231,49 +224,5 @@ describe("execution detail registry", () => {
 
     expect(listExecutionDetails("molq")).toHaveLength(1);
     expect(listExecutionDetails("local")).toHaveLength(0);
-  });
-});
-
-describe("molqApi.listTargets", () => {
-  it("returns the targets array from the response envelope", async () => {
-    const fetchSpy = rs.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ targets: [{ name: "demo" }], total: 1 }), {
-        status: 200,
-      }),
-    );
-
-    const targets = await molqApi.listTargets();
-
-    expect(fetchSpy).toHaveBeenCalledWith("/api/plugins/molq/targets");
-    expect(targets).toEqual([{ name: "demo" }]);
-  });
-
-  it("throws a descriptive error on non-OK response", async () => {
-    rs.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ detail: "boom" }), { status: 500 }),
-    );
-
-    await expect(molqApi.listTargets()).rejects.toThrow(/List targets failed \(500\): boom/);
-  });
-});
-
-describe("molqApi.listJobs", () => {
-  it("encodes target and limit as query params", async () => {
-    const fetchSpy = rs.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          jobs: [],
-          stats: { running: 0, pending: 0, failed: 0, succeeded: 0, avgWaitSeconds: null },
-          total: 0,
-        }),
-        { status: 200 },
-      ),
-    );
-
-    await molqApi.listJobs("demo", 50);
-
-    const url = (fetchSpy.mock.calls[0]?.[0] as string) ?? "";
-    expect(url).toContain("target=demo");
-    expect(url).toContain("limit=50");
   });
 });

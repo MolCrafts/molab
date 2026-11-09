@@ -30,7 +30,7 @@ const FONT_SIZES = [
 ] as const;
 
 /** `--radius-*` roles (sm/md/lg/xl aliases are stock). */
-const RADII = ["hairline", "control", "panel", "overlay", "checkbox"] as const;
+const RADII = ["hairline", "control", "panel", "overlay", "checkbox", "action"] as const;
 
 /**
  * Every product `--spacing-*` name we know of, registered for all geometry
@@ -83,6 +83,19 @@ const SPACING = [
   "pipeline-menu-min",
   "pipeline-menu-max",
   // molab extras
+  "shell-titlebar",
+  "shell-tabs",
+  "shell-crumbs",
+  "shell-status",
+  "shell-row",
+  "shell-action",
+  "shell-button",
+  "shell-sidebar",
+  "shell-tab-max",
+  "shell-preview",
+  "shell-preview-narrow",
+  "shell-kv-label",
+  "quick-input",
   "drawer",
   "viewport-tall",
   "scroll-compact",

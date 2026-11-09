@@ -6,7 +6,6 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
-  Code as InlineCode,
   Input,
   Popover,
   PopoverContent,
@@ -20,13 +19,9 @@ import {
   FileText,
   Filter,
   FlaskConical,
-  FolderInput,
-  NotebookPen,
-  Pencil,
   PlayCircle,
   Plus,
   Search,
-  Trash2,
   X,
 } from "lucide-react";
 import { type ComponentType, type JSX, useEffect, useState } from "react";
@@ -35,6 +30,7 @@ import type { KnowledgeSearchRow } from "@/api/generated/models/KnowledgeSearchR
 import { StatusBadge } from "@/app/components/entity";
 import type { TreeNode, TreeNodeAction } from "@/app/panels/TreeView";
 import { TreeView } from "@/app/panels/TreeView";
+import { runLabel } from "@/app/runs/runTitle";
 import type { Selection, WorkspaceSnapshot } from "@/app/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { usePrompt } from "@/components/PromptDialog";
@@ -49,6 +45,9 @@ import { cn } from "@/lib/utils";
 import { CreateDocDialog, type CreateDocInput } from "./CreateDocDialog";
 import { runsForHost } from "./docTemplates";
 import { HostPickerDialog } from "./HostPickerDialog";
+import { hostLabel } from "./hostLabel";
+import { knowledgeClassOf } from "./knowledgeClass";
+import { knowledgeClassIcon } from "./knowledgeClassIcon";
 import { buildDocTree, type DocTreeNode, KB_GROUP_ID, listHostOptions } from "./knowledgeDocTree";
 import { knowledgeNoteQueryOptions } from "./queries";
 import { isTexDocument } from "./texDocument";
@@ -162,8 +161,8 @@ const groupPresentation = (
   const experiment = snapshot.experiments.find((row) => row.path === hostPath);
   if (experiment) return { label: experiment.name, icon: FlaskConical };
   const run = snapshot.runs.find((row) => row.path === hostPath);
-  if (run) return { label: run.name, icon: PlayCircle };
-  return { label: hostPath, icon: BookOpen };
+  if (run) return { label: runLabel(run), icon: PlayCircle };
+  return { label: hostLabel(snapshot, hostPath), icon: BookOpen };
 };
 
 const collectExpandIds = (nodes: DocTreeNode[], acc: string[]): string[] => {
@@ -296,14 +295,18 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     setCreateHost(hostPath);
   };
 
+  const [creating, setCreating] = useState(false);
   const submitCreate = async (input: CreateDocInput): Promise<void> => {
-    if (createHost === null) return;
+    if (createHost === null || creating) return;
+    setCreating(true);
     try {
       const relPath = await createDoc(input.name, createHost, input);
       setCreateHost(null);
       onSelect({ objectType: "knowledge", objectId: relPath });
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create document.");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -324,15 +327,10 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
 
   const handleDelete = async (path: string, name: string): Promise<void> => {
     const confirmed = await confirm({
-      title: "Delete document?",
-      description: (
-        <>
-          Document{" "}
-          <InlineCode className="rounded-control bg-muted px-1 py-1 text-label">{name}</InlineCode>{" "}
-          will be permanently removed.
-        </>
-      ),
-      confirmLabel: "Delete",
+      title: `Delete document “${name}”?`,
+      description:
+        "The file is removed from the workspace. Documents that cite it keep a broken link.",
+      confirmLabel: "Delete document",
       destructive: true,
     });
     if (!confirmed) return;
@@ -346,21 +344,18 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
       {
         id: "rename",
         label: "Rename",
-        icon: Pencil,
         disabled: operationLabel !== null,
         onSelect: () => void handleRename(path, node.name),
       },
       {
         id: "move",
         label: "Move",
-        icon: FolderInput,
         disabled: operationLabel !== null,
         onSelect: () => void handleMove(path, node.hostPath),
       },
       {
         id: "delete",
-        label: "Delete",
-        icon: Trash2,
+        label: "Delete…",
         disabled: operationLabel !== null,
         destructive: true,
         separatorBefore: true,
@@ -375,13 +370,18 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
       return {
         id: node.id,
         label: node.name,
-        icon: isTexDocument(path) ? FileText : NotebookPen,
+        icon: isTexDocument(path)
+          ? FileText
+          : knowledgeClassIcon(
+              knowledgeClassOf(notes.find((note) => note.relPath === path) ?? { cls: "Note" }),
+            ),
         iconClassName: "text-muted-foreground",
         onPrefetch: () => {
           void import("./KnowledgeViewer");
           void queryClient.prefetchQuery(knowledgeNoteQueryOptions(path));
         },
         onSelect: () => onSelect({ objectType: "knowledge", objectId: path }),
+        preview: { kind: "knowledge", path },
         actions: docActions(node),
       };
     }
@@ -399,7 +399,6 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
         {
           id: "new-doc",
           label: "New document",
-          icon: Plus,
           disabled: operationLabel !== null,
           onSelect: () => void handleCreate(node.hostPath),
         },
@@ -630,6 +629,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
         open={createHost !== null}
         runs={runsForHost(snapshot.runs, createHost ?? "")}
         error={createError}
+        busy={creating}
         onOpenChange={(open) => {
           if (!open) setCreateHost(null);
         }}

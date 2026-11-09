@@ -1,3 +1,4 @@
+import { withRunTitles } from "./runTitle";
 import type { WorkspaceRunsResponse } from "./types";
 
 const ENDPOINT = "/api/workspace/runs";
@@ -36,6 +37,9 @@ export const workspaceRunsApi = {
     if (options.ws !== undefined) params.set("ws", options.ws);
     const url = params.size > 0 ? `${ENDPOINT}?${params.toString()}` : ENDPOINT;
     const response = await fetch(url);
-    return handle<WorkspaceRunsResponse>(response, "List workspace runs");
+    const body = await handle<WorkspaceRunsResponse>(response, "List workspace runs");
+    // Titles need the whole experiment, which this page holds (a run's title is
+    // what varies among its siblings): stamp them where the rows arrive.
+    return Array.isArray(body?.runs) ? { ...body, runs: withRunTitles(body.runs) } : body;
   },
 };

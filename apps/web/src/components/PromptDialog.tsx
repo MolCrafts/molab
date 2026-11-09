@@ -1,17 +1,7 @@
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Label,
-} from "@molcrafts/ui";
-import { Check, X } from "lucide-react";
+/** Promise-style prompt (L13): a quick input under the title bar. */
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useState } from "react";
-import { WorkbenchAction } from "@/components/workbench";
+import { useCallback, useState } from "react";
+import { QuickInput } from "@/components/dialog/QuickInput";
 
 export interface PromptOptions {
   title: ReactNode;
@@ -36,13 +26,11 @@ export const usePrompt = (): UsePromptReturn => {
   const [state, setState] = useState<InternalState | null>(null);
   const [value, setValue] = useState("");
 
-  useEffect(() => {
-    if (state) setValue(state.defaultValue ?? "");
-  }, [state]);
-
   const prompt = useCallback(
     (options: PromptOptions): Promise<string | null> =>
       new Promise<string | null>((resolve) => {
+        // The value is in place before the input mounts, so it is selected on focus.
+        setValue(options.defaultValue ?? "");
         setState({ ...options, resolve });
       }),
     [],
@@ -55,61 +43,35 @@ export const usePrompt = (): UsePromptReturn => {
     }
   };
 
-  const handleSubmit = (event: React.FormEvent): void => {
-    event.preventDefault();
+  const submit = (): void => {
     const trimmed = value.trim();
     close(trimmed.length === 0 ? null : trimmed);
   };
 
+  // L13: a prompt is a quick input — one value, ↵ answers, Esc cancels.
   const dialog = (
-    <Dialog
+    <QuickInput
       open={state !== null}
       onOpenChange={(open) => {
         if (!open) close(null);
       }}
-    >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{state?.title}</DialogTitle>
-          {state?.description !== undefined && (
-            <DialogDescription asChild>
-              <div>{state.description}</div>
-            </DialogDescription>
-          )}
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            {state?.label && <Label htmlFor="prompt-input">{state.label}</Label>}
-            <Input
-              id="prompt-input"
-              autoFocus
-              value={value}
-              placeholder={state?.placeholder}
-              onChange={(event) => setValue(event.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <WorkbenchAction
-              icon={<X aria-hidden />}
-              kind="secondary"
-              size="default"
-              type="button"
-              onClick={() => close(null)}
-            >
-              {state?.cancelLabel ?? "Cancel"}
-            </WorkbenchAction>
-            <WorkbenchAction
-              icon={<Check aria-hidden />}
-              kind="primary"
-              size="default"
-              type="submit"
-            >
-              {state?.confirmLabel ?? "OK"}
-            </WorkbenchAction>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      title={typeof state?.title === "string" ? state.title : (state?.label ?? "Enter a value")}
+      prompt={
+        <>
+          {state?.title}
+          {state?.label ? <> · {state.label}</> : null}
+          {state?.description !== undefined ? <> · {state.description}</> : null}
+          <span className="text-muted-foreground">
+            {" "}
+            · ↵ to {(state?.confirmLabel ?? "confirm").toLowerCase()}, Esc to cancel
+          </span>
+        </>
+      }
+      value={value}
+      onValueChange={setValue}
+      onSubmit={submit}
+      placeholder={state?.placeholder}
+    />
   );
 
   return { prompt, dialog };

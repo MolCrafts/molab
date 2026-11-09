@@ -1,5 +1,4 @@
 import {
-  Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -7,10 +6,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@molcrafts/ui";
-import { LogOut } from "lucide-react";
+import { CircleUser, LogOut } from "lucide-react";
 import { useAuth } from "@/app/auth/AuthContext";
+import { ActivityBarButton } from "@/components/layout/ExplorerShell";
 
-/** Header control: only renders when auth is enabled and a user is signed in. */
+/**
+ * Accounts (L00): the activity bar's foot, as in VS Code. Only renders when
+ * auth is enabled and a user is signed in.
+ */
 export function UserMenu(): JSX.Element | null {
   const { enabled, authenticated, user, logout } = useAuth();
 
@@ -18,28 +21,12 @@ export function UserMenu(): JSX.Element | null {
     return null;
   }
 
-  const initials =
-    user.username
-      .split(/[\s._-]+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join("") || "U";
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="rounded-full bg-background font-mono text-micro"
-          aria-label="Account menu"
-          title={user.username}
-        >
-          <span aria-hidden>{initials}</span>
-        </Button>
+        <ActivityBarButton label={`Account — ${user.username}`} icon={CircleUser} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuContent side="right" align="end" className="w-48">
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col gap-hairline">
             <span className="text-body font-medium">{user.username}</span>

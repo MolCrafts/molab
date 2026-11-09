@@ -1,12 +1,5 @@
 import {
   Checkbox,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -18,8 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@molcrafts/ui";
-import { Ban, Check, Copy, Download, MoreHorizontal, Play, Plus } from "lucide-react";
-import { type JSX, useEffect, useMemo, useState } from "react";
+import { Ban, Copy, Download, MoreHorizontal, Play, Plus } from "lucide-react";
+import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { runsApi } from "@/api";
 import type { ExecutionAttemptCreateRequest } from "@/api/generated/models/ExecutionAttemptCreateRequest";
 import type { TargetResponse } from "@/api/generated/models/TargetResponse";
@@ -35,10 +28,9 @@ import {
   executionModeOptions,
 } from "@/app/runs/runLifecycle";
 import type { RunSummary } from "@/app/types";
+import { AppDialog } from "@/components/dialog/AppDialog";
 import { toast } from "@/components/ui/toast";
-import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
-
-export const POST_DISPATCH_TAB = "executions";
+import { WorkbenchIconAction } from "@/components/workbench";
 
 export interface RunToolbarProps {
   run: RunSummary;
@@ -47,6 +39,9 @@ export interface RunToolbarProps {
   onCancel: () => Promise<void>;
   onDispatched?: (executionId: string) => void;
   onHarvested?: (path: string) => void;
+  /** A Preview's Resume (`?attempt=new`): open the dialog with Resume chosen. */
+  resumeRequested?: boolean;
+  onResumeRequestHandled?: () => void;
 }
 
 export function RunToolbar({
@@ -56,6 +51,8 @@ export function RunToolbar({
   onCancel,
   onDispatched,
   onHarvested,
+  resumeRequested = false,
+  onResumeRequestHandled,
 }: RunToolbarProps): JSX.Element {
   const { writeDeniedReason } = usePermissions();
   const selectedExecution = run.executionHistory.find(
@@ -63,10 +60,17 @@ export function RunToolbar({
   );
   const latestExecution = run.executionHistory[run.executionHistory.length - 1];
   const attempts = run.executionHistory.length;
-  const basedOnStatus = (selectedExecution ?? latestExecution)?.status ?? null;
+  const predecessor = selectedExecution ?? latestExecution ?? null;
+  const basedOnStatus = predecessor?.status ?? null;
+  const blockingExecution =
+    [...run.executionHistory].reverse().find((execution) => canCancel(execution.status)) ?? null;
+  const blockingExecutionId =
+    blockingExecution && blockingExecution.executionId !== predecessor?.executionId
+      ? blockingExecution.executionId
+      : null;
   const modeOptions = useMemo(
-    () => executionModeOptions({ attempts, basedOnStatus }),
-    [attempts, basedOnStatus],
+    () => executionModeOptions({ attempts, basedOnStatus, blockingExecutionId }),
+    [attempts, basedOnStatus, blockingExecutionId],
   );
   const canCancelSelected = selectedExecution ? canCancel(selectedExecution.status) : false;
   const [open, setOpen] = useState(false);
@@ -95,10 +99,27 @@ export function RunToolbar({
     };
   }, [open]);
 
+  // A Resume request must open on Resume, not on whatever the default would
+  // be — chosen once per opening, so a refresh while open keeps the choice.
+  const resumeOnOpen = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the mode is chosen when the dialog opens, not on every refresh
   useEffect(() => {
     if (!open) return;
-    setMode(defaultExecutionMode(executionModeOptions({ attempts, basedOnStatus })));
-  }, [open, attempts, basedOnStatus]);
+    const options = executionModeOptions({ attempts, basedOnStatus, blockingExecutionId });
+    const resume = options.find((option) => option.value === "resume" && option.enabled);
+    setMode(resumeOnOpen.current && resume ? "resume" : defaultExecutionMode(options));
+    resumeOnOpen.current = false;
+  }, [open]);
+
+  useEffect(() => {
+    if (!resumeRequested) return;
+    onResumeRequestHandled?.();
+    // A viewer without write access gets no form that can only fail; an
+    // already-open dialog keeps the mode its user chose.
+    if (writeDeniedReason || open) return;
+    resumeOnOpen.current = true;
+    setOpen(true);
+  }, [resumeRequested, onResumeRequestHandled, writeDeniedReason, open]);
 
   const selectedMode = useMemo(
     () => modeOptions.find((item) => item.value === mode),
@@ -129,14 +150,22 @@ export function RunToolbar({
 
   return (
     <div className="flex items-center gap-1">
-      <Dialog
+      <AppDialog
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
           if (!next) setError(null);
         }}
-      >
-        <DialogTrigger asChild>
+        title="New attempt"
+        message="Run parameters and scientific inputs are immutable. This creates one new physical attempt."
+        size="form"
+        primaryLabel="Create attempt"
+        busyLabel="Creating…"
+        busy={busy}
+        primaryDisabled={!selectedMode?.enabled}
+        onPrimary={createExecution}
+        error={error}
+        trigger={
           <WorkbenchIconAction label="Create execution" deniedReason={writeDeniedReason}>
             {run.executionHistory.length === 0 ? (
               <Play className="size-3.5" />
@@ -144,91 +173,77 @@ export function RunToolbar({
               <Plus className="size-icon-sm" />
             )}
           </WorkbenchIconAction>
-        </DialogTrigger>
-        <DialogContent className="sm:max-w-dialog-sm">
-          <DialogHeader>
-            <DialogTitle>Create execution</DialogTitle>
-            <DialogDescription>
-              Run parameters and scientific inputs are immutable. This creates one new physical
-              attempt.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label htmlFor="execution-mode">Mode</Label>
-              <Select value={mode} onValueChange={(value) => setMode(value as ExecutionModeValue)}>
-                <SelectTrigger id="execution-mode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {modeOptions.map((item) => (
-                    <SelectItem key={item.value} value={item.value} disabled={!item.enabled}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-micro text-muted-foreground">
-                {selectedMode?.reason ?? selectedMode?.description}
-              </p>
-            </div>
-            <div className="grid gap-1">
-              <Label>Based on execution</Label>
-              <p className="break-all font-mono text-micro text-muted-foreground">
-                {selectedExecution
-                  ? selectedExecution.executionId
-                  : latestExecution
-                    ? `Latest execution (${latestExecution.executionId})`
-                    : "This run has no attempt yet."}
-              </p>
-            </div>
-            <div className="flex items-start gap-2">
-              <Checkbox
-                id="bypass-cache"
-                checked={mode === "reproduce" || bypassCache}
-                disabled={mode === "reproduce"}
-                onCheckedChange={(value) => setBypassCache(value === true)}
-              />
-              <div className="grid gap-1">
-                <Label htmlFor="bypass-cache">Recompute everything (bypass cache)</Label>
-                {mode === "reproduce" && (
-                  <p className="text-micro text-muted-foreground">
-                    Reproduce always bypasses the cache
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="execution-target">Target</Label>
-              <Select value={target} onValueChange={setTarget}>
-                <SelectTrigger id="execution-target">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {targets.length === 0 && <SelectItem value="local">local</SelectItem>}
-                  {targets.map((item) => (
-                    <SelectItem key={item.name} value={item.name}>
-                      {item.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {error && <p className="text-label text-destructive">{error}</p>}
+        }
+      >
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="execution-mode">Mode</Label>
+            <Select value={mode} onValueChange={(value) => setMode(value as ExecutionModeValue)}>
+              <SelectTrigger id="execution-mode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {modeOptions.map((item) => (
+                  <SelectItem key={item.value} value={item.value} disabled={!item.enabled}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-micro text-muted-foreground">
+              {selectedMode?.reason ?? selectedMode?.description}
+            </p>
           </div>
-          <DialogFooter>
-            <WorkbenchAction
-              icon={<Check aria-hidden />}
-              aria-busy={busy}
-              kind="primary"
-              disabled={busy || !selectedMode?.enabled}
-              onClick={() => void createExecution()}
-            >
-              {busy ? "Creating…" : "Create"}
-            </WorkbenchAction>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div className="grid gap-1">
+            <Label>Based on execution</Label>
+            <p className="break-all font-mono text-micro text-muted-foreground">
+              {selectedExecution
+                ? selectedExecution.executionId
+                : latestExecution
+                  ? `Latest execution (${latestExecution.executionId})`
+                  : "This run has no attempt yet."}
+            </p>
+            {blockingExecutionId ? (
+              <p className="text-label text-foreground">
+                <span className="font-mono">{blockingExecutionId}</span> is still running. Stop it
+                before starting another attempt.
+              </p>
+            ) : null}
+          </div>
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id="bypass-cache"
+              checked={mode === "reproduce" || bypassCache}
+              disabled={mode === "reproduce"}
+              onCheckedChange={(value) => setBypassCache(value === true)}
+            />
+            <div className="grid gap-1">
+              <Label htmlFor="bypass-cache">Recompute everything (bypass cache)</Label>
+              {mode === "reproduce" && (
+                <p className="text-micro text-muted-foreground">
+                  Reproduce always bypasses the cache
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="execution-target">Target</Label>
+            <Select value={target} onValueChange={setTarget}>
+              <SelectTrigger id="execution-target">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {targets.length === 0 && <SelectItem value="local">local</SelectItem>}
+                {targets.map((item) => (
+                  <SelectItem key={item.name} value={item.name}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </AppDialog>
 
       {canHarvest(run.status) && onHarvested && (
         <HarvestDialog

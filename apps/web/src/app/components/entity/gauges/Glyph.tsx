@@ -8,23 +8,13 @@
 import type { LucideIcon } from "lucide-react";
 import type { JSX, ReactNode } from "react";
 
-import { STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
+import { CHART_GROUPS, type ChartGroupId, type StatusCounts } from "@/app/status/vocabulary";
 import { cn } from "@/lib/utils";
 
 import { StatusIcon } from "../StatusIcon";
-import type { StatusCounts } from "./scale";
 
-/** Status group → the status-icon vocabulary's own name for it. */
-const ICON_STATUS: Record<StatusGroupId, string> = {
-  running: "running",
-  pending: "queued",
-  succeeded: "completed",
-  failed: "failed",
-  cancelled: "cancelled",
-};
-
-const labelOf = (id: StatusGroupId): string =>
-  STATUS_GROUPS.find((group) => group.id === id)?.label ?? id;
+const labelOf = (id: ChartGroupId): string =>
+  CHART_GROUPS.find((group) => group.id === id)?.label ?? id;
 
 /** An icon and a value; `label` is the sentence, shown on hover and read aloud. */
 export const Tally = ({
@@ -56,7 +46,7 @@ export const StatusTally = ({
   unit,
   className,
 }: {
-  status: StatusGroupId;
+  status: ChartGroupId;
   count: number;
   /** Plural noun for the hover title: "executions". */
   unit: string;
@@ -68,7 +58,7 @@ export const StatusTally = ({
     title={`${labelOf(status)}: ${count} ${unit}`}
     className={cn("inline-flex items-center gap-1 tabular-nums text-foreground", className)}
   >
-    <StatusIcon status={ICON_STATUS[status]} label="" className="pointer-events-none" />
+    <StatusIcon status={status} label="" className="pointer-events-none" />
     <span aria-hidden>{count}</span>
   </span>
 );
@@ -82,7 +72,7 @@ export const StatusTallies = ({
   className,
 }: {
   counts: StatusCounts;
-  statuses: readonly StatusGroupId[];
+  statuses: readonly ChartGroupId[];
   unit: string;
   keepZero?: boolean;
   className?: string;
@@ -99,9 +89,9 @@ export const StatusTallies = ({
 /** The status key as icons; each names itself on hover. */
 export const StatusGlyphLegend = ({ className }: { className?: string }): JSX.Element => (
   <ul aria-label="Status key" className={cn("flex flex-wrap items-center gap-3", className)}>
-    {STATUS_GROUPS.map((group) => (
+    {CHART_GROUPS.map((group) => (
       <li key={group.id} title={group.label} className="inline-flex">
-        <StatusIcon status={ICON_STATUS[group.id]} label={group.label} />
+        <StatusIcon status={group.id} label={group.label} />
       </li>
     ))}
   </ul>

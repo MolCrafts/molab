@@ -24,6 +24,14 @@ export const runPath = (
   experimentId: string,
   runId: string,
   view?: ObjectView,
+  focus: {
+    /** The attempt the page shows; omitted means the latest. */
+    attempt?: string | null;
+    /** The log line the Logs view opens at. */
+    line?: number | null;
+    /** Open the New attempt dialog with this mode chosen (a Preview's Resume). */
+    create?: "resume";
+  } = {},
 ): string => {
   const base =
     omittedId(projectId) && omittedId(experimentId)
@@ -31,7 +39,13 @@ export const runPath = (
       : omittedId(projectId)
         ? `/experiments/${enc(experimentId)}/runs/${enc(runId)}`
         : `/projects/${enc(projectId)}/experiments/${enc(experimentId)}/runs/${enc(runId)}`;
-  return view && view !== "overview" ? `${base}?${new URLSearchParams({ tab: view })}` : base;
+  const query = new URLSearchParams();
+  if (view && view !== "overview") query.set("tab", view);
+  if (focus.attempt) query.set("attempt", focus.attempt);
+  if (focus.line) query.set("line", String(focus.line));
+  if (focus.create) query.set("new", focus.create);
+  const search = query.toString();
+  return search ? `${base}?${search}` : base;
 };
 
 /** Canonical experiment URL. Secondary views are nested beneath the experiment
@@ -84,9 +98,7 @@ export const entityPath = (ref: EntityRef, snapshot: WorkspaceSnapshot): string 
       const experiment = workflow
         ? snapshot.experiments.find((item) => item.id === workflow.experimentId)
         : undefined;
-      return experiment
-        ? experimentPath(experiment.projectId, experiment.id, "workflow")
-        : `/workflows/${enc(ref.id)}`;
+      return experiment ? experimentPath(experiment.projectId, experiment.id, "workflow") : null;
     }
 
     case "asset":
@@ -111,8 +123,6 @@ export const SECTION_PATH = {
   workspace: "/workspace",
   runs: "/runs",
   compare: "/compare",
-  activity: "/activity",
-  workflows: "/workflows",
   assets: "/assets",
   knowledge: "/knowledge",
   settings: "/settings",

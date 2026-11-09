@@ -74,7 +74,7 @@ export const failureHeadline = (input: {
 };
 
 export const failureRecovery = (selection: FailureSelection | null): string => {
-  if (!selection) return "Outputs lists this attempt's files and stderr.";
-  if (selection.kind === "file") return `Read ${selection.path} in Outputs.`;
-  return "Read stderr in Outputs.";
+  if (!selection) return "Files lists this attempt's files and stderr.";
+  if (selection.kind === "file") return `Read ${selection.path} in Files.`;
+  return "Read stderr in Files.";
 };

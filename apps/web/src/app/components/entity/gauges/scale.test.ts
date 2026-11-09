@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+import { emptyCounts } from "@/app/status/vocabulary";
 
 import { formatSpan, spanScale, stackLanes, successShare, timeBuckets } from "./scale";
 
@@ -44,7 +45,7 @@ describe("stackLanes", () => {
 
 describe("successShare", () => {
   it("is null until something finished, and ignores live work", () => {
-    const base = { total: 3, running: 3, pending: 0, succeeded: 0, failed: 0, cancelled: 0 };
+    const base = { ...emptyCounts(), total: 3, running: 3 };
     expect(successShare(base)).toBeNull();
     expect(successShare({ ...base, total: 6, succeeded: 1, failed: 2 })).toBeCloseTo(1 / 3);
   });

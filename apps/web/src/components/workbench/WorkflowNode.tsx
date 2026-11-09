@@ -8,8 +8,7 @@
 import { Workflow } from "lucide-react";
 import type { JSX, ReactNode } from "react";
 
-import { statusDotClass } from "@/app/components/entity/StatusBadge";
-import { canonicalStatusFor } from "@/app/components/entity/status";
+import { statusSpec, TONE_FILL } from "@/app/status/vocabulary";
 import { cn } from "@/lib/utils";
 
 export type WorkflowNodeCanvasRole = "input" | "output" | "task";
@@ -43,8 +42,8 @@ export const WorkflowNode = ({
 }: WorkflowNodeProps): JSX.Element => {
   const compact = density === "compact" || Boolean(canvasRole);
   const NodeRoot = onActivate ? "button" : "div";
-  const displayStatus = canonicalStatusFor(status);
-  const failed = displayStatus === "failed";
+  const spec = status ? statusSpec(status) : null;
+  const failed = spec?.key === "failed";
 
   return (
     <NodeRoot
@@ -72,12 +71,12 @@ export const WorkflowNode = ({
         >
           {title}
         </span>
-        {displayStatus && (
+        {spec && (
           <span
             role="img"
-            aria-label={displayStatus}
-            title={displayStatus}
-            className={cn("size-1.5 flex-none rounded-full", statusDotClass(status))}
+            aria-label={spec.word}
+            title={spec.word}
+            className={cn("size-2 flex-none rounded-full", TONE_FILL[spec.tone])}
           />
         )}
       </div>

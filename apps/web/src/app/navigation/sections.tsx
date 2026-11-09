@@ -1,5 +1,4 @@
 import type { ComponentType, SVGProps } from "react";
-import type { InspectorSurfaceRegistration } from "@/app/panels/inspectorSurface";
 import type { LeftPanelView, Selection, SemanticObjectType, WorkspaceSnapshot } from "@/app/types";
 import {
   listAllViewContainers,
@@ -41,7 +40,6 @@ export interface NavigationExplorerProps {
 export interface NavigationLandingProps {
   snapshot: WorkspaceSnapshot;
   onRefresh: () => void;
-  onInspectorChange: (registration: InspectorSurfaceRegistration | null) => void;
 }
 
 export interface NavigationEmptySelection {
@@ -201,8 +199,6 @@ const PRODUCT_ROUTE_FALLBACK: ReadonlyArray<{
   { id: "asset", matches: (pathname) => pathname.startsWith("/assets") },
   { id: "workspace", matches: (pathname) => pathname.startsWith("/workspace") },
   { id: "settings", matches: (pathname) => pathname.startsWith("/settings") },
-  { id: "activity", matches: (pathname) => pathname.startsWith("/activity") },
-  { id: "workflow", matches: (pathname) => pathname.startsWith("/workflows") },
 ];
 
 /** Pure pathname → product section mapping, including hidden compatibility routes. */

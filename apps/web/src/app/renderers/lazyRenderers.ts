@@ -19,9 +19,6 @@ export const ImageViewerLazy = lazyWithPrefetch(() =>
 export const TaskViewerLazy = lazyWithPrefetch(() =>
   import("./TaskViewer").then((module) => ({ default: module.TaskViewer })),
 );
-export const MetadataInspectorLazy = lazyWithPrefetch(() =>
-  import("./MetadataInspector").then((module) => ({ default: module.MetadataInspector })),
-);
 
 const RENDERER_BY_TYPE: Partial<Record<SemanticObjectType, { prefetch: () => unknown }>> = {
   project: ProjectViewerLazy,

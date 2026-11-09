@@ -12,6 +12,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { EntityRef } from "@/app/entities/kinds";
+import { runLabel } from "@/app/runs/runTitle";
 import type {
   ExperimentSummary,
   RunSummary,
@@ -49,7 +50,7 @@ const experimentRef = (experiment: ExperimentSummary): EntityRef => ({
 const runRef = (run: RunSummary): EntityRef => ({
   kind: "run",
   id: run.id,
-  label: run.name || run.id,
+  label: runLabel(run),
   status: run.status,
 });
 

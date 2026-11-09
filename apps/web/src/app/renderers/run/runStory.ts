@@ -1,236 +1,47 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// What a run's Overview says, derived once and without React: the verdict
-// sentence, the latest attempt's tasks on a clock, where the run sits among its
-// experiment's other runs, the parameters that set it apart, and its results.
-// A run is one point of a sweep; its page is about what happened inside it and
-// how it compares — not a rollup of one item.
+// What a run's page says about one attempt, derived once and without React:
+// the verdict line (level 2), its one line of evidence (level 3), the tasks on
+// a clock, and the run result. Comparison with siblings lives in `runCompare`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { formatSpan, type SiblingPoint, type TimelineSpan } from "@/app/components/entity";
-import { formatScalar } from "@/app/renderers/dashboardData";
+import { formatSpan } from "@/app/components/entity";
 import { executionErrorText } from "@/app/renderers/run/executionFailure";
-import { runFinishedAt, runPresentationStatus, runStartedAt } from "@/app/runs/projections";
-import { groupForStatus, STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
-import type { WorkspaceRunRow } from "@/app/runs/types";
+import { normalizeStatus, STATUS, type StatusKey } from "@/app/status/vocabulary";
 import type { ExecutionRecordSummary, RunSummary } from "@/app/types";
+import { parseInstant } from "@/lib/format-time";
 import type { TaskGraphJson, TaskNodeJson } from "@/plugins/workflow/task-graph-ir";
 
-const time = (value: string | null | undefined): number | null => {
-  const parsed = value ? Date.parse(value) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const wordOf = (status: StatusGroupId): string =>
-  STATUS_GROUPS.find((group) => group.id === status)?.label ?? status;
-
-/** Journal statuses (`completed`, `skipped`) mapped onto the UI's groups. */
-const taskStatus = (task: TaskNodeJson): StatusGroupId =>
-  groupForStatus(task.status ?? "pending") ?? "pending";
+/** A journal status (`completed`, `skipped`, none yet) in the vocabulary. */
+const taskStatus = (task: TaskNodeJson): StatusKey => normalizeStatus(task.status ?? "pending");
 
 const taskName = (task: TaskNodeJson): string => task.label || task.id;
 
-// ── Verdict ──────────────────────────────────────────────────────────────────
+const stringOf = (value: unknown): string | null =>
+  typeof value === "string" && value.length > 0 ? value : null;
 
-export interface RunVerdict {
-  status: StatusGroupId | "none";
-  /** The sentence, for hover and assistive tech: "Failed at Train model after 48m". */
-  headline: string;
-  /** What the verdict is about: the failing or running task. */
-  subject: string | null;
-  /** The attempt's wall time: "48m". */
-  elapsed: string | null;
-  tasks: { done: number; total: number };
-  /** Present only when the run has been retried. */
-  attempt: { index: number; total: number; mode: string } | null;
-  /** The failing attempt's own error, first. */
-  error: string | null;
-}
+/** Where an attempt ran: its target, else its backend. */
+export const attemptTarget = (execution: ExecutionRecordSummary | undefined): string | null =>
+  stringOf(execution?.executor?.target) ?? stringOf(execution?.executor?.backend);
 
-const attemptElapsed = (execution: ExecutionRecordSummary, now: number): number | null => {
-  const start = time(execution.startedAt ?? execution.createdAt);
+const pad2 = (value: number): string => value.toString().padStart(2, "0");
+
+/** A wall-clock time as `14:51`, or null. */
+export const clockOf = (iso: string | null | undefined): string | null => {
+  const at = parseInstant(iso);
+  if (at === null) return null;
+  const date = new Date(at);
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+};
+
+/** Wall time of one attempt in seconds; in-flight work counts up to `now`. */
+export const attemptSeconds = (
+  execution: ExecutionRecordSummary,
+  now = Date.now(),
+): number | null => {
+  const start = parseInstant(execution.startedAt ?? execution.createdAt);
   if (start === null) return null;
-  return Math.max(0, (time(execution.finishedAt) ?? now) - start) / 1000;
+  return Math.max(0, (parseInstant(execution.finishedAt) ?? now) - start) / 1000;
 };
-
-export const runVerdict = (
-  run: RunSummary,
-  graph: TaskGraphJson | null,
-  now = Date.now(),
-): RunVerdict => {
-  const history = run.executionHistory;
-  const latest = history[history.length - 1];
-  if (!latest) {
-    return {
-      status: "none",
-      headline: "Not run yet",
-      subject: null,
-      elapsed: null,
-      tasks: { done: 0, total: 0 },
-      attempt: null,
-      error: null,
-    };
-  }
-  const status = groupForStatus(latest.status) ?? "pending";
-  const seconds = attemptElapsed(latest, now);
-  const elapsed = seconds === null ? null : formatSpan(seconds);
-  const tasks = graph?.task_configs ?? [];
-  const failedTask = tasks.find((task) => taskStatus(task) === "failed");
-  const runningTask = tasks.find((task) => taskStatus(task) === "running");
-  const subject =
-    status === "failed" && failedTask
-      ? taskName(failedTask)
-      : status === "running" && runningTask
-        ? taskName(runningTask)
-        : null;
-  const took = elapsed ?? "";
-  const headline =
-    status === "succeeded"
-      ? `Completed${took ? ` in ${took}` : ""}`
-      : status === "failed"
-        ? `Failed${subject ? ` at ${subject}` : ""}${took ? ` after ${took}` : ""}`
-        : status === "running"
-          ? `Running${subject ? ` ${subject}` : ""}${took ? ` · ${took} so far` : ""}`
-          : status === "cancelled"
-            ? `Cancelled${took ? ` after ${took}` : ""}`
-            : `Queued${took ? ` for ${took}` : ""}`;
-  return {
-    status,
-    headline,
-    subject,
-    elapsed,
-    tasks: {
-      done: tasks.filter((task) => taskStatus(task) === "succeeded").length,
-      total: tasks.length,
-    },
-    attempt:
-      history.length > 1
-        ? { index: history.length, total: history.length, mode: latest.mode }
-        : null,
-    error:
-      status === "failed" || status === "cancelled"
-        ? (executionErrorText(latest.error) ?? failedTask?.error ?? run.errorMessage ?? null)
-        : null,
-  };
-};
-
-// ── Tasks on a clock ─────────────────────────────────────────────────────────
-
-/** The latest attempt's tasks that started, in journal order, each from start to finish. */
-export const taskSpans = (graph: TaskGraphJson | null, now = Date.now()): TimelineSpan[] =>
-  (graph?.task_configs ?? []).flatMap((task) => {
-    const start = time(task.startedAt);
-    if (start === null) return [];
-    const status = taskStatus(task);
-    const end = time(task.finishedAt);
-    const seconds = Math.max(0, (end ?? now) - start) / 1000;
-    return [
-      {
-        key: task.id,
-        label: taskName(task),
-        start,
-        end: status === "running" ? null : end,
-        status,
-        tip: [
-          `${taskName(task)} · ${wordOf(status)} · ${formatSpan(seconds)}`,
-          task.type,
-          task.error ?? "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      },
-    ];
-  });
-
-/** Tasks the journal lists that never started: shown as a count, not drawn. */
-export const unstartedTasks = (graph: TaskGraphJson | null): number =>
-  (graph?.task_configs ?? []).filter((task) => !task.startedAt).length;
-
-// ── Among its siblings ───────────────────────────────────────────────────────
-
-const runSeconds = (row: WorkspaceRunRow): number | null => {
-  const status = groupForStatus(runPresentationStatus(row));
-  if (status !== "succeeded" && status !== "failed" && status !== "cancelled") return null;
-  const start = time(runStartedAt(row));
-  const end = time(runFinishedAt(row));
-  return start === null || end === null || end < start ? null : (end - start) / 1000;
-};
-
-export interface SiblingStanding {
-  points: SiblingPoint[];
-  /** "faster than 2 of 3 other runs", or null when it cannot be said. */
-  rank: string | null;
-  /** Place by duration, 1 = fastest, among all runs on the chart: "2/4" ("=" for a tie). */
-  place: string | null;
-}
-
-const plural = (count: number): string => (count === 1 ? "run" : "runs");
-
-/**
- * The run among its experiment's finished runs, by duration. A run still
- * going is placed at its elapsed time so far, so the chart can already say
- * "slower than every finished sibling" while it runs.
- */
-export const siblingStanding = (
-  runId: string,
-  siblings: readonly WorkspaceRunRow[],
-  now = Date.now(),
-): SiblingStanding => {
-  const points: SiblingPoint[] = siblings.flatMap((row) => {
-    const self = row.id === runId;
-    const finished = runSeconds(row);
-    const start = time(runStartedAt(row));
-    const seconds = finished ?? (self && start !== null ? Math.max(0, now - start) / 1000 : null);
-    if (seconds === null) return [];
-    const status = groupForStatus(runPresentationStatus(row));
-    const soFar = finished === null;
-    return [
-      {
-        key: row.id,
-        seconds,
-        status,
-        self,
-        tip: `${self ? "This run" : row.name || row.id} · ${formatSpan(seconds)}${
-          soFar ? " so far" : ""
-        }${status ? ` · ${wordOf(status)}` : ""}`,
-      },
-    ];
-  });
-  const self = points.find((point) => point.self);
-  const others = points.filter((point) => !point.self);
-  if (!self || others.length === 0) return { points, rank: null, place: null };
-  const ongoing = runSeconds(siblings.find((row) => row.id === runId) as WorkspaceRunRow) === null;
-  const slower = others.filter((point) => point.seconds > self.seconds).length;
-  const faster = others.filter((point) => point.seconds < self.seconds).length;
-  const n = others.length;
-  const rank =
-    slower === 0 && faster === 0
-      ? `as long as the ${n} other ${plural(n)}`
-      : ongoing
-        ? faster > 0
-          ? `already longer than ${faster} of ${n} other ${plural(n)}`
-          : `shorter so far than ${n === 1 ? "the other run" : `all ${n} other runs`}`
-        : slower >= faster
-          ? `faster than ${slower} of ${n} other ${plural(n)}`
-          : `slower than ${faster} of ${n} other ${plural(n)}`;
-  const place = slower === 0 && faster === 0 ? "=" : `${faster + 1}/${points.length}`;
-  return { points, rank, place };
-};
-
-/**
- * Parameters on which this run differs from at least one sibling — its
- * coordinates in the sweep. Shared values are the experiment's, not the run's.
- */
-export const distinguishingParameters = (
-  parameters: Record<string, unknown>,
-  siblings: readonly WorkspaceRunRow[],
-): Array<{ key: string; value: string }> =>
-  Object.entries(parameters).flatMap(([key, value]) => {
-    const mine = formatScalar(value);
-    const varies = siblings.some(
-      (row) => row.parameters && formatScalar(row.parameters[key]) !== mine,
-    );
-    return varies ? [{ key, value: mine }] : [];
-  });
 
 // ── Results ──────────────────────────────────────────────────────────────────
 
@@ -238,6 +49,14 @@ export interface ResultFigure {
   key: string;
   value: string;
 }
+
+/** A result number as a person reads it: 1.50e-4, 300.48, 51. */
+export const formatFigure = (value: number): string => {
+  if (Number.isInteger(value)) return value.toLocaleString("en-US");
+  const abs = Math.abs(value);
+  if (abs !== 0 && (abs < 1e-2 || abs >= 1e6)) return value.toExponential(2);
+  return Number(value.toPrecision(5)).toString();
+};
 
 /** Scalar results the attempt reported, numbers first; structured values stay on their tab. */
 export const resultFigures = (results: Record<string, unknown> | undefined): ResultFigure[] =>
@@ -248,10 +67,283 @@ export const resultFigures = (results: Record<string, unknown> | undefined): Res
     )
     .map(([key, value]) => ({
       key,
-      value:
-        typeof value === "number"
-          ? Number.isInteger(value)
-            ? value.toLocaleString("en-US")
-            : Number(value.toPrecision(4)).toString()
-          : String(value),
+      value: typeof value === "number" ? formatFigure(value) : String(value),
     }));
+
+export interface RunResultExecution {
+  execution: ExecutionRecordSummary;
+  /** 1-based place in the run's history. */
+  index: number;
+}
+
+/**
+ * The attempt that holds the run's result: the latest sealed success.
+ * A later running, failed, or cancelled attempt does not replace it.
+ */
+export const runResultExecution = (
+  history: readonly ExecutionRecordSummary[],
+): RunResultExecution | null => {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const execution = history[index];
+    if (!execution) continue;
+    if (normalizeStatus(execution.status) === "succeeded") {
+      return { execution, index: index + 1 };
+    }
+  }
+  return null;
+};
+
+// ── Verdict ──────────────────────────────────────────────────────────────────
+
+export interface RunVerdict {
+  status: StatusKey | "none";
+  /** The status word: "Failed". */
+  word: string;
+  /** What it is about, phrased to follow the word: "at Molecular dynamics", "in 35m", "on hpc-slurm". */
+  subject: string | null;
+  /**
+   * The same, standing alone beside the status glyph (icon OR text, retrofit R3):
+   * "Molecular dynamics", "35m", "hpc-slurm". Null when there is nothing to say.
+   */
+  label: string | null;
+  /** The attempt's wall time for the right edge; null when the subject already says it. */
+  elapsed: string | null;
+  /** The sentence, for hover and assistive tech. */
+  headline: string;
+  /** Level 3: one line under the verdict. */
+  evidence: string | null;
+  /** The full error, shown when the evidence expands. */
+  error: string | null;
+  /** The task the verdict is about, when there is one. */
+  taskId: string | null;
+}
+
+const NOT_RUN: RunVerdict = {
+  status: "none",
+  word: "Not run yet",
+  subject: null,
+  label: "Not run yet",
+  elapsed: null,
+  headline: "Not run yet",
+  evidence: null,
+  error: null,
+  taskId: null,
+};
+
+const firstLine = (text: string | null): string | null =>
+  text
+    ? (text
+        .split("\n")
+        .find((line) => line.trim().length > 0)
+        ?.trim() ?? null)
+    : null;
+
+const errorMessage = (error: Record<string, unknown> | null): string | null =>
+  stringOf(error?.message) ?? stringOf(error?.type);
+
+export const MODE_WORD: Record<string, string> = {
+  initial: "Initial",
+  resume: "Resume",
+  rerun: "Rerun",
+  reproduce: "Reproduce",
+};
+
+const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+/**
+ * The verdict for the latest attempt of `run` (a caller scoping to an older
+ * attempt passes the history up to it). `figures` are that attempt's results,
+ * the evidence a success shows.
+ */
+export const runVerdict = (
+  run: Pick<RunSummary, "executionHistory" | "errorMessage">,
+  graph: TaskGraphJson | null,
+  now = Date.now(),
+  figures: readonly ResultFigure[] = [],
+): RunVerdict => {
+  const history = run.executionHistory;
+  const attempt = history[history.length - 1];
+  if (!attempt) return NOT_RUN;
+  const status = normalizeStatus(attempt.status);
+  const word = STATUS[status].word;
+  const seconds = attemptSeconds(attempt, now);
+  const took = seconds === null ? null : formatSpan(seconds);
+  const tasks = graph?.task_configs ?? [];
+  const done = tasks.filter((task) => taskStatus(task) === "succeeded").length;
+  const reused = tasks.filter((task) => taskStatus(task) === "cached").length;
+  const finished = `${done + reused} of ${tasks.length} tasks finished`;
+  const stopped = tasks.find((task) => ["failed", "interrupted"].includes(taskStatus(task)));
+  const running = tasks.find((task) => ["running", "finalizing"].includes(taskStatus(task)));
+  const target = attemptTarget(attempt);
+  const message = errorMessage(attempt.error) ?? stopped?.error ?? run.errorMessage ?? null;
+  const fullError = executionErrorText(attempt.error) ?? stopped?.error ?? run.errorMessage ?? null;
+  const parts = (...items: (string | null | false | undefined)[]): string | null => {
+    const kept = items.filter((item): item is string => Boolean(item));
+    return kept.length > 0 ? kept.join(" · ") : null;
+  };
+  const attemptNote =
+    history.length > 1
+      ? `Attempt ${history.length} of ${history.length} (${attempt.mode})`
+      : attempt.mode !== "initial"
+        ? MODE_WORD[attempt.mode]
+        : null;
+
+  let subject: string | null = null;
+  let elapsed: string | null = took;
+  let evidence: string | null = null;
+  let error: string | null = null;
+  let taskId: string | null = null;
+  switch (status) {
+    case "succeeded":
+      subject = took ? `in ${took}` : null;
+      elapsed = null;
+      evidence = parts(...figures.slice(0, 3).map((figure) => `${figure.key} ${figure.value}`));
+      break;
+    case "failed":
+    case "interrupted":
+    case "cancelled":
+      subject = stopped ? `at ${taskName(stopped)}` : null;
+      taskId = stopped?.id ?? null;
+      evidence =
+        status === "cancelled"
+          ? parts(
+              clockOf(attempt.finishedAt) ? `Cancelled at ${clockOf(attempt.finishedAt)}` : null,
+              tasks.length > 0 && finished,
+            )
+          : status === "interrupted"
+            ? parts(firstLine(message), tasks.length > 0 && finished)
+            : firstLine(message);
+      error = status === "cancelled" ? null : fullError;
+      break;
+    case "running":
+      subject = running ? taskName(running) : null;
+      taskId = running?.id ?? null;
+      evidence = parts(attemptNote, target && `on ${target}`, tasks.length > 0 && finished);
+      elapsed = took ? `${took} so far` : null;
+      break;
+    case "finalizing":
+      subject = "sealing results";
+      evidence = tasks.length > 0 ? `All ${plural(tasks.length, "task")} finished` : null;
+      break;
+    case "queued": {
+      subject = target ? `on ${target}` : null;
+      const waiting = tasks.length - reused;
+      evidence = parts(
+        attempt.mode !== "initial" && attempt.basedOnExecutionId
+          ? `${MODE_WORD[attempt.mode] ?? attempt.mode} of ${attempt.basedOnExecutionId}`
+          : attemptNote,
+        reused > 0 && `${reused} reused`,
+        tasks.length > 0 && `${plural(waiting, "task")} to run`,
+      );
+      elapsed = took;
+      break;
+    }
+    default:
+      break;
+  }
+  const headline = [word, subject, elapsed && status !== "succeeded" ? `(${elapsed})` : null]
+    .filter(Boolean)
+    .join(" ");
+  // The subject without its joining word, to stand beside the glyph.
+  const label = subject ? subject.replace(/^(at|in|on) /, "") : null;
+  return { status, word, subject, label, elapsed, headline, evidence, error, taskId };
+};
+
+// ── Tasks on a clock ─────────────────────────────────────────────────────────
+
+export interface ClockRow {
+  key: string;
+  label: string;
+  status: StatusKey;
+  /** Epoch ms; null when the task never started. */
+  start: number | null;
+  /** Null while it runs (drawn to now) or when it never started. */
+  end: number | null;
+  /** Text in place of a bar: "not run", "waiting", "reused from e01". */
+  note: string | null;
+  tip: string;
+}
+
+/** Why a task that never started did not: said in words where its bar would be. */
+const unstartedNote = (
+  task: TaskNodeJson,
+  attempt: ExecutionRecordSummary | null,
+): string | null => {
+  const status = taskStatus(task);
+  if (status === "cached") {
+    return attempt?.basedOnExecutionId ? `reused from ${attempt.basedOnExecutionId}` : "reused";
+  }
+  const attemptStatus = attempt ? normalizeStatus(attempt.status) : "pending";
+  if (attemptStatus === "queued" || attemptStatus === "pending") return "waiting";
+  if (attemptStatus === "running" || attemptStatus === "finalizing") return "not started";
+  return "not run";
+};
+
+/** Every task of the attempt in journal order: a bar for the ones that ran, a word for the rest. */
+export const taskClock = (
+  graph: TaskGraphJson | null,
+  attempt: ExecutionRecordSummary | null,
+  now = Date.now(),
+): ClockRow[] =>
+  (graph?.task_configs ?? []).map((task) => {
+    const status = taskStatus(task);
+    const start = parseInstant(task.startedAt);
+    const live = status === "running" || status === "finalizing";
+    const end = start === null || live ? null : parseInstant(task.finishedAt);
+    const seconds = start === null ? null : Math.max(0, (end ?? now) - start) / 1000;
+    const note = start === null ? unstartedNote(task, attempt) : null;
+    return {
+      key: task.id,
+      label: taskName(task),
+      // A task that never started reads as waiting in a queued attempt and "not
+      // started" otherwise, whatever the journal called it (skipped).
+      status:
+        start === null && status !== "cached"
+          ? attempt && normalizeStatus(attempt.status) === "queued"
+            ? "queued"
+            : "pending"
+          : status,
+      start,
+      end,
+      note,
+      tip: [
+        `${taskName(task)} · ${STATUS[status].word}${seconds === null ? "" : ` · ${formatSpan(seconds)}`}`,
+        task.type,
+        task.error ?? "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  });
+
+/** The clock's span as `14:51 → 15:49`, or `→ now` while it runs. */
+export const clockWindow = (rows: readonly ClockRow[]): string | null => {
+  const starts = rows.flatMap((row) => (row.start === null ? [] : [row.start]));
+  if (starts.length === 0) return null;
+  const from = clockOf(new Date(Math.min(...starts)).toISOString());
+  const live = rows.some((row) => row.start !== null && row.end === null);
+  const ends = rows.flatMap((row) => (row.end === null ? [] : [row.end]));
+  const to = live || ends.length === 0 ? "now" : clockOf(new Date(Math.max(...ends)).toISOString());
+  return `${from} → ${to}`;
+};
+
+/**
+ * The log line an error points at: the last line that carries the error's
+ * first line, else the last `Traceback` header. 1-based, or null.
+ */
+export const errorLine = (text: string | null | undefined, error: string | null): number | null => {
+  if (!text) return null;
+  const lines = text.split("\n");
+  const needle = firstLine(error);
+  const tail = needle?.split(": ").pop() ?? null;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index] ?? "";
+    if (needle && (line.includes(needle) || (tail && tail.length > 8 && line.includes(tail)))) {
+      return index + 1;
+    }
+  }
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if ((lines[index] ?? "").startsWith("Traceback")) return index + 1;
+  }
+  return null;
+};

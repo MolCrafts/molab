@@ -745,28 +745,46 @@ class _PathCheck:
         )
 
     def _knowledge(self, index: int, host_rel: str) -> Verdict:
-        from molab.knowledge.validate import class_problem, classify_document
+        from molab.knowledge.naming import KNOWLEDGE_MEDIA_DIR
+        from molab.knowledge.validate import (
+            class_problem,
+            classify_document,
+            duplicate_documents,
+        )
 
         rest = self.parts[index + 1 :]
         on = host_rel or "."
-        write = f"molab knowledge write NAME TEXT --on {on} --class CLASS"
+        write = f"molab knowledge write NAME TEXT --on {on} --class CLASS [--format md|html]"
+        if rest[0] == KNOWLEDGE_MEDIA_DIR and len(rest) == 2:
+            return self.allow("a figure a knowledge document cites")
         rule = classify_document(rest[0], len(rest) > 1)
+        if rule is None and len(rest) > 1:
+            rule = "knowledge.stray"
         if rule is not None:
             if self.exists:
                 return self.allow("an existing entry; old debt, not a new one")
             return self.deny(
                 rule,
-                "knowledges/ holds markdown documents only.",
+                "knowledges/ holds documents (<slug>.md or <slug>.html) and figs/ only.",
                 write,
             )
+        container = self.fs.join(self.root, *self.parts[: index + 1])
+        if not self.exists and self.fs.is_dir(container):
+            twins = duplicate_documents(self.fs.ls(container, A=True), rest[0])
+            if twins:
+                return self.deny(
+                    "knowledge.duplicate",
+                    f"{rest[0]} would be a second file for {twins[0]}; one name, one document.",
+                    write,
+                )
         text = self.content
         if text is None and self.exists:
             text = self.fs.read_text(self.fs.join(self.root, self.rel))
-        problem = class_problem(text or "")
+        problem = class_problem(text or "", path=rest[0])
         if problem is not None:
             return self.deny(
                 "knowledge.class",
-                f"A knowledge document names one known class in its frontmatter: {problem}.",
+                f"A knowledge document names one known class in its record: {problem}.",
                 write,
             )
         return self.allow("a knowledge document with a known class")

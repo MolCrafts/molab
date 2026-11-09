@@ -49,6 +49,7 @@ export const knowledgeApi = {
     name: string,
     options: {
       hostPath?: string | null;
+      format?: "md" | "html";
       body?: string;
       cls?: DocCreateRequest.cls;
       sources?: DocSource[];
@@ -64,6 +65,7 @@ export const knowledgeApi = {
     KnowledgeService.createDoc({
       name,
       hostPath: options.hostPath ?? null,
+      ...(options.format ? { format: options.format as DocCreateRequest.format } : {}),
       body: options.body ?? "",
       cls: options.cls,
       sources: options.sources,

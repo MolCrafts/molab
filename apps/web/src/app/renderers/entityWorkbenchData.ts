@@ -1,43 +1,4 @@
-import type {
-  AssetSummary,
-  ExperimentSummary,
-  ProjectSummary,
-  RendererSnapshot,
-  RunSummary,
-  WorkflowSummary,
-} from "@/app/types";
-import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
-import { countRunStatuses, type RunStatusCounts } from "./dashboardData";
-
-export interface WorkflowRollup {
-  exists: boolean;
-  taskCount: number;
-  linkCount: number;
-  parallelGroupCount: number;
-}
-
-export interface ExperimentRollup {
-  experiment: ExperimentSummary;
-  runs: RunSummary[];
-  counts: RunStatusCounts;
-  workflow: WorkflowSummary | undefined;
-  workflowSummary: WorkflowRollup;
-}
-
-export interface AttentionItem {
-  experiment: ExperimentSummary;
-  reason: "failed" | "running" | "missing-workflow" | "empty";
-  count: number;
-}
-
-export interface ProjectWorkbenchData {
-  experiments: ExperimentRollup[];
-  runs: RunSummary[];
-  counts: RunStatusCounts;
-  attention: AttentionItem[];
-  recentRuns: RunSummary[];
-  assetCount: number;
-}
+import type { ExperimentSummary, ProjectSummary, RunSummary } from "@/app/types";
 
 export interface ProjectSnapshotCompleteness {
   /** Authoritative server total, or null when the shallow summary did not report it. */
@@ -60,45 +21,6 @@ export interface ParameterAxisSummary {
 }
 
 /** One value of a swept parameter, with the runs that used it and their status mix. */
-export interface AxisBucketSummary {
-  value: string;
-  /** Runs that never set the parameter. Filed apart, never as a value named "-". */
-  unset: boolean;
-  counts: RunStatusCounts;
-  runs: RunSummary[];
-}
-
-/** A varying parameter and the outcome of the sweep along it. */
-export interface AxisBreakdownSummary {
-  key: string;
-  buckets: AxisBucketSummary[];
-}
-
-export interface ExperimentWorkbenchData {
-  counts: RunStatusCounts;
-  /** All parameter keys seen across declared space + runs. */
-  parameterAxes: ParameterAxisSummary[];
-  /**
-   * Keys with more than one distinct value — columns on the run list.
-   * Keys with a single value are constants (shown once, not per row).
-   */
-  varyingAxes: ParameterAxisSummary[];
-  fixedAxes: ParameterAxisSummary[];
-  axisBreakdowns: AxisBreakdownSummary[];
-  workflowSummary: WorkflowRollup;
-}
-
-/** Split axes by scientific layer: varying (table columns) vs fixed (once). */
-export const partitionParameterAxes = (
-  axes: ParameterAxisSummary[],
-): { varyingAxes: ParameterAxisSummary[]; fixedAxes: ParameterAxisSummary[] } => ({
-  varyingAxes: axes.filter((axis) => axis.count > 1),
-  fixedAxes: axes.filter((axis) => axis.count === 1),
-});
-
-const latestRunTime = (run: RunSummary): number =>
-  Date.parse(run.finishedAt ?? run.startedAt ?? run.updatedAt ?? "") || 0;
-
 const reportedCount = (value: number | null | undefined): number | null =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 
@@ -149,77 +71,6 @@ const stringifyAxisValue = (value: unknown): string => {
   }
 };
 
-export const summarizeWorkflowGraph = (
-  workflow: Pick<WorkflowSummary, "graph"> | { graph?: TaskGraphJson } | undefined,
-): WorkflowRollup => {
-  const graph = workflow?.graph;
-  const links = graph?.links ?? [];
-  return {
-    exists: Boolean(graph),
-    taskCount: graph?.task_configs.length ?? 0,
-    linkCount: links.length,
-    parallelGroupCount: links.filter((link) => link.kind === "parallel").length,
-  };
-};
-
-export const buildProjectWorkbenchData = (
-  projectId: string,
-  snapshot: Pick<RendererSnapshot, "experiments" | "runs" | "workflows" | "assets">,
-  projectAssets: Pick<AssetSummary, "id">[] = snapshot.assets.filter(
-    (asset) => asset.projectId === projectId,
-  ),
-): ProjectWorkbenchData => {
-  const experiments = snapshot.experiments.filter(
-    (experiment) => experiment.projectId === projectId,
-  );
-  const runs = snapshot.runs.filter((run) => run.projectId === projectId);
-  const rollups = experiments.map((experiment) => {
-    const experimentRuns = runs.filter((run) => run.experimentId === experiment.id);
-    const workflow = snapshot.workflows.find((item) => item.experimentId === experiment.id);
-    return {
-      experiment,
-      runs: experimentRuns,
-      counts: countRunStatuses(experimentRuns),
-      workflow,
-      workflowSummary: summarizeWorkflowGraph(workflow),
-    } satisfies ExperimentRollup;
-  });
-
-  const attention: AttentionItem[] = [];
-  for (const item of rollups) {
-    if (item.counts.failed > 0) {
-      attention.push({ experiment: item.experiment, reason: "failed", count: item.counts.failed });
-    }
-    if (item.counts.running > 0) {
-      attention.push({
-        experiment: item.experiment,
-        reason: "running",
-        count: item.counts.running,
-      });
-    }
-    if (!item.workflowSummary.exists) {
-      attention.push({ experiment: item.experiment, reason: "missing-workflow", count: 1 });
-    }
-    if (item.counts.total === 0) {
-      attention.push({ experiment: item.experiment, reason: "empty", count: 0 });
-    }
-  }
-
-  const anomalous = runs.filter((run) => run.status === "failed" || run.status === "running");
-  const recentRuns = [...new Map([...anomalous, ...runs].map((run) => [run.id, run])).values()]
-    .sort((a, b) => latestRunTime(b) - latestRunTime(a))
-    .slice(0, 8);
-
-  return {
-    experiments: rollups,
-    runs,
-    counts: countRunStatuses(runs),
-    attention,
-    recentRuns,
-    assetCount: projectAssets.length,
-  };
-};
-
 export const buildParameterAxes = (
   experiment: Pick<ExperimentSummary, "parameterSpace">,
   runs: Pick<RunSummary, "parameters">[],
@@ -255,79 +106,13 @@ export const buildParameterAxes = (
   }));
 };
 
-/** Sweep axes worth drawing: more than one value, few enough to read at a glance. */
-const MAX_AXIS_BUCKETS = 12;
-
-const compareAxisValues = (left: string, right: string): number => {
-  const leftNumber = Number(left);
-  const rightNumber = Number(right);
-  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber - rightNumber;
-  return left.localeCompare(right);
-};
-
 /**
- * Status mix per value of each varying parameter — "which corner of the sweep
- * failed", which is the decision an experiment overview exists to serve. A
- * declared value with no runs keeps its (empty) bucket: not-yet-run is a fact.
+ * Parameters whose value differs between the runs, in first-seen order — the
+ * axes a grouping can split on and a run's coordinates in its sweep. A
+ * parameter every run shares is not an axis; a run that never set one is filed
+ * apart, not counted as a value.
  */
-export const buildAxisBreakdowns = (
-  runs: RunSummary[],
-  axes: ParameterAxisSummary[],
-): AxisBreakdownSummary[] =>
-  axes
-    .filter((axis) => axis.count > 1 && axis.count <= MAX_AXIS_BUCKETS)
-    .map((axis) => {
-      const byValue = new Map<string, RunSummary[]>(axis.values.map((value) => [value, []]));
-      const unsetRuns: RunSummary[] = [];
-      for (const run of runs) {
-        const raw = run.parameters?.[axis.key];
-        if (raw === undefined) {
-          unsetRuns.push(run);
-          continue;
-        }
-        const value = stringifyAxisValue(raw);
-        const bucket = byValue.get(value);
-        if (bucket) bucket.push(run);
-        else byValue.set(value, [run]);
-      }
-      const buckets: AxisBucketSummary[] = [...byValue.entries()]
-        .sort(([left], [right]) => compareAxisValues(left, right))
-        .map(([value, bucketRuns]) => ({
-          value,
-          unset: false,
-          counts: countRunStatuses(bucketRuns),
-          runs: bucketRuns,
-        }));
-      return {
-        key: axis.key,
-        buckets:
-          unsetRuns.length === 0
-            ? buckets
-            : [
-                ...buckets,
-                {
-                  value: "unset",
-                  unset: true,
-                  counts: countRunStatuses(unsetRuns),
-                  runs: unsetRuns,
-                },
-              ],
-      };
-    });
-
-export const buildExperimentWorkbenchData = (
-  experiment: ExperimentSummary,
-  runs: RunSummary[],
-  workflow: Pick<WorkflowSummary, "graph"> | undefined,
-): ExperimentWorkbenchData => {
-  const parameterAxes = buildParameterAxes(experiment, runs);
-  const { varyingAxes, fixedAxes } = partitionParameterAxes(parameterAxes);
-  return {
-    counts: countRunStatuses(runs),
-    parameterAxes,
-    varyingAxes,
-    fixedAxes,
-    axisBreakdowns: buildAxisBreakdowns(runs, varyingAxes),
-    workflowSummary: summarizeWorkflowGraph(workflow),
-  };
-};
+export const varyingParameterKeys = (runs: readonly Pick<RunSummary, "parameters">[]): string[] =>
+  buildParameterAxes({ parameterSpace: {} }, [...runs])
+    .filter((axis) => axis.count > 1)
+    .map((axis) => axis.key);

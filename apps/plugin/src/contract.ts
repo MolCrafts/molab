@@ -183,6 +183,84 @@ export interface FileTypeContribution {
   resolveTabBadgeCount?: (ctx: RunTabBadgeContext) => Promise<number | null>;
 }
 
+/**
+ * The run's attempt a run view shows (L14). The host chooses it (the run page's
+ * attempt, `?attempt=eNN`, the latest when absent); a run view never does.
+ */
+export interface RunAttempt {
+  projectId: string;
+  experimentId: string;
+  runId: string;
+  /** Run-local attempt id, e.g. `e03`. */
+  executionId: string;
+  /** The attempt's status (`succeeded`, `running`, `failed`, …). */
+  status: string;
+  /** The newest attempt of the run. */
+  isLatest: boolean;
+  /** The latest sealed success — the run's result. */
+  isRunResult: boolean;
+  /** Workspace-relative attempt directory, as the server reported it. */
+  dir: string | null;
+}
+
+/** One file of the attempt, relative to `RunAttempt.dir`. */
+export type AttemptFile = FileMatchContext;
+
+/** What every run view receives. */
+export interface RunViewProps {
+  attempt: RunAttempt;
+  /** The attempt's files this view matched (`RunViewContribution.files`). */
+  files: readonly AttemptFile[];
+}
+
+/**
+ * A view on the run page (L14), after the core views. Its tab is `label` (a
+ * word, R1) with an optional count badge; it exists for an attempt when that
+ * attempt has a file `files` matches (no `files`: always). The component
+ * renders inside `<RunView>` from `@molcrafts/molab-plugin/ui`.
+ */
+export interface RunViewContribution {
+  id: string;
+  label: string;
+  /** The phone bottom bar's icon (R2: icon on a phone, the word on a desktop). */
+  icon?: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  pluginId?: string;
+  /** Tab order after the core views (lower first). */
+  order?: number;
+  files?: FileTypeMatcher;
+  /** The tab's count badge; null for none. */
+  count?: (
+    attempt: RunAttempt,
+    files: readonly AttemptFile[],
+  ) => number | null | Promise<number | null>;
+  Component: React.ComponentType<RunViewProps>;
+}
+
+/** Result of a host file read inside a run view. */
+export interface AttemptRead<T> {
+  data: T | undefined;
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+}
+
+/**
+ * Host services a run view reaches through the `@molcrafts/molab-plugin/ui`
+ * hooks (`useAttemptText`, `useAttemptBlob`, `useRunLinks`). Reads are cached
+ * per attempt by the host; a view never composes a workspace path.
+ */
+export interface RunViewHost {
+  attempt: RunAttempt;
+  /** A hook: the text of an attempt-relative file. */
+  useAttemptText: (path: string | null) => AttemptRead<string>;
+  /** A hook: an object URL for an attempt-relative file. */
+  useAttemptBlob: (path: string | null) => AttemptRead<string>;
+  /** Open an attempt-relative file in the editor. */
+  openFile: (path: string) => void;
+  /** Open the run's Logs view (at a line). */
+  openLogs: (line?: number) => void;
+}
+
 export interface EntityTabContribution {
   id: string;
   objectType: string;
@@ -270,8 +348,9 @@ export function namespacePluginId(pluginId: string, id: string): string {
  * | `panels` | bottom drawer (v1) |
  * | `statusBar` | 28px status strip |
  * | `settings` | Settings sections |
- * | `fileTypes` | run filename tabs |
- * | `entityTabs` | entity tabs (e.g. molq) |
+ * | `runViews` | run page views (L14): `<RunView>` files · view · style |
+ * | `fileTypes` | filename tabs of non-run objects |
+ * | `entityTabs` | entity tabs of non-run objects |
  * | `execution` | execution table columns / details |
  * | `filePreviews` | editor Preview tab |
  */
@@ -311,6 +390,10 @@ export interface PluginAPI {
 
   settings: {
     registerSection(spec: SettingsSectionSpec): void;
+  };
+
+  runViews: {
+    register(spec: RunViewContribution): void;
   };
 
   fileTypes: {

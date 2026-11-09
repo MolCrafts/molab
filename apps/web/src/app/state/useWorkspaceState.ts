@@ -107,9 +107,9 @@ export const slicesForView = (view: LeftPanelView | undefined): readonly Snapsho
     case "asset":
     case "dashboard": // its explorer lists the workspace's projects
       return ["workspaces", "projectsList"];
-    case "knowledge":
+    case "knowledge": // names a document's host; resolves its refs
+      return ["workspaces", "projectsList"];
     case "runs":
-    case "activity":
     case "settings":
       return ["workspaces"];
     default:

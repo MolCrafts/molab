@@ -27,7 +27,9 @@ __all__ = [
 ]
 
 #: Frontmatter keys every document carries; never part of a structured record.
-COMMON_KEYS: frozenset[str] = frozenset({"class", "name", "created_by", "tags", "status"})
+COMMON_KEYS: frozenset[str] = frozenset(
+    {"class", "name", "created_by", "created_at", "tags", "status"}
+)
 
 _RECORD_ROLES = frozenset({"roadmap", "todo", "milestone"})
 
@@ -116,6 +118,7 @@ def replace_record(
     common = {key: value for key, value in doc.frontmatter().items() if key in owned_common}
     narrative = doc.read() if body is None else body
     doc.write(
-        dump_frontmatter({**common, **clean, "class": klass.__name__}, narrative), replace=True
+        dump_frontmatter({**common, **clean, "class": klass.__name__}, narrative, path=doc.path),
+        replace=True,
     )
     return digest_of(doc)

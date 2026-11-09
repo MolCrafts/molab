@@ -9,7 +9,7 @@
 
 import { type JSX, type ReactNode, useMemo } from "react";
 
-import type { StatusGroupId } from "@/app/runs/statusGroups";
+import type { ChartGroupId } from "@/app/status/vocabulary";
 import { cn } from "@/lib/utils";
 
 import { useStatusColors } from "../InstrumentChart";
@@ -18,7 +18,7 @@ import { OverviewChart } from "./vega/OverviewChart";
 
 export interface UnitMark {
   key: string;
-  status: StatusGroupId;
+  status: ChartGroupId;
   /** What this one item is: its name and its age. */
   title: string;
   /** Filled share of the slot, 0..1. Omit for a full mark. */

@@ -38,12 +38,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-tensorboard = ["tensorboard>=2.15"]
 # molab.plugins.gh (the optional GitHub capability) imports httpx.
 gh = ["httpx>=0.24"]
 # molab.plugins.molvis renders snapshots; headless renders without a display.
 molvis = ["molcrafts-molvis[headless]>=0.4.0"]
-all = ["molcrafts-molab[tensorboard,gh,molvis]"]
+all = ["molcrafts-molab[gh,molvis]"]
 dev = [
     "molcrafts-molab[all]",
     "pytest>=7.0",

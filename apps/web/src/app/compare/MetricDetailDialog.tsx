@@ -52,7 +52,7 @@ import {
   type YNormalize,
   type YScale,
 } from "@/plugins/molplot/aggregateSeries";
-import { PALETTE } from "@/plugins/molplot/RunMetricsView";
+import { PALETTE } from "@/plugins/molplot/scalar-series";
 
 import {
   type ColorBy,

@@ -16,20 +16,10 @@ import {
   useState,
 } from "react";
 
-import { STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
+import { CHART_GROUPS, type ChartGroupId, type StatusCounts } from "@/app/status/vocabulary";
 import { cn } from "@/lib/utils";
 
 import { StatusBarChart } from "./InstrumentChart";
-
-/** Minimal status rollup shape (mirrors RunStatusCounts without importing it). */
-export interface StatusCountRollup {
-  total: number;
-  running: number;
-  pending: number;
-  succeeded: number;
-  failed: number;
-  cancelled: number;
-}
 
 // ── MetaField ────────────────────────────────────────────────────────────────
 
@@ -308,13 +298,13 @@ export const DashboardCard = ({
 // ── Status distribution ──────────────────────────────────────────────────────
 
 interface StatusDistributionProps {
-  counts: StatusCountRollup;
+  counts: StatusCounts;
   /** Draw the status bars. Default true. Ignored by meter and bar. */
   legend?: boolean;
   /** Noun for the accessible total. Default "runs". */
   unit?: string;
   /** Statuses drawn on the face. Default is every group. */
-  groups?: readonly StatusGroupId[];
+  groups?: readonly ChartGroupId[];
   /**
    * bars: one horizontal bar per status.
    * meter: a thin stacked track, for a row of mixes.
@@ -341,7 +331,7 @@ export const StatusDistribution = ({
   className,
   height,
 }: StatusDistributionProps): JSX.Element => {
-  const specs = groups ? STATUS_GROUPS.filter((group) => groups.includes(group.id)) : STATUS_GROUPS;
+  const specs = groups ? CHART_GROUPS.filter((group) => groups.includes(group.id)) : CHART_GROUPS;
   const total = groups ? specs.reduce((sum, group) => sum + counts[group.id], 0) : counts.total;
   const empty = total === 0;
   const occupied = specs.filter((group) => counts[group.id] > 0);
@@ -362,12 +352,11 @@ export const StatusDistribution = ({
               title={`${group.label}: ${counts[group.id]}`}
               className={cn(
                 "h-full min-w-hairline",
-                group.id === "pending" &&
-                  "rounded-hairline border border-status-queued bg-background",
+                group.outline && "rounded-hairline border border-status-queued bg-background",
               )}
               style={{
                 width: `${(counts[group.id] / total) * 100}%`,
-                backgroundColor: group.id === "pending" ? undefined : group.color,
+                backgroundColor: group.outline ? undefined : group.color,
               }}
             />
           ))}

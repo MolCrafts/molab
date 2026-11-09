@@ -7,26 +7,7 @@
 
 import { type JSX, type ReactNode, useId } from "react";
 
-import type { StatusGroupId } from "@/app/runs/statusGroups";
 import { cn } from "@/lib/utils";
-
-/** Solid status fill. Always paired with a label or a title, never colour alone. */
-export const STATUS_FILL: Record<StatusGroupId, string> = {
-  running: "bg-status-running",
-  pending: "bg-status-queued",
-  succeeded: "bg-status-completed",
-  failed: "bg-status-failed",
-  cancelled: "bg-status-cancelled",
-};
-
-/** Status ink for a word or a numeral. Quiet states stay in the body colour. */
-export const STATUS_INK: Record<StatusGroupId, string> = {
-  running: "text-status-running-foreground",
-  pending: "text-muted-foreground",
-  succeeded: "text-status-completed-foreground",
-  failed: "text-status-failed-foreground",
-  cancelled: "text-muted-foreground",
-};
 
 interface GaugeProps {
   title: string;

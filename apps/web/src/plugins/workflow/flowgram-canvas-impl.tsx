@@ -35,8 +35,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { type StatusKey, statusKey } from "@/app/components/entity";
-import { canonicalStatusFor } from "@/app/components/entity/status";
+import { normalizeStatus, type StatusTone, statusSpec } from "@/app/status/vocabulary";
 import { WorkbenchIconAction, WorkflowNode } from "@/components/workbench";
 import {
   buildFlowgramDocument,
@@ -74,8 +73,32 @@ export interface FlowgramCanvasProps {
    * counts as an edit.
    */
   onChange?: (document: FlowgramDocument | null) => void;
+  /**
+   * A workflow definition (L06): no status anywhere — neutral nodes, grey links,
+   * outline ports. A run's canvas leaves this off and keeps its colours.
+   */
+  definition?: boolean;
+  /**
+   * Hands the canvas tools to a host toolbar (L06) instead of drawing the
+   * floating overlay; called again whenever the zoom changes. The provider does
+   * not re-render its children with the host, so the host draws the toolbar.
+   */
+  onTools?: (tools: CanvasTools) => void;
   className?: string;
 }
+
+/** What a toolbar can do to the canvas. */
+export interface CanvasTools {
+  editable: boolean;
+  zoomPercent: number;
+  undo: () => void;
+  redo: () => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  fit: () => void;
+}
+
+const DefinitionContext = createContext(false);
 
 /**
  * Canvas node body — shared {@link WorkflowNode} chrome inside flowgram's
@@ -83,18 +106,20 @@ export interface FlowgramCanvasProps {
  */
 const NodeCard = ({ onNodeClick }: { onNodeClick?: (taskId: string) => void }): JSX.Element => {
   const render = useNodeRender();
+  const definition = useContext(DefinitionContext);
   const nodeDataById = useContext(NodeDataContext);
   const expandSubworkflow = useContext(SubworkflowExpandContext);
   const data = nodeDataById.get(render.id) ?? {};
   const taskId = data.taskId ?? render.id;
   const role = (data.role ?? "task") as "input" | "output" | "task";
-  const status = data.status ?? "pending";
+  // A definition has no status; a run's canvas shows each task's.
+  const status = definition ? null : (data.status ?? "pending");
   const parallel = data.parallel ?? false;
   const subworkflow = data.subworkflow;
-  const failed = statusKey(status) === "failed";
+  const failed = status !== null && normalizeStatus(status) === "failed";
   const error = failed ? data.error : undefined;
-  const displayStatus = canonicalStatusFor(status) ?? "ready";
-  const titleTip = `${taskId} · ${role}${parallel ? " · parallel ×N" : ""}${subworkflow ? " · subworkflow" : ""} · ${displayStatus}${error ? `\n${error}` : ""}`;
+  const displayStatus = status === null ? null : statusSpec(status).word;
+  const titleTip = `${taskId} · ${role}${parallel ? " · parallel ×N" : ""}${subworkflow ? " · subworkflow" : ""}${displayStatus ? ` · ${displayStatus}` : ""}${error ? `\n${error}` : ""}`;
 
   return (
     <div className="relative" title={titleTip}>
@@ -269,11 +294,68 @@ const FlowgramCanvasControls = ({ editable }: { editable: boolean }): JSX.Elemen
   );
 };
 
+/**
+ * flowgram's toJSON() drops each node's own data (config, task type) and each
+ * edge's kind; an edited document gets them back from the document it was
+ * built from, by id, or saving it cannot rebuild the workflow (L06).
+ */
+const withOwnData = (edited: FlowgramDocument, source: FlowgramDocument): FlowgramDocument => {
+  const nodeData = new Map(source.nodes.map((node) => [node.id, node.data]));
+  const edgeOf = new Map(
+    source.edges.map((edge) => [`${edge.sourceNodeID}->${edge.targetNodeID}`, edge]),
+  );
+  return {
+    ...edited,
+    nodes: edited.nodes.map((node) => ({
+      ...node,
+      data: { ...(nodeData.get(node.id) ?? {}), ...(node.data ?? {}) } as FlowgramNodeData,
+    })),
+    edges: edited.edges.map((edge) => {
+      const own = edgeOf.get(`${edge.sourceNodeID}->${edge.targetNodeID}`);
+      return own ? { ...own, ...edge, kind: edge.kind ?? own.kind } : edge;
+    }),
+  };
+};
+
+/** Publishes the live playground tools to the host (inside the provider). */
+const CanvasToolsBridge = ({
+  editable,
+  onTools,
+}: {
+  editable: boolean;
+  onTools: (tools: CanvasTools) => void;
+}): null => {
+  const tools = usePlaygroundTools();
+  const ctx = useClientContext();
+  const easing = !useReducedMotion();
+  const toolsRef = useRef(tools);
+  toolsRef.current = tools;
+  const historyRef = useRef(ctx.history);
+  historyRef.current = ctx.history;
+  const onToolsRef = useRef(onTools);
+  onToolsRef.current = onTools;
+  const zoomPercent = Math.round((tools.zoom ?? 1) * 100);
+  useEffect(() => {
+    onToolsRef.current({
+      editable,
+      zoomPercent,
+      undo: () => historyRef.current.undo(),
+      redo: () => historyRef.current.redo(),
+      zoomIn: () => toolsRef.current.zoomin(easing),
+      zoomOut: () => toolsRef.current.zoomout(easing),
+      fit: () => toolsRef.current.fitView(easing),
+    });
+  }, [editable, zoomPercent, easing]);
+  return null;
+};
+
 export const FlowgramCanvas = ({
   document,
   onNodeClick,
   editable = false,
   onChange,
+  definition = false,
+  onTools,
   className,
 }: FlowgramCanvasProps): JSX.Element => {
   // Callbacks are reached through refs so they are NOT memo deps: a parent that
@@ -289,6 +371,9 @@ export const FlowgramCanvas = ({
   const layoutSettledRef = useRef(false);
   // Epoch ms — ignore dirty signals until this time (residual layout after gate).
   const ignoreDirtyUntilRef = useRef(0);
+  // The document the canvas was built from, for `withOwnData`.
+  const sourceRef = useRef(document);
+  sourceRef.current = document;
   // Visual gate: keep a solid mask up while coarse-grid → dagre still jumps.
   // Ref for dirty tracking; state for the overlay (ref alone cannot re-render).
   const [layoutReady, setLayoutReady] = useState(false);
@@ -298,21 +383,27 @@ export const FlowgramCanvas = ({
     // feeds its target, so it takes the target node's status unless the link
     // itself carries a more specific one. `running` target → flowing animation.
     const nodeStatusById = new Map(document.nodes.map((n) => [n.id, n.data.status ?? "pending"]));
-    const edgeStatusByKey = new Map<string, StatusKey>();
-    for (const edge of document.edges) {
+    // An edge is coloured by its status's tone; it flows while that status runs.
+    const edgeStatusByKey = new Map<string, { tone: StatusTone; flowing: boolean }>();
+    // A definition's links are all neutral: no key resolves, so every line is "ready".
+    for (const edge of definition ? [] : document.edges) {
       const explicit = edge.data?.status ?? edge.status;
       const raw =
         explicit && explicit !== "pending" ? explicit : nodeStatusById.get(edge.targetNodeID);
-      edgeStatusByKey.set(`${edge.sourceNodeID}->${edge.targetNodeID}`, statusKey(raw));
+      const spec = statusSpec(raw);
+      edgeStatusByKey.set(`${edge.sourceNodeID}->${edge.targetNodeID}`, {
+        tone: spec.tone,
+        flowing: spec.key === "running",
+      });
     }
     const lineStatus = (line: {
       from?: { id?: string };
       to?: { id?: string };
       info?: { from?: string; to?: string };
-    }): StatusKey => {
+    }): { tone: StatusTone; flowing: boolean } => {
       const from = line.from?.id ?? line.info?.from;
       const to = line.to?.id ?? line.info?.to;
-      return edgeStatusByKey.get(`${from}->${to}`) ?? "pending";
+      return edgeStatusByKey.get(`${from}->${to}`) ?? { tone: "ready", flowing: false };
     };
 
     return {
@@ -322,7 +413,7 @@ export const FlowgramCanvas = ({
       nodeRegistries: [],
       // Arrow colour follows status (default grey, blue while flowing, red on
       // error); `setLineClassName` adds the per-status class the stylesheet uses
-      // to recolour the gradient stops (success green, skipped grey).
+      // to recolour the gradient stops by the status's tone.
       lineColor: {
         hidden: "transparent",
         default: "var(--molab-muted-foreground)",
@@ -332,8 +423,8 @@ export const FlowgramCanvas = ({
         error: "var(--status-failed)",
         flowing: "var(--status-running)",
       },
-      isFlowingLine: (_ctx, line) => lineStatus(line) === "running",
-      setLineClassName: (_ctx, line) => `molab-edge-${lineStatus(line)}`,
+      isFlowingLine: (_ctx, line) => lineStatus(line).flowing,
+      setLineClassName: (_ctx, line) => `molab-edge-${lineStatus(line).tone}`,
       // Generic nodes: flowgram auto-assigns a default input + output port
       // (see free-layout-core) so links connect without a custom registry.
       getNodeDefaultRegistry(type) {
@@ -365,11 +456,15 @@ export const FlowgramCanvas = ({
               //    the host drops its draft (no false leave-prompt).
               if (!layoutSettledRef.current) return;
               if (Date.now() < ignoreDirtyUntilRef.current) return;
+              // A drag is not an edit: positions are laid out on every load.
+              const current = ctx.document.toJSON();
               if (!ctx.history.canUndo()) {
                 onChangeRef.current?.(null);
                 return;
               }
-              onChangeRef.current?.(ctx.document.toJSON() as unknown as FlowgramDocument);
+              onChangeRef.current?.(
+                withOwnData(current as unknown as FlowgramDocument, sourceRef.current),
+              );
             },
           }
         : {}),
@@ -377,7 +472,7 @@ export const FlowgramCanvas = ({
         ctx.document.fitView(false);
       },
     };
-  }, [document, editable]);
+  }, [document, editable, definition]);
 
   // Per-node display data keyed by id — buildFlowgramDocument already computed
   // role/status/parallel on each node, so just index it for NodeCard lookup.
@@ -397,37 +492,42 @@ export const FlowgramCanvas = ({
 
   return (
     <SubworkflowExpandContext.Provider value={(taskId, inner) => setExpanded({ taskId, inner })}>
-      <NodeDataContext.Provider value={nodeDataById}>
-        <div className={`relative h-full w-full ${className ?? ""}`}>
-          {/*
-            Keep the editor mounted and sized under the mask (opacity only) so
-            node ResizeObservers + auto-layout measure real rects. Hiding via
-            display:none / unmount would zero sizes and re-trigger the jump.
-          */}
+      <DefinitionContext.Provider value={definition}>
+        <NodeDataContext.Provider value={nodeDataById}>
           <div
-            className={`h-full w-full mol-motion-fade ${layoutReady ? "opacity-100" : "opacity-0"}`}
-            aria-hidden={!layoutReady}
+            className={`relative h-full w-full ${definition ? "molab-definition" : ""} ${className ?? ""}`}
           >
             <FreeLayoutEditorProvider {...editorProps}>
-              <EditorRenderer />
+              {onTools ? <CanvasToolsBridge editable={editable} onTools={onTools} /> : null}
+              {/*
+                Keep the editor mounted and sized under the mask (opacity only) so
+                node ResizeObservers + auto-layout measure real rects. Hiding via
+                display:none / unmount would zero sizes and re-trigger the jump.
+              */}
+              <div
+                className={`h-full w-full mol-motion-fade ${layoutReady ? "opacity-100" : "opacity-0"}`}
+                aria-hidden={!layoutReady}
+              >
+                <EditorRenderer />
+              </div>
               <AutoLayoutOnMount
                 settledRef={layoutSettledRef}
                 ignoreDirtyUntilRef={ignoreDirtyUntilRef}
                 onVisualReady={() => setLayoutReady(true)}
               />
-              <FlowgramCanvasControls editable={editable} />
+              {onTools ? null : <FlowgramCanvasControls editable={editable} />}
+              {!layoutReady && (
+                <div
+                  role="status"
+                  className="absolute inset-0 z-20 bg-canvas"
+                  aria-busy="true"
+                  aria-label="Laying out workflow"
+                />
+              )}
             </FreeLayoutEditorProvider>
           </div>
-          {!layoutReady && (
-            <div
-              role="status"
-              className="absolute inset-0 z-20 bg-canvas"
-              aria-busy="true"
-              aria-label="Laying out workflow"
-            />
-          )}
-        </div>
-      </NodeDataContext.Provider>
+        </NodeDataContext.Provider>
+      </DefinitionContext.Provider>
 
       <Dialog open={expanded !== null} onOpenChange={(open) => !open && setExpanded(null)}>
         <DialogContent className="flex h-dialog-scroll max-w-5xl flex-col">
@@ -442,7 +542,7 @@ export const FlowgramCanvas = ({
             </DialogTitle>
           </DialogHeader>
           <div className="min-h-0 flex-1">
-            {innerDocument && <FlowgramCanvas document={innerDocument} />}
+            {innerDocument && <FlowgramCanvas document={innerDocument} definition={definition} />}
           </div>
         </DialogContent>
       </Dialog>

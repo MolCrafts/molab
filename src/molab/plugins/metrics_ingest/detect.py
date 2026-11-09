@@ -21,8 +21,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-_TFEVENT_PREFIX = "events.out.tfevents."
-
 
 class LogFormat(StrEnum):
     """Format ids molab itself needs to name.
@@ -46,7 +44,7 @@ class FormatHit:
     but a reader registered by another package brings its own."""
 
     path: Path
-    """The file (or directory, for TensorBoard) that carries the format."""
+    """The file that carries the format."""
 
     detail: str = ""
     """Short human-readable reason, for the operator-facing report."""
@@ -92,19 +90,8 @@ def detect_log_formats(run_dir: Path | str, *, max_depth: int = 3) -> list[Forma
 
     root = Path(run_dir)
     hits: list[FormatHit] = []
-    seen_dirs: set[Path] = set()
 
     for path in _iter_files(root, max_depth=max_depth):
-        # A directory-shaped format (TensorBoard) is claimed once, by its
-        # parent, no matter how many files it holds.
-        if path.name.startswith(_TFEVENT_PREFIX):
-            parent = path.parent
-            if parent not in seen_dirs:
-                seen_dirs.add(parent)
-                reader = sniff_readers(parent)
-                if reader is not None:
-                    hits.append(FormatHit(reader.format, parent, "tfevents files"))
-            continue
         reader = sniff_readers(path)
         if reader is not None:
             hits.append(FormatHit(reader.format, path, f"claimed by the {reader.format} reader"))

@@ -205,6 +205,187 @@ for (const note of [
   });
 }
 
+// L10: one document stored as HTML — prose in <molab-markdown>, components as elements.
+notes.set("knowledges/integrator-glossary.html", {
+  cls: "Note",
+  name: "Integrator glossary",
+  relPath: "knowledges/integrator-glossary.html",
+  hostPath: "",
+  excerpt: "Terms used across the integrator benchmark.",
+  status: "active",
+  tags: ["glossary"],
+  body: [
+    "<molab-markdown>",
+    "Terms used across the integrator benchmark. This document is stored as **HTML**.",
+    "",
+    "## Energy drift",
+    "",
+    "The slope of total energy over time, per atom, in eV/atom/ps.",
+    "</molab-markdown>",
+    '<molab-run-table experiment="molab:experiment/exp-nve" columns="timestep_fs,driver,energy_drift" where="ensemble=nve"></molab-run-table>',
+    "<molab-markdown>",
+    "## Timestep",
+    "",
+    '!!! tip "Rule of thumb"',
+    "    Flexible O–H bonds need about 1 fs.",
+    "</molab-markdown>",
+  ].join("\n"),
+  links: [],
+});
+
+// L10 v3: the showcase documents use their class templates (MkDocs blocks + <molab-…> components).
+const EXP_NVE = "molab:experiment/exp-nve";
+const RUN_FAILED = "molab:experiment/exp-nve/run/md-009";
+const TEMPLATE_BODIES: Record<string, string> = {
+  "AlphaFold benchmark findings": [
+    "# AlphaFold benchmark findings",
+    "",
+    "The `bf16` baseline converged fastest while preserving mean pLDDT. It ran in [AlphaFold Baseline](molab:experiment/exp-001).",
+    "",
+    "## Results",
+    "",
+    "| run | batch | pLDDT |",
+    "| --- | ---: | ---: |",
+    "| run-001 | 32 | 87.4 |",
+    "| run-002 | 64 | — |",
+    "",
+    "## Next steps",
+    "",
+    '!!! tip "Rerun at batch 64"',
+    "    Once the memory fix lands, rerun with the same seeds and compare pLDDT per target.",
+  ].join("\n"),
+  "Integrator energy conservation": [
+    '!!! success "Claim"',
+    "    Energy drift grows about four-fold for each doubling of the timestep; 0.5 fs keeps it under 4·10⁻⁵ eV/atom/ps for both drivers.",
+    "",
+    "## Evidence",
+    "",
+    '=== "Chart"',
+    "",
+    `    ::molab-metric-chart{experiment=${EXP_NVE} y=energy_drift x=timestep_fs by=driver}`,
+    "",
+    '=== "Runs"',
+    "",
+    `    ::molab-run-table{experiment=${EXP_NVE} columns=timestep_fs,driver,energy_drift where="ensemble=nve"}`,
+    "",
+    "## Holds under",
+    "",
+    '::molab-params{ensemble="nve, nvt" steps=500 system=water-216}',
+    "",
+    "## Builds on",
+    "",
+    "[Molecular simulation methods](knowledges/molecular-simulation-methods.md)",
+  ].join("\n"),
+  "GPU memory failure": [
+    '!!! failure "Molecular dynamics failed"',
+    "    Energy drift exceeded the tolerance at 2 fs.",
+    "",
+    `::molab-run-ref{ref=${RUN_FAILED}}`,
+    "",
+    "## Evidence",
+    "",
+    `::molab-log{run=${RUN_FAILED}}`,
+    "",
+    "## Cause",
+    "",
+    "The timestep exceeds the stability limit for the O–H stretch; the drift grows quadratically with the timestep.",
+    "",
+    "## Remedy",
+    "",
+    "- [x] Rerun at 1 fs",
+    "- [ ] Add SHAKE constraints and retry 2 fs",
+  ].join("\n"),
+  "Temperature stability": [
+    "The thermostat examples stay within **2 K of 300 K** after 5 ps, for both thermostats.",
+    "",
+    "## Seen in",
+    "",
+    '::molab-run-ref{refs="molab:experiment/exp-nve/run/md-002 molab:experiment/exp-nve/run/md-004"}',
+    "",
+    "## Untested",
+    "",
+    '!!! warning "Not yet tested at 2 fs"',
+    "    The 2 fs runs failed on energy drift before equilibrating.",
+  ].join("\n"),
+  "Thermostat validation": [
+    '!!! abstract "Goal"',
+    "    Pick the largest timestep that keeps NVE energy drift below 1·10⁻⁴ eV/atom/ps.",
+    "",
+    "## Roadmap",
+    "",
+    "::molab-stage-track",
+    "",
+    "## Next",
+    "",
+    "- [x] Baseline at 0.5 fs",
+    "- [ ] Sweep 0.5 / 1 / 2 fs × two drivers",
+    "- [ ] Write the finding",
+  ].join("\n"),
+  "Molecular simulation methods": [
+    '::molab-citation{title="Verlet integrators, revisited: energy drift at large timesteps" authors="A. Leimkuhler, C. Matthews" year=2015 venue="Molecular Physics 113(4)" doi=10.1080/00268976.2014.987}',
+    "",
+    '??? abstract "Abstract"',
+    "    We study long-time energy drift of velocity-Verlet in molecular dynamics and show that drift scales with the square of the timestep for smooth potentials.",
+    "",
+    "## Key points",
+    "",
+    "- Drift ∝ Δt² below the stability limit.",
+    "- Constraint algorithms add a linear term.",
+    "",
+    "## Notes",
+    "",
+    '!!! quote "§4.2"',
+    "    For water with flexible O–H bonds the stable limit is near 1 fs.",
+  ].join("\n"),
+  "Thermostat roadmap": [
+    "::molab-stage-track",
+    "",
+    "## Stages",
+    "",
+    "### Bind the workflow",
+    "",
+    "Bind a code workflow and run one smoke test.",
+    "",
+    "### Compare relaxation times",
+    "",
+    '!!! warning "Blocked"',
+    "    Waits for **Bind the workflow**.",
+  ].join("\n"),
+  "Thermostat todo": [
+    "::molab-todo-list",
+    "",
+    "## Notes",
+    "",
+    "Use the same seeds as the integrator benchmark.",
+  ].join("\n"),
+  "Relaxation times compared": [
+    `::molab-milestone{evidence="molab:experiment/exp-nve/run/md-002 molab:experiment/exp-nve/run/md-011"}`,
+    "",
+    "## On the roadmap",
+    "",
+    "Stage 2 of 2 of the thermostat roadmap.",
+  ].join("\n"),
+  "Thermostat check": [
+    '!!! note "Brief"',
+    "    Check that the thermostat examples stay near 300 K at 1 and 2 fs; report any run that drifts more than 5 K.",
+    "",
+    "## Asks",
+    "",
+    "::molab-approval{gate=plan}",
+    "",
+    "## Scope",
+    "",
+    '::molab-params{experiment="Thermostat Validation" may_run_on=hpc-slurm budget="4 GPU-hours"}',
+  ].join("\n"),
+};
+for (const note of notes.values()) {
+  const body = TEMPLATE_BODIES[note.name];
+  if (body) note.body = body;
+  if (note.cls === "Delegation" && note.record) {
+    note.record = { ...note.record, state: "blocked", questions: ["Run 4 jobs on hpc-slurm?"] };
+  }
+}
+
 const manuscript = getFile("manuscript/main.tex");
 if (manuscript?.content)
   notes.set("manuscript/main.tex", {
@@ -220,6 +401,18 @@ if (manuscript?.content)
   });
 for (const note of notes.values()) writeFile(note.relPath, note.body);
 
+/** A stable, spread-out edit history so the landing's Writing gauge has days to draw. */
+const showcaseTimes = (relPath: string): { updatedAt: string; createdAt: string } => {
+  let hash = 0;
+  for (const char of relPath) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  const day = 86_400_000;
+  const updated = Date.now() - (hash % 13) * day - (hash % 7) * 3_600_000;
+  return {
+    updatedAt: new Date(updated).toISOString(),
+    createdAt: new Date(updated - ((hash >> 3) % 9) * day).toISOString(),
+  };
+};
+
 const noteSummary = (note: ShowcaseNote) => ({
   cls: note.cls ?? "Note",
   name: note.name,
@@ -228,6 +421,8 @@ const noteSummary = (note: ShowcaseNote) => ({
   excerpt: note.excerpt,
   status: note.status,
   tags: note.tags,
+  format: note.relPath.endsWith(".html") ? "html" : "md",
+  ...showcaseTimes(note.relPath),
 });
 
 const servedWorkspaces = [
@@ -293,6 +488,8 @@ export const featureShowcaseHandlers = [
       body: note.body,
       links: note.links,
       record: note.record ?? {},
+      format: note.relPath.endsWith(".html") ? "html" : "md",
+      ...showcaseTimes(note.relPath),
       cards: [
         { kind: "experiment", id: "exp-001", title: "AlphaFold Baseline", status: "active" },
         { kind: "run", id: "run-001", title: "run-001", status: "succeeded" },
@@ -329,10 +526,27 @@ export const featureShowcaseHandlers = [
 
   http.get("/api/knowledge/entity-backlinks", ({ request }) => {
     const url = new URL(request.url);
+    const kind = url.searchParams.get("kind");
+    if (kind === "asset") {
+      const assetId = url.searchParams.get("assetId") ?? "";
+      // The water trajectory is cited by the NVE finding; nothing else is.
+      const backlinks =
+        assetId === "asset-nve-trajectory"
+          ? [
+              {
+                path: "knowledges/alphafold-benchmark.md",
+                title: "Energy drift stays flat under NVE at 0.5 fs",
+                type: "finding",
+                role: "cites",
+              },
+            ]
+          : [];
+      return HttpResponse.json({ entity: `asset:${assetId}`, backlinks });
+    }
     const entity =
-      url.searchParams.get("run_id") ??
-      url.searchParams.get("experiment_id") ??
-      url.searchParams.get("project_id") ??
+      url.searchParams.get("runId") ??
+      url.searchParams.get("experimentId") ??
+      url.searchParams.get("projectId") ??
       "entity";
     return HttpResponse.json({
       entity,
@@ -362,7 +576,24 @@ export const featureShowcaseHandlers = [
       body: note.body,
       links: note.links,
       record: note.record ?? {},
+      format: note.relPath.endsWith(".html") ? "html" : "md",
+      updatedAt: new Date().toISOString(),
+      createdAt: showcaseTimes(note.relPath).createdAt,
       cards: [],
+    });
+  }),
+
+  http.patch(workspaceRoute("/api/knowledge/doc/record"), async ({ request }) => {
+    const path = new URL(request.url).searchParams.get("path") ?? "";
+    const note = notes.get(path);
+    if (!note) return HttpResponse.json({ detail: "Note not found" }, { status: 404 });
+    const payload = (await request.json()) as { record?: Record<string, unknown> };
+    note.record = payload.record ?? {};
+    return HttpResponse.json({
+      relPath: note.relPath,
+      cls: note.cls ?? "Note",
+      record: note.record,
+      digest: `sha256:${Date.now().toString(16)}`,
     });
   }),
 
@@ -384,10 +615,12 @@ export const featureShowcaseHandlers = [
       hostPath?: string | null;
       cls?: string;
       record?: Record<string, unknown>;
+      format?: "md" | "html";
     };
     const name = body.name ?? "note";
     const hostPath = body.hostPath ?? "";
-    const relPath = documentRelPath(hostPath, name);
+    const mdPath = documentRelPath(hostPath, name);
+    const relPath = body.format === "html" ? mdPath.replace(/\.md$/, ".html") : mdPath;
     const note: ShowcaseNote = {
       cls: body.cls ?? "Note",
       name,

@@ -1,10 +1,7 @@
 import { Badge, ProgressSpinner } from "@molcrafts/ui";
 import type { JSX } from "react";
+import { type StatusTone, statusSpec, TONE_FILL } from "@/app/status/vocabulary";
 import { cn } from "@/lib/utils";
-
-import { type CanonicalStatus, canonicalStatusFor } from "./status";
-
-export type StatusTone = CanonicalStatus;
 
 const TONE_CLASSES: Record<StatusTone, string> = {
   draft: "bg-status-draft/10 text-muted-foreground",
@@ -17,18 +14,6 @@ const TONE_CLASSES: Record<StatusTone, string> = {
   cancelled: "bg-status-cancelled/10 text-muted-foreground",
   cached: "bg-status-cached/10 text-foreground",
   warning: "bg-status-warning-soft text-status-warning-foreground hover:bg-status-warning-soft",
-};
-
-const DOT_CLASSES: Record<StatusTone, string> = {
-  draft: "bg-status-draft",
-  ready: "bg-status-ready",
-  queued: "bg-status-queued",
-  running: "bg-status-running",
-  completed: "bg-status-completed",
-  failed: "bg-status-failed",
-  cancelled: "bg-status-cancelled",
-  cached: "bg-status-cached",
-  warning: "bg-status-warning",
 };
 
 const SIZE_CLASSES: Record<StatusBadgeSize, string> = {
@@ -44,36 +29,37 @@ export interface StatusBadgeProps {
   /** Show a leading colored dot (matching tone). Ignored for `running` — that
    *  state always uses a spinning indicator (the single "in progress" affordance). */
   dot?: boolean;
-  /** Set false to render only the status indicator without its canonical label. */
+  /** Set false to render only the status indicator without its word. */
   showLabel?: boolean;
+  /**
+   * The word to print. An execution status passes the vocabulary's word
+   * (`RunStatusBadge`); a lifecycle status (a document's `active`, an asset's
+   * `archived`) is the owner's own word and is printed as it is.
+   */
+  word?: string;
 }
 
-const resolveTone = (status: string | null | undefined): StatusTone => {
-  return canonicalStatusFor(status) ?? "ready";
-};
-
-export const statusToneFor = resolveTone;
-export const statusDotClass = (status: string | null | undefined): string =>
-  DOT_CLASSES[resolveTone(status)];
+const sentence = (raw: string): string =>
+  raw.charAt(0).toUpperCase() + raw.slice(1).replace(/_/g, " ");
 
 export const StatusBadge = ({
   status,
   size = "md",
   dot = false,
   showLabel = true,
+  word,
 }: StatusBadgeProps): JSX.Element | null => {
   if (!status) return null;
-  const tone = resolveTone(status);
-  const label = tone;
-  const sourceStatus = status.toLowerCase();
-  const isRunning = tone === "running";
+  const spec = statusSpec(status);
+  const tone = spec.tone;
+  const label = word ?? sentence(status);
+  const isRunning = spec.spin === true;
 
   if (isRunning) {
     return (
       <Badge
         variant="outline"
         aria-label={showLabel ? undefined : label}
-        title={sourceStatus === label ? label : `Reported as ${sourceStatus}`}
         className={cn(
           TONE_CLASSES.running,
           SIZE_CLASSES[size],
@@ -95,7 +81,6 @@ export const StatusBadge = ({
     <Badge
       variant="outline"
       aria-label={showLabel ? undefined : label}
-      title={sourceStatus === label ? label : `Reported as ${sourceStatus}`}
       className={cn(
         TONE_CLASSES[tone],
         SIZE_CLASSES[size],
@@ -105,7 +90,7 @@ export const StatusBadge = ({
       {dot && (
         <span
           aria-hidden="true"
-          className={cn("inline-block h-1.5 w-1.5 rounded-full", DOT_CLASSES[tone])}
+          className={cn("inline-block size-2 rounded-full", TONE_FILL[tone])}
         />
       )}
       {showLabel && <span>{label}</span>}

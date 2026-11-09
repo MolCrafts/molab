@@ -29,8 +29,9 @@ describe("navigation contributions", () => {
       "workspace",
     ]);
     expect(managementNavigationContribution()?.id).toBe("settings");
-    expect(navigationContributions.find(({ id }) => id === "activity")?.placement).toBe("legacy");
-    expect(navigationContributions.find(({ id }) => id === "workflow")?.placement).toBe("legacy");
+    // L16: the Activity and Workflows pages are gone, with no compatibility routes.
+    expect(navigationContributions.find(({ id }) => id === "activity")).toBeUndefined();
+    expect(navigationContributions.find(({ id }) => id === "workflow")).toBeUndefined();
   });
 
   it("keeps Files copy and full-surface settings in product metadata", () => {
@@ -39,15 +40,15 @@ describe("navigation contributions", () => {
       explorerTitle: "Files",
       breadcrumbLabel: "Files",
     });
-    expect(getNavigationContribution("settings").shellMode).toBe("rail-only");
+    // L11: settings categories and search live in the side bar.
+    expect(getNavigationContribution("settings").shellMode).toBe("explorer");
   });
 
   it("declares feature-owned landing surfaces in the same section manifest", () => {
     expect(getNavigationContribution("dashboard").landing).toBeDefined();
     expect(getNavigationContribution("runs").landing).toBeDefined();
     expect(getNavigationContribution("settings").landing).toBeDefined();
-    expect(getNavigationContribution("activity").landing).toBeDefined();
-    expect(getNavigationContribution("workflow").landing).toBeDefined();
+    expect(getNavigationContribution("asset").landing).toBeDefined();
     expect(getNavigationContribution("projects").landing).toBeUndefined();
   });
 
@@ -55,7 +56,6 @@ describe("navigation contributions", () => {
     expect(getNavigationContribution("projects").emptySelection?.title).toBe(
       "No project item selected",
     );
-    expect(getNavigationContribution("asset").emptySelection?.title).toBe("No asset selected");
     expect(getNavigationContribution("workspace").emptySelection?.title).toBe("No file selected");
   });
 
@@ -96,8 +96,8 @@ describe("navigation contributions", () => {
     expect(leftPanelViewFromPath("/experiments/e/runs/r")).toBe("projects");
     expect(leftPanelViewFromPath("/run/r")).toBe("projects");
     expect(leftPanelViewFromPath("/runs?view=timeline")).toBe("runs");
-    expect(leftPanelViewFromPath("/activity/extra")).toBe("activity");
-    expect(leftPanelViewFromPath("/workflows/legacy")).toBe("workflow");
+    expect(leftPanelViewFromPath("/activity")).toBe("projects");
+    expect(leftPanelViewFromPath("/workflows/legacy")).toBe("projects");
     expect(leftPanelViewFromPath("/unknown")).toBe("projects");
   });
 });

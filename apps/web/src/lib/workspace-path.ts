@@ -155,7 +155,7 @@ export const parseHostQualifiedLabel = (label: string): { host: string; root: st
 };
 
 /**
- * Compact label for chrome (ContextBar, multi-ws tree headers).
+ * Compact label for chrome (title bar command centre, multi-ws tree headers).
  *
  * Full serve labels like ``Arrhenius:/home/jicli594/work/mace-nve`` are the
  * identity for copy/API, but repeating them in every chrome surface is noise.

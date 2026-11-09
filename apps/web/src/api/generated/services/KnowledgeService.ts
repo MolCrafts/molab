@@ -27,23 +27,27 @@ export class KnowledgeService {
      * Entity Backlinks
      * Knowledge documents citing one entity.
      *
-     * Pure derived read (no reverse index persisted): resolves the entity
-     * folder, then walks documents whose edges point at its reference.
+     * Pure derived read (no reverse index persisted): resolves the entity,
+     * then walks documents whose edges point at its reference. A run or an
+     * experiment needs ``projectId`` + ``experimentId`` (and ``runId``); an
+     * asset needs ``assetId`` alone, since its id is unique in the workspace.
      * 404 on an unresolvable entity — never an empty-list fallback
      * for a bad ref.
      * @param kind Entity kind.
      * @param projectId
      * @param experimentId
      * @param runId
+     * @param assetId
      * @param molabSession
      * @returns EntityBacklinksResponse Successful Response
      * @throws ApiError
      */
     public static entityBacklinks(
-        kind: 'run' | 'experiment',
-        projectId: string,
-        experimentId: string,
+        kind: 'run' | 'experiment' | 'asset',
+        projectId?: (string | null),
+        experimentId?: (string | null),
         runId?: (string | null),
+        assetId?: (string | null),
         molabSession?: (string | null),
     ): CancelablePromise<EntityBacklinksResponse> {
         return __request(OpenAPI, {
@@ -57,6 +61,7 @@ export class KnowledgeService {
                 'projectId': projectId,
                 'experimentId': experimentId,
                 'runId': runId,
+                'assetId': assetId,
             },
             errors: {
                 422: `Validation Error`,
@@ -420,7 +425,7 @@ export class KnowledgeService {
     }
     /**
      * Export Doc
-     * Export a document as its narrative markdown, or the TeX file itself.
+     * Export a document: a markdown narrative, the HTML document, or the TeX file itself.
      * @param path The note Concept's workspace-relative document path (its identity).
      * @param molabSession
      * @returns any Successful Response
@@ -476,7 +481,7 @@ export class KnowledgeService {
     }
     /**
      * Export Notebook
-     * Zip one host's markdown documents, the figures they cite, and an embed list.
+     * Zip one host's documents, the figures they cite, and an embed list.
      * @param hostPath Workspace-relative host. Empty exports the workspace root's documents.
      * @param molabSession
      * @returns any Successful Response

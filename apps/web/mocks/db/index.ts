@@ -203,6 +203,53 @@ const mockRun = (
 };
 
 /**
+ * A Molq attempt's scheduler evidence, flat under `jobs/` as the server
+ * stages it (`execution_dirs.JOBS`): the submit script once the job is
+ * submitted, its stdout / stderr once it has run.
+ */
+const writeSchedulerFiles = (root: string, execution: ExecutionResponse): void => {
+  const jobId = String(execution.executor?.scheduler_job_id ?? "");
+  writeFile(
+    `${root}/jobs/train.sh`,
+    [
+      "#!/bin/bash",
+      "#SBATCH --job-name=train",
+      "#SBATCH --partition=gpu",
+      "#SBATCH --gres=gpu:1",
+      "#SBATCH --time=02:00:00",
+      "#SBATCH --output=jobs/train.out",
+      "#SBATCH --error=jobs/train.err",
+      "",
+      "set -euo pipefail",
+      `molab worker --execution ${execution.id}`,
+      "",
+    ].join("\n"),
+  );
+  if (execution.status === "queued") return;
+  const failed = ["failed", "interrupted"].includes(execution.status);
+  writeFile(
+    `${root}/jobs/train.out`,
+    [
+      `SLURM_JOB_ID=${jobId}`,
+      "SLURM_JOB_NODELIST=gpu-node-07",
+      `molab worker: claimed ${execution.id}`,
+      ...Array.from(
+        { length: 24 },
+        (_, i) => `step ${(i + 1) * 2000} loss ${(0.9 / (i + 2)).toFixed(4)}`,
+      ),
+      `molab worker: ${execution.status}`,
+      "",
+    ].join("\n"),
+  );
+  writeFile(
+    `${root}/jobs/train.err`,
+    failed
+      ? `Traceback (most recent call last):\n  File "simulate.py", line 184, in evaluate\n${execution.error?.type ?? "RuntimeError"}: ${execution.error?.message ?? "Execution failed"}\nslurmstepd: error: task exited with code 1\n`
+      : "",
+  );
+};
+
+/**
  * Create an empty database
  */
 function createEmptyDb(): MockDatabase {
@@ -563,6 +610,20 @@ export function seed(): void {
         runs.push(run);
       }
     }
+  }
+  // Which assets each run opens (its `inputs`): the Assets view's Used by (L08).
+  const RUN_INPUTS: Record<string, string[]> = {
+    "run-001": ["asset-001"],
+    "run-002": ["asset-003"],
+    "run-003": ["asset-003"],
+    "run-101": ["asset-002"],
+    "run-102": ["asset-002"],
+    "md-002": ["asset-nve-trajectory"],
+    "md-006": ["asset-nve-trajectory"],
+  };
+  for (const run of runs) {
+    const inputs = RUN_INPUTS[run.id];
+    if (inputs) run.inputs = inputs;
   }
   runs.forEach(setRun);
 
@@ -974,9 +1035,24 @@ outputs:
         "INFO prepare: structure and inputs validated",
         "INFO simulate: step 0 / 50000 · T=300.00 K",
         "INFO simulate: step 25000 / 50000 · T=300.12 K",
-        failed
-          ? `ERROR ${execution.error?.message ?? "Execution failed"}`
-          : `INFO Execution ${execution.status}`,
+        "Step     Temp      E_pair      TotEng     Press",
+        ...Array.from({ length: 40 }, (_, i) =>
+          [
+            25000 + i * 500,
+            (300 + i * 0.4).toFixed(2),
+            (-4628 + i).toFixed(3),
+            (-4512 + i).toFixed(3),
+            "1.2e3",
+          ].join("   "),
+        ),
+        ...(failed
+          ? [
+              "WARNING: energy drift 0.0031 eV/atom/ps above warn threshold 0.002",
+              "Traceback (most recent call last):",
+              '  File "simulate.py", line 184, in evaluate',
+              `${execution.error?.type ?? "RuntimeError"}: ${execution.error?.message ?? "Execution failed"}`,
+            ]
+          : [`INFO Execution ${execution.status}`]),
       ];
       db.runLogs.set(run.id, lines);
       writeFile(`${root}/run.log`, lines.join("\n"));
@@ -986,6 +1062,7 @@ outputs:
           `Traceback (most recent call last):\n  File "simulate.py", line 184, in evaluate\n${execution.error?.type ?? "RuntimeError"}: ${execution.error?.message ?? "Execution failed"}\n`,
         );
       writeFile(`${root}/execution.json`, JSON.stringify(execution, null, 2));
+      if (execution.executor?.backend === "molq") writeSchedulerFiles(root, execution);
       if (execution.status === "queued") continue;
       const graph = JSON.parse(run.workflowSource ?? '{"task_configs":[],"links":[]}');
       graph.task_configs = graph.task_configs.map((task: Record<string, unknown>, i: number) => ({
@@ -1028,42 +1105,6 @@ outputs:
         return { ...task, started_at: startedAt, finished_at: finishedAt };
       });
       writeFile(`${root}/workflow.json`, JSON.stringify(graph, null, 2));
-      if (run.id === "run-001") {
-        writeFile(
-          `${root}/out/tensorboard/events.out.tfevents.showcase`,
-          "Synthetic discovery marker; scalar samples are served by the offline TensorBoard API fixture.\n",
-        );
-        writeFile(
-          `${root}/out/phase1_df_report.json`,
-          JSON.stringify(
-            {
-              gold_standard: "fp32 synthetic reference",
-              eval_configs: 64,
-              dataset_force_rms_mev_A: 184.2,
-              deltaF: Object.fromEntries(
-                [
-                  "infer_effect_on_fp32w",
-                  "infer_effect_on_bf16w",
-                  "train_effect_fp64",
-                  "train_effect_bf16",
-                  "combined_e2e_bf16",
-                  "fp64_native_vs_gold",
-                ].map((key, i) => [
-                  key,
-                  {
-                    comp_rms_mev_A: [2.4, 3.1, 0.8, 4.6, 6.2, 0.4][i],
-                    atom_rms_mev_A: [4.1, 5.2, 1.4, 7.9, 10.7, 0.7][i],
-                    max_mev_A: [8.2, 10.4, 2.8, 15.8, 21.4, 1.4][i],
-                    pct_of_Frms: [1.3, 1.7, 0.4, 2.5, 3.4, 0.2][i],
-                  },
-                ]),
-              ),
-            },
-            null,
-            2,
-          ),
-        );
-      }
       writeFile(`${root}/out/metrics.json`, JSON.stringify(run.results ?? {}, null, 2));
       writeFile(
         `${root}/out/trajectory.xyz`,

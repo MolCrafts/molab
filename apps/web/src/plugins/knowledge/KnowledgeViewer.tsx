@@ -1,10 +1,7 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Download, ExternalLink, FileText, NotebookPen } from "lucide-react";
+import { Download, ExternalLink, FileText } from "lucide-react";
 import { type JSX, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import { knowledgeApi } from "@/api";
 import { activeNeedsAuth, shouldShowFailure } from "@/api/errors";
-import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
 import type { ReferenceSummary } from "@/api/generated/models/ReferenceSummary";
 import { DashboardCanvas, EntityPage } from "@/app/components/entity";
 import { useNavigationState } from "@/app/state/useNavigationState";
@@ -14,21 +11,11 @@ import {
   WorkbenchOperationState,
   WorkbenchRetryAction,
 } from "@/components/workbench";
-import { buildMolabRefIndex } from "@/lib/entity-linkify";
-import { resolveMolabRef } from "@/lib/molab-ref";
-import { DocumentControls } from "@/plugins/knowledge/DocumentControls";
-import { EntityRefCard } from "@/plugins/knowledge/EntityRefCard";
-import { KnowledgeDashboard } from "@/plugins/knowledge/KnowledgeDashboard";
-import { knowledgeClassOf } from "@/plugins/knowledge/knowledgeClass";
-import { NoteEditor } from "@/plugins/knowledge/NoteEditor";
-import { PlanningRecord } from "@/plugins/knowledge/PlanningRecord";
-import {
-  knowledgeKeys,
-  useKnowledgeListQuery,
-  useKnowledgeNoteQuery,
-} from "@/plugins/knowledge/queries";
+import { useKnowledgeListQuery, useKnowledgeNoteQuery } from "@/plugins/knowledge/queries";
 import { TexDocumentView } from "@/plugins/knowledge/TexDocumentView";
 import { isTexDocument } from "@/plugins/knowledge/texDocument";
+import { DocPage } from "./doc/DocPage";
+import { KnowledgeOverview } from "./KnowledgeOverview";
 
 const formatReference = (ref: ReferenceSummary): string => {
   const authors =
@@ -47,9 +34,6 @@ const formatReference = (ref: ReferenceSummary): string => {
  */
 export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
   const nav = useNavigationState(snapshot);
-  const navigate = useNavigate();
-  const refIndex = useMemo(() => buildMolabRefIndex(snapshot), [snapshot]);
-  const queryClient = useQueryClient();
   const listQuery = useKnowledgeListQuery();
   const data = listQuery.data;
   const needsAuth = activeNeedsAuth(snapshot.workspaces);
@@ -80,12 +64,8 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
       : "Failed to load note."
     : null;
 
-  const handleSaved = (updated: NoteDetailResponse): void => {
-    queryClient.setQueryData(knowledgeKeys.note(relPath), updated);
-    void queryClient.invalidateQueries({ queryKey: knowledgeKeys.lists() });
-  };
-
-  const back = (): void => nav.setSelection({ objectType: "knowledge", objectId: "" });
+  const open = (path: string): void =>
+    nav.setSelection({ objectType: "knowledge", objectId: path });
 
   // --- TeX manuscript ----------------------------------------------------
   // Listed beside notes, opened with the file-preview plugin. Not a markdown note.
@@ -96,16 +76,11 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
         icon={FileText}
         title={note?.name ?? fileName}
         actions={
-          <>
-            <WorkbenchIconAction label="Download TeX" asChild>
-              <a href={knowledgeApi.docExportUrl(relPath)} download>
-                <Download className="size-4" />
-              </a>
-            </WorkbenchIconAction>
-            <WorkbenchIconAction label="Back to knowledge" onClick={back}>
-              <ArrowLeft className="size-4" />
-            </WorkbenchIconAction>
-          </>
+          <WorkbenchIconAction label="Download TeX" asChild>
+            <a href={knowledgeApi.docExportUrl(relPath)} download>
+              <Download className="size-4" />
+            </a>
+          </WorkbenchIconAction>
         }
       >
         <div className="min-h-0 flex-1">
@@ -121,69 +96,29 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
     );
   }
 
-  // --- Note detail --------------------------------------------------------
+  // --- Note detail: one doc page (L10) ------------------------------------
   if (relPath && isNotePath) {
+    if (noteError) {
+      return (
+        <WorkbenchOperationState
+          kind="error"
+          title="Could not load the document"
+          detail={noteError}
+          action={<WorkbenchRetryAction onClick={() => void noteQuery.refetch()} />}
+        />
+      );
+    }
+    if (noteQuery.isPending || !note) {
+      return <WorkbenchOperationState kind="loading" title="Loading document…" skeletonRows={6} />;
+    }
     return (
-      <EntityPage
-        icon={NotebookPen}
-        title={note?.name ?? relPath}
-        afterTitle={<DocumentControls key={relPath} relPath={relPath} placement="title" />}
-        actions={
-          <>
-            <WorkbenchIconAction label="Export document" asChild>
-              <a href={knowledgeApi.docExportUrl(relPath)} download>
-                <Download className="size-4" />
-              </a>
-            </WorkbenchIconAction>
-            <WorkbenchIconAction label="Back to knowledge" onClick={back}>
-              <ArrowLeft className="size-4" />
-            </WorkbenchIconAction>
-          </>
-        }
-      >
-        <div className="min-h-0 flex-1 overflow-auto">
-          <DashboardCanvas>
-            {noteError ? (
-              <p className="text-body-lg text-destructive">{noteError}</p>
-            ) : noteQuery.isPending || !note ? (
-              <p className="text-body-lg italic text-muted-foreground">Loading…</p>
-            ) : (
-              <div className="space-y-4">
-                <PlanningRecord
-                  cls={knowledgeClassOf(
-                    data?.notes.find((row) => row.relPath === relPath) ?? { cls: "Note" },
-                  )}
-                  record={note.record}
-                />
-                <NoteEditor
-                  note={note}
-                  onSaved={handleSaved}
-                  onOpenHref={(href) => {
-                    const hit = resolveMolabRef(href, refIndex);
-                    if (hit) navigate(hit.path);
-                  }}
-                />
-                {note.cards && note.cards.length > 0 && (
-                  <section className="space-y-2 border-t border-border/50 pt-4">
-                    <h3 className="text-label font-semibold uppercase tracking-wide text-muted-foreground">
-                      Embedded entities ({note.cards.length})
-                    </h3>
-                    <div className="space-y-2">
-                      {note.cards.map((card) => (
-                        <EntityRefCard
-                          key={`${card.kind}:${card.id}`}
-                          card={card}
-                          snapshot={snapshot}
-                        />
-                      ))}
-                    </div>
-                  </section>
-                )}
-              </div>
-            )}
-          </DashboardCanvas>
-        </div>
-      </EntityPage>
+      <DocPage
+        note={note}
+        summary={data?.notes.find((row) => row.relPath === relPath) ?? null}
+        notes={data?.notes ?? []}
+        snapshot={snapshot}
+        onOpen={open}
+      />
     );
   }
 
@@ -191,15 +126,7 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
   if (relPath && selectedReference) {
     const ref = selectedReference;
     return (
-      <EntityPage
-        icon={FileText}
-        title={ref.title ?? ref.name}
-        actions={
-          <WorkbenchIconAction label="Back to knowledge" onClick={back}>
-            <ArrowLeft className="size-4" />
-          </WorkbenchIconAction>
-        }
-      >
+      <EntityPage icon={FileText} title={ref.title ?? ref.name}>
         <div className="min-h-0 flex-1 overflow-auto text-body-lg">
           <DashboardCanvas>
             <p className="text-muted-foreground">{formatReference(ref)}</p>
@@ -235,33 +162,18 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
     );
   }
 
-  const notes = data?.notes ?? [];
-  const references = data?.references ?? [];
-
-  return (
-    <EntityPage icon={BookOpen} title="Knowledge">
-      <div className="min-h-0 flex-1 overflow-auto">
-        <DashboardCanvas>
-          {listQuery.isPending || (needsAuth && !data) ? (
-            <WorkbenchOperationState kind="loading" title="Loading knowledge…" skeletonRows={4} />
-          ) : knowledgeFailed ? (
-            <WorkbenchOperationState
-              kind="error"
-              title="Could not load knowledge"
-              detail={
-                listQuery.error instanceof Error ? listQuery.error.message : "Unknown query error"
-              }
-              action={<WorkbenchRetryAction onClick={() => void listQuery.refetch()} />}
-            />
-          ) : (
-            <KnowledgeDashboard
-              notes={notes}
-              references={references}
-              onOpen={(path) => nav.setSelection({ objectType: "knowledge", objectId: path })}
-            />
-          )}
-        </DashboardCanvas>
-      </div>
-    </EntityPage>
-  );
+  if (listQuery.isPending || (needsAuth && !data)) {
+    return <WorkbenchOperationState kind="loading" title="Loading knowledge…" skeletonRows={4} />;
+  }
+  if (knowledgeFailed) {
+    return (
+      <WorkbenchOperationState
+        kind="error"
+        title="Could not load knowledge"
+        detail={listQuery.error instanceof Error ? listQuery.error.message : "Unknown query error"}
+        action={<WorkbenchRetryAction onClick={() => void listQuery.refetch()} />}
+      />
+    );
+  }
+  return <KnowledgeOverview notes={data?.notes ?? []} snapshot={snapshot} onOpen={open} />;
 };

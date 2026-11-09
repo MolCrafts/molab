@@ -1,7 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
 import {
-  buildExperimentWorkbenchData,
-  buildProjectWorkbenchData,
   experimentRunCompleteness,
   projectSnapshotCompleteness,
 } from "@/app/renderers/entityWorkbenchData";
@@ -110,26 +108,6 @@ const snapshot: WorkspaceSnapshot = {
   consoleEntries: [],
 };
 
-describe("buildProjectWorkbenchData", () => {
-  it("rolls up project inventory and run statuses", () => {
-    const data = buildProjectWorkbenchData(project.id, snapshot);
-    expect(data.experiments).toHaveLength(2);
-    expect(data.counts).toMatchObject({ total: 3, succeeded: 1, failed: 1, running: 1 });
-    expect(data.assetCount).toBe(1);
-  });
-
-  it("flags failed, running, empty, and missing-workflow experiments", () => {
-    const reasons = buildProjectWorkbenchData(project.id, snapshot).attention.map((item) => [
-      item.experiment.id,
-      item.reason,
-    ]);
-    expect(reasons).toContainEqual(["series", "failed"]);
-    expect(reasons).toContainEqual(["series", "running"]);
-    expect(reasons).toContainEqual(["empty", "missing-workflow"]);
-    expect(reasons).toContainEqual(["empty", "empty"]);
-  });
-});
-
 describe("lazy snapshot completeness", () => {
   it("keeps authoritative totals separate from partially loaded run statuses", () => {
     const experiments = [
@@ -168,92 +146,5 @@ describe("lazy snapshot completeness", () => {
     expect(experimentRunCompleteness(summary, 2).runsComplete).toBe(false);
     expect(experimentRunCompleteness(summary, 3).runsComplete).toBe(true);
     expect(experimentRunCompleteness(summary, 4).runsComplete).toBe(false);
-  });
-});
-
-describe("buildExperimentWorkbenchData", () => {
-  it("derives parameter axes from declared space and run parameters", () => {
-    const data = buildExperimentWorkbenchData(snapshot.experiments[0], snapshot.runs, workflow);
-    expect(data.parameterAxes.map((axis) => axis.key)).toEqual(["mode", "ratio", "salt"]);
-    expect(data.parameterAxes.find((axis) => axis.key === "mode")?.values).toEqual([
-      "block",
-      "random",
-    ]);
-  });
-
-  it("partitions varying vs fixed parameter axes for scientific layers", () => {
-    const mixedRuns = [
-      run("run-a", "succeeded", { mode: "block", temperature: 300 }),
-      run("run-b", "failed", { mode: "random", temperature: 300 }),
-    ];
-    const data = buildExperimentWorkbenchData(
-      experiment("mixed", { mode: ["block", "random"], temperature: 300 }),
-      mixedRuns,
-      workflow,
-    );
-    expect(data.varyingAxes.map((axis) => axis.key)).toEqual(["mode"]);
-    expect(data.fixedAxes.map((axis) => axis.key)).toEqual(["temperature"]);
-    expect(data.fixedAxes[0]?.values).toEqual(["300"]);
-  });
-
-  it("summarizes workflow graph and breaks the status mix down per varying axis", () => {
-    const data = buildExperimentWorkbenchData(snapshot.experiments[0], snapshot.runs, workflow);
-    expect(data.workflowSummary).toMatchObject({
-      exists: true,
-      taskCount: 2,
-      linkCount: 1,
-      parallelGroupCount: 1,
-    });
-    const mode = data.axisBreakdowns.find((axis) => axis.key === "mode");
-    expect(mode?.buckets.map((bucket) => bucket.value)).toEqual(["block", "random"]);
-  });
-
-  it("keeps a declared sweep value that has produced no runs yet", () => {
-    const data = buildExperimentWorkbenchData(
-      experiment("partial", { mode: ["block", "random", "spiral"] }),
-      [run("run-a", "succeeded", { mode: "block" })],
-      workflow,
-    );
-    const buckets = data.axisBreakdowns[0]?.buckets ?? [];
-    expect(buckets.map((bucket) => bucket.value)).toEqual(["block", "random", "spiral"]);
-    expect(buckets.map((bucket) => bucket.counts.total)).toEqual([1, 0, 0]);
-  });
-
-  it("leaves fixed axes out of the sweep breakdown", () => {
-    const data = buildExperimentWorkbenchData(
-      experiment("mixed", { mode: ["block", "random"], temperature: 300 }),
-      [
-        run("run-a", "succeeded", { mode: "block", temperature: 300 }),
-        run("run-b", "failed", { mode: "random", temperature: 300 }),
-      ],
-      workflow,
-    );
-    expect(data.axisBreakdowns.map((axis) => axis.key)).toEqual(["mode"]);
-    expect(data.axisBreakdowns[0]?.buckets).toEqual([
-      expect.objectContaining({
-        value: "block",
-        unset: false,
-        counts: expect.objectContaining({ total: 1, succeeded: 1 }),
-      }),
-      expect.objectContaining({
-        value: "random",
-        unset: false,
-        counts: expect.objectContaining({ total: 1, failed: 1 }),
-      }),
-    ]);
-  });
-
-  it("files a run that never set a swept parameter under unset, not as a value", () => {
-    const data = buildExperimentWorkbenchData(
-      experiment("declared", { lr: [0.001, 0.0005] }),
-      [run("run-a", "failed", { batch: 16 }), run("run-b", "succeeded", { batch: 32 })],
-      workflow,
-    );
-    const lr = data.axisBreakdowns.find((axis) => axis.key === "lr");
-    expect(lr?.buckets.map((bucket) => [bucket.value, bucket.unset, bucket.runs.length])).toEqual([
-      ["0.0005", false, 0],
-      ["0.001", false, 0],
-      ["unset", true, 2],
-    ]);
   });
 });

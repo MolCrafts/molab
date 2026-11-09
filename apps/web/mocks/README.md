@@ -13,7 +13,7 @@ All content and job activity are synthetic. Refreshing the tab resets edits and 
 | Projects `/projects/nve-drift` | Integrator Benchmark | 12 driver × ensemble × timestep combinations, distinct numerical results, comparison and sweep instruments |
 | Same project | Thermostat Validation | Empty experiment and unbound-workflow state |
 | Runs `/runs` | Local and Molq executions | Filters, pagination, selection and cross-run comparison; queued, running, finalizing, succeeded, failed, interrupted and cancelled examples; one unexecuted run |
-| Run `/projects/protein-folding/experiments/exp-001/runs/run-001` | Completed showcase | Executions, outputs, registered artifacts, evidence, journal graph, MolPlot scalars and Vega-Lite plot, Molq job details, TensorBoard, ΔF, MolVis discovery |
+| Run `/projects/protein-folding/experiments/exp-001/runs/run-001` | Completed showcase | Executions, outputs, registered artifacts, evidence, journal graph, MolPlot scalars and Vega-Lite plot, Molq job details, MolVis discovery |
 | Run `run-002` in the same experiment | Failed attempt followed by an active retry | Attempt timeline, per-attempt logs, cancellation |
 | Run `run-003` in the same experiment | Failed attempt | Traceback, retry/resume/reproduce controls, harvest/failure-report flows |
 | Assets `/assets` | Protein Folding → alphafold.pt | Two immutable version records, origin metadata, download; artifact promotion appends versions |
@@ -34,7 +34,7 @@ For comparison, add two or more runs to the selection from Runs or their individ
 - `feature_showcase.ts` owns document operations and the cross-domain read models. Unknown API operations still return an explicit 501 so missing coverage is visible.
 - `fflate` is a development-only dependency used for real ZIP exports; exports contain the file bytes shown by previews.
 
-The TensorBoard file is explicitly a synthetic discovery marker; the offline scalar endpoint serves deterministic samples, rather than claiming the marker is a parsed event file. Example model/data payloads are small illustrative files, not usable model weights or full scientific datasets.
+Example model/data payloads are small illustrative files, not usable model weights or full scientific datasets.
 
 ## Limits
 

@@ -21,7 +21,7 @@ import {
   selectAggregateConfig,
   stepResets,
 } from "./multiRunMetrics";
-import { PALETTE, type ScalarSeries } from "./RunMetricsView";
+import { PALETTE, type ScalarSeries } from "./scalar-series";
 
 const OPTS: AggregateOptions = { xMode: "step", yScale: "linear", smoothing: 0, metricKey: "loss" };
 

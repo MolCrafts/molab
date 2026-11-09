@@ -6,12 +6,15 @@
  *   rerun      — any terminal predecessor, including skipped and succeeded
  *   resume     — a failed, cancelled, or interrupted predecessor
  *   reproduce  — a succeeded predecessor; the request always bypasses the cache
- * An active predecessor (queued, pending, running, finalizing) enables nothing.
+ * An active predecessor (queued, running, finalizing) enables nothing.
+ * A still-active attempt anywhere else in the history does the same, even when
+ * the selected predecessor has already succeeded. Pass that attempt's id as
+ * `blockingExecutionId`.
  *
  * Harvest is not a creation mode. It is available on every terminal status.
  */
 
-export const RETRYABLE_STATUSES = new Set(["failed", "cancelled"]);
+import { isActiveStatus, normalizeStatus } from "@/app/status/vocabulary";
 
 /** Terminal outcomes that may be interpreted into Knowledge. */
 export const HARVESTABLE_STATUSES = new Set(["succeeded", "failed", "cancelled", "interrupted"]);
@@ -26,8 +29,6 @@ export const TERMINAL_STATUSES = new Set([
 
 export const RESUMABLE_STATUSES = new Set(["failed", "cancelled", "interrupted"]);
 
-const ACTIVE_STATUSES = new Set(["queued", "pending", "running", "finalizing"]);
-
 export type ExecutionModeValue = "initial" | "rerun" | "resume" | "reproduce";
 
 export interface ExecutionModeOption {
@@ -40,22 +41,23 @@ export interface ExecutionModeOption {
 
 export type RunLifecyclePhase = "pending" | "running" | "retryable" | "succeeded" | "other";
 
+/** A run's phase decides its one row verb: Start · Cancel · Resume. */
 export function runPhase(status: string): RunLifecyclePhase {
-  const s = status.toLowerCase();
-  if (s === "pending") return "pending";
-  if (s === "running") return "running";
-  if (RETRYABLE_STATUSES.has(s)) return "retryable";
-  if (s === "succeeded") return "succeeded";
+  const key = normalizeStatus(status);
+  if (key === "pending") return "pending";
+  if (isActiveStatus(key)) return "running";
+  if (RESUMABLE_STATUSES.has(key)) return "retryable";
+  if (key === "succeeded") return "succeeded";
   return "other";
 }
 
 export function canStart(status: string): boolean {
-  return status.toLowerCase() === "pending";
+  return normalizeStatus(status) === "pending";
 }
 
-/** Queued, pending, running, and finalizing — the same set the server will stop. */
+/** Queued, running, and finalizing — the same set the server will stop. */
 export function canCancel(status: string): boolean {
-  return ACTIVE_STATUSES.has(status.toLowerCase());
+  return isActiveStatus(status);
 }
 
 export function canResume(status: string): boolean {
@@ -73,13 +75,18 @@ export function canReproduce(status: string): boolean {
 export function executionModeOptions(input: {
   attempts: number;
   basedOnStatus: string | null;
+  /** Set when some other attempt is still active. The selected one may already be terminal. */
+  blockingExecutionId?: string | null;
 }): ExecutionModeOption[] {
   const status = input.basedOnStatus?.toLowerCase() ?? null;
   const hasAttempt = input.attempts > 0;
-  const active = status !== null && ACTIVE_STATUSES.has(status);
+  const blockingId = input.blockingExecutionId?.trim() || null;
+  const active = (status !== null && isActiveStatus(status)) || blockingId !== null;
   const initialReason = hasAttempt ? "This run already has an attempt." : null;
   const missing = "This run has no attempt yet; start with Initial.";
-  const activeReason = "The predecessor execution is still active; cancel it first.";
+  const activeReason = blockingId
+    ? `${blockingId} is still running. Stop it before starting another attempt.`
+    : "The predecessor execution is still active; cancel it first.";
 
   const reasonFor = (enabled: boolean, succeededReason: string | null): string | null => {
     if (!hasAttempt) return missing;
@@ -142,6 +149,3 @@ export function canHarvest(status: string): boolean {
 export function isTerminalStatus(status: string): boolean {
   return TERMINAL_STATUSES.has(status.toLowerCase());
 }
-
-/** After a verb that kicks off work, land on Executions (live graph). */
-export const POST_DISPATCH_TAB = "executions" as const;

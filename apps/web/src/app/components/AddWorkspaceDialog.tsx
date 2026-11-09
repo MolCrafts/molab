@@ -3,13 +3,11 @@
  * Accepts a local absolute path, remote `cluster:/abs`, or `@registry-name`.
  */
 
-import { Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "@molcrafts/ui";
-import { Loader2 } from "lucide-react";
-import { type JSX, useCallback, useEffect, useId, useState } from "react";
+import { type JSX, useCallback, useEffect, useState } from "react";
 import { workspacesApi } from "@/api";
 import { requestRemoteAuth } from "@/app/layout/remoteAuthPrompt";
 import type { ServedWorkspaceSummary } from "@/app/types";
-import { cn } from "@/lib/utils";
+import { QuickInput } from "@/components/dialog/QuickInput";
 export interface AddWorkspaceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -40,16 +38,9 @@ export const AddWorkspaceDialog = ({
   onOpenChange,
   onAdded,
 }: AddWorkspaceDialogProps): JSX.Element => {
-  const inputId = useId();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const inputRef = useCallback(
-    (node: HTMLInputElement | null) => {
-      if (node && open) node.focus();
-    },
-    [open],
-  );
 
   useEffect(() => {
     if (open) {
@@ -117,66 +108,21 @@ export const AddWorkspaceDialog = ({
   }, [value, busy, onOpenChange, onAdded]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        className={cn(
-          "top-command-offset max-w-xl -translate-y-0 gap-0 overflow-hidden p-0",
-          "rounded-md shadow-lg sm:max-w-xl",
-        )}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-      >
-        <DialogTitle className="sr-only">Add Folder to Workspace</DialogTitle>
-        <DialogDescription className="sr-only">
-          Enter a local path, cluster:/path, or @registry-name
-        </DialogDescription>
-
-        <div className="border-b border-border/80 bg-muted/40 px-3 py-row-pad">
-          <p className="truncate font-mono text-micro text-muted-foreground">
-            Add Folder to Workspace
-            <span className="text-foreground/50"> · path or cluster:/path</span>
-          </p>
-        </div>
-
-        <form
-          className="relative flex items-center"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-        >
-          <label htmlFor={inputId} className="sr-only">
-            Workspace path
-          </label>
-          <Input
-            id={inputId}
-            ref={inputRef}
-            value={value}
-            disabled={busy}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="/path/to/workspace  or  cluster:/abs/path"
-            className="h-control-comfortable rounded-none border-0 bg-transparent px-3 font-mono text-body shadow-none focus-visible:ring-0"
-            onChange={(e) => {
-              setValue(e.target.value);
-              if (hint) setHint(null);
-            }}
-          />
-          {busy ? (
-            <Loader2 className="mol-motion-progress-spin mr-3 size-icon flex-none text-muted-foreground" />
-          ) : null}
-        </form>
-
-        {hint ? (
-          <p className="border-t border-border/60 px-3 py-row-pad text-micro text-destructive">
-            {hint}
-          </p>
-        ) : (
-          <p className="border-t border-border/40 px-3 py-row-pad text-micro text-muted-foreground">
-            Enter ↵ · Esc cancel · remote: cluster:/path or @name
-          </p>
-        )}
-      </DialogContent>
-    </Dialog>
+    <QuickInput
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Add folder to workspace"
+      prompt="Add folder to workspace · a local path, cluster:/abs/path, or @name · ↵ to add, Esc to cancel"
+      value={value}
+      onValueChange={(next) => {
+        setValue(next);
+        if (hint) setHint(null);
+      }}
+      onSubmit={() => void submit()}
+      placeholder="/path/to/workspace  or  cluster:/abs/path"
+      error={hint}
+      busy={busy}
+      mono
+    />
   );
 };

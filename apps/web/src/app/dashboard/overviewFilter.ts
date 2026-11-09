@@ -6,6 +6,7 @@
 
 import { runExecutorFacet } from "@/app/runs/projections";
 import type { WorkspaceRunRow } from "@/app/runs/types";
+import { parseInstant } from "@/lib/format-time";
 
 export interface OverviewFilter {
   /** Epoch ms, inclusive. */
@@ -18,17 +19,12 @@ export const NO_FILTER: OverviewFilter = { window: null, backend: null };
 export const isFiltered = (filter: OverviewFilter): boolean =>
   filter.window !== null || filter.backend !== null;
 
-const time = (value: string | null | undefined): number | null => {
-  const parsed = value ? Date.parse(value) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
 /** Some attempt of the run was alive at a moment inside the window. */
 const ranDuring = (run: WorkspaceRunRow, [from, to]: [number, number], now: number): boolean =>
   run.executions.some((execution) => {
-    const start = time(execution.startedAt);
+    const start = parseInstant(execution.startedAt);
     if (start === null) return false;
-    const end = time(execution.finishedAt) ?? now;
+    const end = parseInstant(execution.finishedAt) ?? now;
     return start <= to && end >= from;
   });
 

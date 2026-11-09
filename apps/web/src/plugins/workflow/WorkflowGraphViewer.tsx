@@ -1,37 +1,28 @@
 /**
- * WorkflowGraphViewer — the workflow "Graph" tab. Renders the workflow entity's
- * task-graph IR (from the snapshot, or the just-saved draft) on the editable
- * flowgram free-layout canvas, and saves edits back via {@link workflowApi}.
- * Clicking a node opens the right-panel TaskViewer via `inspectedTask`.
+ * The experiment's Workflow view (Figma L06): one toolbar row over the bound
+ * workflow, shown as a Graph or as its Source.
  *
- * Editing safety: a failed save surfaces a dismissible error and keeps the draft
- * so the user can retry; ⌘S/Ctrl+S saves; navigating away (in-app or full
- * unload) with unsaved edits prompts to confirm; Discard reverts to the last
- * saved graph.
+ * - A definition has no status: the canvas is drawn neutral (`definition`).
+ * - A document workflow is editable — move and connect on the Graph, or edit
+ *   its IR JSON in Source; both save through {@link workflowApi}. A code
+ *   workflow is read only and its Source is the `.py`.
+ * - Unsaved edits mark the view and its editor tab with ●; ⌘S saves; Discard
+ *   and leaving ask through the L13 dialog; a failed save is one band and the
+ *   edit is kept.
+ * - A click on a task previews its definition (L12).
  *
- * Raw workspace-file `workflow.json` previews are a different source + format
- * and are handled by {@link WorkflowFileViewer}; this viewer only ever receives
- * ``workflow`` entity selections (it is mounted solely by WorkflowViewer).
+ * Raw workspace-file `workflow.json` previews (a run's journal, with status)
+ * are {@link WorkflowFileViewer}.
  */
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@molcrafts/ui";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useBlocker } from "react-router-dom";
+import { CircleX, X } from "lucide-react";
+import { type JSX, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { workflowApi } from "@/api";
-import { useInspectedTask } from "@/app/state/inspectedTask";
+import { experimentPath } from "@/app/entities/paths";
+import { usePreview } from "@/app/preview/PreviewContext";
+import { useUnsavedEdits } from "@/app/shell/useUnsavedEdits";
 import type { ScopedRendererProps } from "@/app/types";
-import { WorkbenchDismissAction } from "@/components/workbench";
-import { FlowgramCanvas } from "@/components/workflow/flowgram-canvas";
-import { FlowgramCanvasToolbar } from "@/components/workflow/flowgram-canvas-toolbar";
+import { WorkbenchIconAction } from "@/components/workbench";
 import {
   buildFlowgramDocument,
   type FlowgramDocument,
@@ -40,113 +31,149 @@ import {
   taskGraphToWireDocument,
 } from "@/components/workflow/flowgram-document";
 import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
+import { useIsMobile } from "@/hooks/use-is-mobile";
+import { type CanvasTools, FlowgramCanvas } from "@/plugins/workflow/flowgram-canvas";
+import { WorkflowActions, type WorkflowMode } from "./WorkflowActions";
+import { CodeSource, DocumentSource } from "./WorkflowSource";
+import { WorkflowTaskList } from "./WorkflowTaskList";
 import { workflowEditPolicy } from "./workflowEditPolicy";
+
+/** The source text of a document workflow: its IR, pretty-printed when it parses. */
+const prettySource = (raw: string | null | undefined, graph: TaskGraphJson | null): string => {
+  if (raw) {
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return raw;
+    }
+  }
+  return graph ? JSON.stringify(taskGraphToWireDocument(graph), null, 2) : "";
+};
+
+const ErrorBand = ({ message, onDismiss }: { message: string; onDismiss: () => void }) => (
+  <div
+    role="alert"
+    className="flex h-7 min-w-0 flex-none items-center gap-2 border-b border-status-failed/30 bg-status-failed-soft pr-2 pl-6 text-label text-status-failed-foreground"
+  >
+    <CircleX aria-hidden className="size-icon-sm shrink-0" />
+    <span className="min-w-0 flex-1 truncate" title={message}>
+      {message}
+    </span>
+    <WorkbenchIconAction label="Dismiss error" onClick={onDismiss}>
+      <X aria-hidden />
+    </WorkbenchIconAction>
+  </div>
+);
 
 export const WorkflowGraphViewer = ({
   selection,
   snapshot,
   onRefresh,
 }: ScopedRendererProps<"experiments" | "runs" | "workflows" | "workspaces">): JSX.Element => {
-  const { inspectTask } = useInspectedTask();
+  const preview = usePreview();
   const workflow = snapshot.workflows.find((item) => item.id === selection.objectId) ?? null;
+  const experiment = workflow
+    ? (snapshot.experiments.find((item) => item.id === workflow.experimentId) ?? null)
+    : null;
 
+  const phone = useIsMobile();
+  const [chosen, setMode] = useState<WorkflowMode | null>(null);
+  // Phones open on the task list; Source is a desktop view.
+  const mode: WorkflowMode = chosen ?? (phone ? "list" : "graph");
   const [savedGraph, setSavedGraph] = useState<TaskGraphJson | null>(null);
   const [draft, setDraft] = useState<FlowgramDocument | null>(null);
+  const [sourceDraft, setSourceDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [tools, setTools] = useState<CanvasTools | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Bumped on save/discard to force the canvas to re-initialize from the
-  // authoritative document (flowgram only reads `initialData` on mount).
+  // Bumped on save/discard to re-initialise the canvas (flowgram reads initialData on mount).
   const [revision, setRevision] = useState(0);
 
-  const dirty = draft !== null;
-
-  // Reset edit state whenever the selected workflow changes. objectId is a
-  // trigger, not a read — biome's exhaustive-deps can't see that and would
-  // strip it, which would leave stale edits when switching workflows.
   // biome-ignore lint/correctness/useExhaustiveDependencies: objectId is a reset trigger
   useEffect(() => {
     setSavedGraph(null);
     setDraft(null);
+    setSourceDraft(null);
     setError(null);
   }, [selection.objectId]);
 
-  // Prefer the freshly-saved graph, else the snapshot's IR.
+  const dirty = draft !== null || sourceDraft !== null;
+
   const graph = savedGraph ?? workflow?.graph ?? null;
   const document = useMemo<FlowgramDocument | null>(
     () => (graph ? buildFlowgramDocument(graph) : null),
     [graph],
   );
+  const sourceText = useMemo(
+    () =>
+      savedGraph
+        ? prettySource(null, savedGraph)
+        : prettySource(experiment?.workflowSource, workflow?.graph ?? null),
+    [savedGraph, experiment?.workflowSource, workflow?.graph],
+  );
+
+  const persist = useCallback(
+    async (wire: Record<string, unknown>): Promise<void> => {
+      if (!workflow) return;
+      const persisted = await workflowApi.save(workflow.projectId, workflow.experimentId, wire);
+      setSavedGraph(normalizeTaskGraph(persisted));
+      setDraft(null);
+      setSourceDraft(null);
+      setRevision((value) => value + 1);
+      onRefresh();
+    },
+    [workflow, onRefresh],
+  );
 
   const handleSave = useCallback(async (): Promise<void> => {
-    if (!workflow || !draft) return;
+    if (!workflow || !dirty) return;
+    let wire: Record<string, unknown>;
+    if (sourceDraft !== null) {
+      try {
+        wire = JSON.parse(sourceDraft) as Record<string, unknown>;
+      } catch (parseError) {
+        setError(
+          `Couldn't save: the source is not valid JSON (${parseError instanceof Error ? parseError.message : "parse error"})`,
+        );
+        return;
+      }
+    } else if (draft) {
+      try {
+        wire = taskGraphToWireDocument(
+          flowgramDocToTaskGraphJson(draft, workflow.name ?? "Workflow"),
+        );
+      } catch (convertError) {
+        setError(
+          `Couldn't save: the edited graph could not be read back (${convertError instanceof Error ? convertError.message : "unknown error"})`,
+        );
+        return;
+      }
+    } else {
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      const wire = taskGraphToWireDocument(
-        flowgramDocToTaskGraphJson(draft, workflow.name ?? "Workflow"),
-      );
-      const persisted = await workflowApi.save(workflow.projectId, workflow.experimentId, wire);
-      // Reload from the server-normalized document so the canvas reflects
-      // exactly what was persisted, and remount it to drop the stale draft.
-      setSavedGraph(normalizeTaskGraph(persisted));
-      setDraft(null);
-      setRevision((r) => r + 1);
-      onRefresh();
-    } catch (err) {
-      // Keep `draft` so the user can fix and retry — never silently lose edits.
+      await persist(wire);
+    } catch (saveError) {
+      // Keep the draft so the user can fix and retry — never silently lose edits.
       setError(
-        err instanceof Error
-          ? `Couldn't save workflow: ${err.message}`
-          : "Couldn't save workflow. Check your connection and try again.",
+        saveError instanceof Error
+          ? `Couldn't save: ${saveError.message}`
+          : "Couldn't save the workflow. Check your connection and try again.",
       );
     } finally {
       setSaving(false);
     }
-  }, [workflow, draft, onRefresh]);
+  }, [workflow, dirty, sourceDraft, draft, persist]);
 
-  const handleDiscard = useCallback((): void => {
-    setDraft(null);
-    setError(null);
-    setRevision((r) => r + 1);
-  }, []);
-
-  // ⌘S / Ctrl+S saves when there are unsaved edits.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-        if (!dirty || saving) return;
-        event.preventDefault();
-        void handleSave();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [dirty, saving, handleSave]);
-
-  // Warn before a full-page unload (refresh / close / external nav) while dirty.
-  useEffect(() => {
-    if (!dirty) return;
-    const onBeforeUnload = (event: BeforeUnloadEvent): void => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [dirty]);
-
-  // Intercept in-app navigation (e.g. selecting another workflow) while dirty so
-  // edits aren't silently dropped. Requires the data router (see index.tsx).
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      dirty && currentLocation.pathname !== nextLocation.pathname,
-  );
-
-  // If the edits get saved/discarded while a block is pending, let nav through.
-  useEffect(() => {
-    if (blocker.state === "blocked" && !dirty) {
-      blocker.reset?.();
-    }
-  }, [blocker, dirty]);
+  const leaveDialog = useUnsavedEdits({
+    dirty,
+    saving,
+    onSave: () => void handleSave(),
+    subject: `the ${experiment?.name ?? workflow?.name ?? ""} workflow`,
+    markPath: experiment ? experimentPath(experiment.projectId, experiment.id) : null,
+  });
 
   if (!workflow) {
     return (
@@ -156,89 +183,95 @@ export const WorkflowGraphViewer = ({
     );
   }
 
-  const experiment = snapshot.experiments.find((item) => item.id === workflow.experimentId) ?? null;
   const policy = workflowEditPolicy(experiment?.workflowKind);
   const readOnly = policy.mode === "convert";
+  const code = experiment?.workflowKind === "code";
+  const codePath =
+    experiment?.workflowFile || (experiment?.workflowEntrypoint ?? "").split(":")[0] || "";
   const isEmpty = !document || document.nodes.length === 0;
+
+  // No toolbar row (retrofit R7 / R8): the view's icons go to the tab row; ⌘S saves.
+  const toolbar = (canvasTools: CanvasTools | null): ReactNode => (
+    <>
+      <WorkflowActions
+        readOnly={readOnly}
+        phone={phone}
+        mode={mode}
+        onModeChange={setMode}
+        tools={canvasTools}
+        dirty={dirty}
+        saving={saving}
+        onSave={() => void handleSave()}
+      />
+      {error ? <ErrorBand message={error} onDismiss={() => setError(null)} /> : null}
+    </>
+  );
+
+  const previewTask = (taskId: string): void => {
+    if (!experiment) return;
+    preview.preview({
+      kind: "node",
+      projectId: experiment.projectId,
+      experimentId: experiment.id,
+      taskId,
+    });
+  };
+
+  const body =
+    mode === "list" && graph ? (
+      <div className="flex h-full min-h-0 flex-col">
+        {toolbar(null)}
+        <div className="min-h-0 flex-1">
+          <WorkflowTaskList graph={graph} onPreview={previewTask} />
+        </div>
+      </div>
+    ) : mode === "source" ? (
+      <div className="flex h-full min-h-0 flex-col">
+        {toolbar(null)}
+        <div className="min-h-0 flex-1">
+          {code ? (
+            <CodeSource path={codePath} />
+          ) : (
+            <DocumentSource
+              key={`${workflow.id}:${revision}`}
+              text={sourceDraft ?? sourceText}
+              readOnly={readOnly}
+              onChange={(next) => setSourceDraft(next === sourceText ? null : next)}
+            />
+          )}
+        </div>
+      </div>
+    ) : isEmpty ? (
+      <div className="flex h-full min-h-0 flex-col">
+        {toolbar(null)}
+        <div className="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center">
+          <p className="text-body text-foreground">No tasks in this workflow yet</p>
+          <p className="max-w-sm text-label text-muted-foreground">
+            Its graph is empty or has not been compiled. Source shows the definition.
+          </p>
+        </div>
+      </div>
+    ) : (
+      <div className="flex h-full min-h-0 flex-col">
+        {toolbar(tools)}
+        <div className="min-h-0 flex-1">
+          <FlowgramCanvas
+            key={`${workflow.id}:${revision}:${readOnly ? "ro" : "rw"}`}
+            document={document ?? { nodes: [], edges: [] }}
+            editable={!readOnly && sourceDraft === null}
+            definition
+            onTools={setTools}
+            onChange={setDraft}
+            onNodeClick={previewTask}
+          />
+        </div>
+      </div>
+    );
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="relative min-h-0 w-full flex-1">
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-50 flex flex-col gap-2 px-3 py-3">
-          <div className="flex items-start justify-end gap-2">
-            <div className="pointer-events-auto flex items-center rounded-control border border-border bg-background/90 px-1 py-1">
-              <FlowgramCanvasToolbar
-                onSave={handleSave}
-                onDiscard={handleDiscard}
-                saving={saving}
-                dirty={dirty}
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div
-              role="alert"
-              className="pointer-events-auto flex items-start justify-between gap-3 rounded-control border border-status-failed/30 bg-status-failed-soft px-3 py-2 text-body text-status-failed-foreground"
-            >
-              <span>{error}</span>
-              <WorkbenchDismissAction
-                label="Dismiss error"
-                onClick={() => setError(null)}
-                className="-mr-1 size-6 shrink-0 text-status-failed-foreground/80 hover:text-status-failed-foreground"
-              />
-            </div>
-          )}
-        </div>
-
-        {isEmpty && policy.mode !== "convert" ? (
-          <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
-            <p className="text-body font-medium text-foreground">No tasks in this workflow yet</p>
-            <p className="max-w-sm text-label text-muted-foreground">
-              Its graph is empty or hasn&apos;t been compiled. Open the Source tab to view or edit
-              the workflow definition.
-            </p>
-          </div>
-        ) : readOnly ? (
-          <FlowgramCanvas
-            key={`${workflow.id}:${revision}:ro`}
-            document={document ?? { nodes: [], edges: [] }}
-            editable={false}
-            onChange={setDraft}
-            onNodeClick={(taskId) => inspectTask(taskId, "")}
-          />
-        ) : (
-          <FlowgramCanvas
-            key={`${workflow.id}:${revision}`}
-            document={document ?? { nodes: [], edges: [] }}
-            editable
-            onChange={setDraft}
-            onNodeClick={(taskId) => inspectTask(taskId, "")}
-          />
-        )}
-      </div>
-
-      <AlertDialog
-        open={blocker.state === "blocked"}
-        onOpenChange={(open) => {
-          if (!open) blocker.reset?.();
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Leave with unsaved changes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Your edits to this workflow graph haven&apos;t been saved. Leaving now discards them.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => blocker.reset?.()}>Stay</AlertDialogCancel>
-            <AlertDialogAction intent="danger" onClick={() => blocker.proceed?.()}>
-              Leave
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {body}
+      {leaveDialog}
     </div>
   );
 };

@@ -1,19 +1,20 @@
 import { SelectionPanel } from "@/app/compare";
 import { NavigationExplorerHost } from "@/app/navigation/NavigationExplorerHost";
-import { NavigationRail } from "@/app/navigation/NavigationRail";
 import { getNavigationContribution } from "@/app/navigation/sections";
 import type { LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
 import { ExplorerDock } from "@/components/layout/ExplorerShell";
 import { useWorkbenchGeneration } from "@/plugins/contributions/workbench";
 
-const DOCK = { id: "molab-explorer-dock", autoSaveId: "molab.explorerDock.v2" } as const;
+const DOCK = { id: "molab-pinned-dock", autoSaveId: "molab.shell.v3.pinned" } as const;
 
 interface LeftPanelProps {
   view: LeftPanelView;
   selection: Selection | null;
   snapshot: WorkspaceSnapshot;
   searchQuery?: string;
-  onViewChange: (view: LeftPanelView) => void;
+  /** Pinned (the compare selection) is collapsed by default (L00). */
+  pinnedExpanded: boolean;
+  onTogglePinned: () => void;
   onSelect: (selection: Selection) => void;
   onOpenWorkspace: (path: string, options?: { createIfMissing?: boolean }) => Promise<void>;
   onCreateDirectory: (path: string) => void;
@@ -27,25 +28,13 @@ interface LeftPanelProps {
   dataEpoch?: number;
 }
 
-/** Navigation adapter. Each feature owns its explorer, queries, and dialogs. */
-export const LeftPanel = ({
-  view,
-  selection,
-  snapshot,
-  onViewChange,
-  onSelect,
-  onOpenWorkspace,
-  onCreateDirectory,
-  onCreateFile,
-  onRefresh,
-  onExpandDirectory,
-  onExpandProject,
-  onExpandExperiment,
-  isProjectExpanded,
-  isExperimentExpanded,
-  dataEpoch = 0,
-  searchQuery = "",
-}: LeftPanelProps): JSX.Element => {
+/**
+ * The side bar (L00): the active section's explorer over the **Pinned**
+ * section. The activity bar is the shell's, outside this column. Each feature
+ * owns its explorer, queries, and dialogs.
+ */
+export const LeftPanel = (props: LeftPanelProps): JSX.Element => {
+  const { view, snapshot, pinnedExpanded, onTogglePinned, dataEpoch = 0 } = props;
   useWorkbenchGeneration();
   const contribution = getNavigationContribution(view);
   const explorerHost = (
@@ -53,46 +42,48 @@ export const LeftPanel = ({
       contribution={contribution}
       explorerProps={{
         snapshot,
-        selection,
-        searchQuery,
-        onSelect,
-        onRefresh,
+        selection: props.selection,
+        searchQuery: props.searchQuery ?? "",
+        onSelect: props.onSelect,
+        onRefresh: props.onRefresh,
         fileSystem: {
-          onOpenWorkspace,
-          onCreateDirectory,
-          onCreateFile,
-          onExpandDirectory,
+          onOpenWorkspace: props.onOpenWorkspace,
+          onCreateDirectory: props.onCreateDirectory,
+          onCreateFile: props.onCreateFile,
+          onExpandDirectory: props.onExpandDirectory,
           dataEpoch,
         },
         projectTree: {
-          onExpandProject,
-          onExpandExperiment,
-          isProjectExpanded,
-          isExperimentExpanded,
+          onExpandProject: props.onExpandProject,
+          onExpandExperiment: props.onExpandExperiment,
+          isProjectExpanded: props.isProjectExpanded,
+          isExperimentExpanded: props.isExperimentExpanded,
           dataEpoch,
         },
       }}
     />
   );
 
+  // The comparison belongs to the side bar, not to one explorer: runs are
+  // gathered from Projects and Files as readily as from the Runs table.
+  const pinned = (
+    <SelectionPanel snapshot={snapshot} expanded={pinnedExpanded} onToggle={onTogglePinned} />
+  );
+
   return (
-    <div className="flex h-full min-h-0">
-      <NavigationRail
-        activeId={view}
-        scopeKind={snapshot.serveScope?.kind}
-        snapshot={snapshot}
-        onSelect={onViewChange}
-      />
-      {/* The comparison belongs to the panel, not to one explorer: runs are gathered
-          from Projects and Files as readily as from the Runs table, and a staging
-          area that disappears with its section cannot span two projects. */}
-      {contribution.shellMode === "explorer" ? (
-        <ExplorerDock {...DOCK} dock={<SelectionPanel snapshot={snapshot} />}>
+    <aside
+      aria-label="Side bar"
+      className="flex h-full min-h-0 flex-col bg-surface-subtle"
+      data-shell-region="sidebar"
+    >
+      {contribution.shellMode !== "explorer" ? (
+        explorerHost
+      ) : (
+        // One structure either way: folding Pinned must not remount the tree.
+        <ExplorerDock {...DOCK} dock={pinned} collapsed={!pinnedExpanded}>
           {explorerHost}
         </ExplorerDock>
-      ) : (
-        explorerHost
       )}
-    </div>
+    </aside>
   );
 };

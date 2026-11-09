@@ -1,30 +1,13 @@
 import { Suspense } from "react";
 import { LazySurface } from "@/app/layout/LazySurface";
 import { SurfaceErrorBoundary } from "@/app/layout/SurfaceErrorBoundary";
-import {
-  getNavigationContribution,
-  type NavigationEmptySelection,
-} from "@/app/navigation/sections";
-import type { InspectorSurfaceRegistration } from "@/app/panels/inspectorSurface";
+import { getNavigationContribution } from "@/app/navigation/sections";
 import { resolveRenderersForSelection } from "@/app/registry";
+import { Watermark } from "@/app/shell/Watermark";
 import type { InspectorTarget, LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
 import { WorkbenchOperationState, WorkbenchRetryAction } from "@/components/workbench";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { usePluginPreferencesGeneration } from "@/plugins/preferences";
-
-const DEFAULT_EMPTY_SELECTION_COPY: NavigationEmptySelection = {
-  title: "Select an item to begin",
-  description: "Choose an item from the explorer to open its workspace.",
-};
-
-const EmptySelectionPlaceholder = ({ copy }: { copy?: NavigationEmptySelection }): JSX.Element => {
-  const content = copy ?? DEFAULT_EMPTY_SELECTION_COPY;
-  return (
-    <div className="flex h-full items-center justify-center p-6">
-      <WorkbenchOperationState kind="empty" title={content.title} detail={content.description} />
-    </div>
-  );
-};
 
 interface CenterPanelProps {
   selection: Selection | null;
@@ -33,7 +16,6 @@ interface CenterPanelProps {
   inspectorTarget: InspectorTarget;
 
   onInspectorTargetChange: (target: InspectorTarget) => void;
-  onInspectorChange: (registration: InspectorSurfaceRegistration | null) => void;
   onRefresh: () => void;
 }
 
@@ -43,7 +25,6 @@ export const CenterPanel = ({
   leftPanelView,
   inspectorTarget,
   onInspectorTargetChange,
-  onInspectorChange,
   onRefresh,
 }: CenterPanelProps): JSX.Element => {
   // Plugin enable flags gate contributions — re-resolve when toggled.
@@ -81,16 +62,13 @@ export const CenterPanel = ({
               </div>
             }
           >
-            <Landing
-              snapshot={snapshot}
-              onRefresh={onRefresh}
-              onInspectorChange={onInspectorChange}
-            />
+            <Landing snapshot={snapshot} onRefresh={onRefresh} />
           </Suspense>
         </SurfaceErrorBoundary>
       );
     }
-    return <EmptySelectionPlaceholder copy={navigation?.emptySelection} />;
+    // Nothing open (L00): the editor watermark, not a per-section placeholder.
+    return <Watermark />;
   }
 
   const renderers = resolveRenderersForSelection(selection, snapshot, "center");

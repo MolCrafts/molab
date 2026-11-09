@@ -39,7 +39,7 @@ export interface OutlineHeading {
 }
 
 export const KB_GROUP_ID = "group:knowledge-base";
-const KB_GROUP_NAME = "Knowledge base";
+const KB_GROUP_NAME = "Workspace";
 
 /**
  * Group documents by `hostPath`. The workspace root (`""`) is the knowledge-base

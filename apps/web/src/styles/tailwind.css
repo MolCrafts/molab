@@ -13,8 +13,30 @@
 @source "../../../../node_modules/@molcrafts/ui/dist";
 @source "../../../../../molcrafts-ui/packages/ui/src";
 @source "../../../../../molcrafts-ui/packages/markdown/src";
+/* The plugin SDK's UI (<RunView> and its parts) is styled by the host. */
+@source "../../../plugin/src";
 
 @theme inline {
+  /* Knowledge document page (L10): MkDocs-like reading type. */
+  --text-doc: 0.9375rem;
+  --text-doc--line-height: 1.65;
+  --text-doc-h3: 1rem;
+  --text-doc-h3--line-height: 1.5;
+  --text-doc-h2: 1.375rem;
+  --text-doc-h2--line-height: 1.35;
+  --text-doc-title: 2.125rem;
+  --text-doc-title--line-height: 1.25;
+  --spacing-doc-article: 45rem;
+  --spacing-doc-toc: 13rem;
+  --color-doc-accent: var(--doc-accent);
+  --color-doc-tint: var(--doc-tint);
+  --color-doc-accent-wash: var(--doc-accent-wash);
+  /* Asset kinds (L08): one ink each; tiles wash it into the surface. */
+  --color-asset-structure: var(--asset-structure);
+  --color-asset-table: var(--asset-table);
+  --color-asset-model: var(--asset-model);
+  --color-asset-image: var(--asset-image);
+  --color-asset-text: var(--asset-text);
   /* Workbench surfaces */
   --color-background: var(--molab-background);
   --color-surface: var(--molab-surface);
@@ -34,6 +56,8 @@
   --color-accent: var(--molab-accent);
   --color-accent-hover: var(--molab-accent-hover);
   --color-accent-foreground: var(--molab-accent-foreground);
+  /* Accent as text (links, inline actions): the fill accent is too weak as text in dark. */
+  --color-link: var(--molab-link);
   /* Soft accent wash for list/row selection (light lavender in day mode) */
   --color-accent-muted: var(--molab-accent-muted);
   --color-accent-muted-foreground: var(--molab-accent-muted-foreground);
@@ -103,7 +127,45 @@
 
   --shadow-overlay: var(--molab-shadow-overlay);
 
+  /* Bridge to @molcrafts/ui (DS v1.4 §8.1): the shared components name these
+     roles; molab never shipped them, so hover / pressed / disabled states and
+     the tooltip surface silently rendered as nothing. One home: the molab
+     palette below. */
+  --shadow-popup: var(--molab-shadow-overlay);
+  --color-primary-hover: var(--molab-accent-hover);
+  --color-primary-pressed: var(--molab-accent-hover);
+  --color-primary-link: var(--molab-link);
+  --color-primary-link-hover: var(--molab-link);
+  --color-primary-muted: var(--molab-accent-muted);
+  --color-primary-muted-foreground: var(--molab-accent-muted-foreground);
+  --color-interactive-pressed: color-mix(in oklab, var(--molab-interactive), var(--molab-foreground) 10%);
+  --color-input-hover: color-mix(in oklab, var(--molab-input), var(--molab-foreground) 25%);
+  --color-disabled-background: var(--molab-muted);
+  --color-disabled-border: var(--molab-border);
+  --color-disabled-foreground: color-mix(in oklab, var(--molab-foreground) 40%, transparent);
+  --color-neutral: var(--molab-muted);
+  --color-neutral-foreground: var(--molab-foreground);
+  --color-tooltip-background: var(--molab-surface);
+  --color-tooltip-foreground: var(--molab-foreground);
+
   /* Product workbench geometry (constitution owns control/toolbar/dialog-sm…). */
+
+  /* ── Shell (L00, DS v1.4): VS Code density for the frame around the work.
+     Product chrome, not control geometry — the constitution's bands stay. ── */
+  --spacing-shell-titlebar: 2.1875rem; /* 35 — the window band */
+  --spacing-shell-tabs: 2.1875rem; /* 35 — editor tab row */
+  --spacing-shell-crumbs: 1.375rem; /* 22 — breadcrumb row */
+  --spacing-shell-status: 1.375rem; /* 22 — status bar */
+  --spacing-shell-row: 1.75rem; /* 28 — side-bar row and section header (owner, 2026-11-07: 22 read too compact) */
+  --spacing-shell-action: 1.375rem; /* 22 — icon action in chrome */
+  --spacing-shell-button: 1.625rem; /* 26 — text button (VS Code) */
+  --spacing-shell-sidebar: 15.5rem; /* 248 — side bar default width */
+  --spacing-shell-tab-max: 15rem; /* 240 — longest editor tab before it truncates */
+  --spacing-shell-preview: 25rem; /* 400 — the Preview overlay (L12) */
+  --spacing-shell-preview-narrow: 22.5rem; /* 360 — the Preview at 768–1023 */
+  --spacing-shell-kv-label: 5.75rem; /* 92 — key column of a Preview key list */
+  --spacing-quick-input: 37.5rem; /* 600 — quick input, Go to, Commands (L13) */
+  --radius-action: 0.3125rem; /* 5 — icon action hover wash */
 
   --spacing-field-label: 7.5rem;
   --spacing-inspector: 19rem;
@@ -158,8 +220,9 @@
     --molab-canvas: #ffffff;
     --molab-muted: #eeeeee;
     --molab-foreground: #242424;
-    --molab-muted-foreground: #616161;
-    --molab-subtle-foreground: #6b6b6b;
+    --molab-muted-foreground: #5c5c5c;
+    /* Tertiary text is an alias of secondary (DS v1.4: ≥4.5:1 on every surface). */
+    --molab-subtle-foreground: var(--molab-muted-foreground);
     --molab-border: #e5e5e5;
     --molab-input: #cecece;
     --molab-overlay-scrim: oklch(0.12 0.01 255 / 50%);
@@ -167,13 +230,36 @@
     --molab-accent: #005fb8;
     --molab-accent-hover: #004f9a;
     --molab-accent-foreground: #ffffff;
-    --molab-accent-muted: #e8f1fb;
-    --molab-accent-muted-foreground: #004f9a;
+    --molab-link: #005fb8;
+    /* The one selection wash; a selected name keeps the text colour. */
+    --molab-accent-muted: #d3e0f5;
+    --molab-accent-muted-foreground: var(--molab-foreground);
     --molab-interactive: #e8e8e8;
     --molab-interactive-foreground: var(--molab-foreground);
     --molab-on-fill: #ffffff;
     --molab-statusbar: #f3f3f3;
     --molab-statusbar-foreground: var(--molab-foreground);
+
+    /* Knowledge classes (L10): one accent each. A document page's tint is its
+       accent washed into the surface. No class is red. */
+    --knowledge-note: #5f6368;
+    --knowledge-literature: #8a6a2f;
+    --knowledge-report: #66781f;
+    --knowledge-finding: #2e7d4f;
+    --knowledge-observation: #1f7a8c;
+    --knowledge-plan: #2f62b5;
+    --knowledge-roadmap: #5a4fb0;
+    --knowledge-todo: #9a7413;
+    --knowledge-milestone: #93408f;
+    --knowledge-delegation: #4b5563;
+    --knowledge-tint-share: 5%;
+
+    /* Asset kinds (L08). No kind is red. */
+    --asset-structure: #0f766e;
+    --asset-table: #2e7d32;
+    --asset-model: #6d28d9;
+    --asset-image: #b45309;
+    --asset-text: #5f6670;
 
     /* Soft status washes on product surface (base roles from constitution). */
     --constitution-surface: var(--molab-surface);
@@ -254,22 +340,39 @@
 
     --molab-background: #1f1f1f;
     --molab-surface: #1f1f1f;
+    --knowledge-note: #a8adb3;
+    --knowledge-literature: #d1b27a;
+    --knowledge-report: #b4c46a;
+    --knowledge-finding: #7cc79b;
+    --knowledge-observation: #6cc3d3;
+    --knowledge-plan: #8fb0ec;
+    --knowledge-roadmap: #ada4ee;
+    --knowledge-todo: #e0c06a;
+    --knowledge-milestone: #d99ad5;
+    --knowledge-delegation: #a3acb9;
+    --knowledge-tint-share: 7%;
+    --asset-structure: #5cc4b8;
+    --asset-table: #7cc77f;
+    --asset-model: #b49cf2;
+    --asset-image: #e0a45c;
+    --asset-text: #a8adb3;
     --molab-surface-subtle: #181818;
     --molab-canvas: #1f1f1f;
     --molab-muted: #292929;
     --molab-foreground: #cccccc;
-    --molab-muted-foreground: #a6a6a6;
-    --molab-subtle-foreground: #999999;
+    --molab-muted-foreground: #ababab;
+    --molab-subtle-foreground: var(--molab-muted-foreground);
     --molab-border: oklch(1 0 0 / 10%);
     --molab-input: oklch(1 0 0 / 12%);
     --molab-overlay-scrim: oklch(0.04 0.01 255 / 66%);
 
-    --molab-accent: #60a5fa;
-    --molab-accent-hover: #93c5fd;
-    --molab-accent-foreground: #0f172a;
-    --molab-accent-muted: #172554;
-    --molab-accent-muted-foreground: #dbeafe;
-    --molab-interactive: #303030;
+    --molab-accent: #0078d4;
+    --molab-accent-hover: #026ec1;
+    --molab-accent-foreground: #ffffff;
+    --molab-link: #3794ff;
+    --molab-accent-muted: #37373d;
+    --molab-accent-muted-foreground: var(--molab-foreground);
+    --molab-interactive: #2a2d2e;
     --molab-interactive-foreground: var(--molab-foreground);
     --molab-on-fill: oklch(0.985 0.003 255);
     --molab-statusbar: #181818;
@@ -405,20 +508,32 @@
  * Workflow-canvas edges (flowgram free-layout). Shape carries node type;
  * colour carries STATUS only — never product accent.
  */
-.molab-edge-success stop {
+.molab-edge-completed stop {
   stop-color: var(--status-completed) !important;
 }
 .molab-edge-failed stop {
   stop-color: var(--status-failed) !important;
 }
-.molab-edge-pending stop {
-  stop-color: var(--status-draft) !important;
-}
-.molab-edge-skipped stop {
-  stop-color: var(--status-cancelled) !important;
+.molab-edge-warning stop {
+  stop-color: var(--status-warning) !important;
 }
 .molab-edge-running stop {
   stop-color: var(--status-running) !important;
+}
+.molab-edge-queued stop {
+  stop-color: var(--status-queued) !important;
+}
+.molab-edge-ready stop {
+  stop-color: var(--status-ready) !important;
+}
+.molab-edge-cancelled stop {
+  stop-color: var(--status-cancelled) !important;
+}
+.molab-edge-cached stop {
+  stop-color: var(--status-cached) !important;
+}
+.molab-edge-draft stop {
+  stop-color: var(--status-draft) !important;
 }
 
 .molab-edge-running .flowing-line {
@@ -445,6 +560,18 @@
   transition-duration: var(--motion-base) !important;
   transition-timing-function: var(--motion-ease) !important;
   transition-delay: 0s !important;
+}
+
+/*
+ * A workflow definition (L06) carries no status: ports are outlines, not the
+ * engine's filled accent dots.
+ */
+.molab-definition .workflow-port-render .bg {
+  background-color: var(--molab-background) !important;
+  box-shadow: inset 0 0 0 1px var(--molab-muted-foreground) !important;
+}
+.molab-definition .workflow-port-render .bg-circle {
+  background-color: transparent !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -770,4 +897,99 @@
   .mol-status-progress-indeterminate {
     animation: mol-status-progress-indeterminate 1.6s linear infinite !important;
   }
+}
+
+/*
+ * A knowledge document page (L10). `data-class` picks the accent; the page
+ * tint, tag pills, the active "On this page" item, list bullets and the tab
+ * underline all derive from it.
+ */
+.knowledge-doc {
+  --doc-accent: var(--knowledge-note);
+  --doc-tint: color-mix(in oklab, var(--doc-accent) var(--knowledge-tint-share), var(--molab-surface));
+  --doc-accent-wash: color-mix(in oklab, var(--doc-accent) 12%, var(--molab-surface));
+  background: var(--doc-tint);
+}
+.knowledge-doc[data-class="literature"] { --doc-accent: var(--knowledge-literature); }
+.knowledge-doc[data-class="report"] { --doc-accent: var(--knowledge-report); }
+.knowledge-doc[data-class="finding"] { --doc-accent: var(--knowledge-finding); }
+.knowledge-doc[data-class="observation"] { --doc-accent: var(--knowledge-observation); }
+.knowledge-doc[data-class="plan"] { --doc-accent: var(--knowledge-plan); }
+.knowledge-doc[data-class="roadmap"] { --doc-accent: var(--knowledge-roadmap); }
+.knowledge-doc[data-class="todo"] { --doc-accent: var(--knowledge-todo); }
+.knowledge-doc[data-class="milestone"] { --doc-accent: var(--knowledge-milestone); }
+.knowledge-doc[data-class="delegation"] { --doc-accent: var(--knowledge-delegation); }
+
+/* MkDocs-style admonition: a left rule in the type's colour, a washed title bar. */
+.doc-admonition {
+  --adm: var(--molab-accent);
+  border-left: 4px solid var(--adm);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--adm) 18%, transparent);
+}
+.doc-admonition > .doc-admonition-title {
+  background: color-mix(in oklab, var(--adm) 10%, var(--molab-surface));
+}
+.doc-admonition[data-type="abstract"],
+.doc-admonition[data-type="summary"] { --adm: var(--knowledge-observation); }
+.doc-admonition[data-type="info"] { --adm: var(--status-running); }
+.doc-admonition[data-type="tip"],
+.doc-admonition[data-type="hint"] { --adm: var(--knowledge-finding); }
+.doc-admonition[data-type="success"],
+.doc-admonition[data-type="check"],
+.doc-admonition[data-type="done"] { --adm: var(--status-completed); }
+.doc-admonition[data-type="question"] { --adm: var(--knowledge-roadmap); }
+.doc-admonition[data-type="warning"],
+.doc-admonition[data-type="caution"],
+.doc-admonition[data-type="attention"] { --adm: var(--status-warning); }
+.doc-admonition[data-type="failure"],
+.doc-admonition[data-type="fail"],
+.doc-admonition[data-type="danger"],
+.doc-admonition[data-type="error"],
+.doc-admonition[data-type="bug"] { --adm: var(--status-failed); }
+.doc-admonition[data-type="example"] { --adm: var(--knowledge-milestone); }
+.doc-admonition[data-type="quote"],
+.doc-admonition[data-type="cite"] { --adm: var(--molab-muted-foreground); }
+
+/*
+ * A prose block being edited (L10) reads like the page it sits in: Crepe's
+ * frame theme (serif titles, a 120px gutter) is replaced by the page's type.
+ * The 40px left keeps room for Crepe's block handle (+ ⠿).
+ */
+.doc-inline-editor .milkdown {
+  --crepe-font-title: var(--font-sans);
+  --crepe-font-default: var(--font-sans);
+  --crepe-font-code: var(--font-mono);
+  --crepe-base-font-size: var(--text-doc);
+  --crepe-color-background: var(--molab-surface);
+  --crepe-color-on-background: var(--molab-foreground);
+  --crepe-color-surface: var(--molab-surface);
+  --crepe-color-primary: var(--molab-accent);
+}
+.doc-inline-editor .milkdown .ProseMirror {
+  padding: 8px 4px 8px 40px;
+}
+.doc-inline-editor .milkdown .ProseMirror h1 {
+  font-size: var(--text-doc-title);
+  line-height: var(--text-doc-title--line-height);
+  font-weight: 300;
+}
+.doc-inline-editor .milkdown .ProseMirror h2 {
+  font-size: var(--text-doc-h2);
+  line-height: var(--text-doc-h2--line-height);
+  font-weight: 400;
+}
+.doc-inline-editor .milkdown .ProseMirror h3 {
+  font-size: var(--text-doc-h3);
+  line-height: var(--text-doc-h3--line-height);
+  font-weight: 600;
+}
+.doc-inline-editor .milkdown .ProseMirror p,
+.doc-inline-editor .milkdown .ProseMirror li {
+  line-height: var(--text-doc--line-height);
+}
+/* Crepe fills its menu icons; the "/" components use stroke icons (lucide). */
+.milkdown .doc-slash-icon,
+.milkdown .doc-slash-icon * {
+  fill: none !important;
+  stroke: currentColor;
 }

@@ -10,12 +10,12 @@
 
 import type { ChartTheme, VegaLiteSpec } from "@molcrafts/ui-vega-lite";
 
-import type { StatusGroupId } from "@/app/runs/statusGroups";
+import type { ChartGroupId } from "@/app/status/vocabulary";
 
 import { INSTRUMENT_MONO } from "../../instruments";
 
 export interface OverviewPalette {
-  status: Record<StatusGroupId, string>;
+  status: Record<ChartGroupId, string>;
   accent: string;
   ink: string;
   muted: string;
@@ -26,7 +26,7 @@ export interface OverviewPalette {
 
 export const paletteOf = (
   theme: ChartTheme,
-  status: Record<StatusGroupId, string>,
+  status: Record<ChartGroupId, string>,
   read: (name: string, fallback: string) => string,
 ): OverviewPalette => ({
   status,

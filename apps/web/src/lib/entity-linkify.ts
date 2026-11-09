@@ -1,6 +1,7 @@
 /** Index of server `ref` strings for in-app markdown links. */
 
 import { experimentPath, projectPath, runPath } from "@/app/entities/paths";
+import { runLabel } from "@/app/runs/runTitle";
 import type { AssetSummary, ExperimentSummary, ProjectSummary, RunSummary } from "@/app/types";
 import type { MolabRefTarget } from "@/lib/molab-ref";
 
@@ -31,7 +32,7 @@ export const buildMolabRefIndex = (snapshot: {
     if (!run.ref) continue;
     index.set(run.ref, {
       kind: "run",
-      label: run.name,
+      label: runLabel(run),
       path: runPath(run.projectId, run.experimentId, run.id),
     });
   }

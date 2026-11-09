@@ -1,16 +1,11 @@
-import { WorkbenchIconAction } from "@/components/workbench";
 /**
- * Settings → Users — admin-only filesystem user management.
- * Data via TanStack Query (list + mutations); chrome via shared SettingsSection.
+ * Settings › Users (L11, admin only): each account is a setting — its name
+ * (You for the signed-in one, Disabled when it is), "workspaces" as the
+ * description, and the role and Remove under it. Adding is the last setting.
  */
 
 import {
-  Badge,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+  Button,
   Input,
   Label,
   Select,
@@ -18,271 +13,283 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
 } from "@molcrafts/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Plus, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { type JSX, useState } from "react";
 import { useAuth } from "@/app/auth/AuthContext";
 import * as authApi from "@/app/auth/api";
-import { DeniedHint } from "@/app/auth/DeniedHint";
 import { authKeys } from "@/app/auth/keys";
 import type { AuthRole, AuthUser } from "@/app/auth/types";
 import { usePermissions } from "@/app/auth/usePermissions";
-import { SettingsSection } from "@/components/settings";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { AppDialog } from "@/components/dialog/AppDialog";
+import { SettingActions, SettingItem, SettingTag } from "@/components/settings";
+import type { SettingEntry } from "./settingsModel";
 
 const ROLES: AuthRole[] = ["admin", "operator", "viewer"];
 
-export function UsersSection({ sectionId = "users" }: { sectionId?: string }): JSX.Element {
+const AddUser = ({ category }: { category?: string }): JSX.Element => {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<AuthRole>("operator");
+  const [workspaces, setWorkspaces] = useState("*");
+  const [error, setError] = useState<string | null>(null);
+  const create = useMutation({
+    mutationFn: authApi.createUser,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: authKeys.users() });
+      setOpen(false);
+      setUsername("");
+      setPassword("");
+      setRole("operator");
+      setWorkspaces("*");
+      setError(null);
+    },
+    onError: (cause: Error) => setError(cause.message),
+  });
+  return (
+    <SettingItem
+      id="users-add"
+      category={category}
+      title="Add a user"
+      description="A filesystem account for this serve process."
+    >
+      <SettingActions>
+        <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+          Add user
+        </Button>
+      </SettingActions>
+      <AppDialog
+        open={open}
+        onOpenChange={setOpen}
+        title="Add user"
+        size="wide"
+        primaryLabel="Add user"
+        busyLabel="Adding…"
+        busy={create.isPending}
+        primaryDisabled={!username.trim() || !password}
+        onPrimary={() => {
+          setError(null);
+          const keys = workspaces
+            .split(",")
+            .map((key) => key.trim())
+            .filter(Boolean);
+          void create.mutateAsync({
+            username: username.trim(),
+            password,
+            role,
+            workspaces: keys.length ? keys : ["*"],
+          });
+        }}
+        error={error}
+      >
+        <div className="grid gap-2">
+          <Label htmlFor="new-username">Username</Label>
+          <Input
+            id="new-username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            autoComplete="off"
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="new-password">Password</Label>
+          <Input
+            id="new-password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="new-password"
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label>Role</Label>
+          <Select value={role} onValueChange={(value) => setRole(value as AuthRole)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ROLES.map((item) => (
+                <SelectItem key={item} value={item}>
+                  {item}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="new-ws">Workspaces</Label>
+          <Input
+            id="new-ws"
+            value={workspaces}
+            onChange={(event) => setWorkspaces(event.target.value)}
+            placeholder="* or key1,key2"
+          />
+          <p className="text-micro text-muted-foreground">
+            Comma-separated served keys, or * for all.
+          </p>
+        </div>
+      </AppDialog>
+    </SettingItem>
+  );
+};
+
+const UserSetting = ({
+  account,
+  self,
+  category,
+  busy,
+  onRole,
+  onRemove,
+}: {
+  account: AuthUser;
+  self: boolean;
+  category?: string;
+  busy: boolean;
+  onRole: (role: AuthRole) => void;
+  onRemove: () => void;
+}): JSX.Element => {
+  const { confirm, dialog } = useConfirm();
+  return (
+    <SettingItem
+      id={`user-${account.username}`}
+      category={category}
+      title={account.username}
+      tag={
+        self ? (
+          <SettingTag>You</SettingTag>
+        ) : account.disabled ? (
+          <SettingTag>Disabled</SettingTag>
+        ) : null
+      }
+      description={
+        <span>
+          Workspaces <span className="font-mono">{account.workspaces.join(", ")}</span>
+        </span>
+      }
+    >
+      <SettingActions>
+        <Select
+          value={account.role}
+          disabled={busy}
+          onValueChange={(role) => onRole(role as AuthRole)}
+        >
+          <SelectTrigger aria-label={`Role of ${account.username}`} className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ROLES.map((role) => (
+              <SelectItem key={role} value={role}>
+                {role}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy || self}
+          title={self ? "You cannot remove yourself" : undefined}
+          onClick={() =>
+            void confirm({
+              title: `Delete user “${account.username}”?`,
+              description: "The account is removed. This cannot be undone.",
+              confirmLabel: "Delete user",
+              destructive: true,
+            }).then((confirmed) => {
+              if (confirmed) onRemove();
+            })
+          }
+        >
+          Remove
+        </Button>
+      </SettingActions>
+      {dialog}
+    </SettingItem>
+  );
+};
+
+export const useUserEntries = (): SettingEntry[] => {
   const { user: me } = useAuth();
   const { usersDeniedReason, canManageUsers } = usePermissions();
   const queryClient = useQueryClient();
-  const [createOpen, setCreateOpen] = useState(false);
-  const [formUser, setFormUser] = useState("");
-  const [formPassword, setFormPassword] = useState("");
-  const [formRole, setFormRole] = useState<AuthRole>("operator");
-  const [formWorkspaces, setFormWorkspaces] = useState("*");
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const usersQuery = useQuery({
+  const users = useQuery({
     queryKey: authKeys.users(),
     queryFn: authApi.fetchUsers,
-    enabled: me?.role === "admin",
+    enabled: canManageUsers && me?.role === "admin",
   });
-
-  const invalidate = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: authKeys.users() });
-  };
-
-  const createMutation = useMutation({
-    mutationFn: authApi.createUser,
-    onSuccess: async () => {
-      await invalidate();
-      setCreateOpen(false);
-      setFormUser("");
-      setFormPassword("");
-      setFormRole("operator");
-      setFormWorkspaces("*");
-      setFormError(null);
-    },
-    onError: (err: Error) => setFormError(err.message),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: authApi.deleteUser,
+  const invalidate = (): Promise<void> =>
+    queryClient.invalidateQueries({ queryKey: authKeys.users() });
+  const remove = useMutation({ mutationFn: authApi.deleteUser, onSuccess: invalidate });
+  const patch = useMutation({
+    mutationFn: ({ username, role }: { username: string; role: AuthRole }) =>
+      authApi.patchUser(username, { role }),
     onSuccess: invalidate,
   });
-
-  const patchMutation = useMutation({
-    mutationFn: ({
-      username,
-      patch,
-    }: {
-      username: string;
-      patch: { role?: AuthRole; disabled?: boolean; workspaces?: string[] };
-    }) => authApi.patchUser(username, patch),
-    onSuccess: invalidate,
-  });
-
-  const users = usersQuery.data ?? [];
 
   if (!canManageUsers) {
-    return (
-      <SettingsSection
-        id={sectionId}
-        title="Users"
-        description="Admin only — manage filesystem accounts for this serve process."
-      >
-        <p className="text-body text-muted-foreground" title={usersDeniedReason ?? undefined}>
-          {usersDeniedReason ?? "You need the admin role to manage users."}
-        </p>
-      </SettingsSection>
-    );
+    const text = usersDeniedReason ?? "You need the admin role to manage users.";
+    return [
+      {
+        id: "users:denied",
+        title: "Users",
+        description: text,
+        render: (category) => (
+          <SettingItem key="denied" category={category} title="Users" description={text} />
+        ),
+      },
+    ];
   }
 
-  return (
-    <SettingsSection
-      id={sectionId}
-      title="Users"
-      description="Filesystem accounts under ~/.molab/auth/ (CLI: molab auth users …)."
-      trailing={
-        <DeniedHint reason={usersDeniedReason}>
-          <WorkbenchIconAction
-            label="Add user"
-            onClick={() => setCreateOpen(true)}
-            disabled={Boolean(usersDeniedReason)}
-          >
-            <Plus aria-hidden />
-          </WorkbenchIconAction>
-        </DeniedHint>
-      }
-    >
-      {usersQuery.isLoading ? (
-        <p className="text-body text-muted-foreground">Loading users…</p>
-      ) : usersQuery.isError ? (
-        <p className="text-body text-destructive" role="alert">
-          {usersQuery.error instanceof Error ? usersQuery.error.message : "Failed to load users"}
-        </p>
-      ) : users.length === 0 ? (
-        <p className="text-body text-muted-foreground">No users yet.</p>
-      ) : (
-        <div className="overflow-x-auto rounded-control border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Username</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Workspaces</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-16" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map((u: AuthUser) => (
-                <TableRow key={u.username}>
-                  <TableCell className="font-medium">{u.username}</TableCell>
-                  <TableCell>
-                    <Select
-                      value={u.role}
-                      onValueChange={(role) => {
-                        void patchMutation.mutateAsync({
-                          username: u.username,
-                          patch: { role: role as AuthRole },
-                        });
-                      }}
-                      disabled={patchMutation.isPending}
-                    >
-                      <SelectTrigger className="h-control-compact w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ROLES.map((r) => (
-                          <SelectItem key={r} value={r}>
-                            {r}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell className="max-w-48 truncate font-mono text-micro">
-                    {u.workspaces.join(", ")}
-                  </TableCell>
-                  <TableCell>
-                    {u.disabled ? (
-                      <Badge variant="destructive">disabled</Badge>
-                    ) : (
-                      <Badge variant="secondary">active</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <WorkbenchIconAction
-                      label={`Delete ${u.username}`}
-                      disabled={deleteMutation.isPending || u.username === me?.username}
-                      onClick={() => {
-                        if (window.confirm(`Delete user ${u.username}? This cannot be undone.`)) {
-                          void deleteMutation.mutateAsync(u.username);
-                        }
-                      }}
-                    >
-                      <Trash2 className="size-icon" />
-                    </WorkbenchIconAction>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+  const userEntry = (account: AuthUser): SettingEntry => ({
+    id: `user:${account.username}`,
+    title: account.username,
+    description: `${account.role} ${account.workspaces.join(" ")}`,
+    keywords: ["user", "account"],
+    render: (category) => (
+      <UserSetting
+        key={account.username}
+        account={account}
+        self={account.username === me?.username}
+        category={category}
+        busy={patch.isPending || remove.isPending}
+        onRole={(role) => void patch.mutateAsync({ username: account.username, role })}
+        onRemove={() => void remove.mutateAsync(account.username)}
+      />
+    ),
+  });
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add user</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-3 py-2">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="new-username">Username</Label>
-              <Input
-                id="new-username"
-                value={formUser}
-                onChange={(e) => setFormUser(e.target.value)}
-                autoComplete="off"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="new-password">Password</Label>
-              <Input
-                id="new-password"
-                type="password"
-                value={formPassword}
-                onChange={(e) => setFormPassword(e.target.value)}
-                autoComplete="new-password"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label>Role</Label>
-              <Select value={formRole} onValueChange={(v) => setFormRole(v as AuthRole)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLES.map((r) => (
-                    <SelectItem key={r} value={r}>
-                      {r}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="new-ws">Workspaces</Label>
-              <Input
-                id="new-ws"
-                value={formWorkspaces}
-                onChange={(e) => setFormWorkspaces(e.target.value)}
-                placeholder="* or key1,key2"
-              />
-              <p className="text-micro text-muted-foreground">
-                Comma-separated served keys, or * for all.
-              </p>
-            </div>
-            {formError ? (
-              <p className="text-body text-destructive" role="alert">
-                {formError}
-              </p>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <WorkbenchIconAction label="Cancel" onClick={() => setCreateOpen(false)}>
-              <X aria-hidden />
-            </WorkbenchIconAction>
-            <WorkbenchIconAction
-              label={createMutation.isPending ? "Creating user…" : "Create user"}
-              disabled={createMutation.isPending || !formUser.trim() || !formPassword}
-              onClick={() => {
-                setFormError(null);
-                const workspaces = formWorkspaces
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean);
-                void createMutation.mutateAsync({
-                  username: formUser.trim(),
-                  password: formPassword,
-                  role: formRole,
-                  workspaces: workspaces.length ? workspaces : ["*"],
-                });
-              }}
+  const add: SettingEntry = {
+    id: "users:add",
+    title: "Add a user",
+    description: "A filesystem account for this serve process.",
+    render: (category) => <AddUser key="add" category={category} />,
+  };
+  if (users.isPending || users.isError) {
+    const text = users.isPending
+      ? "Loading users…"
+      : users.error instanceof Error
+        ? users.error.message
+        : "Could not load users";
+    return [
+      {
+        id: "users:status",
+        title: "Users",
+        render: (category) => (
+          <SettingItem key="status" category={category} title="Users">
+            <p
+              role={users.isError ? "alert" : undefined}
+              className="text-label text-muted-foreground"
             >
-              <Check aria-hidden />
-            </WorkbenchIconAction>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </SettingsSection>
-  );
-}
+              {text}
+            </p>
+          </SettingItem>
+        ),
+      },
+      add,
+    ];
+  }
+  return [...users.data.map(userEntry), add];
+};

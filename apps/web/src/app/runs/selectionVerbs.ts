@@ -5,6 +5,7 @@
  * or rerun. The bar shows both counts and the user picks one verb.
  */
 
+import { attemptTarget } from "@/app/renderers/run/runStory";
 import type { RunSummary } from "@/app/types";
 import { canCancel, canRerun, canResume, canStart } from "./runLifecycle";
 
@@ -17,6 +18,8 @@ export interface PlannedAttempt {
   /** Set for cancel, resume, and rerun. Absent for the first attempt. */
   executionId: string | null;
   mode: SelectionMode;
+  /** Where the based-on attempt ran: a new attempt goes there too. Null lets the server choose. */
+  target: string | null;
 }
 
 export interface SelectionPlan {
@@ -30,13 +33,17 @@ const attempt = (
   run: RunSummary,
   mode: SelectionMode,
   executionId: string | null,
-): PlannedAttempt => ({
-  runId: run.id,
-  projectId: run.projectId,
-  experimentId: run.experimentId,
-  executionId,
-  mode,
-});
+): PlannedAttempt => {
+  const based = run.executionHistory.find((execution) => execution.executionId === executionId);
+  return {
+    runId: run.id,
+    projectId: run.projectId,
+    experimentId: run.experimentId,
+    executionId,
+    mode,
+    target: attemptTarget(based),
+  };
+};
 
 export const planSelection = (runs: readonly RunSummary[]): SelectionPlan => {
   const plan: SelectionPlan = { start: [], cancel: [], resume: [], rerun: [] };

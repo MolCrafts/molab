@@ -580,11 +580,25 @@ def knowledge_write(
             ),
         ),
     ] = None,
+    doc_format: Annotated[
+        str | None,
+        typer.Option(
+            "--format",
+            help=(
+                "md (<slug>.md, YAML frontmatter + markdown) or html (<slug>.html). "
+                "Default: md, or an existing document's own format."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Write one knowledge document. The same verb as ``write_knowledge``."""
     from molab.knowledge.concepts import _product
+    from molab.knowledge.naming import KNOWLEDGE_FORMATS
     from molab.knowledge.write import normalize_sources, write_knowledge
 
+    if doc_format is not None and doc_format not in KNOWLEDGE_FORMATS:
+        rprint(f"[red]Error:[/red] --format must be one of {', '.join(KNOWLEDGE_FORMATS)}")
+        raise typer.Exit(1)
     workspace = _require_workspace(path)
     host = _host(workspace, on)
     try:
@@ -613,6 +627,7 @@ def knowledge_write(
             record=payload,
             fs=workspace.fs,
             replaces=[workspace.fs.join(str(workspace.resolve()), item) for item in replaces or ()],
+            format=doc_format,
         )
     except (TypeError, ValueError) as exc:
         rprint(f"[red]Error:[/red] {exc}")

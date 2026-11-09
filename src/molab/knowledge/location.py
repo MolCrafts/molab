@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from molab.fs import FileSystem, LocalFS, PathArg
 from molab.ids import slugify
 
-from .naming import KNOWLEDGE_CONTAINER, as_knowledge_file
+from .naming import KNOWLEDGE_CONTAINER, KnowledgeFormat, as_knowledge_file
 
 if TYPE_CHECKING:
     from molab.workspace import Folder
@@ -137,7 +137,13 @@ def host_of(doc_path: PathArg) -> Path:
     return path.parent
 
 
-def _folder(host: PathArg | Folder | Concept, name: str, of: type[Concept]) -> Path:
+def _folder(
+    host: PathArg | Folder | Concept,
+    name: str,
+    of: type[Concept],
+    *,
+    format: KnowledgeFormat = "md",
+) -> Path:
     """The landed path of the *of* document named *name* under *host*.
 
     Args:
@@ -146,6 +152,7 @@ def _folder(host: PathArg | Folder | Concept, name: str, of: type[Concept]) -> P
         name: Human document name; slugified, falling back to the raw name
             when it slugifies to nothing (a CJK-only name).
         of: The Knowledge class. It lands at ``<container>/<slug>.md``.
+        format: ``"html"`` lands it at ``<container>/<slug>.html`` instead.
 
     Returns:
         The document's own path.
@@ -158,7 +165,7 @@ def _folder(host: PathArg | Folder | Concept, name: str, of: type[Concept]) -> P
     if not of.FILE_DOCUMENT:
         raise TypeError(f"{of.__name__} is not a knowledge document class")
     landed = _container_of(host) / document_slug(name)
-    return Path(as_knowledge_file(str(landed)))
+    return Path(as_knowledge_file(str(landed), format))
 
 
 def _container_of(host: PathArg | Folder | Concept) -> Path:

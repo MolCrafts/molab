@@ -1,31 +1,51 @@
+/**
+ * The run page (Figma L04): views Overview · Params · Attempts (n) · Logs, a
+ * rule, then plugin views (L14 `api.runViews`, each in `<RunView>`). The
+ * state's primary action and ⋯ sit at the right of the editor tab row. Every
+ * view follows one attempt — the page's, kept in the URL, named by the chip at
+ * the right end of the views (and the breadcrumb's last segment).
+ */
+
+import type { RunAttempt } from "@molcrafts/molab-plugin";
+import { RunViewHostProvider } from "@molcrafts/molab-plugin/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileQuestion, ListChecks, ListPlus, PlayCircle } from "lucide-react";
-import { useMemo } from "react";
-import { useCompareSet } from "@/app/compare";
-import { activeWorkspace, itemFromRunSummary } from "@/app/compare/entries";
-import { itemKey } from "@/app/compare/types";
-import { EmptyState, EntityPage } from "@/app/components/entity";
-import { LazySurface } from "@/app/layout/LazySurface";
-import { RunExecutionsPanel } from "@/app/renderers/RunExecutionsPanel";
-import { RunLogsPanel } from "@/app/renderers/RunLogsPanel";
-import { RunOverview, RunParameters } from "@/app/renderers/run/RunOverview";
 import {
-  defaultExecutionId,
-  type RunRendererProps,
-  useRunViewer,
-} from "@/app/renderers/useRunViewer";
-import { RunToolbar } from "@/app/runs/RunToolbar";
+  Activity,
+  FileQuestion,
+  History,
+  PlayCircle,
+  Puzzle,
+  SlidersHorizontal,
+  Terminal,
+} from "lucide-react";
+import { type JSX, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
+import { activeWorkspace, itemFromRunSummary } from "@/app/compare/entries";
+import { EmptyState, EntityPage, ViewLabel } from "@/app/components/entity";
+import { LazySurface } from "@/app/layout/LazySurface";
+import { usePreview } from "@/app/preview/PreviewContext";
+import { RunAttemptsPanel } from "@/app/renderers/RunAttemptsPanel";
+import { RunLogsPanel } from "@/app/renderers/RunLogsPanel";
+import { RunAttemptChip } from "@/app/renderers/run/RunAttemptChip";
+import { type OpenInView, RunOverview } from "@/app/renderers/run/RunOverview";
+import { RunParams } from "@/app/renderers/run/RunParams";
+import { runResultExecution } from "@/app/renderers/run/runStory";
+import { useRunViewHost, useRunViews } from "@/app/renderers/run/useRunViews";
+import { type RunRendererProps, useRunViewer } from "@/app/renderers/useRunViewer";
+import { RunEditorActions } from "@/app/runs/RunEditorActions";
+import { runLabel } from "@/app/runs/runTitle";
+import { confirmAndStopExecution } from "@/app/runs/stopExecution";
+import { experimentWorkflowLabel } from "@/app/state/api";
 import { journalRefetchInterval } from "@/app/state/entityQueries";
-import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
-import type { RendererProps } from "@/app/types";
-import { WorkbenchAction } from "@/components/workbench";
-import { pluginTabLabel } from "@/lib/plugin-tab-label";
-import { usePluginTabBadgeCounts } from "@/lib/use-plugin-tab-badge-counts";
+import { useAlert, useConfirm } from "@/components/ConfirmDialog";
+import { matchesMatcher } from "@/lib/file-type-discovery";
 import { knowledgeKeys } from "@/plugins/knowledge/queries";
 
 export const RunViewer = (props: RunRendererProps): JSX.Element => {
   const {
     run,
+    project,
+    experiment,
     workflow,
     selectedRunId,
     activeTab,
@@ -34,24 +54,32 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     outputsError,
     selectedExecutionId,
     setSelectedExecutionId,
+    logLine,
     attemptCount,
-    parameterEntries,
-    runTabContributions,
     inspectTask,
     setSelection,
-    handleCancelRun,
-    confirmDialog,
-    alertDialog,
   } = useRunViewer(props);
-
-  const compare = useCompareSet();
+  const preview = usePreview();
   const queryClient = useQueryClient();
-  const project = props.snapshot.projects.find((p) => p.id === run?.projectId);
-  const experiment = props.snapshot.experiments.find((e) => e.id === run?.experimentId);
-  const compareWorkspace = activeWorkspace(props.snapshot.workspaces);
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const { alert, dialog: alertDialog } = useAlert();
 
-  // Adding from the run page pins the attempt on screen rather than "latest":
-  // the user is looking at a specific execution and means that one.
+  // `?new=resume` (a Preview's Resume) opens New attempt with Resume chosen, once.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const createRequest = searchParams.get("new") === "resume" ? ({ mode: "resume" } as const) : null;
+  const clearCreateRequest = useCallback(() => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.delete("new");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  const compareWorkspace = activeWorkspace(props.snapshot.workspaces);
+  // From the run page, Compare pins the attempt on screen rather than "latest".
   const compareEntry = useMemo(() => {
     if (!run || !compareWorkspace) return null;
     return {
@@ -65,8 +93,6 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     };
   }, [run, compareWorkspace, project?.name, experiment?.name, selectedExecutionId]);
 
-  const inCompareSet = compareEntry ? compare.keys.has(itemKey(compareEntry.ref)) : false;
-
   const runCoords = useMemo(
     () =>
       run && selectedExecutionId
@@ -79,11 +105,62 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
         : null,
     [run, selectedExecutionId],
   );
-  const { discovered: discoveredPlugins, executionDir } = useDiscoveredFileTypesForRun(
-    runCoords,
-    "run",
+
+  // L14: plugin views get the page's attempt from the host, never choose it.
+  const baseAttempt = useMemo((): RunAttempt | null => {
+    if (!run || !selectedExecutionId) return null;
+    const history = run.executionHistory;
+    const execution = history.find((item) => item.executionId === selectedExecutionId);
+    return {
+      projectId: run.projectId,
+      experimentId: run.experimentId,
+      runId: run.id,
+      executionId: selectedExecutionId,
+      status: execution?.status ?? "pending",
+      isLatest: history.at(-1)?.executionId === selectedExecutionId,
+      isRunResult: runResultExecution(history)?.execution.executionId === selectedExecutionId,
+      dir: null,
+    };
+  }, [run, selectedExecutionId]);
+  const { tabs: runViewTabs, dir: attemptDir } = useRunViews(baseAttempt);
+  const runAttempt = useMemo(
+    () => (baseAttempt ? { ...baseAttempt, dir: attemptDir } : null),
+    [baseAttempt, attemptDir],
   );
-  const tabBadgeCounts = usePluginTabBadgeCounts(discoveredPlugins, runCoords);
+  const openAttemptPath = useCallback(
+    (path: string) => {
+      if (!attemptDir) return;
+      const filePath = `${attemptDir.replace(/\/+$/, "")}/${path}`;
+      setSelection({
+        objectType: "workspace-file",
+        objectId: filePath,
+        filePath,
+        fileKind: "text",
+      });
+    },
+    [attemptDir, setSelection],
+  );
+  const openLogsAt = useCallback(
+    (line?: number) => {
+      if (!run) return;
+      setActiveTab("logs");
+      setSelection({
+        objectType: "run",
+        objectId: run.id,
+        objectView: "logs",
+        ...(selectedExecutionId && selectedExecutionId !== run.executionHistory.at(-1)?.executionId
+          ? { attemptId: selectedExecutionId }
+          : {}),
+        ...(line ? { logLine: line } : {}),
+      });
+    },
+    [run, selectedExecutionId, setActiveTab, setSelection],
+  );
+  const runViewLinks = useMemo(
+    () => ({ openFile: openAttemptPath, openLogs: openLogsAt }),
+    [openAttemptPath, openLogsAt],
+  );
+  const runViewHost = useRunViewHost(runAttempt, runViewLinks);
 
   if (!run) {
     return (
@@ -93,69 +170,88 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     );
   }
 
-  const pluginRendererProps: RendererProps = {
-    ...(props as RendererProps),
-    executionId: selectedExecutionId,
-    executionOutputs: outputs,
-    executionDir,
-  };
   const history = run.executionHistory;
-  const selectedIndex = history.findIndex((item) => item.executionId === selectedExecutionId);
-  const selectedExecution = selectedIndex >= 0 ? history[selectedIndex] : null;
-  const latestExecutionId = defaultExecutionId(history);
-  const attemptLabel = selectedExecution
-    ? `${selectedExecution.executionId} (#${selectedIndex + 1})${
-        selectedExecution.executionId === latestExecutionId ? " · latest" : ""
-      }`
-    : "no attempt";
-  const openAttemptFile = (path: string): void => {
-    if (!executionDir) return;
-    const filePath = `${executionDir.replace(/\/+$/, "")}/${path}`;
-    setSelection({ objectType: "workspace-file", objectId: filePath, filePath, fileKind: "text" });
-  };
-  const openRunTab = (value: string): void => {
+  const attempt = history.find((item) => item.executionId === selectedExecutionId) ?? null;
+  const scope = { runId: run.id, projectId: run.projectId, experimentId: run.experimentId };
+
+  const openView = (value: string, focus: { line?: number } = {}): void => {
     setActiveTab(value);
     setSelection({
       objectType: "run",
       objectId: run.id,
       objectView: value === "overview" ? undefined : value,
+      ...(selectedExecutionId && selectedExecutionId !== history.at(-1)?.executionId
+        ? { attemptId: selectedExecutionId }
+        : {}),
+      ...(focus.line ? { logLine: focus.line } : {}),
     });
   };
+  const openIn = (file: { name: string; relPath: string }): OpenInView | null => {
+    const view = runViewTabs.find(
+      ({ contribution }) =>
+        contribution.files && matchesMatcher(contribution.files, { ...file, type: "file" }),
+    );
+    if (view) return { value: view.contribution.id, label: view.contribution.label };
+    return null;
+  };
+  const stop = (execution: (typeof history)[number]): void =>
+    void confirmAndStopExecution({ run, execution, confirm, alert, onStopped: props.onRefresh });
+
   const tabs = [
     {
       value: "overview",
-      label: "Overview",
+      label: <ViewLabel icon={Activity}>Overview</ViewLabel>,
       content: (
         <RunOverview
           run={run}
-          results={
-            selectedExecutionId === latestExecutionId ? (outputs?.results ?? undefined) : undefined
-          }
-          onOpenExecution={(executionId) => {
-            setSelectedExecutionId(executionId);
-            openRunTab("executions");
+          attempt={attempt}
+          outputs={outputs}
+          openIn={openIn}
+          onOpenView={openView}
+          onPreviewTask={(taskId) => inspectTask(taskId, run.id)}
+          onPreviewRun={(runId) => {
+            const sibling = props.snapshot.runs.find((item) => item.id === runId);
+            preview.preview({
+              kind: "run",
+              runId,
+              projectId: sibling?.projectId ?? run.projectId,
+              experimentId: sibling?.experimentId ?? run.experimentId,
+            });
           }}
-          onOpenLogs={() => openRunTab("logs")}
-          onOpenParameters={() => openRunTab("parameters")}
-          onOpenRun={(runId) => setSelection({ objectType: "run", objectId: runId })}
-          onInspectTask={(taskId) => inspectTask(taskId, run.id)}
+          onPreviewAsset={(assetId) => preview.preview({ kind: "asset", assetId })}
+          onOpenKnowledge={(path) => setSelection({ objectType: "knowledge", objectId: path })}
         />
       ),
     },
     {
       value: "parameters",
-      label: parameterEntries.length > 0 ? `Parameters (${parameterEntries.length})` : "Parameters",
-      content: <RunParameters parameters={parameterEntries} />,
+      label: <ViewLabel icon={SlidersHorizontal}>Params</ViewLabel>,
+      content: (
+        <RunParams
+          run={run}
+          assets={props.snapshot.assets}
+          workflowLabel={experiment ? experimentWorkflowLabel(experiment) || null : null}
+          onPreviewRun={(runId) => preview.preview({ kind: "run", ...scope, runId })}
+          onPreviewAsset={(assetId) => preview.preview({ kind: "asset", assetId })}
+        />
+      ),
     },
     {
       value: "executions",
-      label: attemptCount ? `Executions (${attemptCount})` : "Executions",
+      label: (
+        <ViewLabel icon={History} count={attemptCount}>
+          Attempts
+        </ViewLabel>
+      ),
       content: (
-        <RunExecutionsPanel
+        <RunAttemptsPanel
           run={run}
           workflow={workflow}
           selectedExecutionId={selectedExecutionId}
           onSelectExecution={setSelectedExecutionId}
+          onPreviewExecution={(executionId) =>
+            preview.preview({ kind: "attempt", ...scope, executionId })
+          }
           onInspectTask={inspectTask}
           outputs={outputs}
           logsError={outputsError}
@@ -164,9 +260,9 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
             workflow
               ? () =>
                   setSelection({
-                    objectType: "workflow",
-                    objectId: workflow.id,
-                    workflowId: workflow.id,
+                    objectType: "experiment",
+                    objectId: workflow.experimentId,
+                    experimentView: "workflow",
                   })
               : undefined
           }
@@ -175,66 +271,40 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     },
     {
       value: "logs",
-      label: "Logs",
+      label: <ViewLabel icon={Terminal}>Logs</ViewLabel>,
       content: (
-        <div className="flex h-full flex-1 flex-col overflow-hidden bg-background text-foreground">
-          <RunLogsPanel
-            execution={
-              selectedExecution
-                ? {
-                    projectId: run.projectId,
-                    experimentId: run.experimentId,
-                    runId: run.id,
-                    executionId: selectedExecution.executionId,
-                  }
-                : null
-            }
-            live={journalRefetchInterval(selectedExecution?.status) !== false}
-            selectedExecutionId={selectedExecutionId}
-            attemptLabel={attemptLabel}
-            onViewLatest={() => setSelectedExecutionId(latestExecutionId)}
-            onOpenFile={executionDir ? openAttemptFile : undefined}
-          />
-        </div>
+        <RunLogsPanel
+          key={`${run.id}:${selectedExecutionId ?? "none"}`}
+          execution={runCoords}
+          live={journalRefetchInterval(attempt?.status) !== false}
+          line={logLine}
+          onOpenFile={attemptDir ? openAttemptPath : undefined}
+        />
       ),
     },
-    ...runTabContributions.map((tab) => {
-      const TabComponent = tab.Component;
+    ...runViewTabs.map(({ contribution, files, count }, index) => {
+      const View = contribution.Component;
       return {
-        value: tab.value,
-        label: tab.label,
-        content: (
-          <LazySurface
-            suspense={false}
-            key={`${selectedRunId}:${selectedExecutionId ?? "none"}`}
-            resetKey={`run-tab:${tab.id}:${selectedRunId}:${selectedExecutionId ?? "none"}`}
-            loadingTitle={`Loading ${tab.label}…`}
-          >
-            <TabComponent {...pluginRendererProps} />
-          </LazySurface>
+        value: contribution.id,
+        dividerBefore: index === 0,
+        label: (
+          <ViewLabel icon={contribution.icon ?? Puzzle} count={count ?? undefined}>
+            {contribution.label}
+          </ViewLabel>
         ),
-      };
-    }),
-    ...discoveredPlugins.map(({ contribution, files }) => {
-      const PluginComponent = contribution.Component;
-      return {
-        value: contribution.value,
-        label: pluginTabLabel(
-          contribution.label,
-          files.length,
-          Boolean(contribution.resolveTabBadgeCount),
-          tabBadgeCounts[contribution.value],
-        ),
-        content: (
-          <LazySurface
-            suspense={false}
-            key={`${selectedRunId}:${selectedExecutionId}`}
-            resetKey={`run-file-tab:${contribution.id}:${selectedRunId}:${selectedExecutionId}`}
-            loadingTitle={`Loading ${contribution.label}…`}
-          >
-            <PluginComponent {...pluginRendererProps} discoveredFiles={files} />
-          </LazySurface>
-        ),
+        content:
+          runAttempt && runViewHost ? (
+            <LazySurface
+              suspense={false}
+              key={`${selectedRunId}:${selectedExecutionId ?? "none"}`}
+              resetKey={`run-view:${contribution.id}:${selectedRunId}:${selectedExecutionId ?? "none"}`}
+              loadingTitle={`Loading ${contribution.label}…`}
+            >
+              <RunViewHostProvider value={runViewHost}>
+                <View attempt={runAttempt} files={files} />
+              </RunViewHostProvider>
+            </LazySurface>
+          ) : null,
       };
     }),
   ];
@@ -243,44 +313,48 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     <>
       <EntityPage
         icon={PlayCircle}
-        title={run.name}
+        title={runLabel(run)}
         actions={
           <>
-            {compareEntry && (
-              <WorkbenchAction
-                icon={inCompareSet ? <ListChecks aria-hidden /> : <ListPlus aria-hidden />}
-                aria-pressed={inCompareSet}
-                kind={inCompareSet ? "ghost" : "secondary"}
-                size="compact"
-                type="button"
-                onClick={() =>
-                  inCompareSet
-                    ? compare.remove(itemKey(compareEntry.ref))
-                    : compare.add(compareEntry)
-                }
-              >
-                {inCompareSet ? "Remove from selection" : "Add to selection"}
-              </WorkbenchAction>
-            )}
-            <RunToolbar
+            <span className="sm:hidden">
+              <RunAttemptChip
+                history={run.executionHistory}
+                selected={selectedExecutionId}
+                onSelect={setSelectedExecutionId}
+              />
+            </span>
+            <RunEditorActions
               run={run}
-              selectedExecutionId={selectedExecutionId}
-              onRefresh={props.onRefresh}
-              onCancel={handleCancelRun}
+              pageExecutionId={selectedExecutionId}
+              compareEntry={compareEntry}
+              onStop={stop}
+              onCreated={(executionId) => {
+                props.onRefresh();
+                // The new attempt is the latest: the page follows it on Overview.
+                void executionId;
+                setActiveTab("overview");
+                setSelection({ objectType: "run", objectId: run.id });
+              }}
+              onOpenLogs={() => openView("logs")}
               onHarvested={(path) => {
                 void queryClient.invalidateQueries({ queryKey: knowledgeKeys.lists() });
                 if (path) setSelection({ objectType: "knowledge", objectId: path });
               }}
-              onDispatched={(executionId) => {
-                setSelectedExecutionId(executionId);
-                openRunTab("executions");
-              }}
+              request={createRequest}
+              onRequestHandled={clearCreateRequest}
             />
           </>
         }
         activeTab={activeTab}
-        onActiveTabChange={openRunTab}
+        onActiveTabChange={(value) => openView(value)}
         tabs={tabs}
+        tabsTrailing={
+          <RunAttemptChip
+            history={run.executionHistory}
+            selected={selectedExecutionId}
+            onSelect={setSelectedExecutionId}
+          />
+        }
       />
       {confirmDialog}
       {alertDialog}

@@ -6,7 +6,7 @@
  * free-layout document via {@link buildFlowgramDocument}, and drawn read-only on
  * the same `@flowgram.ai/free-layout-editor` canvas the full viewers use. Node
  * clicks bubble up through the `onNodeClick` prop (RunViewer wires this to the
- * `inspectedTask` → TaskViewer path).
+ * Preview path).
  */
 
 import { type JSX, useMemo } from "react";

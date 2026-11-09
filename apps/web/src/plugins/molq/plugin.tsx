@@ -1,6 +1,7 @@
 import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
-import { ServerCog } from "lucide-react";
+import { Server } from "lucide-react";
 import { lazy } from "react";
+import { SCHEDULER_FILES } from "./job";
 
 const MolqExecutionColumn = {
   Cluster: lazy(() =>
@@ -17,41 +18,25 @@ const MolqExecutionColumn = {
 const MolqExecutionDetail = lazy(() =>
   import("./MolqExecutionDetail").then((module) => ({ default: module.MolqExecutionDetail })),
 );
-const MolqRunTab = lazy(() =>
-  import("./MolqRunTab").then((module) => ({ default: module.MolqRunTab })),
+const MolqRunView = lazy(() =>
+  import("./MolqRunView").then((module) => ({ default: module.MolqRunView })),
 );
-const isMolqRun = (
-  runId: string,
-  runs: Array<{ id: string; executionHistory: Array<{ executor: Record<string, unknown> }> }>,
-) => {
-  const run = runs.find((item) => item.id === runId);
-  return run?.executionHistory.some((execution) => execution.executor.backend === "molq") ?? false;
-};
 
 const molqPlugin: MolabPluginModule = {
   id: "molq",
   name: "Molq",
   version: "1.0.0",
-  description: "Scheduler run monitor, Molq tab, and execution columns for molq backends.",
+  description: "Molq run view (job and scheduler files) and execution columns for molq backends.",
   activate: (api: PluginAPI) => {
-    api.entityTabs.register({
-      id: "molq:run-tab",
-      objectType: "run",
-      value: "molq",
+    // A run view applies by files: a Molq submission stages its scheduler
+    // evidence under the attempt's `jobs/`, so the view exists exactly then.
+    api.runViews.register({
+      id: "molq",
       label: "Molq",
-      Icon: ServerCog,
-      priority: 40,
-      matches: (context) => {
-        const selection = context.selection as { objectId: string };
-        const snapshot = context.snapshot as {
-          runs: Array<{
-            id: string;
-            executionHistory: Array<{ executor: Record<string, unknown> }>;
-          }>;
-        };
-        return isMolqRun(selection.objectId, snapshot.runs);
-      },
-      Component: MolqRunTab,
+      icon: Server,
+      order: 30,
+      files: SCHEDULER_FILES,
+      Component: MolqRunView,
     });
 
     api.execution.registerColumn({

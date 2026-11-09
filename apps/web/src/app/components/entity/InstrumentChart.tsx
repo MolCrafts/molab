@@ -5,32 +5,23 @@ import {
   VegaLiteView,
 } from "@molcrafts/ui-vega-lite";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
-import { STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
+import { CHART_GROUPS, type ChartGroupId, type StatusCounts } from "@/app/status/vocabulary";
 import { cn } from "@/lib/utils";
 
-import type { StatusCountRollup } from "./Dashboard";
 import { type BarDatum, barSpec, statusBarSpec } from "./instruments";
 
-const STATUS_VARS: Record<StatusGroupId, string> = {
-  running: "--status-running",
-  pending: "--status-queued",
-  succeeded: "--status-completed",
-  failed: "--status-failed",
-  cancelled: "--status-cancelled",
-};
-
 /** Resolved status ramp. Vega cannot paint `var(--status-*)` itself. */
-export const useStatusColors = (): Record<StatusGroupId, string> | null => {
-  const [colors, setColors] = useState<Record<StatusGroupId, string> | null>(null);
+export const useStatusColors = (): Record<ChartGroupId, string> | null => {
+  const [colors, setColors] = useState<Record<ChartGroupId, string> | null>(null);
   useEffect(() => {
     const read = (): void => {
       const probe = document.createElement("span");
       probe.style.display = "none";
       document.documentElement.append(probe);
-      const next = {} as Record<StatusGroupId, string>;
-      for (const [id, name] of Object.entries(STATUS_VARS)) {
-        probe.style.color = `var(${name})`;
-        next[id as StatusGroupId] = getComputedStyle(probe).color;
+      const next = {} as Record<ChartGroupId, string>;
+      for (const group of CHART_GROUPS) {
+        probe.style.color = group.color;
+        next[group.id] = getComputedStyle(probe).color;
       }
       probe.remove();
       setColors((previous) =>
@@ -107,14 +98,14 @@ export const StatusBarChart = ({
   label,
   height,
 }: {
-  counts: StatusCountRollup;
-  groups?: readonly StatusGroupId[];
+  counts: StatusCounts;
+  groups?: readonly ChartGroupId[];
   label: string;
   /** Pixel height. Omit to size the chart from the number of status rows. */
   height?: number;
 }): JSX.Element => {
   const colors = useStatusColors();
-  const specs = groups ? STATUS_GROUPS.filter((group) => groups.includes(group.id)) : STATUS_GROUPS;
+  const specs = groups ? CHART_GROUPS.filter((group) => groups.includes(group.id)) : CHART_GROUPS;
   const occupied = specs.filter((group) => counts[group.id] > 0);
   const colorKey = colors == null ? "" : occupied.map((group) => colors[group.id]).join("|");
   const signature = `${occupied.map((group) => `${group.id}:${counts[group.id]}`).join(",")}|${colorKey}`;

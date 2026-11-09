@@ -13,33 +13,16 @@ import {
   InventoryCanvas,
   OverviewCanvas,
   OverviewSurface,
-  type StatusCountRollup,
   SuccessDial,
   Tally,
 } from "@/app/components/entity";
-import { groupForStatus } from "@/app/runs/statusGroups";
+import { countStatuses, type StatusCounts } from "@/app/status/vocabulary";
 import type { RendererProps } from "@/app/types";
 import type { TaskNodeJson } from "@/components/workflow/task-graph-ir";
 import { WorkflowGraphViewer } from "@/plugins/workflow/WorkflowGraphViewer";
-import { WorkflowSourceViewer } from "@/plugins/workflow/WorkflowSourceViewer";
 
-const taskStatusCounts = (tasks: readonly TaskNodeJson[]): StatusCountRollup => {
-  const counts: StatusCountRollup = {
-    total: 0,
-    running: 0,
-    pending: 0,
-    succeeded: 0,
-    failed: 0,
-    cancelled: 0,
-  };
-  for (const task of tasks) {
-    const group = groupForStatus(task.status);
-    if (!group) continue;
-    counts.total += 1;
-    counts[group] += 1;
-  }
-  return counts;
-};
+const taskStatusCounts = (tasks: readonly TaskNodeJson[]): StatusCounts =>
+  countStatuses(tasks.map((task) => task.status));
 
 const taskTypeCounts = (tasks: readonly TaskNodeJson[]): { type: string; count: number }[] => {
   const counts = new Map<string, number>();
@@ -194,7 +177,6 @@ export const WorkflowViewer = (props: RendererProps): JSX.Element => {
           label: tasks.length > 0 ? `Tasks (${tasks.length})` : "Tasks",
           content: <TaskTable tasks={tasks} />,
         },
-        { value: "source", label: "Source", content: <WorkflowSourceViewer {...props} /> },
       ]}
     />
   );

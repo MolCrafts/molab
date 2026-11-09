@@ -17,8 +17,8 @@ const deferred = <T>(): Deferred<T> => {
 };
 
 describe("slicesForView", () => {
-  it("does not fetch the file tree on knowledge", () => {
-    expect(slicesForView("knowledge")).toEqual(["workspaces"]);
+  it("does not fetch the file tree on knowledge, but lists projects to name hosts (L10)", () => {
+    expect(slicesForView("knowledge")).toEqual(["workspaces", "projectsList"]);
   });
 
   it("loads the file tree only on Files", () => {

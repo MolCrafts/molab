@@ -1,121 +1,56 @@
 /**
- * Workspace settings — molvis-style left nav + scroll sections.
- *
- * Sections: Appearance, Remote workspaces, Compute targets, UI plugins,
- * Users (admin when auth on). Chrome is domain-free
- * (`components/settings`); panels keep their own data.
+ * Settings (L11): the editor shows one category — `/settings/<id>` — as a
+ * stack of settings, or, while the side bar's search has text (`?q=`), every
+ * matching setting as "Category › Setting". The categories and the search
+ * field live in the side bar (`SettingsExplorer`).
  */
 
-import { Cpu, History, Puzzle, Type, Users, Wifi } from "lucide-react";
-import { useAuth } from "@/app/auth";
-import { HistoryPanel } from "@/app/history/HistoryPanel";
-import { type SettingsNavEntry, SettingsSection, SettingsShell } from "@/components/settings";
-import { listSettingsSections, useWorkbenchGeneration } from "@/plugins/contributions/workbench";
-import { AppearancePanel } from "./AppearancePanel";
-import { ComputeTargetsPanel } from "./ComputeTargetsPanel";
-import { RemoteWorkspacesPanel } from "./RemoteWorkspacesPanel";
-import { UiPluginsPanel } from "./UiPluginsPanel";
-import { UsersSection } from "./UsersSection";
+import type { JSX } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
+import { SettingsPageHeader } from "@/components/settings";
+import { categoryFromPath, matchesQuery } from "./settingsModel";
+import { useSettingsCategories } from "./useSettingsCategories";
+
+export const SETTINGS_QUERY_PARAM = "q";
 
 export function SettingsPage(): JSX.Element {
-  const { enabled, user } = useAuth();
-  const showUsers = enabled && user?.role === "admin";
-  useWorkbenchGeneration();
+  const categories = useSettingsCategories();
+  const { pathname } = useLocation();
+  const [params] = useSearchParams();
+  const query = (params.get(SETTINGS_QUERY_PARAM) ?? "").trim();
 
-  const entries: SettingsNavEntry[] = [
-    {
-      id: "appearance",
-      label: "Appearance",
-      group: "display",
-      groupLabel: "Display",
-      icon: <Type className="size-icon-sm" aria-hidden />,
-      content: (
-        <SettingsSection id="appearance" title="Appearance">
-          <AppearancePanel />
-        </SettingsSection>
-      ),
-    },
-    {
-      id: "remote-workspaces",
-      label: "Remote workspaces",
-      group: "workspace",
-      groupLabel: "Workspace",
-      icon: <Wifi className="size-icon-sm" aria-hidden />,
-      content: (
-        <SettingsSection id="remote-workspaces" title="Remote workspaces">
-          <RemoteWorkspacesPanel />
-        </SettingsSection>
-      ),
-    },
-    {
-      id: "compute-targets",
-      label: "Compute targets",
-      group: "workspace",
-      groupLabel: "Workspace",
-      icon: <Cpu className="size-icon-sm" aria-hidden />,
-      content: (
-        <SettingsSection id="compute-targets" title="Compute targets">
-          <ComputeTargetsPanel />
-        </SettingsSection>
-      ),
-    },
-    {
-      id: "history",
-      label: "History",
-      group: "workspace",
-      groupLabel: "Workspace",
-      icon: <History className="size-icon-sm" aria-hidden />,
-      content: (
-        <SettingsSection
-          id="history"
-          title="History"
-          description="Facts recorded in the workspace git log."
-        >
-          <HistoryPanel />
-        </SettingsSection>
-      ),
-    },
-    {
-      id: "ui-plugins",
-      label: "UI plugins",
-      group: "workspace",
-      groupLabel: "Workspace",
-      icon: <Puzzle className="size-icon-sm" aria-hidden />,
-      content: (
-        <SettingsSection id="ui-plugins" title="UI plugins">
-          <UiPluginsPanel />
-        </SettingsSection>
-      ),
-    },
-    {
-      id: "users",
-      label: "Users",
-      group: "access",
-      groupLabel: "Access",
-      icon: <Users className="size-icon-sm" aria-hidden />,
-      hidden: !showUsers,
-      content: <UsersSection sectionId="users" />,
-    },
-    ...listSettingsSections().map((section) => {
-      const Render = section.render;
-      return {
-        id: section.id,
-        label: section.title,
-        group: section.group ?? "plugins",
-        groupLabel: section.group ?? "Plugins",
-        icon: <Puzzle className="size-icon-sm" aria-hidden />,
-        content: (
-          <SettingsSection id={section.id} title={section.title}>
-            <Render />
-          </SettingsSection>
-        ),
-      } satisfies SettingsNavEntry;
-    }),
-  ];
+  if (query) {
+    const matches = categories.flatMap((category) =>
+      category.entries
+        .filter((entry) => matchesQuery(entry, query, category.label))
+        .map((entry) => ({ category, entry })),
+    );
+    return (
+      <section aria-label="Search settings" className="h-full min-h-0 overflow-auto bg-background">
+        <div className="flex max-w-3xl flex-col px-6 pt-2 pb-8 max-md:px-4">
+          <p className="py-2 text-label text-muted-foreground">
+            {matches.length === 0
+              ? `No setting matches “${query}”.`
+              : `${matches.length} ${matches.length === 1 ? "setting matches" : "settings match"} “${query}”`}
+          </p>
+          {matches.map(({ category, entry }) => entry.render(category.label))}
+        </div>
+      </section>
+    );
+  }
 
+  const id = categoryFromPath(
+    pathname,
+    categories.map((category) => category.id),
+  );
+  const category = categories.find((item) => item.id === id) ?? categories[0];
+  if (!category) return <div />;
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <SettingsShell title="Settings" entries={entries} defaultId="appearance" className="h-full" />
-    </div>
+    <section aria-label={category.label} className="h-full min-h-0 overflow-auto bg-background">
+      <div className="flex max-w-3xl flex-col px-6 pt-2 pb-8 max-md:px-4">
+        <SettingsPageHeader title={category.label} description={category.description} />
+        {category.entries.map((entry) => entry.render())}
+      </div>
+    </section>
   );
 }

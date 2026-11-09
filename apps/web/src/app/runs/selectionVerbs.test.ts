@@ -57,4 +57,17 @@ describe("planSelection", () => {
     const plan = planSelection([run("pending", "e01")]);
     expect(plan.start).toEqual([]);
   });
+
+  it("sends a new attempt to the target its based-on attempt ran on, not to local", () => {
+    const failed = run("failed", "e02");
+    const onCluster = {
+      ...failed,
+      executionHistory: failed.executionHistory.map((execution) => ({
+        ...execution,
+        executor: { target: "hpc-slurm" },
+      })),
+    } as RunSummary;
+    expect(planSelection([onCluster]).resume[0]?.target).toBe("hpc-slurm");
+    expect(planSelection([run("pending")]).start[0]?.target).toBeNull();
+  });
 });

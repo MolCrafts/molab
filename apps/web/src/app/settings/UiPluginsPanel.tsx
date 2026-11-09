@@ -1,72 +1,71 @@
 /**
- * Settings → UI plugins — user toggles for panel contribution plugins.
- *
- * Each toggleable plugin (workflow, molplot, molvis, molq, …) can be turned
- * off so its center/right/tab contributions stop resolving. Core is always
- * on and never listed. Preferences persist in localStorage.
+ * Settings › Plugins (L11): each plugin is a setting — its name (Built in for
+ * the ones that cannot be turned off), its description, and under it the
+ * switch and what it adds, read from the contribution registries.
+ * Preferences persist in localStorage.
  */
 
-import { Label, Switch } from "@molcrafts/ui";
-import { Puzzle } from "lucide-react";
+import { Switch } from "@molcrafts/ui";
 import type { JSX } from "react";
-import { listToggleablePlugins } from "@/plugins/catalog";
+import { SettingItem, SettingTag } from "@/components/settings";
+import { describePluginContributions, useContributionGeneration } from "@/lib/contribution-runtime";
+import { listPluginCatalog, type PluginCatalogEntry } from "@/plugins/catalog";
 import {
   isPluginEnabled,
   setPluginEnabled,
   usePluginPreferencesGeneration,
 } from "@/plugins/preferences";
 import { ensureInternalPlugin } from "@/plugins/runtime";
+import type { SettingEntry } from "./settingsModel";
 
-export function UiPluginsPanel(): JSX.Element {
+const PluginSetting = ({
+  plugin,
+  category,
+}: {
+  plugin: PluginCatalogEntry;
+  category?: string;
+}): JSX.Element => {
   usePluginPreferencesGeneration();
-  const plugins = listToggleablePlugins();
-
-  if (plugins.length === 0) {
-    return (
-      <p className="text-body text-muted-foreground">
-        No toggleable UI plugins are registered yet.
-      </p>
-    );
-  }
-
+  useContributionGeneration();
+  const enabled = isPluginEnabled(plugin.id);
+  const adds = describePluginContributions(plugin.id);
+  const switchId = `plugin-${plugin.id}`;
   return (
-    <ul className="divide-y divide-border rounded-panel border border-border">
-      {plugins.map((plugin) => {
-        const enabled = isPluginEnabled(plugin.id);
-        const switchId = `ui-plugin-${plugin.id}`;
-        return (
-          <li key={plugin.id} className="flex items-start gap-3 px-2 py-2 sm:items-center">
-            <div className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-              <Puzzle className="size-icon-sm" aria-hidden />
-            </div>
-            <div className="min-w-0 flex-1 space-y-1">
-              <Label
-                htmlFor={switchId}
-                className="cursor-pointer text-body font-medium text-foreground"
-              >
-                {plugin.name}
-              </Label>
-              {plugin.description ? (
-                <p
-                  className="line-clamp-1 text-label text-muted-foreground"
-                  title={plugin.description}
-                >
-                  {plugin.description}
-                </p>
-              ) : null}
-            </div>
-            <Switch
-              id={switchId}
-              checked={enabled}
-              onCheckedChange={(checked) => {
-                setPluginEnabled(plugin.id, checked);
-                if (checked) void ensureInternalPlugin(plugin.id);
-              }}
-              aria-label={`${enabled ? "Disable" : "Enable"} ${plugin.name}`}
-            />
-          </li>
-        );
-      })}
-    </ul>
+    <SettingItem
+      id={switchId}
+      category={category}
+      title={plugin.name}
+      tag={plugin.userToggleable ? null : <SettingTag>Built in</SettingTag>}
+      description={plugin.description}
+    >
+      <div className="flex items-center gap-3">
+        {plugin.userToggleable ? (
+          <Switch
+            id={switchId}
+            checked={enabled}
+            onCheckedChange={(checked) => {
+              setPluginEnabled(plugin.id, checked);
+              if (checked) void ensureInternalPlugin(plugin.id);
+            }}
+            aria-label={`${enabled ? "Turn off" : "Turn on"} ${plugin.name}`}
+          />
+        ) : null}
+        {adds.length ? (
+          <span className="text-label text-muted-foreground">Adds {adds.join(" · ")}</span>
+        ) : null}
+      </div>
+    </SettingItem>
   );
-}
+};
+
+/** Every plugin the app knows, built-in ones included. */
+export const usePluginEntries = (): SettingEntry[] => {
+  usePluginPreferencesGeneration();
+  return listPluginCatalog().map((plugin) => ({
+    id: `plugin:${plugin.id}`,
+    title: plugin.name,
+    description: plugin.description,
+    keywords: [plugin.id, "plugin"],
+    render: (category) => <PluginSetting key={plugin.id} plugin={plugin} category={category} />,
+  }));
+};

@@ -3,7 +3,7 @@ import { RunStatusBadge } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 import type { TaskProduct } from "./taskProducts";
 
-/** Status, scalar results, and structure files for each task in one attempt. */
+/** Status and per-task scalars for one attempt. The run result lives on Overview. */
 export const TaskProductList = ({
   products,
   activePath,
@@ -15,11 +15,10 @@ export const TaskProductList = ({
 }): JSX.Element | null => {
   if (products.length === 0) return null;
   return (
-    <section
-      aria-label="Task results"
-      className="shrink-0 space-y-3 border-b border-border px-4 py-3"
-    >
-      <h3 className="text-body-lg font-medium text-foreground">Results</h3>
+    <section aria-label="Tasks in this attempt" className="shrink-0 space-y-4">
+      <h3 className="border-b border-border/70 pb-2 text-label font-medium text-foreground">
+        Tasks
+      </h3>
       <ul className="space-y-3">
         {products.map((product) => (
           <li key={product.taskId} className="min-w-0 space-y-1">
