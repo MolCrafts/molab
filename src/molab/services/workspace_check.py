@@ -679,6 +679,15 @@ class _PathCheck:
             flags.append(f"--run {self.names.get('run', 'RUN')}")
         return " ".join(["molab index write", *flags, "--from FILE"])
 
+    def _asset_command(self, index: int) -> str:
+        """Replace when the path is inside an asset slot; otherwise import."""
+        if index + 1 < len(self.parts):
+            slot = "/".join(self.parts[: index + 2])
+            record = self.fs.join(self.root, slot, "asset.json")
+            if self.fs.exists(record):
+                return f"molab asset replace {slot} SRC"
+        return self._fill("molab asset import NAME SRC --project {project}")
+
     def _adopt(self) -> str:
         return self._fill(
             "molab runs adopt {project} {experiment} {run} --product TASK=PATH --log FILE"
@@ -843,8 +852,9 @@ class _PathCheck:
                     return self.deny(
                         "asset.owned",
                         "assets/ is molab's asset store. molab writes asset.json and the "
-                        "payload when a file is registered or imported.",
-                        self._fill("molab asset import NAME SRC --project {project}"),
+                        "payload. New bytes in an existing asset go through "
+                        "`molab asset replace`; a new file is `molab asset import`.",
+                        self._asset_command(index),
                     )
             if level == "execution" and (
                 (last and name in ATTEMPT_FILES) or (not last and name in execution_dir_names())

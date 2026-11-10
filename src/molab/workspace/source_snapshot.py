@@ -54,28 +54,68 @@ class SourceCaptureError(RuntimeError):
     """
 
 
-def _relative_import_files(current: Path, node: ast.ImportFrom) -> list[Path]:
-    """Files a relative import in *current* names, when those files exist.
+def _module_files(base: Path, dotted: str, names: list[str]) -> list[Path]:
+    """First-party files a module path names under *base*, and its submodules.
 
-    ``from .helper import fit`` in ``pkg/workflow.py`` is ``pkg/helper.py``.
-    ``from ..helper import fit`` walks one package up. A package
-    ``helper/__init__.py`` counts too. Absolute imports stay on the flat
-    sibling rule in :func:`_local_import_closure`.
+    Walks ``a.b.c`` one segment at a time: a package contributes its
+    ``__init__.py`` and is descended into, a module file ends the walk (any
+    later segment is an attribute of it). When the walk ends on a package,
+    each name in *names* that is itself a submodule there (``from lib import
+    render`` → ``lib/render.py``) is included too — importing it runs it.
+    A first segment that is not under *base* is not first-party: nothing.
     """
+    found: list[Path] = []
+    directory: Path | None = base
+    for part in dotted.split(".") if dotted else []:
+        if directory is None:
+            break
+        package = directory / part / "__init__.py"
+        module = directory / f"{part}.py"
+        if package.is_file():
+            found.append(package.resolve())
+            directory = directory / part
+        elif module.is_file():
+            found.append(module.resolve())
+            directory = None
+        elif (directory / part).is_dir():
+            # A namespace package has no __init__.py, but its submodules
+            # are still first-party source and contribute to the digest.
+            directory = directory / part
+        else:
+            return found
+    if directory is not None:
+        for name in names:
+            if name == "*":
+                continue
+            package = directory / name / "__init__.py"
+            module = directory / f"{name}.py"
+            if package.is_file():
+                found.append(package.resolve())
+            elif module.is_file():
+                found.append(module.resolve())
+    return found
+
+
+def _import_files(current: Path, root: Path, node: ast.AST) -> list[Path]:
+    """First-party files one ``import`` statement in *current* names.
+
+    Absolute imports resolve from *root* (the entrypoint's directory); a
+    relative import from the package of *current*, walked up one directory
+    per extra dot. ``import a.b`` names ``a/__init__.py`` and ``a/b.py``;
+    ``from a import b`` names ``a/__init__.py`` and, when ``b`` is a
+    submodule, ``a/b.py``.
+    """
+    if isinstance(node, ast.Import):
+        return [f for alias in node.names for f in _module_files(root, alias.name, [])]
+    if not isinstance(node, ast.ImportFrom):
+        return []
+    names = [alias.name for alias in node.names]
+    if node.level == 0:
+        return _module_files(root, node.module or "", names) if node.module else []
     base = current.parent
     for _ in range(node.level - 1):
         base = base.parent
-    modules = [node.module.split(".")[0]] if node.module else []
-    modules.extend(alias.name.split(".")[0] for alias in node.names if not node.module)
-    found: list[Path] = []
-    for name in modules:
-        file = (base / f"{name}.py").resolve()
-        package = (base / name / "__init__.py").resolve()
-        if file.is_file():
-            found.append(file)
-        elif package.is_file():
-            found.append(package)
-    return found
+    return _module_files(base, node.module or "", names)
 
 
 def _capture_name(root: Path, src: Path) -> str:
@@ -97,11 +137,13 @@ def _capture_name(root: Path, src: Path) -> str:
 def _local_import_closure(entrypoint: Path) -> list[Path]:
     """Entrypoint + transitively-imported first-party modules.
 
-    An absolute module name ``m`` is first-party iff ``<root>/m.py`` exists
-    (``root`` = the entrypoint's directory). Dotted absolute imports contribute
-    their first segment. A relative import is resolved from the file that
-    wrote it. Stdlib / third-party imports resolve to no file and are skipped.
-    Returns the entrypoint first, then the rest sorted by filename.
+    A module is first-party when its file is under ``root`` (the entrypoint's
+    directory): ``m.py`` or a package (including namespace packages), followed
+    down a dotted path and into imported submodules (:func:`_import_files`) — ``from lib import
+    render`` brings ``lib/render.py``, not just ``lib/__init__.py``. A
+    relative import is resolved from the file that wrote it. Stdlib /
+    third-party imports resolve to no file and are skipped. Returns the
+    entrypoint first, then the rest sorted by path.
     """
     entrypoint = entrypoint.resolve()
     root = entrypoint.parent
@@ -116,26 +158,11 @@ def _local_import_closure(entrypoint: Path) -> list[Path]:
             tree = ast.parse(current.read_text(encoding="utf-8"), filename=str(current))
         except (SyntaxError, UnicodeDecodeError, OSError):
             continue
-        names: set[str] = set()
-        relative: list[Path] = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                names.update(alias.name.split(".")[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                names.add(node.module.split(".")[0])
-            elif isinstance(node, ast.ImportFrom) and node.level > 0:
-                relative.extend(_relative_import_files(current, node))
-        for name in names:
-            file = (root / f"{name}.py").resolve()
-            package = (root / name / "__init__.py").resolve()
-            if file.is_file() and file not in seen:
-                stack.append(file)
-            elif package.is_file() and package not in seen:
-                stack.append(package)
-        for candidate in relative:
-            if candidate.is_file() and candidate not in seen:
-                stack.append(candidate)
-    rest = sorted((p for p in seen if p != entrypoint), key=lambda p: p.name)
+            for candidate in _import_files(current, root, node):
+                if candidate not in seen:
+                    stack.append(candidate)
+    rest = sorted((p for p in seen if p != entrypoint), key=lambda p: str(p))
     return [entrypoint, *rest]
 
 
@@ -160,7 +187,11 @@ def local_import_digest(module_file: PathArg) -> str | None:
     deps = _local_import_closure(path)[1:]
     if not deps:
         return None
-    payload = "\n".join(f"{dep.name}:{_sha256(dep)}" for dep in deps)
+    # Keyed by path under the importing file's directory: two packages'
+    # ``__init__.py`` must not collapse onto one name.
+    payload = "\n".join(
+        f"{Path(os.path.relpath(dep, path.parent)).as_posix()}:{_sha256(dep)}" for dep in deps
+    )
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

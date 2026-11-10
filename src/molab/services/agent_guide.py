@@ -57,7 +57,7 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
     (
         "Record a job that ran outside molab",
         "molab runs adopt PROJECT EXPERIMENT RUN --product TASK=PATH --log FILE "
-        "--job FILE --source FILE [--params '{...}']",
+        "--job FILE --source FILE [--params '{...}'] [--mode MODE]",
     ),
     (
         "Write the narrative of a record",
@@ -68,11 +68,19 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
         "molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --record JSON --created-by AGENT",
     ),
     (
+        "Preview a knowledge document as a reader sees it (or export one HTML file)",
+        "molab knowledge serve DOC [--export FILE]",
+    ),
+    (
         "Report back as a dispatched worker",
         "molab knowledge write NAME TEXT --on HOST --class Report --source SOURCE "
         '--record \'{"kind": "worker_report", ...}\' --created-by WORKER',
     ),
     ("Import external data", "molab asset import TITLE PATH --project PROJECT"),
+    (
+        "Replace an asset's bytes and keep its id",
+        "molab asset replace SPEC PATH",
+    ),
     ("Empty old scratch entries", "molab scratch clean --older-than 7d"),
     ("Rebuild every derived index block", "molab index sync"),
     ("Ask whether a write is legal", "molab check path PATH --op write --json"),
@@ -158,7 +166,7 @@ def _layout() -> str:
         ),
         (
             f"        ├── {ASSET_CONTAINER}/<run>--<title>/",
-            "a run's final products (ctx.register); a later attempt replaces them",
+            "a run's final products (ctx.register). New bytes keep the id: molab asset replace",
         ),
         (f"        ├── {SCRATCH_CONTAINER}/", "quick tests only; disposable, gitignored"),
         (f"        └── {RUN_CONTAINER}/<key=value_…>/", "directory name = the run's parameters"),

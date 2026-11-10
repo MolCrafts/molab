@@ -252,8 +252,8 @@ class Project(Folder):
     ) -> Asset:
         """Register outside bytes as an asset of this project.
 
-        The same bytes registered again return the existing asset. *title*
-        is a label, not an identity.
+        The same bytes registered again return the existing asset. The same
+        title with new bytes replaces that slot and keeps its id.
         """
         return self.assets.import_asset(title, src, media_type=media_type, tags=tags)
 

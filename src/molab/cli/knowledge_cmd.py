@@ -439,6 +439,76 @@ def knowledge_read(
             rprint(f"  [dim][{edge.role}][/dim] {edge.target}")
 
 
+@knowledge_app.command("serve")
+def knowledge_serve(
+    doc: Annotated[
+        Path,
+        typer.Argument(help="The document: a .md or .html knowledge file in this workspace."),
+    ],
+    port: Annotated[int, typer.Option("--port", "-p", help="Port; 0 picks a free one.")] = 0,
+    host: Annotated[str, typer.Option("--host", help="Address to bind.")] = "127.0.0.1",
+    open_browser: Annotated[
+        bool, typer.Option("--open/--no-open", help="Open the page in a browser.")
+    ] = True,
+    export: Annotated[
+        Path | None,
+        typer.Option(
+            "--export",
+            help=(
+                "Write one self-contained file instead of serving: HTML with assets "
+                "inlined, or a PDF when FILE ends in .pdf (needs Playwright)."
+            ),
+        ),
+    ] = None,
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to the one DOC is in.")
+    ] = None,
+) -> None:
+    """Preview one knowledge document as a reader sees it, images in place.
+
+    Serves the rendered page on localhost and re-renders it on every reload,
+    so edits show at once; ``molab:asset`` images come from their slots and
+    links to other knowledge documents open in the same viewer. With
+    ``--export`` the page is written to one HTML file with every image
+    inlined, to send on. Stop the server with Ctrl-C.
+    """
+    from molab.knowledge.preview import export_page, serve
+    from molab.workspace import Workspace
+
+    target = doc.resolve()
+    if not target.is_file() or target.suffix not in (".md", ".html"):
+        rprint(f"[red]Error:[/red] not a .md or .html knowledge file: {doc}")
+        raise typer.Exit(1)
+    root = path or Workspace.enclosing_root(target.parent, fs=_local_fs())
+    if root is None:
+        rprint(f"[red]Error:[/red] {doc} is not inside a molab workspace.")
+        raise typer.Exit(1)
+    workspace = Workspace.load(Path(str(root)))
+    if export is not None:
+        try:
+            page = export_page(target, workspace, export)
+        except RuntimeError as exc:
+            rprint(f"[red]Error:[/red] {exc}")
+            raise typer.Exit(1) from None
+        print(f"exported\t{export}\t{len(page.asset_ids)} assets inlined")
+        return
+
+    def ready(url: str) -> None:
+        print(f"Serving {target.name} at {url}  (Ctrl-C to stop)", flush=True)
+        if open_browser:
+            import webbrowser
+
+            webbrowser.open(url)
+
+    serve(target, workspace, host=host, port=port, on_ready=ready)
+
+
+def _local_fs():
+    from molab.fs import LocalFS
+
+    return LocalFS()
+
+
 def _require_workspace(path: Path | None) -> Workspace:
     """Load the workspace at *path* (cwd when omitted)."""
     from molab.workspace import Workspace

@@ -7,12 +7,13 @@ import contextlib
 import json
 import os
 import platform
+import re
 import sys
 import threading
 import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
 from mollog import get_logger
@@ -68,13 +69,28 @@ if TYPE_CHECKING:
 _logger = get_logger(__name__)
 
 
+_TITLE_SUFFIX = re.compile(r"\.[A-Za-z0-9]+")
+
+
+def _title_suffix(title: str) -> str:
+    """The title's last extension, when it is one file suffix.
+
+    In-memory bytes have no path of their own. The payload is named
+    ``payload`` plus this suffix, so a plugin can claim ``network.data``.
+    """
+    suffix = PurePosixPath(title.strip()).suffix
+    if _TITLE_SUFFIX.fullmatch(suffix):
+        return suffix.lower()
+    return ""
+
+
 def _register_filename(title: str, data: object) -> str:
     """A filename for in-memory bytes registered under *title*."""
     from .naming import entity_slug
 
     slug = entity_slug(title, fallback="asset")
     if isinstance(data, (bytes, bytearray)):
-        return slug
+        return f"{slug}{_title_suffix(title)}"
     if isinstance(data, (dict, list)):
         return f"{slug}.json"
     return f"{slug}.txt"
@@ -710,7 +726,9 @@ class ExecutionContext:
 
         The bytes are copied next to the asset record, at this run's
         experiment. The same bytes registered again return the existing
-        asset. *title* is a label. The task's working file is left in place.
+        asset. *title* is a label. In-memory bytes keep *title*'s suffix
+        (``network.data`` is stored as ``payload.data``); a title with no
+        suffix stays ``payload``. The task's working file is left in place.
 
         Returns:
             The asset. ``asset.ref`` is ``molab:asset/<id>``.

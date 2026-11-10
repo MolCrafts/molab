@@ -10,6 +10,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from molab.cli._common import (
     rprint,
@@ -361,6 +362,13 @@ def run_adopt(
             "--params", help="JSON or file: create the run first when RUN does not exist."
         ),
     ] = None,
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode",
+            help="How this attempt relates to earlier ones: initial, rerun, resume, reproduce.",
+        ),
+    ] = "initial",
     json_out: Annotated[bool, typer.Option("--json", help="Print the result as JSON.")] = False,
     target_spec: TargetOption = ".",
 ) -> None:
@@ -371,10 +379,12 @@ def run_adopt(
     ``jobs/``, the log as ``run.log``, scripts into ``source/``. ``--from DIR``
     folds a ``molab.track()`` directory: ``stdout.log`` / ``stderr.log`` and
     ``metrics.mlp.jsonl`` at the attempt root, and registers staged files
-    as assets.
+    as assets. ``--mode`` is ``initial`` for the run's first attempt. A later
+    one is ``rerun``, ``resume``, or ``reproduce``, under the same rules as
+    ``molab run``.
     """
     from molab.workspace import ExperimentNotFoundError, ProjectNotFoundError
-    from molab.workspace.domain import ExecutionStatus
+    from molab.workspace.domain import ExecutionMode, ExecutionStatus
     from molab.workspace.tracking import TrackedDirectory, read_tracked
 
     try:
@@ -423,6 +433,13 @@ def run_adopt(
         rprint("[red]Error:[/red] nothing to take times from; pass --started and --finished")
         raise typer.Exit(2)
 
+    try:
+        attempt_mode = ExecutionMode(mode)
+    except ValueError:
+        names = ", ".join(item.value for item in ExecutionMode)
+        rprint(f"[red]Error:[/red] --mode must be one of {names}, got {mode!r}")
+        raise typer.Exit(2) from None
+
     ws = _open_ws(target_spec)
     try:
         experiment = ws.get_project(project_id).get_experiment(experiment_id)
@@ -446,6 +463,7 @@ def run_adopt(
             status=state,
             started_at=started_at,
             finished_at=finished_at,
+            mode=attempt_mode,
             # One path per task keeps adopt's rule: a directory becomes out/TASK/.
             products={
                 task: paths[0] if len(paths) == 1 else list(paths)
@@ -470,6 +488,7 @@ def run_adopt(
         "execution_id": execution.id,
         "path": f"{run_rel}/executions/{execution.id}",
         "status": execution.status.value,
+        "mode": execution.mode.value,
         "started_at": execution.started_at.isoformat() if execution.started_at else None,
         "finished_at": execution.finished_at.isoformat() if execution.finished_at else None,
     }
@@ -1015,8 +1034,10 @@ def asset_list(
 ) -> None:
     """List assets across ALL scopes (workspace, project, experiment, run).
 
-    Named assets are listed with a Scope column. Use ``--scope`` to restrict
-    to one scope kind. ``run`` is accepted and matches nothing.
+    Named assets are listed with a Scope column. The Asset ID column is the
+    full id, so it can be passed to ``info``, ``replace``, and ``delete``.
+    Use ``--scope`` to restrict to one scope kind. ``run`` is accepted and
+    matches nothing.
     """
     ws = _open_ws(target_spec)
 
@@ -1047,18 +1068,25 @@ def asset_list(
         return
     title = "Assets (all scopes)" if scope is None else f"Assets ({scope} scope)"
     table = Table(title=title)
-    table.add_column("Asset ID", style="cyan")
-    table.add_column("Title", style="green")
-    table.add_column("Kind")
-    table.add_column("Scope", style="magenta")
-    table.add_column("Created")
+    table.add_column("Asset ID", style="cyan", no_wrap=True, overflow="ignore")
+    compact = _console.width < 100
+    if compact:
+        table.add_column("Title / Kind / Scope / Created")
+    else:
+        table.add_column("Title", style="green")
+        table.add_column("Kind")
+        table.add_column("Scope", style="magenta")
+        table.add_column("Created")
     for asset in shown:
+        details = [
+            Text(asset.title, style="green"),
+            Text(asset.media_type or ""),
+            Text(_format_asset_scope(asset.scope), style="magenta"),
+            Text(asset.created_at.strftime("%Y-%m-%d %H:%M")),
+        ]
         table.add_row(
-            asset.id[:12] + "...",
-            asset.title,
-            asset.media_type or "",
-            _format_asset_scope(asset.scope),
-            asset.created_at.strftime("%Y-%m-%d %H:%M"),
+            asset.id,
+            *([Text("\n").join(details)] if compact else details),
         )
     _console.print(table)
     if len(assets) > len(shown):
@@ -1067,24 +1095,29 @@ def asset_list(
 
 @asset_app.command("info")
 def asset_info(
-    asset_id: Annotated[str, typer.Argument(help="The asset id to inspect.")],
+    spec: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The asset: its id, its molab:asset/<id> ref, or its workspace-relative "
+                "slot directory (projects/P/experiments/E/assets/<run>--<title>)."
+            )
+        ),
+    ],
     target_spec: TargetOption = ".",
 ) -> None:
     """Show one asset: identity, content, and where the bytes came from."""
-    from molab.workspace.domain import Asset, ExecutionOrigin, ImportOrigin
+    from molab.services.asset_delete import resolve_asset
+    from molab.workspace.domain import ExecutionOrigin, ImportOrigin
     from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
-    from molab.workspace.refs import MolabRef
+    from molab.workspace.refs import InvalidRefError
 
     ws = _open_ws(target_spec)
     try:
-        found = ws.find(MolabRef(asset_id=asset_id))
-    except (RefNotFoundError, AmbiguousRefError) as exc:
+        asset, _repository = resolve_asset(ws, spec)
+    except (RefNotFoundError, AmbiguousRefError, InvalidRefError, OSError, ValueError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
-    if not isinstance(found, Asset):
-        rprint(f"[red]Error:[/red] {asset_id!r} is not an asset.")
-        raise typer.Exit(1)
-    asset = found
     origin = asset.origin
     if isinstance(origin, ImportOrigin):
         origin_text = f"import {origin.uri}"
@@ -1100,13 +1133,25 @@ def asset_info(
     rprint(f"  digest       : {asset.content.digest}")
     rprint(f"  size         : {asset.content.size}")
     rprint(f"  file         : {asset.file}")
+    slug = ws.assets_at(asset.scope).find_slug(asset.id)
+    if slug is not None:
+        slot = Path(ws.assets_at(asset.scope).assets_dir) / slug
+        rprint(f"  slot         : {slot.relative_to(Path(str(ws.root))).as_posix()}")
     rprint(f"  origin       : {origin_text}")
     rprint(f"  created      : {asset.created_at.isoformat()}")
 
 
 @asset_app.command("lineage")
 def asset_lineage(
-    asset_id: Annotated[str, typer.Argument(help="The asset id to trace.")],
+    spec: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The asset: its id, its molab:asset/<id> ref, or its workspace-relative "
+                "slot directory (projects/P/experiments/E/assets/<run>--<title>)."
+            )
+        ),
+    ],
     direction: Annotated[
         str,
         typer.Option("--direction", help="ancestors | descendants | both."),
@@ -1114,11 +1159,12 @@ def asset_lineage(
     target_spec: TargetOption = ".",
 ) -> None:
     """Trace an asset's provenance — wraps ``assets.lineage.ancestors/descendants``."""
+    from molab.services.asset_delete import resolve_asset
     from molab.workspace.asset_repository import scan_asset_repositories
     from molab.workspace.assets import lineage as asset_lineage_mod
     from molab.workspace.domain import Asset
     from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
-    from molab.workspace.refs import MolabRef
+    from molab.workspace.refs import InvalidRefError
 
     if direction not in ("ancestors", "descendants", "both"):
         rprint(
@@ -1127,10 +1173,11 @@ def asset_lineage(
         raise typer.Exit(1)
     ws = _open_ws(target_spec)
     try:
-        ws.find(MolabRef(asset_id=asset_id))
-    except (RefNotFoundError, AmbiguousRefError) as exc:
+        resolved, _repository = resolve_asset(ws, spec)
+    except (RefNotFoundError, AmbiguousRefError, InvalidRefError, OSError, ValueError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
+    asset_id = resolved.id
 
     named: dict[str, Asset] = {
         asset.id: asset for repo in scan_asset_repositories(ws) for asset in repo.list()
@@ -1229,8 +1276,9 @@ def asset_import(
 ) -> None:
     """Copy a file in as a project asset.
 
-    The same bytes registered again return the existing asset. The title is
-    a label, so a matching title with different bytes is a new asset.
+    The same bytes registered again return the existing asset. The same title
+    with new bytes replaces that slot and keeps its id. A run's product is
+    not an import: put new bytes there with ``molab asset replace``.
     """
     ws = _open_ws(target_spec)
     try:
@@ -1238,9 +1286,53 @@ def asset_import(
     except Exception as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
+    previous = next((item for item in owner.assets.list() if item.title == name), None)
     try:
         asset = owner.import_asset(name, src, tags={"role": "import"})
     except (FileNotFoundError, ValueError, OSError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
-    print(f"imported\t{asset.title}\t{asset.id}")
+    replaced = (
+        previous is not None
+        and previous.id == asset.id
+        and previous.content.digest != asset.content.digest
+    )
+    print(f"{'replaced' if replaced else 'imported'}\t{asset.title}\t{asset.id}")
+
+
+@asset_app.command("replace")
+def asset_replace(
+    spec: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The asset: its id, its molab:asset/<id> ref, or its workspace-relative "
+                "slot directory (projects/P/experiments/E/assets/<run>--<title>)."
+            )
+        ),
+    ],
+    src: Annotated[Path, typer.Argument(help="The new bytes.", exists=True)],
+    media_type: Annotated[
+        str | None,
+        typer.Option("--media-type", help="Media type. Omitted, the suffix is guessed."),
+    ] = None,
+    target_spec: TargetOption = ".",
+) -> None:
+    """Put new bytes into an existing asset. The id stays, so citations still name it.
+
+    Use this when a product is regenerated outside the workflow that first
+    registered it. Do not edit ``payload`` or ``asset.json``. The same bytes
+    change nothing. A log is refused.
+    """
+    from molab.services.asset_replace import replace_asset
+    from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
+    from molab.workspace.refs import InvalidRefError
+
+    ws = _open_ws(target_spec)
+    try:
+        replaced = replace_asset(ws, spec, src, media_type=media_type)
+    except (RefNotFoundError, AmbiguousRefError, InvalidRefError, OSError, ValueError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    verb = "replaced" if replaced.changed else "unchanged"
+    print(f"{verb}\t{replaced.asset.title}\t{replaced.asset.id}\t{replaced.asset.content.digest}")

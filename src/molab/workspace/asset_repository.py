@@ -14,6 +14,7 @@ grow ``-2`` suffixes. Logs are not products and are refused.
 from __future__ import annotations
 
 import builtins
+import contextlib
 import hashlib
 import json
 import re
@@ -30,7 +31,7 @@ from .domain import Asset, AssetOrigin, AssetScope, ContentRef, ExecutionOrigin,
 from .errors import UnmigratedAssetError
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFS
-from .history import AgentRef
+from .history import MOLAB_DIR, AgentRef
 from .naming import ASSET_CONTAINER
 from .schema_version import versioned_payload
 
@@ -458,8 +459,9 @@ class AssetRepository:
     ) -> Asset:
         """Register bytes brought in from outside a run.
 
-        *title* is a label. The same bytes, registered again anywhere in the
-        workspace, return the existing asset.
+        The same bytes, registered again anywhere in the workspace, return the
+        existing asset. The same title with new bytes replaces that slot and
+        keeps its id.
         """
         from .history import SYSTEM_AGENT
 
@@ -471,6 +473,104 @@ class AssetRepository:
             media_type=media_type,
             tags=tags,
         )
+
+    def replace_bytes(
+        self,
+        asset_id: str,
+        source: str | Path,
+        *,
+        media_type: str | None = None,
+    ) -> Asset:
+        """Put *source* into asset *asset_id*. The id, title, origin, and tags stay.
+
+        The same bytes are a no-op. A log is refused. Bytes that already belong
+        to a different asset are refused: one digest is one asset.
+
+        Raises:
+            KeyError: *asset_id* is not in this scope.
+            FileNotFoundError: *source* does not exist.
+            ValueError: *source* is a log, or another asset already stores its digest.
+        """
+        import mimetypes
+
+        path = Path(source)
+        if not path.exists():
+            raise FileNotFoundError(f"Source path does not exist: {source}")
+        if path.is_file() and path.suffix.lower() in _EVIDENCE_SUFFIXES:
+            raise ValueError(
+                f"{path.name} is a log: logs are evidence and stay in the attempt's out/, not assets"
+            )
+        content = _digest_local(path)
+        with self._lock():
+            asset = self.get(asset_id)
+            if content.digest == asset.content.digest:
+                return asset
+            other = asset_by_digest(self.workspace, content.digest)
+            if other is not None and other.id != asset.id:
+                raise ValueError(
+                    f"these bytes are already {other.ref} ({other.title}); "
+                    "cite that asset instead of copying them into this one"
+                )
+            slug = self.find_slug(asset_id)
+            assert slug is not None
+            asset_root = self.fs.join(self.assets_dir, slug)
+            filename = f"payload{path.suffix}" if path.is_file() else "payload"
+            guessed = media_type
+            if guessed is None and path.is_file():
+                guessed = mimetypes.guess_type(path.name)[0]
+            updated = asset.model_copy(
+                update={
+                    "content": content,
+                    "file": filename,
+                    "media_type": guessed if guessed is not None else asset.media_type,
+                }
+            )
+            staging = self.fs.join(self.root, MOLAB_DIR, "asset-replacements", generate_uuid7())
+            prepared = self.fs.join(staging, "new")
+            backup = self.fs.join(staging, "previous")
+            restore_required = False
+            try:
+                self.fs.mkdir(prepared, parents=True, exist_ok=False)
+                dest = self.fs.join(prepared, filename)
+                self._copy_payload(path, dest)
+                stored = content_ref(self.fs, dest)
+                if stored != content:
+                    raise ValueError(
+                        f"copied bytes are {stored.digest}, source is {content.digest}"
+                    )
+                self.fs.atomic_write_json(
+                    self.fs.join(prepared, "asset.json"),
+                    versioned_payload(updated.model_dump(mode="json")),
+                )
+                # Switch the complete slot, not the payload and record separately.
+                # Keep the old slot until the new one has been installed.
+                self.fs.mv(asset_root, backup)
+                restore_required = True
+                self.fs.mv(prepared, asset_root)
+                restore_required = False
+            except BaseException:
+                if restore_required:
+                    self.fs.mv(backup, asset_root)
+                    restore_required = False
+                raise
+            finally:
+                # If restoration itself failed, preserve the backup for recovery.
+                if not restore_required:
+                    with contextlib.suppress(OSError):
+                        self.fs.rm(staging, recursive=True)
+            return updated
+
+    def _copy_payload(self, source: Path, dest: str) -> None:
+        if source.is_dir():
+            if isinstance(self.fs, LocalFS):
+                shutil.copytree(source, dest)
+            else:
+                self.fs.cp(str(source), dest, recursive=True)
+            return
+        if isinstance(self.fs, LocalFS):
+            shutil.copy2(source, dest)
+            return
+        self.fs.cp(str(source), dest)
 
     def payload_path(self, asset_id: str) -> str:
         """Path of the asset's bytes on the workspace filesystem.
@@ -511,15 +611,7 @@ class AssetRepository:
         filename = f"payload{source.suffix}" if source.is_file() else "payload"
         payload = self.fs.join(asset_root, filename)
         self.fs.mkdir(asset_root, parents=True, exist_ok=True)
-        if source.is_dir():
-            if isinstance(self.fs, LocalFS):
-                shutil.copytree(source, payload)
-            else:
-                self.fs.cp(str(source), payload, recursive=True)
-        elif isinstance(self.fs, LocalFS):
-            shutil.copy2(source, payload)
-        else:
-            self.fs.cp(str(source), payload)
+        self._copy_payload(source, payload)
         guessed = media_type or (mimetypes.guess_type(source.name)[0] if source.is_file() else None)
         asset = Asset(
             id=asset_id,
