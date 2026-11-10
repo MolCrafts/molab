@@ -1,4 +1,4 @@
-import { isChemicalStructureName, structureRank } from "@/lib/structure-files";
+import { structureRank } from "@/lib/structure-files";
 
 export interface TaskScalar {
   key: string;
@@ -47,8 +47,15 @@ const scalarText = (value: unknown): string | null => {
 
 const fileName = (path: string): string => path.split("/").pop() || path;
 
-/** One row per task: its status, short results, and structure files it wrote. */
-export const taskProducts = (tasks: readonly TaskLike[], executionId: string): TaskProduct[] => {
+/**
+ * One row per task: its status, short results, and files a preview plugin claims.
+ * The host does not keep a format list. `claimsFile` is that plugin check.
+ */
+export const taskProducts = (
+  tasks: readonly TaskLike[],
+  executionId: string,
+  claimsFile: (name: string) => boolean,
+): TaskProduct[] => {
   const products: TaskProduct[] = [];
   for (const task of tasks) {
     const scalars: TaskScalar[] = [];
@@ -56,8 +63,9 @@ export const taskProducts = (tasks: readonly TaskLike[], executionId: string): T
     for (const [key, value] of Object.entries(task.outputs ?? {})) {
       if (typeof value === "string") {
         const relative = executionRelativePath(value, executionId);
-        if (relative && isChemicalStructureName(relative)) {
-          structures.push({ key, label: fileName(relative), path: relative });
+        const label = relative ? fileName(relative) : "";
+        if (relative && claimsFile(label)) {
+          structures.push({ key, label, path: relative });
           continue;
         }
       }

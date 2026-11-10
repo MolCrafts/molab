@@ -160,7 +160,7 @@ export const DocMarkdown = ({
       return <TaskBox checked={Boolean(checked)} onToggle={toggle} />;
     },
     blockquote: ({ children }) => (
-      <blockquote className="my-4 border-l-4 border-border pl-4 text-doc text-muted-foreground">
+      <blockquote className="my-4 rounded-control border border-border px-4 py-2 text-doc text-muted-foreground">
         {children}
       </blockquote>
     ),
@@ -182,11 +182,13 @@ export const DocMarkdown = ({
       </div>
     ),
     th: ({ children }) => (
-      <th className="h-7 border-b border-border px-3 text-left font-normal text-muted-foreground">
+      <th className="h-list-row border-b border-border px-list-pad-x text-left text-label font-normal text-muted-foreground">
         {children}
       </th>
     ),
-    td: ({ children }) => <td className="h-6 border-t border-border px-3">{children}</td>,
+    td: ({ children }) => (
+      <td className="h-list-row border-t border-border px-list-pad-x text-body">{children}</td>
+    ),
     a: ({ href, children }) =>
       isMolabRef(href) ? (
         <RefChip refText={href}>{children as ReactNode}</RefChip>

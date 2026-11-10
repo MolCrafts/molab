@@ -5,10 +5,11 @@
  */
 
 import { Button, Input, Label } from "@molcrafts/ui";
-import { Eye, EyeOff, Layers, LoaderCircle } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle } from "lucide-react";
 import { type FormEvent, type JSX, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/app/auth/AuthContext";
+import { ProductMark } from "@/app/shell/ProductMark";
 import { cn } from "@/lib/utils";
 
 /** Default username matches CLI ``molab auth login`` bootstrap. */
@@ -68,7 +69,7 @@ export function LoginPage(): JSX.Element {
       <div className="flex w-full max-w-sm flex-col gap-6">
         <header className="flex flex-col items-start gap-4">
           <span className="flex items-center gap-2 text-title font-semibold text-foreground">
-            <Layers aria-hidden className="size-6 text-accent" />
+            <ProductMark className="size-6 text-accent" />
             molab
           </span>
           <div className="flex flex-col gap-1">

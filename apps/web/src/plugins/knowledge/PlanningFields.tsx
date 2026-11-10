@@ -40,7 +40,7 @@ export const PlanningFields = ({
       <div className="grid gap-3">
         {draft.stages.map((row, index) => (
           <fieldset key={row.key} className="grid gap-2 border border-border p-3">
-            <legend className="px-1 text-micro uppercase tracking-wide text-muted-foreground">
+            <legend className="px-1 text-label font-medium text-muted-foreground">
               Stage {index + 1}
             </legend>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -136,7 +136,7 @@ export const PlanningFields = ({
       <div className="grid gap-3">
         {draft.items.map((row, index) => (
           <fieldset key={row.key} className="grid gap-2 border border-border p-3">
-            <legend className="px-1 text-micro uppercase tracking-wide text-muted-foreground">
+            <legend className="px-1 text-label font-medium text-muted-foreground">
               Item {index + 1}
             </legend>
             <div className="grid gap-2 sm:grid-cols-2">

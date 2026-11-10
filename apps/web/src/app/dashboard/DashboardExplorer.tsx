@@ -2,8 +2,8 @@
  * The Dashboard side bar is the triage list (Figma L01-1, L01-3, decision 2):
  * Needs attention (latest attempt failed or interrupted), Active (running,
  * then queued) and Finished · 24h (folded). One 28px row per run — its title
- * and its experiment. A click previews the run (L12); ↵ or a double click
- * opens it. These lists replace the Dashboard's old Attention and Timeline
+ * and its experiment. A click opens an italic preview tab; ↵ or a double click
+ * pins it. These lists replace the Dashboard's old Attention and Timeline
  * views and its project list (the Projects section has the projects).
  */
 
@@ -52,7 +52,7 @@ const Section = ({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex h-shell-crumbs w-full items-center gap-1 px-1 text-micro font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex h-list-row w-full items-center gap-1 px-1 text-label font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <Chevron aria-hidden className="size-icon-sm" />
         <span className="flex-1 text-left">{title}</span>
@@ -67,7 +67,7 @@ const Section = ({
   );
 };
 
-/** One list of runs, 28px rows; shared with the phone Overview (L01-8). */
+/** One list of runs. Row height is the constitution list row. Shared with the phone Overview. */
 export const RunList = ({
   runs,
   more,
@@ -93,11 +93,11 @@ export const RunList = ({
               type="button"
               aria-label={`${runLabel(run)} · ${run.experimentName}`}
               aria-current={selected ? "true" : undefined}
-              className={`flex h-7 w-full min-w-0 items-center gap-2 pr-3 pl-6 text-left hover:bg-interactive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring ${selected ? "bg-accent-muted" : ""}`}
+              className={`flex h-list-row w-full min-w-0 items-center gap-2 pr-3 pl-6 text-left text-body hover:bg-interactive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring ${selected ? "bg-accent-muted" : ""}`}
               onClick={(event) =>
                 event.metaKey || event.ctrlKey
                   ? preview.open(target, { background: true })
-                  : preview.preview(target)
+                  : preview.reveal(target)
               }
               onDoubleClick={() => preview.open(target)}
               onKeyDown={(event) => {
@@ -108,12 +108,10 @@ export const RunList = ({
               }}
             >
               <StatusIcon status={runPresentationStatus(run)} className="size-icon-sm shrink-0" />
-              <span className="max-w-[55%] shrink-0 truncate font-mono text-label text-foreground">
+              <span className="max-w-[55%] shrink-0 truncate font-mono text-foreground">
                 {runLabel(run)}
               </span>
-              <span className="min-w-0 truncate text-label text-muted-foreground">
-                {run.experimentName}
-              </span>
+              <span className="min-w-0 truncate text-muted-foreground">{run.experimentName}</span>
             </button>
           </li>
         );
@@ -140,20 +138,32 @@ export const DashboardExplorer = ({ onRefresh }: NavigationExplorerProps): JSX.E
         onRefresh();
       }}
     >
-      <RefreshCw className="size-3.5" />
+      <RefreshCw className="size-icon-sm" />
     </WorkbenchIconAction>
   );
 
   return (
     <LeftExplorer title="Dashboard" actions={actions} bodyClassName="py-1">
       <Section title="Needs attention" count={lists.attention.length}>
-        <RunList runs={lists.attention} more="more in Runs" empty="Nothing needs you." />
+        <RunList
+          runs={lists.attention}
+          more="more in Runs"
+          empty="Nothing needs you. Failed and cancelled runs show up here."
+        />
       </Section>
       <Section title="Active" count={lists.active.length}>
-        <RunList runs={lists.active} more="more in Runs" empty="Nothing is running." />
+        <RunList
+          runs={lists.active}
+          more="more in Runs"
+          empty="Nothing is running. Start a run from an experiment."
+        />
       </Section>
       <Section title="Finished · 24h" count={lists.finished.length} defaultOpen={false}>
-        <RunList runs={lists.finished} more="more in Runs" empty="Nothing finished today." />
+        <RunList
+          runs={lists.finished}
+          more="more in Runs"
+          empty="Nothing finished in the last 24 hours."
+        />
       </Section>
     </LeftExplorer>
   );

@@ -25,7 +25,7 @@ import {
   useState,
 } from "react";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
-import { StatusIcon, SweepChart } from "@/app/components/entity";
+import { OverviewCanvas, StatusIcon, SweepChart } from "@/app/components/entity";
 import { type ComparedRun, keyMetric, sweepOf } from "@/app/renderers/run/runCompare";
 import {
   clockWindow,
@@ -238,7 +238,7 @@ const Outputs = ({
     {rows.map((row) => {
       const Icon = row.view?.Icon;
       return (
-        <li key={row.key} className="flex h-7 min-w-0 items-center gap-3 text-body">
+        <li key={row.key} className="flex h-list-row min-w-0 items-center gap-3 text-body">
           <FileText aria-hidden className="size-icon-sm shrink-0 text-muted-foreground" />
           {row.assetId && onPreviewAsset ? (
             <button
@@ -402,44 +402,42 @@ export const RunOverview = ({
   const outputsList = succeeded ? outputRows(outputs, openIn) : [];
 
   return (
-    <div className="h-full min-h-0 overflow-auto bg-background">
-      <div className="space-y-8 px-6 py-6">
-        {attempt ? (
-          <Verdict run={run} attempt={attempt} verdict={verdict} onOpenView={onOpenView} />
-        ) : (
-          <section aria-label="Not run yet" className="space-y-1">
-            <div className="flex items-center gap-2">
-              <StatusIcon status="pending" className="size-icon shrink-0" />
-              <h2 className="text-title font-semibold text-muted-foreground">Not started</h2>
-            </div>
-            <p className="ml-6 text-body text-muted-foreground">
-              No attempt yet. Start it from the editor actions.
-            </p>
-          </section>
-        )}
+    <OverviewCanvas>
+      {attempt ? (
+        <Verdict run={run} attempt={attempt} verdict={verdict} onOpenView={onOpenView} />
+      ) : (
+        <section aria-label="Not run yet" className="space-y-1">
+          <div className="flex items-center gap-2">
+            <StatusIcon status="pending" className="size-icon shrink-0" />
+            <h2 className="text-title font-semibold text-muted-foreground">Not started</h2>
+          </div>
+          <p className="ml-6 text-body text-muted-foreground">
+            No attempt yet. Start it from the editor actions.
+          </p>
+        </section>
+      )}
 
-        {attempt ? (
-          <Section title="Tasks" readout={clockWindow(rows)}>
-            {journal.isPending ? (
-              <Pending label="Reading the attempt's journal" />
-            ) : rows.length > 0 ? (
-              <TaskClock rows={rows} onPreviewTask={onPreviewTask} />
-            ) : (
-              <p className="text-body text-muted-foreground">This attempt journalled no tasks.</p>
-            )}
-          </Section>
-        ) : null}
+      {attempt ? (
+        <Section title="Tasks" readout={clockWindow(rows)}>
+          {journal.isPending ? (
+            <Pending label="Reading the attempt's journal" />
+          ) : rows.length > 0 ? (
+            <TaskClock rows={rows} onPreviewTask={onPreviewTask} />
+          ) : (
+            <p className="text-body text-muted-foreground">This attempt journalled no tasks.</p>
+          )}
+        </Section>
+      ) : null}
 
-        <Siblings run={run} results={results} onPreviewRun={onPreviewRun} />
+      <Siblings run={run} results={results} onPreviewRun={onPreviewRun} />
 
-        {outputsList.length > 0 ? (
-          <Section title="Outputs">
-            <Outputs rows={outputsList} onPreviewAsset={onPreviewAsset} onOpenView={onOpenView} />
-          </Section>
-        ) : null}
+      {outputsList.length > 0 ? (
+        <Section title="Outputs">
+          <Outputs rows={outputsList} onPreviewAsset={onPreviewAsset} onOpenView={onOpenView} />
+        </Section>
+      ) : null}
 
-        <CitedBy run={run} onOpenKnowledge={onOpenKnowledge} />
-      </div>
-    </div>
+      <CitedBy run={run} onOpenKnowledge={onOpenKnowledge} />
+    </OverviewCanvas>
   );
 };

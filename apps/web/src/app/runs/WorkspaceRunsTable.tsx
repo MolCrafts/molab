@@ -189,7 +189,7 @@ export const WorkspaceRunsTable = ({
     <table aria-label="Runs" className="w-full border-collapse text-body">
       <thead className="sticky top-0 z-10 border-b border-border bg-background text-label text-muted-foreground">
         <tr>
-          <th scope="col" className="h-7 w-10 pl-6">
+          <th scope="col" className="h-list-row w-10 pl-6">
             <input
               type="checkbox"
               aria-label={allSelected ? "Deselect all runs" : "Select all runs"}
@@ -212,7 +212,7 @@ export const WorkspaceRunsTable = ({
                 scope="col"
                 aria-sort={active ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                 className={cn(
-                  "h-7 px-2 font-normal",
+                  "h-list-row px-list-pad-x font-normal",
                   header.numeric ? "text-right" : "text-left",
                   header.className,
                 )}
@@ -257,7 +257,7 @@ export const WorkspaceRunsTable = ({
               }}
               onKeyDown={(event) => onRowKey(event, row, index)}
               className={cn(
-                "h-6 cursor-default outline-none hover:bg-interactive focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring max-sm:h-auto",
+                "h-list-row cursor-default outline-none hover:bg-interactive focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring max-sm:h-auto",
                 selected && "bg-accent-muted hover:bg-accent-muted",
                 previewed &&
                   !selected &&
@@ -274,10 +274,10 @@ export const WorkspaceRunsTable = ({
                   className="size-3.5 accent-accent"
                 />
               </td>
-              <td className="w-6 px-2">
+              <td className="w-6 px-list-pad-x">
                 <StatusIcon status={row.status} className="size-icon-sm" />
               </td>
-              <td className="max-w-[20rem] px-2 max-sm:max-w-60 max-sm:py-1">
+              <td className="max-w-[20rem] px-list-pad-x max-sm:max-w-60 max-sm:py-1">
                 <span className="block truncate font-mono" title={row.title}>
                   {row.title}
                 </span>
@@ -287,22 +287,22 @@ export const WorkspaceRunsTable = ({
                   {row.at === null ? "" : ` · ${formatRelative(new Date(row.at).toISOString())}`}
                 </span>
               </td>
-              <td className="max-w-[18rem] truncate px-2 max-sm:hidden">
+              <td className="max-w-[18rem] truncate px-list-pad-x max-sm:hidden">
                 <span className="text-muted-foreground">{row.run.projectName} ›</span>{" "}
                 {row.run.experimentName}
               </td>
-              <td className="px-2 font-mono text-label text-muted-foreground max-md:hidden">
+              <td className="px-list-pad-x font-mono text-label text-muted-foreground max-md:hidden">
                 {row.attempt ?? "—"}
               </td>
-              <td className="px-2 text-right tabular-nums max-sm:hidden">
+              <td className="px-list-pad-x text-right tabular-nums max-sm:hidden">
                 {row.seconds === null ? "—" : formatSpan(row.seconds)}
               </td>
-              <td className="px-2 text-right tabular-nums text-muted-foreground max-sm:hidden">
+              <td className="px-list-pad-x text-right tabular-nums text-muted-foreground max-sm:hidden">
                 {row.at === null
                   ? "—"
                   : formatRelative(new Date(row.at).toISOString()).replace(/ ago$/, "")}
               </td>
-              <td className="px-2 text-muted-foreground max-md:hidden">
+              <td className="px-list-pad-x text-muted-foreground max-md:hidden">
                 {row.target ? (
                   <span className="inline-flex items-center gap-1">
                     {row.target === "laptop" || row.target === "local" ? (
@@ -316,7 +316,7 @@ export const WorkspaceRunsTable = ({
                   "—"
                 )}
               </td>
-              <td className="px-2 pr-6 font-mono text-label text-muted-foreground max-lg:hidden">
+              <td className="px-list-pad-x pr-6 font-mono text-label text-muted-foreground max-lg:hidden">
                 {row.run.id}
               </td>
             </tr>

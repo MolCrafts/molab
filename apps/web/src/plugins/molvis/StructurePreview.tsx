@@ -13,9 +13,22 @@ import { MolvisErrorBoundary } from "./MolvisErrorBoundary";
 import { DEFAULT_STYLE } from "./sceneStyle";
 import { type SceneSource, TrajectoryViewer } from "./TrajectoryViewer";
 
-export const StructurePreview = ({ content, name }: FilePreviewContentProps): JSX.Element => {
-  const source = useMemo<SceneSource>(() => ({ kind: "text", name, content }), [name, content]);
+export const StructurePreview = ({
+  content,
+  name,
+  path,
+  bytes,
+}: FilePreviewContentProps): JSX.Element => {
+  const source = useMemo<SceneSource>(() => {
+    if (bytes) return { kind: "bytes", name, path: path || name, content: bytes };
+    return { kind: "text", name, content };
+  }, [bytes, content, name, path]);
   const [failure, setFailure] = useState<string | null>(null);
+  const [seen, setSeen] = useState(source);
+  if (seen !== source) {
+    setSeen(source);
+    setFailure(null);
+  }
   return (
     <div className="relative flex h-full min-h-48 flex-col bg-background">
       {failure ? (
@@ -23,7 +36,7 @@ export const StructurePreview = ({ content, name }: FilePreviewContentProps): JS
           {failure}
         </div>
       ) : (
-        <MolvisErrorBoundary key={name}>
+        <MolvisErrorBoundary>
           <TrajectoryViewer
             source={source}
             style={DEFAULT_STYLE}

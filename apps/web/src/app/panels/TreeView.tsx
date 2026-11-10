@@ -43,7 +43,7 @@ export interface TreeNode {
   actions?: TreeNodeAction[];
   /** Open the row's page (double-click, ↵). Without `preview`, a click opens too. */
   onSelect?: () => void;
-  /** What a single click shows in the Preview (L12). */
+  /** Single click opens this as the italic preview tab; double click pins it. */
   preview?: PreviewTarget;
   /**
    * Intent (hover / keyboard focus): start async work the click will need
@@ -138,10 +138,9 @@ const TreeRow = ({
   tabStopId,
 }: RowProps): JSX.Element => {
   const previewApi = usePreview();
-  // Single click (L12): preview when the row has a target, else open; a
-  // folder-like row also shows what is inside it.
+  // Single click: an italic preview tab. A folder-like row also shows what is inside it.
   const clickNode = (target: TreeNode): void => {
-    if (target.preview) previewApi.preview(target.preview);
+    if (target.preview) previewApi.reveal(target.preview);
     else target.onSelect?.();
     if (target.children !== undefined && !expanded.has(target.id)) onToggle(target.id);
   };
@@ -188,12 +187,9 @@ const TreeRow = ({
         clickNode(node);
       }}
       onDoubleClick={() => {
-        // Opening the row's page retires the Preview of it.
-        previewApi.close();
-        node.onSelect?.();
-      }}
-      onContextMenu={() => {
-        if (node.preview) previewApi.preview(node.preview);
+        // Double click pins a concrete tab.
+        if (node.preview) previewApi.open(node.preview);
+        else node.onSelect?.();
       }}
       onPointerEnter={() => node.onPrefetch?.()}
       onFocus={() => node.onPrefetch?.()}
@@ -385,7 +381,7 @@ export const TreeView = ({
       const ordered = visiblePreorder(nodes, expanded);
       shiftAnchor.current = ordered.indexOf(node.selectionKey);
     }
-    if (node.preview) previewApi.preview(node.preview);
+    if (node.preview) previewApi.reveal(node.preview);
     else node.onSelect?.();
     // A folder-like row also shows what is inside it.
     if (node.children !== undefined && !expanded.has(node.id)) toggle(node.id);
@@ -409,7 +405,7 @@ export const TreeView = ({
     };
     switch (event.key) {
       case "Enter":
-        // ↵ opens the page; a click (or Space) only previews (L12).
+        // ↵ pins the row, the same as a double click.
         event.preventDefault();
         current.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
         return;

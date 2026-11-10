@@ -35,6 +35,12 @@ export type PreviewTarget =
 
 export type PreviewKind = PreviewTarget["kind"];
 
+/** The right overlay peeks at an item inside an italic preview tab, not at the tab itself. */
+export const previewOverlaysEditor = (
+  target: PreviewTarget | null,
+  tab: { key: string; preview?: boolean } | null,
+): boolean => Boolean(target && tab?.preview && previewKey(target) !== tab.key);
+
 export const previewKey = (target: PreviewTarget): string => {
   switch (target.kind) {
     case "run":

@@ -58,7 +58,7 @@
 
 .mol-progress-spinner {
   display: inline-block;
-  border-radius: 9999px;
+  border-radius: 50%;
   border-style: solid;
   border-color: color-mix(in oklab, var(--status-running) 28%, transparent);
   border-top-color: var(--status-running);

@@ -156,7 +156,7 @@
   --spacing-shell-tabs: 2.1875rem; /* 35 — editor tab row */
   --spacing-shell-crumbs: 1.375rem; /* 22 — breadcrumb row */
   --spacing-shell-status: 1.375rem; /* 22 — status bar */
-  --spacing-shell-row: 1.75rem; /* 28 — side-bar row and section header (owner, 2026-11-07: 22 read too compact) */
+  --spacing-shell-row: 1.75rem; /* 28 — side-bar row. Keep equal to constitution --spacing-list-row. */
   --spacing-shell-action: 1.375rem; /* 22 — icon action in chrome */
   --spacing-shell-button: 1.625rem; /* 26 — text button (VS Code) */
   --spacing-shell-sidebar: 15.5rem; /* 248 — side bar default width */
@@ -743,7 +743,7 @@
   flex: none;
   border: 2px solid currentColor;
   border-right-color: transparent;
-  border-radius: 9999px;
+  border-radius: 50%;
   animation: molab-progress-spin 0.7s linear infinite !important;
   will-change: transform;
 }
@@ -920,11 +920,10 @@
 .knowledge-doc[data-class="milestone"] { --doc-accent: var(--knowledge-milestone); }
 .knowledge-doc[data-class="delegation"] { --doc-accent: var(--knowledge-delegation); }
 
-/* MkDocs-style admonition: a left rule in the type's colour, a washed title bar. */
+/* Admonition: the type's colour is the icon and the title wash, inside a hairline frame. */
 .doc-admonition {
   --adm: var(--molab-accent);
-  border-left: 4px solid var(--adm);
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--adm) 18%, transparent);
+  border: 1px solid color-mix(in oklab, var(--adm) 35%, transparent);
 }
 .doc-admonition > .doc-admonition-title {
   background: color-mix(in oklab, var(--adm) 10%, var(--molab-surface));

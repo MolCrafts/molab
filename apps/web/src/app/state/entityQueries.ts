@@ -186,6 +186,23 @@ export const assetTextQueryOptions = (projectId: string, assetId: string, limit:
     staleTime: Number.POSITIVE_INFINITY,
   });
 
+/** Whole registered-asset bytes, including imports without a producing attempt. */
+export const assetBytesQueryOptions = (projectId: string, assetId: string) =>
+  queryOptions({
+    queryKey: [...assetKeys.detail(projectId, assetId), "bytes"] as const,
+    queryFn: async (): Promise<Uint8Array> => {
+      const response = await fetch(assetsApi.downloadUrl(projectId, assetId), {
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        throw new Error(`Could not read the asset (HTTP ${response.status})`);
+      }
+      return new Uint8Array(await response.arrayBuffer());
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+    structuralSharing: false,
+  });
+
 export const executionJournalQueryOptions = (
   projectId: string,
   experimentId: string,
@@ -295,6 +312,63 @@ export const runFileBlobQueryOptions = (
     staleTime: Number.POSITIVE_INFINITY,
   });
 
+const attemptFileUrl = (runDir: string, path: string): string =>
+  `${runDir.replace(/\/+$/, "")}/${path}`;
+
+/**
+ * Whole bytes of one attempt file. DCD is binary; the text route would decode
+ * it as UTF-8. `download` lifts the image/PDF allow-list on the blob route.
+ */
+export const runFileBytesQueryOptions = (
+  projectId: string,
+  experimentId: string,
+  runId: string,
+  executionId: string,
+  path: string,
+) =>
+  queryOptions({
+    queryKey: [...runKeys.fileBlob(projectId, experimentId, runId, executionId, path), "bytes"],
+    queryFn: async (): Promise<Uint8Array> => {
+      const listing = await runsApi.getRunFiles(projectId, experimentId, runId, executionId);
+      const blob = await workspaceApi.getWorkspaceFileBlob(attemptFileUrl(listing.runDir, path), {
+        download: true,
+      });
+      return new Uint8Array(await blob.arrayBuffer());
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+    structuralSharing: false,
+  });
+
+/** Whole bytes of one registered asset. The text content client would decode a DCD. */
+export const artifactBytesQueryOptions = (
+  projectId: string,
+  experimentId: string,
+  runId: string,
+  executionId: string,
+  artifactId: string,
+) =>
+  queryOptions({
+    queryKey: [
+      ...runKeys.artifactContent(projectId, experimentId, runId, executionId, artifactId),
+      "bytes",
+    ],
+    queryFn: async (): Promise<Uint8Array> => {
+      const url =
+        `/api/projects/${encodeURIComponent(projectId)}` +
+        `/experiments/${encodeURIComponent(experimentId)}` +
+        `/runs/${encodeURIComponent(runId)}` +
+        `/executions/${encodeURIComponent(executionId)}` +
+        `/assets/${encodeURIComponent(artifactId)}/content`;
+      const response = await fetch(url, { credentials: "same-origin" });
+      if (!response.ok) {
+        throw new Error(`Could not read the asset (HTTP ${response.status})`);
+      }
+      return new Uint8Array(await response.arrayBuffer());
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+    structuralSharing: false,
+  });
+
 /** A workspace file's text (the Workflow view's Source of a code workflow, L06). */
 export const fileKeys = {
   all: ["workspace-file"] as const,
@@ -314,4 +388,16 @@ export const workspaceFileBlobQueryOptions = (path: string) =>
     queryKey: [...fileKeys.all, getWorkspaceQueryScope(), path, "blob"] as const,
     queryFn: () => workspaceApi.getWorkspaceFileBlob(path),
     staleTime: 60_000,
+  });
+
+/** Plugin-requested binary content, without the image/PDF preview allow-list. */
+export const workspaceFileBytesQueryOptions = (path: string) =>
+  queryOptions({
+    queryKey: [...fileKeys.all, getWorkspaceQueryScope(), path, "bytes"] as const,
+    queryFn: async (): Promise<Uint8Array> => {
+      const blob = await workspaceApi.getWorkspaceFileBlob(path, { download: true });
+      return new Uint8Array(await blob.arrayBuffer());
+    },
+    staleTime: 30_000,
+    structuralSharing: false,
   });

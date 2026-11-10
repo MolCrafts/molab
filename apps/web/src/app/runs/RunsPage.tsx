@@ -8,7 +8,7 @@
  * the bar for the L03 selection bar.
  */
 
-import { ListChecks, ListFilter, RefreshCw, X } from "lucide-react";
+import { ListFilter, ListVideo, RefreshCw, X } from "lucide-react";
 import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { isSoftRemoteWait } from "@/api/errors";
@@ -197,7 +197,7 @@ export const RunsPage = ({ snapshot }: RunsPageProps): JSX.Element => {
 
   return (
     <EntityPage
-      icon={ListChecks}
+      icon={ListVideo}
       title="Runs"
       actions={
         <WorkbenchIconAction
@@ -296,7 +296,9 @@ export const RunsPage = ({ snapshot }: RunsPageProps): JSX.Element => {
         <div className="min-h-0 flex-1 overflow-auto">
           {filteredRuns.length === 0 && !loading ? (
             <p className="px-6 py-4 text-body text-muted-foreground">
-              {rows.length === 0 ? "No runs in this workspace yet." : "No run matches this filter."}
+              {rows.length === 0
+                ? "No runs in this workspace yet. Open an experiment and start a run."
+                : "No run matches this filter. Clear it to see every run."}
             </p>
           ) : (
             <WorkspaceRunsTable

@@ -94,7 +94,7 @@ export const ExperimentNotebook = ({
                 <span className="block truncate text-body-lg font-medium text-foreground">
                   {doc.name}
                 </span>
-                <span className="block truncate text-micro uppercase tracking-wide text-muted-foreground">
+                <span className="block truncate text-label font-medium text-muted-foreground">
                   {knowledgeClassOf(doc)}
                 </span>
                 {doc.excerpt && (

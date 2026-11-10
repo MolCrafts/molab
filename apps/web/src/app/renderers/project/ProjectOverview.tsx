@@ -8,7 +8,13 @@
  */
 
 import { type JSX, useMemo } from "react";
-import { GaugeSection, MixChart, StatusGlyphLegend, StatusIcon } from "@/app/components/entity";
+import {
+  GaugeSection,
+  MixChart,
+  OverviewCanvas,
+  StatusGlyphLegend,
+  StatusIcon,
+} from "@/app/components/entity";
 import { DurationsBy } from "@/app/dashboard/dashboardWidgets";
 import { Gauges, Verdict } from "@/app/renderers/experiment/ExperimentOverview";
 import { outcomeByGroup, type ScopeRun, scopeVerdict } from "@/app/renderers/scopeStory";
@@ -100,50 +106,48 @@ export const ProjectOverview = ({
   const groups = useMemo(() => outcomeByGroup(runs, named), [runs, named]);
 
   return (
-    <div className="h-full min-h-0 overflow-auto bg-background">
-      <div className="space-y-8 px-6 py-6">
-        {loading ? (
-          <WorkbenchOperationState
-            kind="loading"
-            density="compact"
-            title="Loading runs…"
-            skeletonRows={3}
+    <OverviewCanvas>
+      {loading ? (
+        <WorkbenchOperationState
+          kind="loading"
+          density="compact"
+          title="Loading runs…"
+          skeletonRows={3}
+        />
+      ) : (
+        <Verdict verdict={verdict} onOpenRuns={onOpenRuns} />
+      )}
+      {loading ? null : runs.length === 0 ? (
+        <FirstSteps
+          experiments={experiments}
+          onOpenExperiment={onOpenExperiment}
+          onNewExperiment={onNewExperiment}
+        />
+      ) : (
+        <>
+          <Gauges
+            runs={runs}
+            rows={rows}
+            partial={partial}
+            onOpenRuns={onOpenRuns}
+            label="Project gauges"
           />
-        ) : (
-          <Verdict verdict={verdict} onOpenRuns={onOpenRuns} />
-        )}
-        {loading ? null : runs.length === 0 ? (
-          <FirstSteps
-            experiments={experiments}
-            onOpenExperiment={onOpenExperiment}
-            onNewExperiment={onNewExperiment}
-          />
-        ) : (
-          <>
-            <Gauges
-              runs={runs}
-              rows={rows}
-              partial={partial}
-              onOpenRuns={onOpenRuns}
-              label="Project gauges"
-            />
-            <div className="grid min-w-0 gap-x-12 gap-y-8 lg:grid-cols-2">
-              <GaugeSection title="Outcome by experiment" readout="latest attempt of each run">
-                <MixChart
-                  groups={groups}
-                  label="Outcome by experiment"
-                  onPick={onPreviewExperiment}
-                  wording={RUN_WORDING}
-                />
-                <StatusGlyphLegend className="pt-4" />
-              </GaugeSection>
-              <GaugeSection title="Duration by experiment" readout="each finished run">
-                <DurationsBy rows={rows} groupBy="experiment" />
-              </GaugeSection>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+          <div className="grid min-w-0 gap-x-12 gap-y-8 lg:grid-cols-2">
+            <GaugeSection title="Outcome by experiment" readout="latest attempt of each run">
+              <MixChart
+                groups={groups}
+                label="Outcome by experiment"
+                onPick={onPreviewExperiment}
+                wording={RUN_WORDING}
+              />
+              <StatusGlyphLegend className="pt-4" />
+            </GaugeSection>
+            <GaugeSection title="Duration by experiment" readout="each finished run">
+              <DurationsBy rows={rows} groupBy="experiment" />
+            </GaugeSection>
+          </div>
+        </>
+      )}
+    </OverviewCanvas>
   );
 };

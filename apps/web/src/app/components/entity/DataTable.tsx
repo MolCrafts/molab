@@ -14,7 +14,7 @@ import { Fragment } from "react";
 import { usePreview } from "@/app/preview/PreviewContext";
 import type { PreviewTarget } from "@/app/preview/target";
 import { ContextMenuItems } from "@/components/menu/MenuItems";
-import { ROW_PADDING_DENSE, TABLE_HEADER } from "./density";
+import { LIST_CELL, LIST_HEADER_CELL, TABLE_HEADER } from "./density";
 
 export interface DataTableColumn<T> {
   key: string;
@@ -64,12 +64,16 @@ export const DataTable = <T,>({
   const renderRow = (row: T): JSX.Element => {
     const actions = rowActions?.(row) ?? [];
     const interactive = Boolean(onRowActivate);
+    const target = getRowPreview?.(row) ?? null;
     // Opening the row's page retires the Preview of it.
     const activate = (): void => {
       previewApi.close();
       onRowActivate?.(row);
     };
-    const target = getRowPreview?.(row) ?? null;
+    const openRow = (): void => {
+      if (target) previewApi.open(target);
+      else activate();
+    };
     const selected = target !== null && previewApi.isPreviewed(target);
     // Single click previews when the row has a target; otherwise it opens.
     const click = (event?: { metaKey: boolean; ctrlKey: boolean }): void => {
@@ -91,7 +95,7 @@ export const DataTable = <T,>({
                 // A double-click on a control inside the row is that control's.
                 const control = (event.target as HTMLElement).closest("button, input, a, label");
                 if (control && event.currentTarget.contains(control)) return;
-                activate();
+                openRow();
               }
             : undefined
         }
@@ -114,7 +118,7 @@ export const DataTable = <T,>({
                 }
                 if (event.key === "Enter") {
                   event.preventDefault();
-                  activate();
+                  openRow();
                   return;
                 }
                 if (event.key === " ") {
@@ -128,7 +132,7 @@ export const DataTable = <T,>({
         {columns.map((col) => (
           <TableCell
             key={col.key}
-            className={`h-6 px-3 py-0 ${col.align === "right" ? "text-right" : ""}`}
+            className={`${LIST_CELL} ${col.align === "right" ? "text-right" : ""}`}
           >
             {col.cell(row)}
           </TableCell>
@@ -154,13 +158,13 @@ export const DataTable = <T,>({
 
   return (
     <div className="flex-1 overflow-auto">
-      <Table className="w-full text-left text-body [&_td]:max-w-72 [&_td]:overflow-hidden [&_th]:h-7">
+      <Table className="w-full text-left text-body [&_td]:max-w-72 [&_td]:overflow-hidden">
         <TableHeader className={`${TABLE_HEADER} z-10 text-label font-medium`}>
           <TableRow className="hover:bg-transparent">
             {columns.map((col) => (
               <TableHead
                 key={col.key}
-                className={`${ROW_PADDING_DENSE} ${col.width ?? "w-auto"} ${col.align === "right" ? "text-right" : ""}`}
+                className={`${LIST_HEADER_CELL} ${col.width ?? "w-auto"} ${col.align === "right" ? "text-right" : ""}`}
               >
                 {col.header}
               </TableHead>

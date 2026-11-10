@@ -44,6 +44,8 @@ const SPACING = [
   "icon-lg",
   // constitution — rows
   "row-pad",
+  "list-row",
+  "list-pad-x",
   "marker-gutter",
   // constitution — separation
   "hairline",

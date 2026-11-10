@@ -89,9 +89,7 @@ export function RouteErrorBoundary(): ReactNode {
           <Icon className="h-control w-control text-status-failed-foreground" />
         </div>
 
-        <p className="mb-2 font-mono text-label font-medium uppercase tracking-wide text-muted-foreground">
-          {badge}
-        </p>
+        <p className="mb-2 font-mono text-label font-medium text-muted-foreground">{badge}</p>
         <h1 className="text-display font-semibold tracking-tight text-foreground">{title}</h1>
         <p className="mx-auto mt-3 max-w-sm text-body-lg text-muted-foreground">{description}</p>
 

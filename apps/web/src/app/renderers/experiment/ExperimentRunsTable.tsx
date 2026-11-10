@@ -197,7 +197,7 @@ export const ExperimentRunsTable = ({
       <th
         key={column}
         scope="col"
-        className={cn("h-7 px-2 font-normal", numeric ? "text-right" : "text-left")}
+        className={cn("h-list-row px-list-pad-x font-normal", numeric ? "text-right" : "text-left")}
         aria-sort={active ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
       >
         <button
@@ -276,7 +276,7 @@ export const ExperimentRunsTable = ({
           <table aria-label="Runs" className="w-full min-w-[44rem] border-collapse text-body">
             <thead className="sticky top-0 z-10 border-b border-border bg-background text-label text-muted-foreground">
               <tr>
-                <th scope="col" className="h-7 w-10 pl-6">
+                <th scope="col" className="h-list-row w-10 pl-6">
                   <input
                     type="checkbox"
                     aria-label={allSelected ? "Deselect all runs" : "Select all runs"}
@@ -326,7 +326,7 @@ export const ExperimentRunsTable = ({
                     }}
                     onKeyDown={(event) => onRowKey(event, row, index)}
                     className={cn(
-                      "h-6 cursor-default outline-none hover:bg-interactive focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+                      "h-list-row cursor-default outline-none hover:bg-interactive focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
                       isSelected && "bg-accent-muted hover:bg-accent-muted",
                       isFocused &&
                         !isSelected &&
@@ -350,14 +350,17 @@ export const ExperimentRunsTable = ({
                         className="size-3.5 accent-accent"
                       />
                     </td>
-                    <td className="w-6 px-2">
+                    <td className="w-6 px-list-pad-x">
                       <StatusIcon status={row.run.status} className="size-icon-sm" />
                     </td>
-                    <td className="max-w-[18rem] truncate px-2 font-mono" title={row.title}>
+                    <td
+                      className="max-w-[18rem] truncate px-list-pad-x font-mono"
+                      title={row.title}
+                    >
                       {row.title}
                     </td>
                     {sweptColumns.map((key) => (
-                      <td key={key} className="px-2 text-right font-mono tabular-nums">
+                      <td key={key} className="px-list-pad-x text-right font-mono tabular-nums">
                         {row.run.parameters && key in row.run.parameters
                           ? formatParameterValue(key, row.run.parameters[key]).replace(
                               ` ${parameterUnit(key) ?? "\u0000"}`,
@@ -366,18 +369,18 @@ export const ExperimentRunsTable = ({
                           : "—"}
                       </td>
                     ))}
-                    <td className="px-2 text-right tabular-nums">
+                    <td className="px-list-pad-x text-right tabular-nums">
                       {row.seconds === null ? "—" : formatSpan(row.seconds)}
                     </td>
                     {resultColumns.map((key) => {
                       const value = row.results[key];
                       return (
-                        <td key={key} className="px-2 text-right font-mono tabular-nums">
+                        <td key={key} className="px-list-pad-x text-right font-mono tabular-nums">
                           {typeof value === "number" ? formatFigure(value) : "—"}
                         </td>
                       );
                     })}
-                    <td className="px-2 text-muted-foreground">
+                    <td className="px-list-pad-x text-muted-foreground">
                       {row.target ? (
                         <span className="inline-flex items-center gap-1">
                           <Server aria-hidden className="size-icon-sm" />
@@ -387,7 +390,7 @@ export const ExperimentRunsTable = ({
                         "—"
                       )}
                     </td>
-                    <td className="px-2 pr-6 font-mono text-label text-muted-foreground">
+                    <td className="px-list-pad-x pr-6 font-mono text-label text-muted-foreground">
                       {row.run.id}
                     </td>
                   </tr>

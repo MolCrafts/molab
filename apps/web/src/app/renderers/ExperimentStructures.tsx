@@ -3,32 +3,35 @@ import { type JSX, Suspense, useMemo, useState } from "react";
 import { EmptyState, InventoryCanvas, OverviewSurface } from "@/app/components/entity";
 import { runLabel } from "@/app/runs/runTitle";
 import {
+  artifactBytesQueryOptions,
   artifactContentQueryOptions,
   executionOutputsQueryOptions,
-  runFileTextQueryOptions,
 } from "@/app/state/entityQueries";
 import type { RunSummary } from "@/app/types";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
-import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
-import { isChemicalStructureName, structureRank } from "@/lib/structure-files";
+import { filePreviewPayload, filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { cn } from "@/lib/utils";
 
-interface ListedStructure {
+const readError = (error: unknown): string | null => {
+  if (!error) return null;
+  return error instanceof Error ? error.message : "Preview unavailable";
+};
+
+interface ListedAsset {
   key: string;
   runName: string;
   runId: string;
   executionId: string;
   label: string;
-  artifactId: string | null;
-  path: string | null;
+  artifactId: string;
 }
 
 const latestExecutionId = (run: RunSummary): string | null =>
   run.executionHistory.at(-1)?.executionId ?? null;
 
 /**
- * Every structure file from the latest attempt of each run, one MolVis scene
- * open at a time.
+ * Every asset the latest attempt of each run registered. The host does not
+ * choose a format: a file-preview plugin claims the file, or the row has no preview.
  */
 export const ExperimentStructures = ({ runs }: { runs: readonly RunSummary[] }): JSX.Element => {
   const generation = useContributionGeneration();
@@ -46,12 +49,11 @@ export const ExperimentStructures = ({ runs }: { runs: readonly RunSummary[] }):
     ),
   });
   const listed = useMemo(() => {
-    const rows: ListedStructure[] = [];
+    const rows: ListedAsset[] = [];
     attempts.forEach(({ run, executionId }, index) => {
       const body = outputs[index]?.data;
       if (!body) return;
       for (const asset of body.assets ?? []) {
-        if (!isChemicalStructureName(asset.title)) continue;
         rows.push({
           key: `${run.id}:${asset.id}`,
           runName: runLabel(run),
@@ -59,61 +61,55 @@ export const ExperimentStructures = ({ runs }: { runs: readonly RunSummary[] }):
           executionId,
           label: asset.title,
           artifactId: asset.id,
-          path: null,
-        });
-      }
-      for (const file of body.unregistered ?? []) {
-        if (!isChemicalStructureName(file.name)) continue;
-        rows.push({
-          key: `${run.id}:file:${file.relPath}`,
-          runName: runLabel(run),
-          runId: run.id,
-          executionId,
-          label: file.name,
-          artifactId: null,
-          path: file.relPath,
         });
       }
     });
     rows.sort(
       (left, right) =>
-        left.runName.localeCompare(right.runName) ||
-        structureRank(left.label) - structureRank(right.label) ||
-        left.label.localeCompare(right.label),
+        left.runName.localeCompare(right.runName) || left.label.localeCompare(right.label),
     );
     return rows;
   }, [attempts, outputs]);
   const [picked, setPicked] = useState<string | null>(null);
   const active = listed.find((row) => row.key === picked) ?? listed[0] ?? null;
   const run = active ? runs.find((item) => item.id === active.runId) : null;
-  const artifactText = useQuery({
-    ...artifactContentQueryOptions(
-      run?.projectId ?? "",
-      run?.experimentId ?? "",
-      active?.runId ?? "",
-      active?.executionId ?? "",
-      active?.artifactId ?? "",
-    ),
-    enabled: Boolean(run && active?.artifactId),
-  });
-  const fileText = useQuery({
-    ...runFileTextQueryOptions(
-      run?.projectId ?? "",
-      run?.experimentId ?? "",
-      active?.runId ?? "",
-      active?.executionId ?? "",
-      active?.path ?? "",
-    ),
-    enabled: Boolean(run && active?.path),
-  });
-  const content = active?.artifactId ? (artifactText.data ?? null) : (fileText.data ?? null);
   const plugin = useMemo(() => {
     void generation;
     if (!active) return null;
     return filePreviewPluginRegistry.getPluginForFile(active.label, active.label);
   }, [generation, active]);
+  const payload =
+    plugin && active
+      ? filePreviewPayload(plugin, { name: active.label, path: active.label })
+      : "text";
+  const wantsBytes = Boolean(plugin && payload === "bytes");
+  const projectId = run?.projectId ?? "";
+  const experimentId = run?.experimentId ?? "";
+  const runId = active?.runId ?? "";
+  const executionId = active?.executionId ?? "";
+  const artifactId = active?.artifactId ?? "";
+  const artifactText = useQuery({
+    // `whole` is the plugin's request. The log cap splits a structure mid-record.
+    ...artifactContentQueryOptions(
+      projectId,
+      experimentId,
+      runId,
+      executionId,
+      artifactId,
+      plugin?.whole === true,
+    ),
+    enabled: Boolean(run && active && plugin && !wantsBytes),
+  });
+  const artifactBytes = useQuery({
+    ...artifactBytesQueryOptions(projectId, experimentId, runId, executionId, artifactId),
+    enabled: Boolean(run && active && wantsBytes),
+  });
+  const content = artifactText.data ?? null;
+  const bytes = artifactBytes.data ?? null;
+  const previewError = readError(wantsBytes ? artifactBytes.error : artifactText.error);
   const loading = attempts.length > 0 && outputs.some((query) => query.isPending);
   const Preview = plugin?.Component;
+  const ready = wantsBytes ? bytes !== null : content !== null;
 
   return (
     <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
@@ -121,11 +117,11 @@ export const ExperimentStructures = ({ runs }: { runs: readonly RunSummary[] }):
         {listed.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6">
             <EmptyState
-              title={loading ? "Loading structures…" : "No structures yet"}
+              title={loading ? "Loading assets…" : "No assets yet"}
               description={
                 loading
                   ? "Reading the latest attempt of each run."
-                  : "PDB, XYZ, MOL2, and SDF files from a run show up here."
+                  : "Assets a run registers show up here. A plugin previews the formats it claims."
               }
             />
           </div>
@@ -151,22 +147,25 @@ export const ExperimentStructures = ({ runs }: { runs: readonly RunSummary[] }):
               ))}
             </ul>
             <div className="min-h-0 overflow-hidden">
-              {Preview && content ? (
+              {previewError ? (
+                <p className="p-4 text-label text-destructive">{previewError}</p>
+              ) : Preview && ready && active ? (
                 <Suspense
-                  fallback={
-                    <p className="p-4 text-label text-muted-foreground">Loading structure…</p>
-                  }
+                  fallback={<p className="p-4 text-label text-muted-foreground">Loading…</p>}
                 >
                   <Preview
-                    content={content}
-                    name={active?.label ?? ""}
-                    path={active?.label ?? ""}
+                    key={active.key}
+                    content={content ?? ""}
+                    bytes={wantsBytes ? (bytes ?? undefined) : undefined}
+                    name={active.label}
+                    path={active.label}
                     folderId=""
+                    assetId={active.artifactId}
                   />
                 </Suspense>
               ) : (
                 <p className="p-4 text-label text-muted-foreground">
-                  {content === null ? "Loading structure…" : "No structure preview for this file."}
+                  {plugin ? "Loading…" : "No preview plugin claims this asset."}
                 </p>
               )}
             </div>

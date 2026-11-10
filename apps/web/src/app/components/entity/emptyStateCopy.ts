@@ -9,20 +9,25 @@ export const EMPTY_COPY = {
   },
   projectRuns: {
     title: "No runs",
+    description: "Start one from an experiment.",
   },
   assets: {
     title: "No assets",
+    description: "Import a file to keep it with this project.",
   },
   entries: {
-    title: "Empty",
+    title: "Nothing here",
   },
   projectsFilter: {
     title: "No matches",
+    description: "Clear the filter to see every project.",
   },
   workspace: {
     title: "No files",
+    description: "This workspace has no files yet.",
   },
   emptyFolder: {
-    title: "Empty",
+    title: "Empty folder",
+    description: "Nothing in this folder.",
   },
 } as const;

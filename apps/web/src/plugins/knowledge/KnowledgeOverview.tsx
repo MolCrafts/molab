@@ -13,6 +13,7 @@ import {
   GaugeSection,
   Instrument,
   InstrumentStrip,
+  OverviewCanvas,
   StatusIcon,
   SuccessDial,
   type UnitMark,
@@ -80,7 +81,7 @@ const DocumentsTable = ({
   return (
     <table className="w-full table-fixed border-collapse text-body">
       <thead>
-        <tr className="h-7 border-b border-border text-label text-muted-foreground">
+        <tr className="h-list-row border-b border-border text-label text-muted-foreground">
           <th className="w-6" aria-label="Class" />
           <th className="text-left font-normal">Document</th>
           <th className="w-2/5 text-left font-normal max-sm:hidden">Where</th>
@@ -95,7 +96,7 @@ const DocumentsTable = ({
             <tr
               key={note.relPath}
               onClick={() => onOpen(note.relPath)}
-              className="h-6 cursor-pointer hover:bg-interactive"
+              className="h-list-row cursor-pointer hover:bg-interactive"
             >
               <td>
                 <Icon aria-label={cls} className="size-icon-sm text-muted-foreground" />
@@ -200,13 +201,13 @@ export const KnowledgeOverview = ({
 
   const { verdict, todos } = overview;
   return (
-    <div className="h-full min-h-0 overflow-auto bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-background">
       <EditorActions>
         <DialogButton kind="primary" size="chrome" onClick={() => setCreating(true)}>
           New document
         </DialogButton>
       </EditorActions>
-      <div className="space-y-8 px-6 py-6">
+      <OverviewCanvas>
         <section aria-label={verdict.subject} className="min-w-0 space-y-1">
           <div className="flex min-w-0 items-center gap-2">
             <StatusIcon status={verdict.status} className="size-icon shrink-0" />
@@ -250,7 +251,7 @@ export const KnowledgeOverview = ({
             <OpenWork rows={overview.openWork} onOpen={onOpen} />
           </GaugeSection>
         </div>
-      </div>
+      </OverviewCanvas>
       <CreateDocDialog
         open={creating}
         runs={runsForHost(snapshot.runs, "")}

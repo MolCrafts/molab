@@ -3,7 +3,7 @@
 // run › attempt for the hierarchy, section › entity for everything else. Each
 // segment carries its kind so the row can draw the entity's icon, and every
 // ancestor routes through the single ``entityPath`` URL builder. A section
-// page (Runs, Settings…) has no trail: its editor tab already names it.
+// page (Dashboard, Runs, Settings…) is one segment: that section's name.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { entityMeta } from "@/app/entities/kinds";
@@ -35,6 +35,17 @@ const runChain = (runId: string, snapshot: TrailSnapshot, linkRun: boolean): Bre
   ];
 };
 
+/** Order in the run's history, then the mode when the record has one: `#2 · resume`. */
+const attemptLabel = (
+  history: ReadonlyArray<{ executionId: string; mode?: string }>,
+  shown: { executionId: string; mode?: string },
+): string => {
+  const index = history.findIndex((execution) => execution.executionId === shown.executionId);
+  const order = index >= 0 ? index + 1 : history.length;
+  const mode = shown.mode?.trim() ?? "";
+  return mode ? `#${order} · ${mode}` : `#${order}`;
+};
+
 /** The attempt the run page shows (its `?attempt=`, else the latest); it opens the Attempts view. */
 const shownAttempt = (
   runId: string,
@@ -42,14 +53,13 @@ const shownAttempt = (
   snapshot: TrailSnapshot,
 ): BreadcrumbItem[] => {
   const run = snapshot.runs.find((candidate) => candidate.id === runId);
-  const shown =
-    run?.executionHistory.find((execution) => execution.executionId === attemptId) ??
-    run?.executionHistory.at(-1);
+  const history = run?.executionHistory ?? [];
+  const shown = history.find((execution) => execution.executionId === attemptId) ?? history.at(-1);
   if (!run || !shown) return [];
   return [
     item(
       "attempt",
-      shown.executionId,
+      attemptLabel(history, shown),
       runPath(run.projectId, run.experimentId, run.id, "executions", {
         attempt: attemptId ? shown.executionId : null,
       }),
@@ -62,10 +72,11 @@ export const buildTrail = (
   leftPanelView: LeftPanelView,
   snapshot: TrailSnapshot,
 ): BreadcrumbItem[] => {
-  if (!selection) return [];
   // The section an entity was opened from; before the registry activates (or
-  // in a unit test) the kind's plural stands in, without a link.
+  // in a unit test) the kind's plural stands in, without a link. A landing
+  // with nothing selected is that one section name, and it is not a link.
   const section = listAllNavigationContributions().find(({ id }) => id === leftPanelView);
+  if (!selection) return section ? [item("section", section.breadcrumbLabel)] : [];
   const root = section
     ? item("section", section.breadcrumbLabel, section.route)
     : item("section", entityMeta(selection.objectType).plural);

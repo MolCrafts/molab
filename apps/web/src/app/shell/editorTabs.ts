@@ -19,6 +19,11 @@ export interface EditorTab {
   kind: EditorTabKind;
   /** Label at the last sighting; the strip prefers a live label when it has one. */
   label: string;
+  /**
+   * VS Code preview tab: italic, and the only one. A single click replaces it.
+   * Absent or false is a concrete tab; a double click pins a preview.
+   */
+  preview?: boolean;
 }
 
 export interface EditorTabsState {
@@ -60,7 +65,62 @@ const sameTab = (left: EditorTab, right: EditorTab): boolean =>
   left.key === right.key &&
   left.path === right.path &&
   left.kind === right.kind &&
-  left.label === right.label;
+  left.label === right.label &&
+  Boolean(left.preview) === Boolean(right.preview);
+
+/** How the editor arrived at the current URL. */
+export type EditorOpenMode = "preview" | "pin" | "follow";
+
+export const editorOpenState = (
+  mode: Exclude<EditorOpenMode, "follow">,
+): { editorOpen: typeof mode } => ({ editorOpen: mode });
+
+/** Location state is untrusted; anything else is an ordinary follow. */
+export const editorOpenMode = (state: unknown): EditorOpenMode => {
+  if (typeof state !== "object" || state === null || !("editorOpen" in state)) return "follow";
+  const mode = (state as { editorOpen?: unknown }).editorOpen;
+  return mode === "preview" || mode === "pin" ? mode : "follow";
+};
+
+/**
+ * Single click (side bar, or a list while no preview tab is open): at most one
+ * italic tab, replaced in place. An entity that already has a concrete tab is
+ * activated there and is not demoted.
+ */
+export const openPreviewTab = (state: EditorTabsState, tab: EditorTab): EditorTabsState => {
+  const next: EditorTab = { ...tab, preview: true };
+  const existingIndex = state.tabs.findIndex((candidate) => candidate.key === tab.key);
+  if (existingIndex >= 0) {
+    const existing = state.tabs[existingIndex];
+    if (!existing?.preview) return openEditorTab(state, { ...tab, preview: false });
+    if (sameTab(existing, next) && state.activeKey === next.key) return state;
+    return {
+      tabs: state.tabs.map((candidate, index) => (index === existingIndex ? next : candidate)),
+      activeKey: next.key,
+    };
+  }
+  const previewIndex = state.tabs.findIndex((candidate) => candidate.preview);
+  if (previewIndex >= 0) {
+    return {
+      tabs: state.tabs.map((candidate, index) => (index === previewIndex ? next : candidate)),
+      activeKey: next.key,
+    };
+  }
+  return openEditorTab(state, next);
+};
+
+/** Double click: the tab stays where it is and stops being a preview. */
+export const pinEditorTab = (state: EditorTabsState, key: string): EditorTabsState => {
+  const index = state.tabs.findIndex((candidate) => candidate.key === key);
+  const tab = index >= 0 ? state.tabs[index] : undefined;
+  if (!tab?.preview) return state;
+  return {
+    tabs: state.tabs.map((candidate, i) =>
+      i === index ? { ...candidate, preview: false } : candidate,
+    ),
+    activeKey: state.activeKey,
+  };
+};
 
 export const openEditorTab = (state: EditorTabsState, tab: EditorTab): EditorTabsState => {
   const index = state.tabs.findIndex((candidate) => candidate.key === tab.key);
@@ -144,7 +204,8 @@ const isEditorTab = (value: unknown): value is EditorTab => {
     candidate.path.startsWith("/") &&
     typeof candidate.kind === "string" &&
     TAB_KINDS.has(candidate.kind) &&
-    typeof candidate.label === "string"
+    typeof candidate.label === "string" &&
+    (candidate.preview === undefined || typeof candidate.preview === "boolean")
   );
 };
 
@@ -162,7 +223,10 @@ export const parseStoredEditorTabs = (raw: string | null): EditorTabsState => {
   }
   const record = parsed as Record<string, unknown>;
   const tabs = Array.isArray(record.tabs)
-    ? record.tabs.filter(isEditorTab).slice(0, MAX_EDITOR_TABS)
+    ? record.tabs
+        .filter(isEditorTab)
+        .slice(0, MAX_EDITOR_TABS)
+        .map((tab) => ({ ...tab, preview: tab.preview === true }))
     : [];
   const activeKey =
     typeof record.activeKey === "string" && tabs.some((t) => t.key === record.activeKey)
@@ -182,11 +246,15 @@ export const followLocation = (
   state: EditorTabsState,
   current: EditorTab | null,
   pendingClose: string | null,
+  mode: EditorOpenMode = "follow",
 ): EditorTabsState => {
   const base =
     pendingClose && pendingClose !== current?.key
       ? closeEditorTab(state, pendingClose).state
       : state;
-  if (current) return openEditorTab(base, current);
-  return base.activeKey === null ? base : { ...base, activeKey: null };
+  if (!current) return base.activeKey === null ? base : { ...base, activeKey: null };
+  if (mode === "preview") return openPreviewTab(base, current);
+  if (mode === "pin") return openEditorTab(base, { ...current, preview: false });
+  const existing = base.tabs.find((candidate) => candidate.key === current.key);
+  return openEditorTab(base, { ...current, preview: Boolean(existing?.preview) });
 };

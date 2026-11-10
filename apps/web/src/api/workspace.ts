@@ -58,9 +58,12 @@ export const workspaceApi = {
     const response = await WorkspaceService.readWorkspaceFile(path);
     return response.content;
   },
-  getWorkspaceFileBlob: async (path: string): Promise<Blob> => {
-    // Generated client JSON-decodes this binary route.
-    const response = await fetch(`/api/workspace/file/blob?path=${encodeURIComponent(path)}`);
+  getWorkspaceFileBlob: async (path: string, options?: { download?: boolean }): Promise<Blob> => {
+    // Generated client JSON-decodes this binary route. `download` lifts the
+    // image/PDF allow-list so a trajectory (DCD) can be read as bytes.
+    const query = new URLSearchParams({ path });
+    if (options?.download) query.set("download", "true");
+    const response = await fetch(`/api/workspace/file/blob?${query}`);
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status} ${response.statusText}`);
     }

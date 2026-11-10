@@ -27,9 +27,7 @@ const Section = ({
   children: React.ReactNode;
 }): JSX.Element => (
   <div className="px-3 py-3">
-    <h3 className="mb-2 text-micro font-medium uppercase tracking-wide text-muted-foreground">
-      {title}
-    </h3>
+    <h3 className="mb-2 text-label font-medium text-muted-foreground">{title}</h3>
     {children}
   </div>
 );
@@ -110,14 +108,8 @@ export const TaskViewer = ({
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="flex items-center justify-between gap-2 border-b border-border/70 bg-muted/20 px-3 py-2">
-        <h2 className="truncate text-micro font-medium uppercase tracking-wide text-muted-foreground">
-          Task
-        </h2>
-        {node?.type && (
-          <WorkbenchTag className="h-5 px-2 text-micro uppercase tracking-wide">
-            {node.type}
-          </WorkbenchTag>
-        )}
+        <h2 className="truncate text-label font-medium text-muted-foreground">Task</h2>
+        {node?.type && <WorkbenchTag className="h-5 px-2 text-label">{node.type}</WorkbenchTag>}
       </div>
 
       <div className="flex-1 divide-y divide-border/50 overflow-auto">

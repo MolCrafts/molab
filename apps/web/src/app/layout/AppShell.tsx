@@ -30,7 +30,7 @@ import { CenterPanel } from "@/app/panels/CenterPanel";
 import { LeftPanel } from "@/app/panels/LeftPanel";
 import { PreviewBody, PreviewOverlay } from "@/app/preview/Preview";
 import { PreviewProvider } from "@/app/preview/PreviewContext";
-import type { PreviewTarget } from "@/app/preview/target";
+import { type PreviewTarget, previewOverlaysEditor } from "@/app/preview/target";
 import { describeEditorTab } from "@/app/shell/describeEditorTab";
 import { EditorTabStrip } from "@/app/shell/EditorTabStrip";
 import { EditorActionsSlotProvider } from "@/app/shell/editorActions";
@@ -155,8 +155,6 @@ export const AppShell = ({
   const sideBarView =
     sideBarChoice && sideBarChoice.path === currentPath ? sideBarChoice.view : leftPanelView;
   const railOnlyNavigation = getNavigationContribution(sideBarView).shellMode === "rail-only";
-
-  const previewVisible = previewTarget !== null;
 
   const activeWorkspace = useMemo(
     () => snapshot.workspaces.find((w) => w.active) ?? snapshot.workspaces[0] ?? null,
@@ -369,6 +367,11 @@ export const AppShell = ({
     [selection, leftPanelView, snapshot],
   );
   const activeTab = editorTabs.state.tabs.find((tab) => tab.key === editorTabs.state.activeKey);
+  const overlayOpen = previewOverlaysEditor(previewTarget, activeTab ?? null);
+  // Pinning or leaving the italic tab retires a peek that belonged to it.
+  useEffect(() => {
+    if (previewTarget && !activeTab?.preview) setPreviewTarget(null);
+  }, [activeTab, previewTarget]);
   const tabSnapshot = useTabSnapshot(snapshot);
   const activePresentation = activeTab ? describeEditorTab(activeTab, tabSnapshot) : null;
   const workspaceLabel = activeWorkspace ? shortWorkspaceLabel(activeWorkspace.label) : "molab";
@@ -387,10 +390,11 @@ export const AppShell = ({
           snapshot={snapshot}
           onActivate={editorTabs.activate}
           onClose={editorTabs.close}
+          onPin={editorTabs.pin}
           actionsRef={setActionsSlot}
         />
       ) : null}
-      {!isMobile ? <Breadcrumb items={trail} /> : null}
+      <Breadcrumb items={trail} />
       {isMobile ? (
         <>
           {connectionTrouble ? (
@@ -406,7 +410,12 @@ export const AppShell = ({
         // The Preview overlays the page; it never reflows it (L12).
         <div className="relative flex min-h-0 flex-1 flex-col">
           {centerContent}
-          <PreviewOverlay snapshot={snapshot} narrow={isNarrow} onRefresh={onWorkspaceRefresh} />
+          <PreviewOverlay
+            snapshot={snapshot}
+            narrow={isNarrow}
+            open={overlayOpen}
+            onRefresh={onWorkspaceRefresh}
+          />
         </div>
       )}
     </main>
@@ -471,7 +480,7 @@ export const AppShell = ({
         </SheetContent>
       </Sheet>
       {/* Phones: the same Preview as a bottom sheet (v6 frame 14). */}
-      <Sheet open={previewVisible} onOpenChange={(open) => !open && setPreviewTarget(null)}>
+      <Sheet open={overlayOpen} onOpenChange={(open) => !open && setPreviewTarget(null)}>
         <SheetContent
           side="bottom"
           className="h-viewport-tall max-h-[70%] p-0"
@@ -556,6 +565,7 @@ export const AppShell = ({
         target={previewTarget}
         onTargetChange={setPreviewTarget}
         workspaces={snapshot.workspaces}
+        activeEditor={activeTab ?? null}
         onOpenInBackground={editorTabs.openInBackground}
       >
         <EditorActionsSlotProvider value={actionsSlot}>

@@ -1,6 +1,7 @@
-export const ROW_PADDING_DEFAULT = "px-3 py-2";
-export const ROW_PADDING_DENSE = "px-3 py-1";
-export const ROW_PADDING_COMPACT = "px-2 py-row-pad";
+/** One cell of a data table. Height and inset are constitution tokens. */
+export const LIST_CELL = "h-list-row px-list-pad-x py-0";
+/** Column header. Same row height; label type, not body. */
+export const LIST_HEADER_CELL = "h-list-row px-list-pad-x font-medium";
 
 export const DIVIDE_Y = "divide-y divide-border/50";
 

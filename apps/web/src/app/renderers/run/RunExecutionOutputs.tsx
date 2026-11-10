@@ -7,14 +7,20 @@ import type { RunFileNode } from "@/api/generated/models/RunFileNode";
 import { EmptyState } from "@/app/components/entity";
 import { type TreeNode, TreeView } from "@/app/panels/TreeView";
 import {
+  artifactBytesQueryOptions,
   artifactContentQueryOptions,
   runFileBlobQueryOptions,
+  runFileBytesQueryOptions,
   runFileTextQueryOptions,
 } from "@/app/state/entityQueries";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
-import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
+import { filePreviewPayload, filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { formatBytes } from "@/lib/format-bytes";
-import { isStructurePreviewName, structureRank } from "@/lib/structure-files";
+import {
+  isBinaryTrajectoryName,
+  isRankedStructureName,
+  structureRank,
+} from "@/lib/structure-files";
 import { useObjectUrl } from "@/lib/use-object-url";
 
 type SelectedOutput =
@@ -139,11 +145,11 @@ export const RunExecutionOutputs = ({
     if (!outputs || !selectedExecutionId) return null;
     const ranked: { rank: number; selected: SelectedOutput }[] = [];
     for (const item of outputs.assets ?? []) {
-      if (!isStructurePreviewName(item.title)) continue;
+      if (!isRankedStructureName(item.title)) continue;
       ranked.push({ rank: structureRank(item.title), selected: { kind: "artifact", id: item.id } });
     }
     for (const row of outputs.unregistered ?? []) {
-      if (!isStructurePreviewName(row.name)) continue;
+      if (!isRankedStructureName(row.name)) continue;
       ranked.push({
         rank: structureRank(row.name),
         selected: { kind: "file", path: row.relPath },
@@ -174,7 +180,15 @@ export const RunExecutionOutputs = ({
       : selected?.kind === "file"
         ? (selected.path.split("/").pop() ?? selected.path)
         : "";
-  const structure = isStructurePreviewName(previewName);
+  const plugin = useMemo(() => {
+    void contributionGeneration;
+    if (!previewName) return null;
+    return filePreviewPluginRegistry.getPluginForFile(previewName, previewName);
+  }, [contributionGeneration, previewName]);
+  const wantsBytes =
+    plugin !== null &&
+    filePreviewPayload(plugin, { name: previewName, path: filePath || previewName }) === "bytes";
+  const binaryTrajectory = isBinaryTrajectoryName(previewName);
   const artifactQuery = useQuery({
     ...artifactContentQueryOptions(
       projectId,
@@ -182,42 +196,62 @@ export const RunExecutionOutputs = ({
       runId,
       readingExecutionId,
       artifactId,
-      structure,
+      plugin?.whole === true,
     ),
-    enabled: selected?.kind === "artifact" && readingExecutionId !== "",
+    enabled:
+      selected?.kind === "artifact" &&
+      !wantsBytes &&
+      !binaryTrajectory &&
+      readingExecutionId !== "",
   });
-  const binaryKind = selected?.kind === "file" ? binaryKindOf(filePath) : null;
+  const artifactBytes = useQuery({
+    ...artifactBytesQueryOptions(projectId, experimentId, runId, readingExecutionId, artifactId),
+    enabled: selected?.kind === "artifact" && wantsBytes && readingExecutionId !== "",
+  });
+  const binaryKind =
+    selected?.kind === "file" && !wantsBytes && !binaryTrajectory ? binaryKindOf(filePath) : null;
   const fileQuery = useQuery({
     ...runFileTextQueryOptions(projectId, experimentId, runId, readingExecutionId, filePath),
-    enabled: selected?.kind === "file" && binaryKind === null && readingExecutionId !== "",
+    enabled:
+      selected?.kind === "file" &&
+      !wantsBytes &&
+      binaryKind === null &&
+      !binaryTrajectory &&
+      readingExecutionId !== "",
+  });
+  const fileBytes = useQuery({
+    ...runFileBytesQueryOptions(projectId, experimentId, runId, readingExecutionId, filePath),
+    enabled: selected?.kind === "file" && wantsBytes && readingExecutionId !== "",
   });
   const blobQuery = useQuery({
     ...runFileBlobQueryOptions(projectId, experimentId, runId, readingExecutionId, filePath),
     enabled: binaryKind !== null && readingExecutionId !== "",
   });
   const blobUrl = useObjectUrl(binaryKind ? blobQuery.data : undefined);
-  const fileError = binaryKind ? blobQuery.error : fileQuery.error;
+  const fileError = binaryKind ? blobQuery.error : wantsBytes ? fileBytes.error : fileQuery.error;
   const previewPending =
-    (selected?.kind === "artifact" && artifactQuery.isPending) ||
-    (selected?.kind === "file" && binaryKind === null && fileQuery.isPending) ||
+    (selected?.kind === "artifact" && !wantsBytes && artifactQuery.isPending) ||
+    (selected?.kind === "artifact" && wantsBytes && artifactBytes.isPending) ||
+    (selected?.kind === "file" && !wantsBytes && binaryKind === null && fileQuery.isPending) ||
+    (selected?.kind === "file" && wantsBytes && fileBytes.isPending) ||
     (binaryKind !== null && blobQuery.isPending);
 
-  const previewError =
+  const activeError =
     selected?.kind === "artifact"
-      ? artifactQuery.error instanceof ApiError && artifactQuery.error.status === 404
-        ? "Asset bytes not found for this execution."
-        : artifactQuery.error instanceof Error
-          ? artifactQuery.error.message
-          : artifactQuery.error
-            ? "Preview unavailable"
-            : null
+      ? wantsBytes
+        ? artifactBytes.error
+        : artifactQuery.error
       : selected?.kind === "file"
-        ? fileError instanceof Error
-          ? fileError.message
-          : fileError
-            ? "Preview unavailable"
-            : null
+        ? fileError
         : null;
+  const previewError =
+    activeError instanceof ApiError && activeError.status === 404
+      ? "Asset bytes not found for this execution."
+      : activeError instanceof Error
+        ? activeError.message
+        : activeError
+          ? "Preview unavailable"
+          : null;
   const preview =
     selected?.kind === "stdio"
       ? (outputs?.[selected.name] ?? `No ${selected.name} captured.`)
@@ -226,11 +260,13 @@ export const RunExecutionOutputs = ({
         : selected?.kind === "file"
           ? (fileQuery.data ?? null)
           : null;
-  const structurePlugin = useMemo(() => {
-    void contributionGeneration;
-    if (!structure) return null;
-    return filePreviewPluginRegistry.getPluginForFile(previewName, previewName);
-  }, [contributionGeneration, previewName, structure]);
+  const previewBytes = wantsBytes
+    ? selected?.kind === "artifact"
+      ? (artifactBytes.data ?? null)
+      : selected?.kind === "file"
+        ? (fileBytes.data ?? null)
+        : null
+    : null;
 
   if (!selectedExecutionId) {
     return (
@@ -325,28 +361,35 @@ export const RunExecutionOutputs = ({
       <div className="relative min-h-0 overflow-auto">
         {binaryKind && !previewError ? (
           <BinaryPreview kind={binaryKind} url={blobUrl} name={filePath} />
-        ) : previewPending && preview == null && !previewError ? (
+        ) : previewPending &&
+          !previewError &&
+          (wantsBytes ? previewBytes == null : preview == null) ? (
           <div className="flex h-full items-center justify-center text-label text-muted-foreground">
             Loading preview…
           </div>
-        ) : structurePlugin &&
-          typeof preview === "string" &&
-          preview.length > 0 &&
-          !previewError ? (
+        ) : plugin &&
+          !previewError &&
+          (wantsBytes ? previewBytes !== null : typeof preview === "string") ? (
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center text-label text-muted-foreground">
-                Loading structure…
+                Loading preview…
               </div>
             }
           >
-            <structurePlugin.Component
-              content={preview}
+            <plugin.Component
+              content={typeof preview === "string" ? preview : ""}
+              bytes={wantsBytes ? (previewBytes ?? undefined) : undefined}
               name={previewName}
-              path={previewName}
+              path={filePath || previewName}
               folderId=""
+              assetId={selected?.kind === "artifact" ? selected.id : undefined}
             />
           </Suspense>
+        ) : binaryTrajectory && !plugin ? (
+          <p className="p-4 text-label text-muted-foreground">
+            No preview plugin claims this file.
+          </p>
         ) : (
           <Preview value={preview} error={previewError} empty="Select an output" />
         )}

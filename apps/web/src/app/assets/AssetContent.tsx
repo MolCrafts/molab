@@ -8,10 +8,14 @@ import { Button, Skeleton } from "@molcrafts/ui";
 import { useQuery } from "@tanstack/react-query";
 import { type JSX, useMemo } from "react";
 import { assetsApi } from "@/api";
-import { assetTextQueryOptions, STRUCTURE_PREVIEW_CAP } from "@/app/state/entityQueries";
+import {
+  assetBytesQueryOptions,
+  assetTextQueryOptions,
+  STRUCTURE_PREVIEW_CAP,
+} from "@/app/state/entityQueries";
 import type { AssetSummary } from "@/app/types";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
-import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
+import { filePreviewPayload, filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { formatBytes } from "@/lib/format-bytes";
 import { AssetTile } from "./AssetTile";
 import { ASSET_KIND_META, type AssetKind, assetFileName } from "./assetKinds";
@@ -143,10 +147,18 @@ export const AssetContent = ({ asset, kind, mode }: AssetContentProps): JSX.Elem
     void generation;
     return filePreviewPluginRegistry.getPluginForFile(fileName, fileName);
   }, [generation, fileName]);
-  const cap = kind === "structure" ? STRUCTURE_PREVIEW_CAP : TEXT_CAP;
-  const tooLarge = kind === "structure" && (asset.sizeBytes ?? 0) > STRUCTURE_PREVIEW_CAP;
+  const wantsBytes = Boolean(
+    plugin && filePreviewPayload(plugin, { name: fileName, path: fileName }) === "bytes",
+  );
+  const cap = plugin?.whole
+    ? Number.MAX_SAFE_INTEGER
+    : kind === "structure"
+      ? STRUCTURE_PREVIEW_CAP
+      : TEXT_CAP;
+  const tooLarge = !wantsBytes && kind === "structure" && (asset.sizeBytes ?? 0) > cap;
   const readsText =
     Boolean(asset.projectId) &&
+    !wantsBytes &&
     !tooLarge &&
     (kind === "table" ||
       kind === "text" ||
@@ -155,6 +167,10 @@ export const AssetContent = ({ asset, kind, mode }: AssetContentProps): JSX.Elem
   const text = useQuery({
     ...assetTextQueryOptions(asset.projectId ?? "", asset.id, cap),
     enabled: readsText,
+  });
+  const bytes = useQuery({
+    ...assetBytesQueryOptions(asset.projectId ?? "", asset.id),
+    enabled: Boolean(asset.projectId && wantsBytes && kind !== "image"),
   });
   const meta = ASSET_KIND_META[kind];
   const size = asset.sizeBytes != null ? formatBytes(asset.sizeBytes) : null;
@@ -180,7 +196,7 @@ export const AssetContent = ({ asset, kind, mode }: AssetContentProps): JSX.Elem
         detail={`${size ?? "This structure"} is past the preview limit. Download it to open it.`}
       />
     );
-  if (!readsText)
+  if (!readsText && !wantsBytes)
     return (
       <Message
         asset={asset}
@@ -194,28 +210,36 @@ export const AssetContent = ({ asset, kind, mode }: AssetContentProps): JSX.Elem
         }
       />
     );
-  if (text.isPending)
+  const reading = wantsBytes ? bytes : text;
+  if (reading.isPending)
     return (
       <Skeleton role="status" aria-label="Loading preview" className="h-full w-full rounded-none" />
     );
-  if (text.error)
+  if (reading.error)
     return (
       <Message
         asset={asset}
         kind={kind}
         mode={mode}
         title="Could not read the asset"
-        detail={text.error instanceof Error ? text.error.message : String(text.error)}
+        detail={reading.error instanceof Error ? reading.error.message : String(reading.error)}
       />
     );
-  const { text: body, partial } = text.data;
-  if (kind === "table")
+  const { text: body, partial } = text.data ?? { text: "", partial: false };
+  if (kind === "table" && !wantsBytes)
     return <TableContent name={fileName} text={body} partial={partial} mode={mode} />;
   if (plugin) {
     const Preview = plugin.Component;
     return (
       <div className="h-full min-h-0 overflow-hidden">
-        <Preview content={body} name={fileName} path={fileName} folderId="" assetId={asset.id} />
+        <Preview
+          content={body}
+          bytes={wantsBytes ? bytes.data : undefined}
+          name={fileName}
+          path={fileName}
+          folderId=""
+          assetId={asset.id}
+        />
       </div>
     );
   }

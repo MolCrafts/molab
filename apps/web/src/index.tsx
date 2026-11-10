@@ -10,6 +10,8 @@ import { applyTextScale } from "@/lib/ui-scale";
 import { applyUiTheme } from "@/lib/ui-theme";
 import { bootPlugins } from "@/plugins/runtime";
 import App from "./App";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist/wght-italic.css";
 import "./styles/tailwind.css";
 
 // Before the first API call: a 503 needs_auth opens the verification-code dialog.

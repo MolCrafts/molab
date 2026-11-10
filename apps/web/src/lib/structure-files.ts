@@ -29,9 +29,16 @@ export const LAMMPS_DATA_EXTENSIONS = [".data", ".lmp", ".lammpsdata"] as const;
 
 const LAMMPS_DATA = /\.(data|lmp|lammpsdata)$/i;
 
+/** Binary trajectories molvis reads from bytes. A DCD is not UTF-8. */
+export const BINARY_TRAJECTORY_EXTENSIONS = [".dcd"] as const;
+
+const BINARY_TRAJECTORY = /\.dcd$/i;
+
 export const isChemicalStructureName = (name: string): boolean => STRUCTURE.test(name);
 
 export const isLammpsDataName = (name: string): boolean => LAMMPS_DATA.test(name);
+
+export const isBinaryTrajectoryName = (name: string): boolean => BINARY_TRAJECTORY.test(name);
 
 /** A file the output pane should hand to the 3D structure preview. */
 export const isStructurePreviewName = (name: string): boolean =>
@@ -39,27 +46,40 @@ export const isStructurePreviewName = (name: string): boolean =>
 
 /**
  * Prefer a connection table over bare coordinates when several files describe
- * the same molecule. Lower is better.
+ * the same molecule. Lower is better. `.dcd` is last: it is a trajectory,
+ * not the default frame.
  */
-export const structureRank = (name: string): number => {
+const STRUCTURE_RANK = [
+  "mol2",
+  "sdf",
+  "mol",
+  "pdb",
+  "ent",
+  "brk",
+  "gro",
+  "cif",
+  "mmcif",
+  "xyz",
+  "extxyz",
+  "exyz",
+  "cube",
+  "cub",
+  "data",
+  "lmp",
+  "lammpsdata",
+  "dcd",
+] as const;
+
+const extensionOf = (name: string): string => {
   const dot = name.lastIndexOf(".");
-  const ext = (dot < 0 ? "" : name.slice(dot + 1)).toLowerCase();
-  const order = [
-    "mol2",
-    "sdf",
-    "mol",
-    "pdb",
-    "ent",
-    "brk",
-    "gro",
-    "cif",
-    "mmcif",
-    "xyz",
-    "extxyz",
-    "exyz",
-    "cube",
-    "cub",
-  ];
-  const index = order.indexOf(ext);
-  return index < 0 ? order.length : index;
+  return (dot < 0 ? "" : name.slice(dot + 1)).toLowerCase();
+};
+
+/** True when the suffix is one `structureRank` orders, including `.dcd`. */
+export const isRankedStructureName = (name: string): boolean =>
+  (STRUCTURE_RANK as readonly string[]).includes(extensionOf(name));
+
+export const structureRank = (name: string): number => {
+  const index = (STRUCTURE_RANK as readonly string[]).indexOf(extensionOf(name));
+  return index < 0 ? STRUCTURE_RANK.length : index;
 };

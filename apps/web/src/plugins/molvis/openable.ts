@@ -1,5 +1,7 @@
 import {
+  BINARY_TRAJECTORY_EXTENSIONS,
   CHEMICAL_STRUCTURE_EXTENSIONS,
+  isBinaryTrajectoryName,
   isChemicalStructureName,
   isLammpsDataName,
   LAMMPS_DATA_EXTENSIONS,
@@ -22,6 +24,7 @@ export const MOLVIS_FILE_PATTERNS: readonly string[] = [
   ...CHEMICAL_STRUCTURE_EXTENSIONS,
   ...LAMMPS_DATA_EXTENSIONS,
   ...TRAJECTORY_EXTENSIONS,
+  ...BINARY_TRAJECTORY_EXTENSIONS,
 ].map((extension) => `*${extension}`);
 const ZARR_GROUP = /(?:^|\/)(?:frame|trajectory|meta)\/zarr\.json$/i;
 
@@ -35,7 +38,10 @@ const hasMrecAncestor = (path: string): boolean =>
   path.split("/").some((seg) => seg.endsWith(".mrec"));
 
 export const isMolvisTrajectoryName = (name: string): boolean =>
-  isChemicalStructureName(name) || TRAJECTORY.test(name) || isLammpsDataName(name);
+  isChemicalStructureName(name) ||
+  TRAJECTORY.test(name) ||
+  isLammpsDataName(name) ||
+  isBinaryTrajectoryName(name);
 
 /**
  * True when this file is a molvis-openable ``*.mrec`` store marker.

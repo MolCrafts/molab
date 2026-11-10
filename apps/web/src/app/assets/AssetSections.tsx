@@ -53,7 +53,7 @@ const Group = ({
 );
 
 const Fact = ({ label, children }: { label: string; children: ReactNode }): JSX.Element => (
-  <div className="flex min-h-7 items-center gap-3 text-body">
+  <div className="flex min-h-list-row items-center gap-3 text-body">
     <span className="w-20 flex-none text-muted-foreground">{label}</span>
     <span className="flex min-w-0 flex-1 items-center">{children}</span>
   </div>
@@ -202,7 +202,7 @@ export const AssetDetails = ({
     </Group>
     <Group title="Cited in" count={citations.length}>
       {citationsLoading ? (
-        <Skeleton role="status" aria-label="Loading citations" className="h-7 w-full" />
+        <Skeleton role="status" aria-label="Loading citations" className="h-list-row w-full" />
       ) : citations.length === 0 ? (
         <p className="text-label text-muted-foreground">No knowledge document cites it.</p>
       ) : (
@@ -212,7 +212,7 @@ export const AssetDetails = ({
             type="button"
             onClick={() => onOpenCitation(row.path)}
             title={`${row.role} · ${row.path}`}
-            className="flex min-h-7 w-full min-w-0 items-center gap-2 rounded-sm text-left hover:bg-interactive"
+            className="flex min-h-list-row w-full min-w-0 items-center gap-2 rounded-sm text-left text-body hover:bg-interactive"
           >
             <BookOpen aria-hidden className="size-icon-sm flex-none text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate">{row.title}</span>
@@ -284,7 +284,7 @@ export const RunDetails = ({
               key={input.id}
               type="button"
               onClick={() => onPickInput?.(input)}
-              className="flex min-h-7 items-center text-left text-accent hover:underline"
+              className="flex min-h-list-row items-center text-left text-body text-accent hover:underline"
             >
               {input.name}
             </button>

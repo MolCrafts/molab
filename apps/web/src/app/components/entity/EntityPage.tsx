@@ -155,20 +155,16 @@ export const EntityPage = ({
   tabsTrailing,
   children,
 }: EntityPageProps): JSX.Element => {
-  // L00: the editor tab and the breadcrumb name the page; its actions sit at
-  // the right end of the tab row. `icon` / `title` still label the region for
-  // assistive tech and a page rendered outside the shell.
-  void icon;
-  const facts = afterTitle || meta;
+  // One heading for the page. Actions stay on the editor tab row.
   return (
     <section
       aria-label={titleTooltip ?? title}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
     >
       <EditorActions>{actions}</EditorActions>
-      {facts ? (
+      <EntityHeader icon={icon} title={title} titleTooltip={titleTooltip} afterTitle={afterTitle} />
+      {meta ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-6 py-1 font-mono text-micro tabular-nums text-muted-foreground">
-          {afterTitle}
           {meta}
         </div>
       ) : null}

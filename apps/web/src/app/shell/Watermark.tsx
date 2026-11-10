@@ -5,9 +5,9 @@
  */
 
 import { Kbd } from "@molcrafts/ui";
-import { Layers } from "lucide-react";
 import type { JSX } from "react";
 import { SHORTCUTS } from "./keys";
+import { ProductMark } from "./ProductMark";
 
 const HINTS: ReadonlyArray<{ label: string; keys: () => string }> = [
   { label: "Go to", keys: SHORTCUTS.goTo },
@@ -22,7 +22,7 @@ export const Watermark = (): JSX.Element => (
     data-testid="editor-watermark"
   >
     <div className="flex flex-col items-center gap-6">
-      <Layers className="size-16 text-border" strokeWidth={1} aria-hidden />
+      <ProductMark className="size-16 text-border" strokeWidth={1} />
       <dl className="grid grid-cols-2 items-center gap-x-3 gap-y-2 text-label">
         {HINTS.map((hint) => (
           <div key={hint.label} className="contents">

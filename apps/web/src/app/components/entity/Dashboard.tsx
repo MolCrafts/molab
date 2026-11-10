@@ -1,4 +1,4 @@
-import { WorkbenchAction, WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
+import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
 // ─────────────────────────────────────────────────────────────────────────────
 // Dashboard primitives — section / chart vocabulary for entity Overviews.
 // Shared by Project / Experiment / Run so hierarchy pages share one surface
@@ -366,56 +366,6 @@ export const StatusDistribution = ({
 
   return <StatusBarChart counts={counts} groups={groups} label={label} height={height} />;
 };
-
-// ── Breadcrumb trail (inline entity path) ────────────────────────────────────
-
-interface EntityPathSegment {
-  label: string;
-  onClick?: () => void;
-}
-
-interface EntityPathProps {
-  segments: EntityPathSegment[];
-  trailing?: ReactNode;
-  className?: string;
-}
-
-/** Quiet project / experiment / workflow path under a summary card. */
-export const EntityPath = ({ segments, trailing, className }: EntityPathProps): JSX.Element => (
-  <div
-    className={cn(
-      "flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/60 pt-3 text-label text-muted-foreground",
-      className,
-    )}
-  >
-    {segments.map((seg, i) => {
-      // Stable path key from the prefix labels (unique within a breadcrumb).
-      const pathKey = segments
-        .slice(0, i + 1)
-        .map((s) => s.label)
-        .join("/");
-      return (
-        <span key={pathKey} className="inline-flex items-center gap-2">
-          {i > 0 && <span className="text-border">/</span>}
-          {seg.onClick ? (
-            <WorkbenchAction
-              kind="ghost"
-              size="content"
-              type="button"
-              className="truncate hover:text-foreground hover:underline"
-              onClick={seg.onClick}
-            >
-              {seg.label}
-            </WorkbenchAction>
-          ) : (
-            <span className="truncate">{seg.label}</span>
-          )}
-        </span>
-      );
-    })}
-    {trailing != null && <span className="ml-auto font-mono text-micro">{trailing}</span>}
-  </div>
-);
 
 // ── Chip / tag ───────────────────────────────────────────────────────────────
 

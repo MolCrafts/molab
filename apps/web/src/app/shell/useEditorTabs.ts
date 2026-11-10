@@ -15,9 +15,11 @@ import {
   closeEditorTab,
   type EditorTab,
   type EditorTabsState,
+  editorOpenMode,
   editorTabKey,
   followLocation,
   parseStoredEditorTabs,
+  pinEditorTab,
 } from "./editorTabs";
 import { useTabSnapshot } from "./useTabSnapshot";
 
@@ -56,6 +58,8 @@ export interface EditorTabsControls {
   activate: (key: string) => void;
   close: (key: string) => void;
   closeActive: () => void;
+  /** Double-click an italic tab: it becomes concrete and stays put. */
+  pin: (key: string) => void;
   cycle: (delta: number) => void;
 }
 
@@ -88,6 +92,7 @@ export const useEditorTabs = (
     hasLanding: Boolean(section?.landing),
   });
   const path = `${location.pathname}${location.search}`;
+  const openMode = editorOpenMode(location.state);
   const kind: EditorTab["kind"] = selection ? selection.objectType : "section";
   const label = tabKey
     ? describeEditorTab({ key: tabKey, path, kind, label: selection?.objectId ?? "" }, snapshot)
@@ -99,8 +104,8 @@ export const useEditorTabs = (
     const pending = pendingClose.current !== tabKey ? pendingClose.current : null;
     if (pending) pendingClose.current = null;
     const current = tabKey ? { key: tabKey, path, kind, label } : null;
-    setState((previous) => followLocation(previous, current, pending));
-  }, [key, tabKey, path, kind, label]);
+    setState((previous) => followLocation(previous, current, pending, openMode));
+  }, [key, tabKey, path, kind, label, openMode]);
 
   // Nothing is stored until a workspace is known: a set saved under no key
   // would be handed to whichever workspace loads next.
@@ -130,6 +135,10 @@ export const useEditorTabs = (
     },
     [leftPanelView, navigate, state],
   );
+
+  const pin = useCallback((target: string) => {
+    setState((previous) => pinEditorTab(previous, target));
+  }, []);
 
   const closeActive = useCallback(() => {
     if (state.activeKey) close(state.activeKey);
@@ -164,5 +173,5 @@ export const useEditorTabs = (
     [snapshot],
   );
 
-  return { state, openInBackground, activate, close, closeActive, cycle };
+  return { state, openInBackground, activate, close, closeActive, pin, cycle };
 };

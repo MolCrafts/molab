@@ -30,7 +30,9 @@ import { WorkbenchOperationState } from "@/components/workbench";
 import { normalizeTaskGraph } from "@/components/workflow/flowgram-document";
 import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
 import { WorkflowGraph } from "@/components/workflow/workflow-graph";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
 import type { ExecutionRowData } from "@/lib/contribution-types";
+import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { cn } from "@/lib/utils";
 
 /** Same section head as the other run views: a name on a hairline. */
@@ -143,10 +145,17 @@ export const RunAttemptsPanel = ({
   const [pinned, setPinned] = useState<{ executionId: string; path: string } | null>(null);
   const pinnedPath =
     pinned && selected && pinned.executionId === selected.executionId ? pinned.path : null;
-  const products = useMemo(
-    () => (graph && selected ? taskProducts(graph.task_configs, selected.executionId) : []),
-    [graph, selected],
-  );
+  const contributionGeneration = useContributionGeneration();
+  const products = useMemo(() => {
+    void contributionGeneration;
+    return graph && selected
+      ? taskProducts(
+          graph.task_configs,
+          selected.executionId,
+          (name) => filePreviewPluginRegistry.getPluginForFile(name, name) !== null,
+        )
+      : [];
+  }, [contributionGeneration, graph, selected]);
   const taskFailure = failedTask(graph);
   const headline = selected
     ? failureHeadline({ status: selected.status, error: selected.error, task: taskFailure })

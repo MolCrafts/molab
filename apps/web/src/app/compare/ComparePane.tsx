@@ -61,7 +61,7 @@ const Rows = ({
       </th>
     </tr>
     {rows.map((row) => (
-      <tr key={row.key} className="h-6 border-b border-border">
+      <tr key={row.key} className="h-list-row border-b border-border">
         <th
           scope="row"
           className="sticky left-0 z-[1] w-44 min-w-44 truncate bg-background pr-4 text-left font-mono text-label font-normal text-muted-foreground"
@@ -74,7 +74,7 @@ const Rows = ({
             key={index}
             className={cn(
               COLUMN,
-              "truncate px-2 font-mono text-label tabular-nums",
+              "truncate px-list-pad-x font-mono text-label tabular-nums",
               index === baseline && "bg-accent-muted",
               row.differs[index] ? "font-medium text-diff-modified-foreground" : "text-foreground",
             )}

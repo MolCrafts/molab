@@ -4,12 +4,13 @@
  */
 
 import { Kbd } from "@molcrafts/ui";
-import { Layers, PanelBottom, PanelLeft, Search } from "lucide-react";
+import { PanelBottom, PanelLeft, Search } from "lucide-react";
 import type { JSX } from "react";
 import { openCommandPalette } from "@/app/entities/GlobalCommandPalette";
 import { WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 import { SHORTCUTS } from "./keys";
+import { ProductMark } from "./ProductMark";
 
 interface TitleBarProps {
   workspaceLabel: string;
@@ -32,7 +33,7 @@ export const TitleBar = ({
     data-shell-region="titlebar"
   >
     <div className="flex min-w-0 items-center gap-2 pl-1">
-      <Layers className="size-icon flex-none text-accent" aria-hidden />
+      <ProductMark className="size-icon flex-none text-accent" />
       <span className="text-label text-muted-foreground">molab</span>
     </div>
 

@@ -1,7 +1,12 @@
 import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 import { Atom } from "lucide-react";
 import { lazyWithPrefetch } from "@/lib/lazy-with-prefetch";
-import { CHEMICAL_STRUCTURE_EXTENSIONS, LAMMPS_DATA_EXTENSIONS } from "@/lib/structure-files";
+import {
+  BINARY_TRAJECTORY_EXTENSIONS,
+  CHEMICAL_STRUCTURE_EXTENSIONS,
+  isBinaryTrajectoryName,
+  LAMMPS_DATA_EXTENSIONS,
+} from "@/lib/structure-files";
 import { isMolvisZarr, MOLVIS_FILE_PATTERNS, uniqueMolvisFiles } from "./openable";
 
 const MolvisDatasetPreview = lazyWithPrefetch(() =>
@@ -47,8 +52,14 @@ const molvisPlugin: MolabPluginModule = {
     api.filePreviews.register({
       id: "molvis:structure",
       name: "Structure",
-      extensions: [...CHEMICAL_STRUCTURE_EXTENSIONS, ...LAMMPS_DATA_EXTENSIONS],
+      extensions: [
+        ...CHEMICAL_STRUCTURE_EXTENSIONS,
+        ...LAMMPS_DATA_EXTENSIONS,
+        ...BINARY_TRAJECTORY_EXTENSIONS,
+      ],
       priority: 20,
+      payload: ({ name }) => (isBinaryTrajectoryName(name) ? "bytes" : "text"),
+      whole: true,
       Component: StructurePreview,
     });
   },

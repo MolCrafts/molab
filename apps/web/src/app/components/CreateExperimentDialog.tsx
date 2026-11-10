@@ -179,7 +179,7 @@ export function CreateExperimentDialog({
                 <SelectItem key={t.name} value={t.name}>
                   <span className="flex items-center gap-2">
                     <span className="font-medium">{t.name}</span>
-                    <span className="text-micro uppercase tracking-wide text-muted-foreground">
+                    <span className="text-label font-medium text-muted-foreground">
                       {t.isRemote ? "remote" : "local"}
                     </span>
                   </span>

@@ -19,6 +19,7 @@ import {
   Instrument,
   InstrumentStrip,
   MixChart,
+  OverviewCanvas,
   quantile,
   StatusGlyphLegend,
   StatusIcon,
@@ -422,29 +423,27 @@ export const ExperimentOverview = ({
     [runs, experiment.parameterSpace],
   );
   return (
-    <div className="h-full min-h-0 overflow-auto bg-background">
-      <div className="space-y-8 px-6 py-6">
-        <Verdict verdict={verdict} onOpenRuns={onOpenRuns} />
-        {runs.length === 0 ? (
-          <MissingSteps
+    <OverviewCanvas>
+      <Verdict verdict={verdict} onOpenRuns={onOpenRuns} />
+      {runs.length === 0 ? (
+        <MissingSteps
+          experiment={experiment}
+          hasWorkflow={hasWorkflow}
+          onOpenWorkflow={onOpenWorkflow}
+          onNewRun={onNewRun}
+          onSweep={onSweep}
+        />
+      ) : (
+        <>
+          <Gauges runs={runs} rows={rows} partial={partial} onOpenRuns={onOpenRuns} />
+          <Charts
             experiment={experiment}
-            hasWorkflow={hasWorkflow}
-            onOpenWorkflow={onOpenWorkflow}
-            onNewRun={onNewRun}
-            onSweep={onSweep}
+            runs={runs}
+            onOpenRuns={onOpenRuns}
+            onPreviewRun={onPreviewRun}
           />
-        ) : (
-          <>
-            <Gauges runs={runs} rows={rows} partial={partial} onOpenRuns={onOpenRuns} />
-            <Charts
-              experiment={experiment}
-              runs={runs}
-              onOpenRuns={onOpenRuns}
-              onPreviewRun={onPreviewRun}
-            />
-          </>
-        )}
-      </div>
-    </div>
+        </>
+      )}
+    </OverviewCanvas>
   );
 };

@@ -129,6 +129,8 @@ export const PreviewBody = ({
 interface PreviewOverlayProps {
   snapshot: WorkspaceSnapshot;
   narrow: boolean;
+  /** False unless the active tab is an italic preview and the target is an item inside it. */
+  open: boolean;
   onRefresh: () => void;
 }
 
@@ -136,21 +138,22 @@ interface PreviewOverlayProps {
 export const PreviewOverlay = ({
   snapshot,
   narrow,
+  open,
   onRefresh,
 }: PreviewOverlayProps): JSX.Element | null => {
   const { target, close } = usePreview();
 
   useEffect(() => {
-    if (!target) return;
+    if (!open || !target) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented || overlayOpen()) return;
       close();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [target, close]);
+  }, [open, target, close]);
 
-  if (!target) return null;
+  if (!open || !target) return null;
   return (
     <aside
       aria-label="Preview"

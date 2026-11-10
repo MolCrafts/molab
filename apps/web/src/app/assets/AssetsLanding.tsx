@@ -21,7 +21,6 @@ import type { NavigationLandingProps } from "@/app/navigation/sections";
 import { usePreview } from "@/app/preview/PreviewContext";
 import { runLabel, withRunTitles } from "@/app/runs/runTitle";
 import { EditorActions } from "@/app/shell/editorActions";
-import { useNavigationState } from "@/app/state/useNavigationState";
 import type { AssetSummary } from "@/app/types";
 import { DialogButton } from "@/components/dialog/AppDialog";
 import { WorkbenchIconAction, WorkbenchOperationState } from "@/components/workbench";
@@ -103,7 +102,7 @@ const AssetRow = ({
       }
     }}
     className={cn(
-      "grid h-7 w-full grid-cols-[minmax(0,16rem)_5rem_minmax(0,10rem)_minmax(0,10rem)_1fr] items-center gap-3 pr-3 text-left text-body hover:bg-interactive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring max-md:grid-cols-[minmax(0,1fr)_5rem]",
+      "grid h-list-row w-full grid-cols-[minmax(0,16rem)_5rem_minmax(0,10rem)_minmax(0,10rem)_1fr] items-center gap-3 pr-3 text-left text-body hover:bg-interactive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring max-md:grid-cols-[minmax(0,1fr)_5rem]",
       indent ? "pl-12 max-md:pl-6" : "pl-6 max-md:pl-2",
       previewed && "bg-accent-muted",
     )}
@@ -141,9 +140,9 @@ const BlockHead = ({ block }: { block: AssetBlock }): JSX.Element | null => {
   if (block.run) {
     const attempt = latestExecution(block.run);
     return (
-      <div className="flex h-7 min-w-0 items-center gap-2 pl-6 max-md:pl-2">
+      <div className="flex h-list-row min-w-0 items-center gap-2 pl-6 text-body max-md:pl-2">
         <StatusIcon status={attempt?.status ?? null} />
-        <span className="truncate font-mono text-label">{runLabel(block.run)}</span>
+        <span className="truncate font-mono">{runLabel(block.run)}</span>
         <span className="flex-none text-micro text-muted-foreground">
           {[attempt?.executionId, formatRelative(attempt?.createdAt ?? block.run.createdAt)]
             .filter(Boolean)
@@ -154,16 +153,16 @@ const BlockHead = ({ block }: { block: AssetBlock }): JSX.Element | null => {
   }
   if (!block.source) return null;
   return (
-    <div className="flex h-7 min-w-0 items-center gap-2 pl-6 max-md:pl-2">
+    <div className="flex h-list-row min-w-0 items-center gap-2 pl-6 text-body max-md:pl-2">
       <Link2 aria-hidden className="size-icon-sm flex-none text-muted-foreground" />
-      <span className="truncate font-mono text-label">{block.source}</span>
+      <span className="truncate font-mono">{block.source}</span>
     </div>
   );
 };
 
 const GroupHead = ({ group }: { group: AssetGroup }): JSX.Element | null =>
   group.kind === "all" ? null : (
-    <h2 className="mt-3 flex h-8 items-center gap-2 border-b border-border text-body first:mt-0">
+    <h2 className="mt-3 flex h-list-row items-center gap-2 border-b border-border text-label font-medium first:mt-0">
       {group.kind === "imported" ? (
         <Link2 aria-hidden className="size-icon-sm text-muted-foreground" />
       ) : (
@@ -180,7 +179,6 @@ export const AssetsLanding = ({ snapshot, onRefresh }: NavigationLandingProps): 
   const [importOpen, setImportOpen] = useState(false);
   const { writeDeniedReason } = usePermissions();
   const preview = usePreview();
-  const { setSelection } = useNavigationState(snapshot);
   const inventory = useScopeRuns({}, true);
   const runs = useMemo(() => withRunTitles(inventory.rows), [inventory.rows]);
   const assets = useMemo(
@@ -206,8 +204,7 @@ export const AssetsLanding = ({ snapshot, onRefresh }: NavigationLandingProps): 
 
   const onPreview = (asset: AssetSummary): void =>
     preview.preview({ kind: "asset", assetId: asset.id });
-  const onOpen = (asset: AssetSummary): void =>
-    setSelection({ objectType: "asset", objectId: asset.id });
+  const onOpen = (asset: AssetSummary): void => preview.open({ kind: "asset", assetId: asset.id });
 
   return (
     <section aria-label="Assets" className="flex h-full min-h-0 flex-col bg-background">

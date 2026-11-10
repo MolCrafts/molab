@@ -158,9 +158,7 @@ export const LeftExplorer = ({
     >
       <header className="flex min-h-shell-row shrink-0 items-center pr-1 pl-3">
         <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-          <h2 className="min-w-0 truncate text-micro font-semibold uppercase tracking-wide text-foreground">
-            {title}
-          </h2>
+          <h2 className="min-w-0 truncate text-label font-medium text-foreground">{title}</h2>
           {actions ? (
             <div className="flex shrink-0 items-center gap-hairline [&_button]:size-shell-action [&_button]:rounded-action">
               {actions}

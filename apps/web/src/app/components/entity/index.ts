@@ -4,7 +4,6 @@ export {
   CopyButton,
   DashboardCanvas,
   DashboardCard,
-  EntityPath,
   InventoryCanvas,
   MetaField,
   OverviewInstruments,

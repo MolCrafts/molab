@@ -11,7 +11,7 @@ import { type JSX, useCallback, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { activeNeedsAuth } from "@/api/errors";
 import { CreateProjectDialog } from "@/app/components/CreateProjectDialog";
-import { EntityPage, ViewLabel } from "@/app/components/entity";
+import { EntityPage, OverviewCanvas, ViewLabel } from "@/app/components/entity";
 import { DashboardAttention } from "@/app/dashboard/DashboardAttention";
 import { DashboardEditorActions } from "@/app/dashboard/DashboardEditorActions";
 import {
@@ -138,7 +138,7 @@ export const DashboardPage = ({ snapshot, onRefresh }: NavigationLandingProps): 
             value: "plan",
             label: <ViewLabel icon={ListChecks}>Plan</ViewLabel>,
             content: (
-              <div className="h-full min-h-0 overflow-auto bg-background px-6 py-6">
+              <OverviewCanvas>
                 <PlanProgress
                   campaigns={campaigns}
                   hostLabel={(path) =>
@@ -148,7 +148,7 @@ export const DashboardPage = ({ snapshot, onRefresh }: NavigationLandingProps): 
                   onOpenExperiment={openPlanExperiment}
                   onOpenDoc={openPlanDoc}
                 />
-              </div>
+              </OverviewCanvas>
             ),
           },
         ]

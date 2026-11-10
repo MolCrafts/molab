@@ -1,11 +1,11 @@
 import type { PluginAPI } from "@molcrafts/molab-plugin";
 import {
-  Archive,
   Blocks,
   FolderTree,
   GitCompare,
   LayoutDashboard,
-  PlayCircle,
+  Library,
+  ListVideo,
   Settings,
 } from "lucide-react";
 import type { NavigationContribution } from "@/app/navigation/sections";
@@ -93,7 +93,7 @@ export const CORE_NAVIGATION: readonly NavigationContribution[] = [
     label: "Runs",
     explorerTitle: "Runs",
     breadcrumbLabel: "Runs",
-    icon: PlayCircle,
+    icon: ListVideo,
     route: "/runs",
     placement: "primary",
     order: 30,
@@ -123,7 +123,7 @@ export const CORE_NAVIGATION: readonly NavigationContribution[] = [
     label: "Assets",
     explorerTitle: "Assets",
     breadcrumbLabel: "Assets",
-    icon: Archive,
+    icon: Library,
     route: "/assets",
     placement: "secondary",
     order: 60,

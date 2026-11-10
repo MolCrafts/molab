@@ -263,12 +263,9 @@ export const AssetViewer = (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col max-md:overflow-auto">
           <header className="flex flex-none items-center gap-3 px-6 pt-4 pb-3 max-md:px-4">
             <AssetTile kind={kind} />
-            <div className="flex min-w-0 flex-col">
-              <h1 className="truncate text-title font-semibold">{summary.name}</h1>
-              <p className="truncate text-label text-muted-foreground">
-                {contextSentence(context, runLabel, citations.data?.length ?? null)}
-              </p>
-            </div>
+            <p className="min-w-0 truncate text-label text-muted-foreground">
+              {contextSentence(context, runLabel, citations.data?.length ?? null)}
+            </p>
           </header>
           <div className="flex-none px-6 pb-4 max-md:px-4">
             {inventory.query.isPending ? (

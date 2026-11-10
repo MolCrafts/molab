@@ -20,9 +20,10 @@ import {
 import { useSceneGround } from "./sceneGround";
 import type { MolvisStyle } from "./sceneStyle";
 
-/** What the scene draws: a file's text, or a `*.mrec` store under the attempt. */
+/** What the scene draws: file text, binary trajectory bytes, or a `*.mrec` store. */
 export type SceneSource =
   | { kind: "text"; name: string; content: string }
+  | { kind: "bytes"; name: string; path: string; content: Uint8Array }
   | { kind: "mrec"; name: string; storeRoot: string; attemptDir: string };
 
 /** What the loaded scene can be styled with. */
@@ -48,7 +49,7 @@ const message = (reason: unknown): string =>
 
 const loadSource = async (core: MolvisCore, app: Molvis, source: SceneSource): Promise<void> => {
   const target = app as unknown as Parameters<MolvisCore["loadFileContent"]>[0];
-  if (source.kind === "text") {
+  if (source.kind === "text" || source.kind === "bytes") {
     await core.loadFileContent(target, source.content, source.name);
     return;
   }
@@ -74,12 +75,12 @@ export const TrajectoryViewer = ({
   const callbacks = useRef({ onLoaded, onFailed });
   callbacks.current = { onLoaded, onFailed };
 
-  const sourceKey =
-    source.kind === "text"
-      ? `text:${source.name}:${source.content}`
-      : `mrec:${source.attemptDir}:${source.storeRoot}`;
+  const content = source.kind === "mrec" ? undefined : source.content;
+  const path = source.kind === "bytes" ? source.path : undefined;
+  const attemptDir = source.kind === "mrec" ? source.attemptDir : undefined;
+  const storeRoot = source.kind === "mrec" ? source.storeRoot : undefined;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `sourceKey` is the source's identity
+  // biome-ignore lint/correctness/useExhaustiveDependencies: depend on the source's fields; callers may recreate the descriptor on a style change.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -121,7 +122,7 @@ export const TrajectoryViewer = ({
         // The canvas goes away with the view.
       }
     };
-  }, [sourceKey]);
+  }, [source.kind, source.name, content, path, attemptDir, storeRoot]);
 
   useEffect(() => {
     if (stage) applyGround(stage.app, ground);

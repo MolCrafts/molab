@@ -80,7 +80,7 @@ export const PluginBottomPanelHost = ({
                 role="tab"
                 aria-selected={selected}
                 className={cn(
-                  "relative flex-none text-micro font-medium uppercase tracking-wide outline-none",
+                  "relative flex-none text-label font-medium outline-none",
                   "focus-visible:ring-1 focus-visible:ring-ring",
                   selected
                     ? "text-foreground after:absolute after:inset-x-0 after:bottom-1 after:h-px after:bg-foreground"

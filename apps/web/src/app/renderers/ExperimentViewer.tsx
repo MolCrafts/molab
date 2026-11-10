@@ -1,6 +1,6 @@
 /**
  * The experiment page (Figma L03): views Overview · Runs (n) · Params ·
- * Workflow · Notebook, a rule, then Structures. The state's primary action and
+ * Workflow · Notebook, a rule, then Assets. The state's primary action and
  * ⋯ sit at the right of the editor tab row. The Runs filter lives in the URL
  * (`…/runs?filter=status:failed,interrupted`), so the Overview's verdict can
  * open exactly the runs it counts.
@@ -8,10 +8,10 @@
 
 import {
   Activity,
-  Atom,
   FileQuestion,
   FileText,
   FlaskConical,
+  Library,
   SlidersHorizontal,
   Table2,
   Workflow,
@@ -282,12 +282,7 @@ export const ExperimentViewer = ({
           onFilterChange={setFilter}
           onPreview={previewRun}
           onOpen={(run, background) =>
-            background
-              ? preview.open(
-                  { kind: "run", runId: run.id, projectId, experimentId },
-                  { background: true },
-                )
-              : setSelection({ objectType: "run", objectId: run.id })
+            preview.open({ kind: "run", runId: run.id, projectId, experimentId }, { background })
           }
           compareDisabledReason={
             compareScope ? null : "No served workspace to attribute these runs to."
@@ -364,7 +359,7 @@ export const ExperimentViewer = ({
           {
             value: "products",
             dividerBefore: true,
-            label: <ViewLabel icon={Atom}>Structures</ViewLabel>,
+            label: <ViewLabel icon={Library}>Assets</ViewLabel>,
             content: <ExperimentStructures runs={runs} />,
           },
         ]

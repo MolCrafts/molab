@@ -34,7 +34,7 @@ const STARTED: readonly { id: RunsStartedWindow; label: string }[] = [
 /** Values shown per facet before “n more”. */
 const COLLAPSE_THRESHOLD = 8;
 
-/** A section of the filter view: a 22px caps header that folds, VS Code style. */
+/** A section of the filter view. The header is a list row in label type. */
 const Section = ({ title, children }: { title: string; children: ReactNode }): JSX.Element => {
   const [open, setOpen] = useState(true);
   const Chevron = open ? ChevronDown : ChevronRight;
@@ -44,7 +44,7 @@ const Section = ({ title, children }: { title: string; children: ReactNode }): J
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex h-shell-crumbs w-full items-center gap-1 px-1 text-micro font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex h-list-row w-full items-center gap-1 px-1 text-label font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <Chevron aria-hidden className="size-icon-sm" />
         {title}
@@ -72,7 +72,7 @@ const Row = ({
   return (
     <li
       className={cn(
-        "flex h-6 items-center gap-2 rounded-hairline pr-2 pl-6 text-body hover:bg-interactive",
+        "flex h-list-row items-center gap-2 rounded-hairline pr-list-pad-x pl-6 text-body hover:bg-interactive",
         dimmed && "opacity-50",
       )}
     >

@@ -3,9 +3,23 @@ import {
   registerFilePreviewContribution,
   unregisterFilePreviewContribution,
 } from "@/lib/contribution-runtime";
-import type { FilePreviewPlugin } from "@/lib/contribution-types";
+import type { FilePreviewPayload, FilePreviewPlugin } from "@/lib/contribution-types";
 
-export type { FilePreviewContentProps, FilePreviewPlugin } from "@/lib/contribution-types";
+export type {
+  FilePreviewContentProps,
+  FilePreviewPayload,
+  FilePreviewPlugin,
+} from "@/lib/contribution-types";
+
+/** The load a plugin asked for. Absent means text. */
+export const filePreviewPayload = (
+  plugin: FilePreviewPlugin,
+  file: { name: string; path: string },
+): FilePreviewPayload => {
+  const payload = plugin.payload;
+  if (typeof payload === "function") return payload(file);
+  return payload ?? "text";
+};
 
 class FilePreviewPluginRegistry {
   register(plugin: FilePreviewPlugin): void {

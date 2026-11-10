@@ -149,7 +149,10 @@ const RecordedFacts = ({ category }: { category?: string }): JSX.Element => {
               <p className="pt-2 pb-1 text-label text-muted-foreground">{day.label}</p>
               <ul className="flex flex-col">
                 {day.facts.map((item) => (
-                  <li key={item.key} className="flex h-7 min-w-0 items-center gap-2 text-body">
+                  <li
+                    key={item.key}
+                    className="flex h-list-row min-w-0 items-center gap-2 text-body"
+                  >
                     {item.status ? (
                       <StatusIcon status={item.status} />
                     ) : (

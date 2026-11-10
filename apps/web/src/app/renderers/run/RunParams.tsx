@@ -6,7 +6,7 @@
  */
 
 import { type JSX, type ReactNode, useMemo } from "react";
-import { CopyButton } from "@/app/components/entity";
+import { CopyButton, OverviewCanvas } from "@/app/components/entity";
 import {
   baselineOf,
   type ComparedRun,
@@ -49,7 +49,7 @@ const Row = ({
   valueClassName?: string;
   copy?: string;
 }): JSX.Element => (
-  <div className="group grid h-7 grid-cols-[13rem_11rem_minmax(0,1fr)] items-center gap-x-4 px-2">
+  <div className="group grid h-list-row grid-cols-[13rem_11rem_minmax(0,1fr)] items-center gap-x-4 px-list-pad-x">
     <dt className="truncate font-mono text-label text-foreground">{name}</dt>
     <dd className={cn("flex min-w-0 items-center gap-1 font-mono text-label", valueClassName)}>
       <span className="min-w-0 truncate" title={typeof value === "string" ? value : undefined}>
@@ -112,95 +112,88 @@ export const RunParams = ({
   const inputs = run.inputs ?? [];
 
   return (
-    <div className="h-full min-h-0 overflow-auto bg-background">
-      <div className="space-y-8 px-6 py-6">
-        <Table
-          title="Parameters"
-          readout={
-            baseline ? (
-              <span className="flex items-center gap-1">
-                baseline
-                <button
-                  type="button"
-                  onClick={() => onPreviewRun?.(baseline.id)}
-                  className="font-mono text-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  {baseline.title}
-                </button>
-              </span>
-            ) : null
-          }
-        >
-          {rows.length === 0 ? (
-            <p className="px-2 py-1 text-label text-muted-foreground">No parameters</p>
-          ) : (
-            rows.map((row) => (
-              <Row
-                key={row.key}
-                name={row.key}
-                value={row.value}
-                note={roleNote(row)}
-                valueClassName={
-                  row.differs ? "font-medium text-diff-modified-foreground" : "text-foreground"
-                }
-              />
-            ))
-          )}
-        </Table>
-
-        {inputs.length > 0 ? (
-          <Table title="Inputs">
-            {inputs.map((assetId) => {
-              const asset = assets.find((candidate) => candidate.id === assetId);
-              return (
-                <Row
-                  key={assetId}
-                  name={asset?.kind ?? "asset"}
-                  value={
-                    <button
-                      type="button"
-                      onClick={() => onPreviewAsset?.(assetId)}
-                      className="truncate text-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    >
-                      {asset?.name ?? assetId}
-                    </button>
-                  }
-                  note={["asset", asset?.scopeKind].filter(Boolean).join(" · ")}
-                />
-              );
-            })}
-          </Table>
-        ) : null}
-
-        <Table title="Identity">
-          <Row name="run id" value={run.id} copy={run.id} valueClassName="text-foreground" />
-          {run.definitionHash ? (
+    <OverviewCanvas>
+      <Table
+        title="Parameters"
+        readout={
+          baseline ? (
+            <span className="flex items-center gap-1">
+              baseline
+              <button
+                type="button"
+                onClick={() => onPreviewRun?.(baseline.id)}
+                className="font-mono text-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {baseline.title}
+              </button>
+            </span>
+          ) : null
+        }
+      >
+        {rows.length === 0 ? (
+          <p className="px-2 py-1 text-label text-muted-foreground">No parameters</p>
+        ) : (
+          rows.map((row) => (
             <Row
-              name="definition"
-              value={shortHash(run.definitionHash)}
-              copy={run.definitionHash}
-              valueClassName="text-foreground"
-            />
-          ) : null}
-          {workflowLabel ? (
-            <Row
-              name="workflow"
-              value={
-                run.experimentRevisionId
-                  ? `${workflowLabel} · ${shortHash(run.experimentRevisionId)}`
-                  : workflowLabel
+              key={row.key}
+              name={row.key}
+              value={row.value}
+              note={roleNote(row)}
+              valueClassName={
+                row.differs ? "font-medium text-diff-modified-foreground" : "text-foreground"
               }
-              valueClassName="text-foreground"
             />
-          ) : null}
-          <Row
-            name="path"
-            value={run.path}
-            copy={run.path}
-            valueClassName="text-muted-foreground"
-          />
+          ))
+        )}
+      </Table>
+
+      {inputs.length > 0 ? (
+        <Table title="Inputs">
+          {inputs.map((assetId) => {
+            const asset = assets.find((candidate) => candidate.id === assetId);
+            return (
+              <Row
+                key={assetId}
+                name={asset?.kind ?? "asset"}
+                value={
+                  <button
+                    type="button"
+                    onClick={() => onPreviewAsset?.(assetId)}
+                    className="truncate text-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    {asset?.name ?? assetId}
+                  </button>
+                }
+                note={["asset", asset?.scopeKind].filter(Boolean).join(" · ")}
+              />
+            );
+          })}
         </Table>
-      </div>
-    </div>
+      ) : null}
+
+      <Table title="Identity">
+        <Row name="run id" value={run.id} copy={run.id} valueClassName="text-foreground" />
+        {run.definitionHash ? (
+          <Row
+            name="definition"
+            value={shortHash(run.definitionHash)}
+            copy={run.definitionHash}
+            valueClassName="text-foreground"
+          />
+        ) : null}
+        {workflowLabel ? (
+          <Row
+            name="workflow"
+            value={
+              run.experimentRevisionId
+                ? `${workflowLabel} · ${shortHash(run.experimentRevisionId)}`
+                : workflowLabel
+            }
+            valueClassName="text-foreground"
+          />
+        ) : null}
+        <Row name="path" value={run.path} copy={run.path} valueClassName="text-muted-foreground" />
+      </Table>
+    </OverviewCanvas>
   );
 };

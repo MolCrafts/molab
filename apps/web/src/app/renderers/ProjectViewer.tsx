@@ -8,11 +8,11 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
+  Blocks,
   Copy,
   ExternalLink,
   FileText,
   FlaskConical,
-  FolderKanban,
   ListChecks,
   Package,
 } from "lucide-react";
@@ -30,6 +30,7 @@ import {
   EMPTY_COPY,
   EmptyState,
   EntityPage,
+  OverviewCanvas,
   StatusIcon,
   ViewLabel,
 } from "@/app/components/entity";
@@ -481,7 +482,7 @@ export const ProjectViewer = ({
             value: "plan",
             label: <ViewLabel icon={ListChecks}>Plan</ViewLabel>,
             content: (
-              <div className="h-full min-h-0 overflow-auto bg-background px-6 py-6">
+              <OverviewCanvas>
                 <PlanProgress
                   campaigns={campaigns}
                   onOpenExperiment={(name) => {
@@ -492,7 +493,7 @@ export const ProjectViewer = ({
                   }}
                   onOpenDoc={(path) => setSelection({ objectType: "knowledge", objectId: path })}
                 />
-              </div>
+              </OverviewCanvas>
             ),
           },
         ]
@@ -506,7 +507,7 @@ export const ProjectViewer = ({
   return (
     <>
       <EntityPage
-        icon={FolderKanban}
+        icon={Blocks}
         title={project.name}
         actions={
           <ProjectEditorActions

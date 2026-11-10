@@ -27,6 +27,8 @@ interface EditorTabStripProps {
   snapshot: WorkspaceSnapshot;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
+  /** Double-click pins an italic preview tab. */
+  onPin: (key: string) => void;
   /** Receives the editor-actions slot element. */
   actionsRef: Ref<HTMLDivElement>;
 }
@@ -47,6 +49,7 @@ export const EditorTabStrip = ({
   snapshot,
   onActivate,
   onClose,
+  onPin,
   actionsRef,
 }: EditorTabStripProps): JSX.Element => {
   const strip = useRef<HTMLDivElement>(null);
@@ -96,16 +99,23 @@ export const EditorTabStrip = ({
                 type="button"
                 role="tab"
                 aria-selected={active}
-                title={tabTitle(presentation)}
+                title={tab.preview ? `${tabTitle(presentation)} (preview)` : tabTitle(presentation)}
                 className={cn(
                   "flex h-full min-w-0 items-center gap-2 pr-1 pl-3 text-body outline-none",
                   "focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
                   active ? "text-foreground" : "text-muted-foreground",
                 )}
                 onClick={() => onActivate(tab.key)}
+                onDoubleClick={() => onPin(tab.key)}
               >
                 <TabGlyph presentation={presentation} />
-                <span className={cn("truncate", tab.kind === "run" && "font-mono text-label")}>
+                <span
+                  className={cn(
+                    "truncate",
+                    tab.preview && "italic",
+                    tab.kind === "run" && "font-mono text-label",
+                  )}
+                >
                   {presentation.label}
                 </span>
               </button>
@@ -154,7 +164,9 @@ export const EditorTabStrip = ({
                   onSelect={() => onActivate(tab.key)}
                 >
                   <TabGlyph presentation={presentation} />
-                  <span className="truncate">{presentation.label}</span>
+                  <span className={cn("truncate", tab.preview && "italic")}>
+                    {presentation.label}
+                  </span>
                   {presentation.context ? (
                     <span className="ml-auto truncate pl-3 text-micro text-muted-foreground">
                       {presentation.context}

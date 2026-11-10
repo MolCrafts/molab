@@ -10,7 +10,13 @@
 
 import { Funnel, X } from "lucide-react";
 import { type JSX, useMemo, useState } from "react";
-import { GaugeSection, MixChart, StatusGlyphLegend, StatusIcon } from "@/app/components/entity";
+import {
+  GaugeSection,
+  MixChart,
+  OverviewCanvas,
+  StatusGlyphLegend,
+  StatusIcon,
+} from "@/app/components/entity";
 import { RunList } from "@/app/dashboard/DashboardExplorer";
 import { dashboardLists } from "@/app/dashboard/dashboardLists";
 import {
@@ -175,84 +181,79 @@ export const WorkspaceOverview = ({
           onClear={() => setFilter(NO_FILTER)}
         />
       ) : null}
-      <div className="min-h-0 flex-1 overflow-auto">
-        <div className="space-y-8 px-6 py-6">
-          <Verdict verdict={verdict} onOpenRuns={onOpenRuns} />
-          {/* Phones have no side bar on screen: its first list sits under the verdict (L01-8). */}
-          {attention.length > 0 ? (
-            <section
-              aria-label="Needs attention"
-              className="-mx-6 border-y border-border sm:hidden"
-            >
-              <h3 className="px-6 pt-2 pb-1 text-micro font-semibold uppercase tracking-wide text-muted-foreground">
-                Needs attention · {attention.length}
-              </h3>
-              <RunList runs={attention} more="more in Runs" empty="" />
-            </section>
-          ) : null}
-          {nothingRan ? (
-            <FirstSteps
-              projects={projects}
-              onNewProject={onNewProject}
-              onOpenRuns={() => onOpenRuns()}
+      <OverviewCanvas>
+        <Verdict verdict={verdict} onOpenRuns={onOpenRuns} />
+        {/* Phones have no side bar on screen: its first list sits under the verdict (L01-8). */}
+        {attention.length > 0 ? (
+          <section aria-label="Needs attention" className="-mx-4 border-y border-border sm:hidden">
+            <h3 className="px-4 pt-2 pb-1 text-label font-medium text-muted-foreground">
+              Needs attention · {attention.length}
+            </h3>
+            <RunList runs={attention} more="more in Runs" empty="" />
+          </section>
+        ) : null}
+        {nothingRan ? (
+          <FirstSteps
+            projects={projects}
+            onNewProject={onNewProject}
+            onOpenRuns={() => onOpenRuns()}
+          />
+        ) : (
+          <>
+            <Gauges
+              runs={runs}
+              rows={scoped}
+              partial={partial}
+              onOpenRuns={onOpenRuns}
+              label="Workspace gauges"
             />
-          ) : (
-            <>
-              <Gauges
-                runs={runs}
-                rows={scoped}
-                partial={partial}
-                onOpenRuns={onOpenRuns}
-                label="Workspace gauges"
-              />
-              <ActivityPanel
-                rows={byBackend}
-                inventoryBlocked={inventoryBlocked}
-                selection={filter.window}
-                onSelect={(window) => setFilter((current) => ({ ...current, window }))}
-              />
-              <div className="grid min-w-0 gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-                <GaugeSection title="Outcome by project" readout="latest attempt of each run">
-                  {groups.length === 0 ? (
-                    <EmptyLine>No runs in this view.</EmptyLine>
-                  ) : (
-                    <>
-                      <MixChart
-                        groups={groups}
-                        label="Outcome by project"
-                        onPick={onPreviewProject}
-                        wording={RUN_WORDING}
-                      />
-                      <StatusGlyphLegend className="pt-4" />
-                    </>
-                  )}
-                </GaugeSection>
-                <GaugeSection title="Backends" readout="attempts · a bar narrows the page">
-                  {backends.length === 0 ? (
-                    <EmptyLine>No executor recorded yet.</EmptyLine>
-                  ) : (
+            <ActivityPanel
+              rows={byBackend}
+              inventoryBlocked={inventoryBlocked}
+              selection={filter.window}
+              onSelect={(window) => setFilter((current) => ({ ...current, window }))}
+            />
+            <div className="grid min-w-0 gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+              <GaugeSection title="Outcome by project" readout="latest attempt of each run">
+                {groups.length === 0 ? (
+                  <EmptyLine>No runs in this view.</EmptyLine>
+                ) : (
+                  <>
                     <MixChart
-                      groups={backends}
-                      label="Attempts by backend"
-                      selected={filter.backend}
-                      wording={ATTEMPT_WORDING}
-                      onPick={(backend) =>
-                        setFilter((current) => ({
-                          ...current,
-                          backend: current.backend === backend ? null : backend,
-                        }))
-                      }
+                      groups={groups}
+                      label="Outcome by project"
+                      onPick={onPreviewProject}
+                      wording={RUN_WORDING}
                     />
-                  )}
-                </GaugeSection>
-              </div>
-              <GaugeSection title="Duration by project" readout="each finished run">
-                <DurationsBy rows={scoped} groupBy="project" />
+                    <StatusGlyphLegend className="pt-4" />
+                  </>
+                )}
               </GaugeSection>
-            </>
-          )}
-        </div>
-      </div>
+              <GaugeSection title="Backends" readout="attempts · a bar narrows the page">
+                {backends.length === 0 ? (
+                  <EmptyLine>No executor recorded yet.</EmptyLine>
+                ) : (
+                  <MixChart
+                    groups={backends}
+                    label="Attempts by backend"
+                    selected={filter.backend}
+                    wording={ATTEMPT_WORDING}
+                    onPick={(backend) =>
+                      setFilter((current) => ({
+                        ...current,
+                        backend: current.backend === backend ? null : backend,
+                      }))
+                    }
+                  />
+                )}
+              </GaugeSection>
+            </div>
+            <GaugeSection title="Duration by project" readout="each finished run">
+              <DurationsBy rows={scoped} groupBy="project" />
+            </GaugeSection>
+          </>
+        )}
+      </OverviewCanvas>
     </div>
   );
 };

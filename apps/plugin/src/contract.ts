@@ -273,12 +273,16 @@ export interface EntityTabContribution {
   Component: PluginComponent;
 }
 
+export type FilePreviewPayload = "text" | "bytes";
+
 export interface FilePreviewContentProps {
   content: string;
   name: string;
   path: string;
   folderId: string;
   assetId?: string;
+  /** Set when the plugin asked for bytes. A DCD is not a string. */
+  bytes?: Uint8Array;
 }
 
 export interface FilePreviewContribution {
@@ -288,6 +292,13 @@ export interface FilePreviewContribution {
   pluginId?: string;
   priority?: number;
   canHandle?: (props: { name: string; path: string; hasPreviewSidecar?: boolean }) => boolean;
+  /**
+   * How the host loads a file this plugin claims. Default is text.
+   * The host does not decide the format; this declaration does.
+   */
+  payload?: FilePreviewPayload | ((file: { name: string; path: string }) => FilePreviewPayload);
+  /** Load text whole. The host's default cap is for logs, and it splits a structure. */
+  whole?: boolean;
   Component: React.ComponentType<FilePreviewContentProps>;
 }
 

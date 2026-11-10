@@ -70,9 +70,7 @@ export const SelectionPanel = ({
           onClick={onToggle}
         >
           <Chevron className="size-icon flex-none text-foreground" aria-hidden />
-          <span className="truncate text-micro font-semibold uppercase tracking-wide text-foreground">
-            Pinned
-          </span>
+          <span className="truncate text-label font-medium text-foreground">Pinned</span>
         </button>
         {visible.length > 0 ? (
           <>

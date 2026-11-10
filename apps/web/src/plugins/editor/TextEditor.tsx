@@ -28,7 +28,11 @@ import { LazySurface } from "@/app/layout/LazySurface";
 import { fileEditorMark } from "@/app/shell/dirtyEditors";
 import { EditorActions } from "@/app/shell/editorActions";
 import { useUnsavedEdits } from "@/app/shell/useUnsavedEdits";
-import { fileKeys, workspaceFileTextQueryOptions } from "@/app/state/entityQueries";
+import {
+  fileKeys,
+  workspaceFileBytesQueryOptions,
+  workspaceFileTextQueryOptions,
+} from "@/app/state/entityQueries";
 import type { FileKind, RendererProps } from "@/app/types";
 import { toast } from "@/components/ui/toast";
 import {
@@ -39,7 +43,7 @@ import {
 } from "@/components/workbench";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import type { FilePreviewPlugin } from "@/lib/file-preview-plugins";
-import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
+import { filePreviewPayload, filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { useUiTheme } from "@/lib/ui-theme";
 import { MonacoEditor } from "./MonacoEditor";
 
@@ -75,11 +79,13 @@ const nameOf = (path: string): string => path.split("/").pop() ?? path;
 const PreviewPane = ({
   plugin,
   text,
+  bytes,
   path,
   assetId,
 }: {
   plugin: FilePreviewPlugin;
   text: string;
+  bytes?: Uint8Array;
   path: string;
   assetId?: string;
 }): JSX.Element => (
@@ -90,6 +96,7 @@ const PreviewPane = ({
     >
       <plugin.Component
         content={text}
+        bytes={bytes}
         name={nameOf(path)}
         path={path}
         folderId="workspace"
@@ -112,7 +119,11 @@ const FileEditor = ({
 }): JSX.Element => {
   const theme = useUiTheme();
   const queryClient = useQueryClient();
-  const query = useQuery(workspaceFileTextQueryOptions(path));
+  const wantsBytes = Boolean(
+    plugin && filePreviewPayload(plugin, { name: nameOf(path), path }) === "bytes",
+  );
+  const query = useQuery({ ...workspaceFileTextQueryOptions(path), enabled: !wantsBytes });
+  const bytes = useQuery({ ...workspaceFileBytesQueryOptions(path), enabled: wantsBytes });
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -172,7 +183,7 @@ const FileEditor = ({
           <Save aria-hidden />
         </WorkbenchIconAction>
       ) : null}
-      {plugin ? (
+      {plugin && !wantsBytes ? (
         <>
           <WorkbenchToggleAction
             label="Preview"
@@ -216,16 +227,17 @@ const FileEditor = ({
     </div>
   );
 
-  if (query.isPending) {
+  const reading = wantsBytes ? bytes : query;
+  if (reading.isPending) {
     return <WorkbenchOperationState kind="loading" title="Loading file…" skeletonRows={6} />;
   }
-  if (query.isError) {
+  if (reading.isError) {
     return (
       <WorkbenchOperationState
         kind="error"
         title="Could not load file"
-        detail={query.error instanceof Error ? query.error.message : path}
-        action={<WorkbenchRetryAction onClick={() => void query.refetch()} />}
+        detail={reading.error instanceof Error ? reading.error.message : path}
+        action={<WorkbenchRetryAction onClick={() => void reading.refetch()} />}
       />
     );
   }
@@ -262,9 +274,15 @@ const FileEditor = ({
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1">
-        {plugin && layout === "preview" ? (
+        {plugin && (wantsBytes || layout === "preview") ? (
           <div className="min-w-0 flex-1">
-            <PreviewPane plugin={plugin} text={text} path={path} assetId={assetId} />
+            <PreviewPane
+              plugin={plugin}
+              text={wantsBytes ? "" : text}
+              bytes={wantsBytes ? bytes.data : undefined}
+              path={path}
+              assetId={assetId}
+            />
           </div>
         ) : (
           <>

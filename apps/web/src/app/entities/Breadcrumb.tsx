@@ -1,5 +1,6 @@
 // Breadcrumb row (L00): 22px under the editor tabs — project › experiment ›
-// run › attempt, names only (retrofit R10: icon OR text), each ancestor a link.
+// run › attempt, names only, each ancestor a link. A single segment still
+// renders: a project page is one name, and that name is the trail.
 // Driven by ``buildTrail`` from the active editor; it lives once in the shell.
 
 import { ChevronRight } from "lucide-react";
@@ -13,8 +14,7 @@ interface BreadcrumbProps {
 }
 
 export const Breadcrumb = ({ items }: BreadcrumbProps): JSX.Element | null => {
-  // One segment is the editor tab's own name: the row would only repeat it.
-  if (items.length < 2) return null;
+  if (items.length === 0) return null;
   return (
     <nav
       aria-label="Breadcrumb"
@@ -22,11 +22,7 @@ export const Breadcrumb = ({ items }: BreadcrumbProps): JSX.Element | null => {
     >
       {items.map((item, index) => {
         const isLast = index === items.length - 1;
-        const body = (
-          <span className={cn("truncate", item.kind === "attempt" && "font-mono")}>
-            {item.label}
-          </span>
-        );
+        const body = <span className="truncate">{item.label}</span>;
         return (
           <Fragment key={`${item.kind}:${item.label}`}>
             {index > 0 && (
