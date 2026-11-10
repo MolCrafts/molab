@@ -104,6 +104,31 @@ def _molecule_chain() -> Workflow:
     return wf
 
 
+def _chain_with_picture() -> Workflow:
+    """:func:`_chain` plus ``picture``, which needs only the run's parameter."""
+    wf = _chain()
+
+    @wf.task
+    def picture(x: int) -> str:
+        _bump("picture")
+        return f"x={x}"
+
+    return wf
+
+
+def _drop_config(run, execution_id: str) -> None:
+    path = run.execution_dir(execution_id) / "execution.json"
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    loaded["environment"].pop("config_hash", None)
+    path.write_text(json.dumps(loaded), encoding="utf-8")
+
+
+def _strip_to_adopted(run, execution_id: str) -> None:
+    """Make *execution_id* look adopted: no journal, no config_hash."""
+    (run.execution_dir(execution_id) / "workflow.json").unlink()
+    _drop_config(run, execution_id)
+
+
 def _run(tmp_path: Path, params: dict | None = None):
     ws = me.Workspace(tmp_path / "ws", name="lab")
     return ws.add_project("p").add_experiment("e").add_run(params=params or {"x": 2})
@@ -312,6 +337,43 @@ class TestRerunOneTask:
             execute_run(_chain(), run, rerun=True, only=("b",))
         assert [item.id for item in run.executions if item.status.value == "queued"] == []
         assert _CALLS == {"a": 1, "b": 1}
+
+    def test_new_task_runs_alone_on_an_unjournalled_predecessor(self, tmp_path: Path) -> None:
+        # An adopted attempt: no journal and no config_hash. A task added to the
+        # workflow since then needs nothing from it, so a partial rerun of that
+        # task alone has nothing to mix and runs; the rest is not re-executed.
+        run = _run(tmp_path)
+        execute_run(_chain(), run)
+        _strip_to_adopted(run, "e01")
+        _CALLS.clear()
+
+        result = execute_run(_chain_with_picture(), run, rerun=True, only=("picture",))
+
+        assert _CALLS == {"picture": 1}
+        assert result.outputs["picture"] == "x=2"
+        records = _records(_raw_journal(run, "e02"))
+        assert records["picture"]["status"] == "completed"
+        assert {records[name]["status"] for name in ("a", "b", "c")} == {"skipped"}
+
+    def test_unjournalled_predecessor_still_refuses_a_task_needing_upstream(
+        self, tmp_path: Path
+    ) -> None:
+        run = _run(tmp_path)
+        execute_run(_chain(), run)
+        _strip_to_adopted(run, "e01")
+
+        with pytest.raises(RunNotExecutableError, match="'a'"):
+            execute_run(_chain(), run, rerun=True, only=("b",))
+
+    def test_journalled_predecessor_without_config_hash_is_still_refused(
+        self, tmp_path: Path
+    ) -> None:
+        run = _run(tmp_path)
+        execute_run(_chain(), run)
+        _drop_config(run, "e01")
+
+        with pytest.raises(RunNotExecutableError, match="config_hash"):
+            execute_run(_chain_with_picture(), run, rerun=True, only=("picture",))
 
     def test_unknown_task_is_refused(self, tmp_path: Path) -> None:
         run = _run(tmp_path)

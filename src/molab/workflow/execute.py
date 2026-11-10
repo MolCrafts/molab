@@ -252,7 +252,10 @@ def _attempt_seeds(run: Run, record: Execution, compiled: CompiledWorkflow) -> A
     :func:`read_attempt_seeds`); any other attempt seeds nothing. A missing
     ``config_hash`` on either record, or two different values, drops every
     seed of a RESUME and refuses a partial RERUN (its seeds would mix two
-    configs). ``None == None`` matches: neither side named a profile.
+    configs) — unless the partial RERUN seeds nothing at all (an adopted
+    predecessor has no journal) and its tasks need no upstream value, when
+    there is nothing to mix. ``None == None`` matches: neither side named a
+    profile.
 
     Args:
         run: The run that holds both attempts.
@@ -277,6 +280,11 @@ def _attempt_seeds(run: Run, record: Execution, compiled: CompiledWorkflow) -> A
     if _config_hashes_disagree(record, prior):
         ours = record.environment.get("config_hash", "<missing>")
         theirs = prior.environment.get("config_hash", "<missing>")
+        empty = _empty_partial_seeds(run, based_on, compiled, selection) if partial else None
+        if empty is not None:
+            # Nothing recorded to reuse (an adopted attempt has no journal), and
+            # the selected tasks need no upstream value: no two configs can mix.
+            return empty
         if partial:
             raise RunNotExecutableError(
                 f"partial rerun {record.id} of {list(selection)}: config_hash {ours!r} "
@@ -294,6 +302,24 @@ def _attempt_seeds(run: Run, record: Execution, compiled: CompiledWorkflow) -> A
         return read_attempt_seeds(run, based_on, compiled, select=selection)
     except RecordedInputError as exc:
         raise RunNotExecutableError(str(exc)) from exc
+
+
+def _empty_partial_seeds(
+    run: Run, based_on: str, compiled: CompiledWorkflow, selection: tuple[str, ...]
+) -> AttemptSeeds | None:
+    """The seeds of a partial rerun that takes no recorded value from *based_on*.
+
+    ``None`` when it would take some — then the config guard applies.
+
+    Raises:
+        RunNotExecutableError: A selected task needs an upstream value the
+            predecessor did not record.
+    """
+    try:
+        seeds = read_attempt_seeds(run, based_on, compiled, select=selection)
+    except RecordedInputError as exc:
+        raise RunNotExecutableError(str(exc)) from exc
+    return None if seeds.outputs else seeds
 
 
 def _cancel_orphan(run: Run, execution_id: str) -> None:
