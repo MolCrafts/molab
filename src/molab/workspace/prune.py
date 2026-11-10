@@ -325,11 +325,9 @@ def discard_superseded_attempts(run: Run) -> tuple[str, ...]:
     for execution_id in stale:
         for asset in assets_produced_by(workspace, execution_id):
             if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id:
-                assets = workspace.assets_at(asset.scope)
-                slug = assets.find_slug(asset.id)
-                assets.remove(asset.id)
-                if slug is not None:
-                    touched.append(repo.fs.join(assets.assets_dir, slug))
+                removed = workspace.assets_at(asset.scope).remove(asset.id)
+                if removed is not None:
+                    touched.append(removed)
         repo.fs.rm(repo.execution_dir(execution_id), recursive=True)
         for lock in (repo._seal_lock(execution_id), repo._state_lock(execution_id)):
             lock.unlink(missing_ok=True)

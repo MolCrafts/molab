@@ -443,3 +443,52 @@ class TestAssetLineage:
         )
         assert result.exit_code == 0, result.output
         assert f"<- {upstream.id}" in result.output
+
+
+class TestAssetDelete:
+    def _delete(self, ws: Workspace, spec: str):
+        return CliRunner().invoke(resources.asset_app, ["delete", spec, "-ws", str(ws.root)])
+
+    def test_by_id(self, tmp_path: Path) -> None:
+        ws, asset_id = _greeting(tmp_path)
+        result = self._delete(ws, asset_id)
+        assert result.exit_code == 0, result.output
+        assert result.output.startswith(f"deleted\tgreeting\t{asset_id}\t")
+        assert ws.assets.list() == []
+        assert not (Path(str(ws.root)) / "assets" / "greeting").exists()
+
+    def test_by_ref(self, tmp_path: Path) -> None:
+        ws, asset_id = _greeting(tmp_path)
+        result = self._delete(ws, f"molab:asset/{asset_id}")
+        assert result.exit_code == 0, result.output
+        assert ws.assets.list() == []
+
+    def test_by_directory(self, tmp_path: Path) -> None:
+        ws, _asset_id = _greeting(tmp_path)
+        result = self._delete(ws, "assets/greeting")
+        assert result.exit_code == 0, result.output
+        assert ws.assets.list() == []
+
+    def test_refuses_when_cited_and_names_the_document(self, tmp_path: Path) -> None:
+        from molab.knowledge import Note
+        from molab.knowledge.write import write_knowledge
+
+        ws, asset_id = _greeting(tmp_path)
+        write_knowledge(
+            ws.root,
+            name="greeting-notes",
+            of=Note,
+            created_by="test",
+            text=f"See [greeting](molab:asset/{asset_id}).\n",
+        )
+        result = self._delete(ws, asset_id)
+        assert result.exit_code == 1
+        assert "greeting-notes" in " ".join(result.output.split())
+        assert [asset.id for asset in ws.assets.list()] == [asset_id]
+
+    def test_unknown_id_exits_1(self, tmp_path: Path) -> None:
+        ws, asset_id = _greeting(tmp_path)
+        result = self._delete(ws, "missing")
+        assert result.exit_code == 1
+        assert "not found" in result.output
+        assert [asset.id for asset in ws.assets.list()] == [asset_id]

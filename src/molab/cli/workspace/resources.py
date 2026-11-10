@@ -1156,6 +1156,43 @@ def asset_lineage(
         _render("descendants", "->", asset_lineage_mod.descendants(ws, asset_id))
 
 
+@asset_app.command("delete")
+def asset_delete(
+    spec: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The asset: its id, its molab:asset/<id> ref, or its workspace-relative "
+                "slot directory (projects/P/experiments/E/assets/<run>--<title>)."
+            )
+        ),
+    ],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Delete one asset that nothing cites; one history commit.
+
+    Refused while a knowledge document names the asset or a run declares it
+    as an input: the citing places are listed and nothing is removed.
+    """
+    from molab.services.asset_delete import AssetCitedError, delete_asset
+    from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
+    from molab.workspace.refs import InvalidRefError
+
+    ws = _open_ws(target_spec)
+    try:
+        deleted = delete_asset(ws, spec)
+    except AssetCitedError as exc:
+        rprint(f"[red]Refusing:[/red] asset {exc.asset_id} is still cited by:")
+        for citation in exc.citations:
+            rprint(f"  {citation}")
+        raise typer.Exit(1) from None
+    except (RefNotFoundError, AmbiguousRefError, InvalidRefError, OSError, ValueError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    rel = Path(deleted.path).relative_to(Path(str(ws.root))).as_posix()
+    print(f"deleted\t{deleted.asset.title}\t{deleted.asset.id}\t{rel}")
+
+
 @asset_app.command("migrate")
 def asset_migrate(
     target_spec: TargetOption = ".",

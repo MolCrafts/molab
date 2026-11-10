@@ -396,12 +396,19 @@ class AssetRepository:
                 return asset
         return None
 
-    def remove(self, asset_id: str) -> None:
-        """Delete asset *asset_id*'s directory; a missing id is a no-op."""
+    def remove(self, asset_id: str) -> str | None:
+        """Delete asset *asset_id*'s directory and return its path; a missing id is a no-op.
+
+        Returns:
+            The removed slot directory (for the caller's history commit), or
+            ``None`` when this scope holds no asset *asset_id*.
+        """
         slug = self.find_slug(asset_id)
         if slug is None:
-            return
-        self.fs.rm(self.fs.join(self.assets_dir, slug), recursive=True)
+            return None
+        directory = self.fs.join(self.assets_dir, slug)
+        self.fs.rm(directory, recursive=True)
+        return directory
 
     def list(self) -> builtins.list[Asset]:
         if not self.fs.exists(self.assets_dir):
