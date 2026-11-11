@@ -1,0 +1,999 @@
+"""Run routes for Molab API."""
+
+from __future__ import annotations
+
+import codecs
+import io
+from pathlib import Path
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+
+from molab.atomicio import file_lock
+from molab.fs.window import iter_file_chunks
+from molab.plugins.submit_molq.submit import SubmitHandler
+from molab.workflow import read_journal
+from molab.workspace import (
+    ExperimentNotFoundError as WorkspaceExperimentNotFoundError,
+)
+from molab.workspace import (
+    ProjectNotFoundError as WorkspaceProjectNotFoundError,
+)
+from molab.workspace import (
+    RunNotFoundError as WorkspaceRunNotFoundError,
+)
+from molab.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace.execution_dirs import JOBS, product_dirs
+from molab.workspace.execution_repository import (
+    RUN_LOG_FILENAME,
+    STDIO_FILES,
+    ExecutionRepository,
+)
+from molab.workspace.fs_cached import CachedRemoteFS
+from molab.workspace.fs_tree import list_tree_children, tree_to_run_file_dicts
+from molab.workspace.history import AgentRef
+from molab.workspace.models import ComputeTarget
+from molab.workspace.targets import resolve_compute_target
+
+from ..dependencies import get_workspace
+from ..exceptions import RunNotFoundError
+from ..schemas import (
+    ExecutionAttemptCreateRequest,
+    ExecutionEvidenceResponse,
+    ExecutionOutputsResponse,
+    ExecutionResponse,
+    ManagedAssetResponse,
+    RunCreateRequest,
+    RunExecutionResponse,
+    RunFileNode,
+    RunFilesResponse,
+    RunFileTextResponse,
+    RunHarvestRequest,
+    RunLogChunkResponse,
+    RunLogsResponse,
+    RunResponse,
+)
+from ..schemas._wire import ApiModel
+
+router = APIRouter(
+    prefix="/projects/{project_id}/experiments/{experiment_id}/runs",
+    tags=["runs"],
+)
+
+
+def _get_experiment(workspace, project_id: str, experiment_id: str):  # noqa: ANN001, ANN202
+    """The experiment inside the serve root, or ``None``.
+
+    Ids above the served directory are ignored. A miss stays ``None`` so
+    callers keep mapping it to HTTP 404.
+    """
+    from molab.workspace.experiment import Experiment
+    from molab.workspace.scope import as_folder, resolve_in_scope
+
+    try:
+        node = resolve_in_scope(as_folder(workspace), project_id, experiment_id)
+    except (WorkspaceProjectNotFoundError, WorkspaceExperimentNotFoundError):
+        return None
+    return node if isinstance(node, Experiment) else None
+
+
+def _get_scoped_run(workspace, project_id: str, experiment_id: str, run_id: str):  # noqa: ANN001, ANN202
+    """The run inside the serve root, including when the root is that run."""
+    from molab.workspace.run import Run
+    from molab.workspace.scope import as_folder, resolve_in_scope
+
+    try:
+        node = resolve_in_scope(as_folder(workspace), project_id, experiment_id, run_id)
+    except (
+        WorkspaceProjectNotFoundError,
+        WorkspaceExperimentNotFoundError,
+        WorkspaceRunNotFoundError,
+    ):
+        return None
+    return node if isinstance(node, Run) else None
+
+
+#: ``executor`` key holding the idempotency key an attempt was requested with.
+REQUEST_KEY = "request_key"
+
+
+def _create_attempt(run, body: ExecutionAttemptCreateRequest, target: ComputeTarget):  # noqa: ANN001, ANN202
+    """Create one QUEUED attempt from *body* (422 on a refused creation).
+
+    An active attempt whose owner is dead (same host: its pid is gone; other
+    host: its heartbeat is stale) is sealed FAILED first, as ``molab run`` and
+    cancel do, so a resume or rerun after a crashed or killed owner is not
+    refused as "still active".
+    """
+    from molab.workspace.run_reaper import reap_zombie_run
+
+    reap_zombie_run(run)
+    created_by = (
+        AgentRef(id=body.requested_by, type="software", name=body.requested_by)
+        if body.requested_by
+        else AgentRef(id="ui", type="person", name="Molab UI")
+    )
+    backend = "local" if target.cluster_id is None else "molq"
+    executor: dict[str, object] = {"backend": backend, "target": target.name}
+    if body.request_key is not None:
+        executor[REQUEST_KEY] = body.request_key
+    if body.task_executor is not None:
+        executor["task_executor"] = body.task_executor
+    if body.max_workers is not None:
+        executor["task_max_workers"] = body.max_workers
+    try:
+        return run._create_execution(
+            mode=ExecutionMode(body.mode),
+            created_by=created_by,
+            predecessor=body.based_on_execution_id,
+            bypass_cache=body.bypass_cache,
+            executor=executor,
+            environment={"submit_cwd": str(Path.cwd().resolve())},
+            selected_tasks=tuple(body.tasks or ()),
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _attempt_with_request_key(run, key: str):  # noqa: ANN001, ANN202
+    """The attempt of *run* created with idempotency *key*, or ``None``."""
+    for state in run.executions:
+        if (state.executor or {}).get(REQUEST_KEY) == key:
+            return state
+    return None
+
+
+def _request_key_lock(workspace, run) -> Path:  # noqa: ANN001
+    """Lock serializing keyed attempt creation on one Run."""
+    lock = Path(str(workspace.root)) / ".molab" / "locks" / f"{run.id}.request-key.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    return lock
+
+
+def _execution_repository(workspace, run) -> ExecutionRepository:  # noqa: ANN001
+    return ExecutionRepository(
+        workspace.root,
+        run.run_dir,
+        run_id=run.id,
+        project_id=run.ancestor_id("workspace.project"),
+        fs=workspace.fs,
+    )
+
+
+def _execution_response(state) -> ExecutionResponse:  # noqa: ANN001
+    return ExecutionResponse(
+        id=state.id,
+        runId=state.run_id,
+        mode=state.mode.value,
+        status=state.status.value,
+        createdAt=state.created_at.isoformat(),
+        startedAt=state.started_at.isoformat() if state.started_at else None,
+        finishedAt=state.finished_at.isoformat() if state.finished_at else None,
+        basedOnExecutionId=state.based_on_execution_id,
+        executor=state.executor,
+        environment=state.environment,
+        error=state.error,
+        selectedTasks=list(state.selected_tasks),
+    )
+
+
+def _require_recoverable(run) -> None:  # noqa: ANN001
+    """422 unless a worker process can rebuild *run*'s workflow on its own."""
+    from molab.workflow import can_recover_workflow
+
+    if not can_recover_workflow(run):
+        kind = run.experiment.workflow_kind
+        if kind is None:
+            remedy = "pass workflow= or bind a workflow on the experiment"
+        elif kind == "code":
+            remedy = "run the experiment's defining script to bind a code locator"
+        else:
+            remedy = "PUT a workflow document on the experiment's /workflow route"
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"experiment {run.experiment.id!r} cannot be dispatched "
+                f"(workflow_kind={kind!r}); {remedy}"
+            ),
+        )
+
+
+def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # noqa: ANN001
+    """Submit *run* through molq onto *target*.
+
+    Resources and scheduling come from the target's defaults — the API
+    has no per-run CLI overrides like ``molab run --cpus``. When
+    *execution_id* is given the worker starts that record (a RESUME record
+    is the new Execution; rerun runs the freshly-derived id) instead of
+    deriving its own.
+    """
+    _require_recoverable(run)
+
+    handler = SubmitHandler(
+        scheduler="",
+        cluster=target.cluster_id,
+        resources={},
+        scheduling={},
+        target=target,
+    )
+    handler(None, run, run.experiment, run.experiment.project, execution_id=execution_id)
+
+
+def _start_locally(run, execution_id: str) -> None:  # noqa: ANN001
+    """Start the QUEUED attempt on this machine, detached from the server.
+
+    The same worker a scheduler job runs (``molab execute <run_dir>
+    --execution-id eNN``), launched in its own session so it outlives the
+    request and the server. Its stdout/stderr is scheduler evidence, so it
+    goes to ``jobs/worker.log`` in the attempt's directory (a file directly
+    in the attempt directory is a stray); the worker records its own pid.
+    """
+    import subprocess
+    import sys
+
+    _require_recoverable(run)
+    attempt_dir = Path(str(run.run_dir)) / "executions" / execution_id
+    jobs_dir = attempt_dir / JOBS.name
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    argv = [sys.executable, "-m", "molab.cli", "execute", str(run.run_dir)]
+    with (jobs_dir / "worker.log").open("ab") as log:
+        subprocess.Popen(
+            [*argv, "--execution-id", execution_id],
+            cwd=str(attempt_dir),
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+
+def _invalidate_run_nav_cache(workspace, run_or_exp_path: str) -> None:  # noqa: ANN001
+    """Drop pinned remote dir listings for *run_or_exp_path* so new files appear.
+
+    Secondary fix for pin-until-refresh caches that hide newly-landed
+    ``*.mlp.jsonl`` / run dirs until an explicit refresh.
+    """
+    fs = getattr(workspace, "fs", None)
+    if isinstance(fs, CachedRemoteFS):
+        fs.invalidate(run_or_exp_path)
+
+
+@router.get("", response_model=list[RunResponse])
+def list_runs(
+    project_id: str,
+    experiment_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> list[RunResponse]:
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    if not experiment:
+        raise RunNotFoundError(project_id, experiment_id, "")
+    # See a run directory that landed on the host since the last list.
+    # Dropping only this listing keeps pinned index.md and execution.json;
+    # wiping the whole tree made every open re-fetch over SSH.
+    fs = getattr(workspace, "fs", None)
+    if isinstance(fs, CachedRemoteFS):
+        fs.invalidate_dir_listing(fs.join(str(experiment.experiment_dir), "runs"))
+    runs = experiment.list_runs()
+    document = experiment.workflow_document
+    kind = experiment.workflow_kind
+    return [
+        RunResponse.from_model(
+            run,
+            workflow_document=document,
+            workflow_kind=kind,
+            workflow_loaded=True,
+        )
+        for run in runs
+    ]
+
+
+@router.get("/{run_id}", response_model=RunResponse)
+def get_run(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> RunResponse:
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    return RunResponse.from_model(run)
+
+
+@router.post(
+    "/{run_id}/executions",
+    response_model=ExecutionResponse,
+    status_code=201,
+)
+def create_execution(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    body: ExecutionAttemptCreateRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ExecutionResponse:
+    """Create one physical attempt and submit it to its compute target.
+
+    The attempt is submitted in the same request, so a QUEUED record always
+    has a job behind it. A submission failure seals the attempt FAILED with
+    the reason, and the error is returned.
+    """
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    try:
+        target = resolve_compute_target(workspace, body.target)
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown target {body.target!r}") from exc
+    if body.request_key is None:
+        state = _create_attempt(run, body, target)
+    else:
+        with file_lock(_request_key_lock(workspace, run)):
+            existing = _attempt_with_request_key(run, body.request_key)
+            if existing is not None:
+                return _execution_response(existing)
+            state = _create_attempt(run, body, target)
+    try:
+        if target.cluster_id is None:
+            _start_locally(run, state.id)
+        else:
+            _dispatch_to_molq(target, run, execution_id=state.id)
+    except Exception as exc:
+        _execution_repository(workspace, run).seal(
+            state.id,
+            ExecutionStatus.FAILED,
+            error={"type": type(exc).__name__, "message": str(exc)},
+        )
+        raise
+    return _execution_response(state)
+
+
+@router.get(
+    "/{run_id}/executions",
+    response_model=list[ExecutionResponse],
+)
+def list_executions(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> list[ExecutionResponse]:
+    """Every attempt at this Run, oldest first (``e01``, ``e02``, …).
+
+    The Run detail already embeds these; this is the addressable list for a
+    caller that wants the attempts alone, and the GET counterpart of the POST
+    on the same path.
+    """
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    return [_execution_response(state) for state in _execution_repository(workspace, run).list()]
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}",
+    response_model=ExecutionResponse,
+)
+def get_execution_record(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ExecutionResponse:
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    try:
+        return _execution_response(_execution_repository(workspace, run).get(execution_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}/outputs",
+    response_model=ExecutionOutputsResponse,
+)
+def get_execution_outputs(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ExecutionOutputsResponse:
+    """Separate stdio, assets this attempt registered, evidence, and working files."""
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    repo = _execution_repository(workspace, run)
+    try:
+        repo.get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    fs = workspace.fs
+    execution_dir = repo.execution_dir(execution_id)
+
+    def read_optional(name: str) -> str | None:
+        path = fs.join(execution_dir, name)
+        return fs.read_text(path, encoding="utf-8") if fs.is_file(path) else None
+
+    from molab.workspace.asset_repository import assets_produced_by
+
+    produced = assets_produced_by(workspace, execution_id)
+    asset_responses = [ManagedAssetResponse.from_model(asset) for asset in produced]
+    # Registered bytes live with the asset record, outside this attempt.
+    # What remains under a product directory is a working file.
+    unregistered: list[RunFileNode] = []
+    exec_prefix = execution_dir.rstrip("/") + "/"
+    for tier in product_dirs():
+        tier_dir = fs.join(execution_dir, tier.name)
+        if not fs.is_dir(tier_dir):
+            continue
+        for path in sorted(fs.rglob(tier_dir, "*")):
+            if not fs.is_file(path):
+                continue
+            rel = path[len(exec_prefix) :] if path.startswith(exec_prefix) else path
+            stat = fs.stat(path)
+            unregistered.append(
+                RunFileNode(
+                    name=fs.basename(path),
+                    relPath=rel,
+                    type="file",
+                    size=stat.size,
+                    modified=stat.mtime,
+                )
+            )
+    sealed_record = repo.record(execution_id)
+    evidence = (
+        [
+            ExecutionEvidenceResponse(
+                kind=item.kind,
+                path=item.rel_path,
+                digest=item.digest,
+                size=item.size,
+            )
+            for item in sealed_record.evidence
+        ]
+        if sealed_record is not None
+        else []
+    )
+    results = run.results(execution_id)
+    return ExecutionOutputsResponse(
+        executionId=execution_id,
+        stdout=read_optional("stdout.log"),
+        stderr=read_optional("stderr.log"),
+        runtime=read_optional(RUN_LOG_FILENAME),
+        assets=asset_responses,
+        evidence=evidence,
+        unregistered=unregistered,
+        results=results,
+    )
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}/assets/{asset_id}/content",
+)
+def download_asset_content(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    asset_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> StreamingResponse:
+    """Stream one asset this attempt registered."""
+    from molab.workspace.asset_repository import assets_produced_by, payload_path_for
+
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    produced = {asset.id: asset for asset in assets_produced_by(workspace, execution_id)}
+    asset = produced.get(asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="asset was not registered by this attempt")
+    try:
+        location = payload_path_for(workspace, asset_id)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not workspace.fs.is_file(location):
+        raise HTTPException(status_code=404, detail="asset payload not found")
+    filename = Path(asset.file).name
+    return StreamingResponse(
+        iter_file_chunks(workspace.fs, location, size=workspace.fs.getsize(location)),
+        media_type=asset.media_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.post("", response_model=RunResponse, status_code=201)
+def create_scoped_run(
+    project_id: str,
+    experiment_id: str,
+    run_req: RunCreateRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> RunResponse:
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    if not experiment:
+        raise RunNotFoundError(project_id, experiment_id, "")
+
+    run = experiment.add_run(
+        params=run_req.params,
+        target=run_req.target,
+        inputs=tuple(run_req.inputs),
+    )
+    return RunResponse.from_model(run)
+
+
+LogStream = Literal["stdout", "stderr", "run"]
+
+#: The most one ``…/logs/{stream}`` call returns.
+_LOG_CHUNK_BYTES = 256 * 1024
+
+_LEGACY_JOB_SUFFIX = {"stdout": ".out", "stderr": ".err"}
+"""A scheduler job's flat stream files: ``jobs/<job>.out`` / ``.err``."""
+
+_LEGACY_RUN_LOG = ("logs", "run.log")
+"""Where an older layout kept the attempt's own log."""
+
+
+def _execution_log_path(fs, exec_dir: str, stream: LogStream) -> str | None:  # noqa: ANN001
+    """The file one log *stream* of an attempt is read from, or ``None``.
+
+    The attempt's own file wins: ``stdout.log`` / ``stderr.log`` (written by
+    ``molab.print`` and ``ctx.log``, D92) or ``run.log``. Only when it is
+    absent does a legacy location answer — ``jobs/*/stdout.log`` (one
+    directory per job) or ``jobs/*.out`` / ``*.err`` for the stdio streams,
+    ``logs/run.log`` for ``run``.
+    """
+    if stream == "run":
+        candidates = [fs.join(exec_dir, RUN_LOG_FILENAME), fs.join(exec_dir, *_LEGACY_RUN_LOG)]
+    else:
+        name = STDIO_FILES[stream]
+        candidates = [fs.join(exec_dir, name)]
+        jobs = fs.join(exec_dir, JOBS.name)
+        if fs.is_dir(jobs):
+            candidates += sorted(fs.glob(jobs, f"*/{name}"))
+            candidates += sorted(fs.glob(jobs, f"*{_LEGACY_JOB_SUFFIX[stream]}"))
+    return next((path for path in candidates if fs.is_file(path)), None)
+
+
+def _read_log_text(fs, exec_dir: str, stream: LogStream) -> str | None:  # noqa: ANN001
+    path = _execution_log_path(fs, exec_dir, stream)
+    if path is None:
+        return None
+    return fs.read_bytes(path).decode("utf-8", errors="replace")
+
+
+def _read_execution_logs(workspace, run, execution_id: str) -> RunLogsResponse:  # noqa: ANN001
+    fs = workspace.fs
+    exec_dir = _execution_repository(workspace, run).execution_dir(execution_id)
+    stdout = _read_log_text(fs, exec_dir, "stdout")
+    stderr = _read_log_text(fs, exec_dir, "stderr")
+    # Fall back to the attempt's own log when nothing was printed, so the Logs
+    # panel still shows what the run did rather than "No stdout captured."
+    if not stdout:
+        stdout = _read_log_text(fs, exec_dir, "run") or stdout
+    return RunLogsResponse(execution_id=execution_id, stdout=stdout, stderr=stderr)
+
+
+def _read_log_chunk(
+    workspace,  # noqa: ANN001
+    run,  # noqa: ANN001
+    execution_id: str,
+    stream: LogStream,
+    offset: int,
+) -> RunLogChunkResponse:
+    """Read at most ``_LOG_CHUNK_BYTES`` of one log from *offset*, through ``fs.read_range``.
+
+    A multi-byte character cut at the end of the window is not decoded;
+    ``next_offset`` stops before it, so the next read starts on a boundary.
+    """
+    fs = workspace.fs
+    exec_dir = _execution_repository(workspace, run).execution_dir(execution_id)
+    path = _execution_log_path(fs, exec_dir, stream)
+    if path is None:
+        return RunLogChunkResponse(
+            stream=stream, text="", offset=offset, next_offset=offset, size=0, eof=True
+        )
+    size = fs.getsize(path)
+    data = fs.read_range(path, offset, _LOG_CHUNK_BYTES) if offset < size else b""
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    text = decoder.decode(data, final=False)
+    next_offset = offset + len(data) - len(decoder.getstate()[0])
+    return RunLogChunkResponse(
+        stream=stream,
+        text=text,
+        offset=offset,
+        next_offset=next_offset,
+        size=size,
+        eof=next_offset >= size,
+    )
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}/logs",
+    response_model=RunLogsResponse,
+)
+def get_run_execution_logs(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> RunLogsResponse:
+    """Return stdout/stderr for a specific execution attempt."""
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    return _read_execution_logs(workspace, run, execution_id)
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}/logs/{stream}",
+    response_model=RunLogChunkResponse,
+)
+def get_run_execution_log_chunk(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    stream: LogStream,
+    offset: int = Query(
+        default=0, ge=0, description="Byte offset to read from; pass back nextOffset."
+    ),
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> RunLogChunkResponse:
+    """Read one log (stdout, stderr or run) incrementally: at most 256 KiB from ``offset``."""
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    return _read_log_chunk(workspace, run, execution_id, stream, offset)
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}/file/text",
+    response_model=RunFileTextResponse,
+)
+def get_run_file_text(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    path: str = Query(..., description="Relative path under the Execution directory"),
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> RunFileTextResponse:
+    """Return the raw text content of a file under the run directory.
+
+    Routes through ``workspace.fs`` — same path as workspace file reads —
+    so remote workspaces resolve correctly.
+    """
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+
+    fs = workspace.fs
+    try:
+        execution_dir = _execution_repository(workspace, run).execution_dir(execution_id)
+        _execution_repository(workspace, run).get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    rel = path.lstrip("/")
+    if ".." in Path(rel).parts:
+        raise HTTPException(status_code=400, detail="path escapes run directory")
+    target = fs.join(execution_dir, rel) if rel else execution_dir
+    execution_norm = execution_dir.rstrip("/")
+    if target != execution_norm and not target.startswith(execution_norm + "/"):
+        raise HTTPException(status_code=400, detail="path escapes run directory")
+    if not fs.exists(target) or not fs.is_file(target):
+        raise HTTPException(status_code=404, detail=f"file not found: {path}")
+
+    try:
+        content = fs.read_text(target, encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=415, detail="file is not text-decodable as UTF-8") from exc
+    return RunFileTextResponse(path=path, content=content, size=fs.getsize(target))
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}/workflow",
+    response_model=RunExecutionResponse,
+)
+def get_run_execution(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> RunExecutionResponse:
+    """Return one Execution's node journal.
+
+    The journal is owned by the workflow layer and read through
+    ``molab.workflow.read_journal``; ``status`` is the Execution record's
+    status. ``workflow`` is null while the attempt has no journal yet.
+    """
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+
+    repo = _execution_repository(workspace, run)
+    try:
+        state = repo.get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RunExecutionResponse(
+        execution_id=execution_id,
+        status=state.status.value,
+        workflow=read_journal(run, execution_id),
+    )
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}/files",
+    response_model=RunFilesResponse,
+)
+def get_run_files(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> RunFilesResponse:
+    """Return the on-disk file tree for a run, enriched with catalog metadata.
+
+    Uses the **same** :func:`~molab.workspace.fs_tree.list_tree_children` walk
+    as workspace file listing (via ``workspace.fs``) so remote workspaces
+    activate plugins the same way as local ones. Catalog enrichment is
+    best-effort for local asset scans only.
+    """
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+
+    fs = workspace.fs
+    try:
+        run.execution(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    execution_dir = run.execution_dir(execution_id)
+    run_dir = str(execution_dir)
+    # Drop pinned listings so a newly-written metrics file shows up.
+    _invalidate_run_nav_cache(workspace, run_dir)
+
+    tree = list_tree_children(fs, run_dir, max_depth=8)
+    raw_nodes = tree_to_run_file_dicts(tree)
+
+    def enrich(node: dict) -> RunFileNode:
+        rel = node.get("relPath") or ""
+        children_raw = node.get("children") or []
+        return RunFileNode(
+            name=node.get("name") or "",
+            relPath=rel,
+            type=node.get("type") or "file",
+            size=node.get("size"),
+            modified=node.get("modified"),
+            children=[enrich(c) for c in children_raw],
+        )
+
+    nodes = [enrich(n) for n in raw_nodes]
+    try:
+        run_dir_rel = str(Path(run_dir).relative_to(Path(str(workspace.root))))
+    except ValueError:
+        # Remote roots: strip workspace root prefix via string ops.
+        root = str(workspace.root).rstrip("/")
+        run_dir_rel = run_dir[len(root) + 1 :] if run_dir.startswith(root + "/") else run_dir
+
+    return RunFilesResponse(
+        runId=run_id,
+        runDir=run_dir_rel,
+        nodes=nodes,
+    )
+
+
+@router.post(
+    "/{run_id}/executions/{execution_id}/cancel",
+    response_model=ExecutionResponse,
+)
+def cancel_execution(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ExecutionResponse:
+    """Cancel one explicit Execution.
+
+    The intervene verb is :func:`molab.workspace.lifecycle_ops.cancel_run`,
+    the same function ``molab runs cancel`` calls. This route names one
+    execution; the CLI names the run and cancels every active attempt.
+    """
+    from molab.plugins.submit_molq.cancel import try_cancel
+    from molab.workspace.lifecycle_ops import cancel_run
+    from molab.workspace.run import Run
+
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+
+    def _signal(target: Run) -> str | None:
+        return try_cancel(target)
+
+    try:
+        cancel_run(run, signal_executor=_signal, execution_id=execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _execution_response(run.execution(execution_id))
+
+
+@router.get("/{run_id}/export")
+def export_run(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> StreamingResponse:
+    """Stream a zip archive of the run directory (artifacts, logs, metadata)."""
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+
+    from molab.workspace.archive import archive_folder_zip
+
+    # The one workspace zip writer (molab.workspace.archive).
+    payload = archive_folder_zip(run)
+    buffer = io.BytesIO(payload)
+    buffer.seek(0)
+
+    filename = f"run-{run.id}.zip"
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/{run_id}/harvest")
+def harvest_run_route(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    body: RunHarvestRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> dict[str, str]:
+    """Harvest a terminal run into sourced Knowledge under its experiment."""
+    from molab.knowledge.concepts import HARVEST_TARGETS
+
+    harvest_ok = HARVEST_TARGETS
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    if body.cls not in harvest_ok:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{body.cls} is not a harvest target",
+        )
+    try:
+        item = harvest_ok[body.cls].harvest(
+            run,
+            narrative=body.narrative,
+            created_by=body.created_by,
+            results=body.results,
+            name=body.name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        rel = Path(item.path).relative_to(workspace.resolve()).as_posix()
+    except Exception:
+        rel = item.name
+    return {"name": item.name, "path": rel}
+
+
+@router.post("/{run_id}/executions/{execution_id}/molplot/ingest")
+def ingest_run_metrics(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> dict[str, object]:
+    """Ingest foreign logs into the run host metrics surface (additive).
+
+    Shares :func:`molab.plugins.metrics_ingest.ingest_run` with the CLI.
+    Skips are returned; the route does not fail the whole call when one
+    converter cannot run.
+    """
+    from molab.plugins.metrics_ingest import ingest_run
+
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    try:
+        _execution_repository(workspace, run).get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Same directory ``molab runs ingest-metrics`` passes: this attempt.
+    result = ingest_run(run.execution_dir(execution_id))
+    return {
+        "runId": run.id,
+        "records": result.records,
+        "ingested": dict(result.ingested),
+        "skipped": [
+            {
+                "format": s.format,
+                "path": s.path.name,
+                "reason": s.reason,
+            }
+            for s in result.skipped
+        ],
+    }
+
+
+class RunPruneRequest(ApiModel):
+    """Select attempts to prune. ``apply`` false returns the plan and deletes nothing."""
+
+    execution_ids: list[str] | None = None
+    statuses: list[str] | None = None
+    apply: bool = False
+
+
+class RunPruneEntryResponse(ApiModel):
+    execution_id: str
+    status: str
+    dirs: list[str]
+
+
+class RunPruneResponse(ApiModel):
+    run_id: str
+    removed: int | None = None
+    entries: list[RunPruneEntryResponse]
+
+
+@router.post("/{run_id}/prune", response_model=RunPruneResponse)
+def prune_run_route(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    body: RunPruneRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> RunPruneResponse:
+    """Plan or apply an execution prune.
+
+    The same two functions as ``molab runs prune``:
+    :func:`molab.workspace.prune.plan_execution_prune` and
+    :func:`molab.workspace.prune.apply_execution_prune`.
+    """
+    from molab.workspace.prune import (
+        LivePruneRefusedError,
+        apply_execution_prune,
+        plan_execution_prune,
+    )
+
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    try:
+        plan = plan_execution_prune(
+            run,
+            execution_ids=body.execution_ids,
+            statuses=body.statuses,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LivePruneRefusedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    removed = apply_execution_prune(run, plan) if body.apply else None
+    return RunPruneResponse(
+        run_id=plan.run_id,
+        removed=removed,
+        entries=[
+            RunPruneEntryResponse(
+                execution_id=entry.execution_id,
+                status=entry.status,
+                dirs=list(entry.dirs),
+            )
+            for entry in plan.entries
+        ],
+    )

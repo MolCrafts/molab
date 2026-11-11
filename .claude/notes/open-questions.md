@@ -1,144 +1,27 @@
 # Open questions
 
-Open questions that downstream sub-specs in the
-`planmode-workspace-pipeline-*` chain (sub-specs 01–06) must
-**accept the recommended default** or **override with explicit
-justification** before starting substantive work.
+Debts the arch-own chain recorded and did not close. Decided items are not listed here.
 
-Each question is paired with the recommended-default answer. A
-sub-spec that overrides a default does so in its own design
-section, not by editing this file.
+## Crepe `molab:` links are unverified
 
-## 1. Where do PlanMode-materialized experiment workspaces live on disk?
+After knowledge documents may contain `molab:` links, clicking one in the Milkdown Crepe editor (`NoteEditor.tsx`) and proving a Crepe save round-trips `[x](molab:…)` byte for byte has not been checked.
 
-Candidates considered:
+## `molab:asset/<id>` stays unresolved in markdown
 
-- **(A) `Workspace.subsystem_store("agent.plan-experiments")` —
-  RECOMMENDED DEFAULT.** Each plan instance lives at
-  `<workspace_root>/.subsystems/agent.plan-experiments/<plan_id>/`.
-- (B) Under a specific `Experiment` / `Run` directory (e.g.
-  `runs/<run-id>/plan/`).
-- (C) A new generic `workspace/` primitive (e.g. an
-  `ExperimentWorkspace` sibling of `Run`).
+Asset responses carry no server ref, so a `molab:asset/<id>` link renders as unresolved text. The asset response shape is owned elsewhere.
 
-**Recommended default rationale.** Option A respects the workspace
-charter rule that *"subsystem identifiers are owned by consumers"*
-(CLAUDE.md `## Layer charters`), requires zero changes to
-`workspace/` source, and leaves the door open for sibling
-subsystems (e.g. `agent.run-experiments`) without requiring a new
-primitive each time. Option B couples the plan workspace to a
-specific run, which is wrong polarity — a plan can be authored
-*before* any run exists. Option C is over-engineering until a
-second consumer asks for the same shape.
+## Missing upstream evidence file
 
-**Reservation status.** `agent.plan-experiments` is reserved in
-the architecture blueprint's Conventions section (sub-spec
-00, 2026-05-09). Sibling kinds like `agent.run-experiments` are
-**not** reserved at this time — reserve when a sub-spec needs them.
+The comparison that rejected Temporal, Ray, AiiDA, and PSI/J as workflow-engine replacements is not in the tree. The verdict (they lose on one source of truth and on one-wheel distribution) stays in CLAUDE.md. The evidence file itself is missing.
 
-**Adopted by:** sub-spec 03 (`planmode-workspace-pipeline-03-experiment-workspace-layout`).
+## Run lock is keyed by a bare run id
 
-## 2. Should `ValidationReport` be a generic `ValidationAsset` subtype, or remain a plain markdown file inside the experiment workspace?
+The run lock uses the bare run id. Accepted legacy debt from the execution-mode work. `qualify_run_id` remains the permanent qualifier when a bare id must be turned into a `molab:` ref.
 
-Candidates considered:
+## Evidence after an early seal
 
-- **(A) Plain `validation_report.md` file inside the experiment
-  workspace, written via `PlanWorkspaceHandle.write_validation_report` — RECOMMENDED DEFAULT for v1.**
-- (B) New generic `ValidationAsset` subtype under
-  `molexp.workspace.assets`, registered with the asset catalog so
-  cross-cutting consumers can query for it.
+D92 (track-01). `ExecutionContext.__exit__` closes `stdout.log` / `stderr.log` before `ExecutionRepository.seal` hashes them, so a normal exit seals the final bytes. Not covered: an attempt sealed from outside while its body still runs (`run.cancel`, `lifecycle_ops.cancel_run`, the zombie reaper). Its evidence is hashed at that seal, the body keeps printing into `stdout.log`, and `__exit__`'s own seal is a no-op on a sealed record, so the recorded digest no longer matches the file. The same already held for `run.log` (`_emit_results` appends "results not recorded" after an early seal) and for a `ctx.log("stdout").append` after exit, which still appends (call style kept). Options: stop copying into an attempt once it is observed sealed, or record post-seal growth as its own fact. No owner.
 
-**Recommended default rationale.** A `ValidationAsset` is only
-worth the cost when there is a second consumer that wants to query
-for "all validation reports across all experiments". v1 of the
-PlanMode pipeline has exactly one consumer (the human reviewer
-reading the markdown), so we keep it as a file. If a future
-RunMode (or a UI dashboard) wants cross-cutting visibility into
-validation failures across plans, **revisit this decision** by
-opening a new spec that introduces `ValidationAsset` and migrates
-existing `validation_report.md` files into the catalog.
+## A child process still writing after the owner seals
 
-**Adopted by:** sub-spec 03 (file-only) and sub-spec 06 (consumer).
-
-## 3. What is the on-disk + in-process shape of the `PlanMode → RunMode` handoff contract?
-
-Candidates considered:
-
-- **(A) Frozen pydantic type, serialized to a `handoff:` section
-  inside `manifest.yaml` — RECOMMENDED DEFAULT.** In-process
-  consumers read `AgentRunResult.loop_state["plan"]["handoff"]`;
-  on-disk consumers read `manifest.yaml`.
-- (B) On-disk YAML manifest only (no in-process pydantic mirror).
-- (C) Frozen pydantic type only (no on-disk persistence; consumer
-  must keep the agent process alive).
-
-**Recommended default rationale.** Option A combines static
-enforcement (the pydantic type rejects malformed handoffs at the
-boundary) with disk-side inspectability (a future RunMode can
-load the contract without depending on the agent runtime). Option
-B loses static enforcement; option C breaks the agent ↔ run
-process boundary because the contract dies with the agent. The
-serialization round-trip is plain
-`yaml.safe_dump(json.loads(handoff.model_dump_json()))` — no
-custom encoders, so the YAML form is always reconstructible by
-calling `PlanRunHandoff.model_validate_json` on the JSON
-intermediate.
-
-**Adopted by:** sub-spec 06 (`planmode-workspace-pipeline-06-pipeline-rewrite-codegen-validation`)
-defines `PlanRunHandoff` in `src/molexp/agent/modes/plan/handoff.py`.
-
-## Integrity issues surfaced during the 2026-05-09 blueprint refresh
-
-These are tracked here (rather than in `architecture.md`'s managed
-section) because they are *transient* — they should be cleaned up
-by the relevant sub-spec rather than recorded permanently.
-
-- **Stale import in `src/molexp/agent/_pydanticai/provider.py`**
-  imports `from molexp.agent.modes._plan_protocols import ModelTier`,
-  but no `_plan_protocols` module exists on disk. The actual
-  location is `molexp.agent.modes.plan.protocols`. **Fix in:**
-  sub-spec 02 (already noted in the spec body).
-- **Empty leftover plugin directories** at
-  `src/molexp/plugins/agent_pydanticai/` and
-  `src/molexp/plugins/metrics/`. No `__init__.py`, no modules.
-  The agent plugin indirection was removed; metrics moved to
-  `workspace.metrics`. **Recommended action:** delete both
-  directories — out of scope for the PlanMode-rewrite chain;
-  open a separate cleanup spec when convenient.
-- **Empty `src/molexp/sweep/` package** with no `__init__.py`.
-  Either reserved for a future spec or leftover; track outside
-  this chain.
-
-## 2026-05-05 — molexp-specific axes the generic mol plugin does not cover
-
-*(Migrated from the retired `.agent/open-questions.md` during the /mol:bootstrap v0.3.0 layout consolidation.)*
-
-Three project-local agents were retired together with the `/molexp-*`
-skill suite:
-
-- `molexp-designer` — UI visual quality, information density, design
-  tokens, accessibility (no equivalent in the `mol` plugin's agent set).
-- `molexp-integrity` — experiment reproducibility, atomic-write
-  correctness, param-space determinism, concurrent-run safety
-  (closest generic agent: `mol:scientist`, but it targets numerical
-  correctness, not workflow integrity).
-- `molexp-security` — prompt-injection surfaces, secret handling,
-  API auth, LLM output sanitization, FastAPI input validation
-  (no equivalent in the `mol` plugin).
-
-Decide whether to:
-1. propose these as generic `mol` plugin agents (designer, integrity,
-   security) so other mol-family projects benefit, or
-2. reintroduce them locally if and when the gap actually bites.
-
-The retired agent definitions can be recovered from git history if
-needed (commit `d05fe29` and earlier).
-
-## pure-task-context-03 / polymer_electrolyte (closed 2026-07-10)
-
-`pure-task-context-03-build-flow-rewrite` was closed as **blocked**: the target
-script `/Users/roykid/work/molcrafts/polymer_electrolyte/build_flow.py` is not
-present in this environment. molexp-side contract is already `ctx.workdir`
-(first-class) + named task params, not `ctx.inputs["workdir"]`. If/when that
-script returns, rewrite against current TaskContext (`ctx.workdir` + named
-parameters), not the older inputs-workdir draft.
+D94 (track-03). An attached child (`MOLAB_EXECUTION_DIR`) appends `stdout.log` / `stderr.log` / the metrics WAL with `O_APPEND` and re-reads `sealed_at` at most every 5 s. A child that outlives its owner (detached, or launched without waiting) can therefore (a) append within that window after `seal` hashed the evidence, so the digest no longer matches the file; (b) stage an artifact after `_fold_staged` read the manifest and before or after the seal, and that entry is never recorded (its bytes stay in `work/_molab/staged/`). `CommandTask` waits for its child, so neither happens there. A child's metric records also bypass the owner's per-task capture, so a node-cache hit does not replay them. `O_APPEND` keeps whole-line writes from interleaving on a local filesystem only; several hosts appending to one WAL over NFS can interleave or lose lines. Options: an owner-side "closing" marker the child checks before every write, a post-seal fold of late entries as a separate fact, or one WAL per child process merged at seal. No owner.

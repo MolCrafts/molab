@@ -2,7 +2,7 @@
 
 ``Caching`` identity is unit-tested in ``test_cache_contract``; this file proves
 the runtime actually *calls* it — one orthogonal wiring behaviour per test:
-hit serves the cached output, hit re-registers the artifact, config discriminates
+hit serves the cached output, a hit returns the asset ref, config discriminates
 the key, ``cache=None`` disables caching, actors are never cached, and a failing
 backend degrades gracefully but visibly.
 """
@@ -13,14 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     Caching,
     Task,
     TaskContext,
-    WorkflowCompiler,
+    Workflow,
     WorkflowRuntime,
 )
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionMode
 
 # ── module-level per-task execution counters (bodies increment these) ───────
 _COUNTERS: dict[str, int] = {}
@@ -80,17 +81,17 @@ class _FailingPutStore:
 @pytest.mark.asyncio
 class TestRuntimeCaching:
     async def test_second_run_hits_cache_and_serves_output_without_recompute(
-        self, workspace: Workspace
+        self, workspace: Workspace, tmp_path: Path
     ) -> None:
-        wf = WorkflowCompiler(name="counted")
+        wf = Workflow(name="counted")
 
         @wf.task
         async def step(ctx: TaskContext) -> int:
             _bump("step")
             return 42
 
-        compiled = wf.compile()
-        cache = Caching(store=workspace.cache.as_cache_store())
+        compiled = (wf).compile()
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "run1")
         with run1.start() as ctx1:
@@ -105,42 +106,87 @@ class TestRuntimeCaching:
         assert r2.outputs["step"] == 42
         assert _COUNTERS["step"] == 1
 
-    async def test_artifact_reregistered_on_hit_without_recompute(
+    async def test_auto_cache_writes_under_run_machine_dir(self, workspace: Workspace) -> None:
+        wf = Workflow(name="auto-cache")
+
+        @wf.task
+        async def step(ctx: TaskContext) -> int:
+            _bump("auto")
+            return 7
+
+        compiled = (wf).compile()
+        run = _new_run(workspace, "auto")
+        with run.start() as ctx:
+            result = await WorkflowRuntime().execute(compiled, run_context=ctx)
+        assert result.outputs["step"] == 7
+        # Machine state keyed by run identity, never inside a scientific dir.
+        root = Path(workspace.root)
+        assert run.machine_dir() == root / ".molab" / "runs" / run.id
+        assert list((run.machine_dir() / "cache").glob("*.json"))
+        assert not (root / ".molab" / "cache").exists()
+        assert not (Path(run.run_dir) / ".cache").exists()
+        assert not (root / "cache").exists()
+
+    async def test_auto_cache_shared_across_executions_of_one_run(
         self, workspace: Workspace
     ) -> None:
-        wf = WorkflowCompiler(name="artifact-producer")
+        wf = Workflow(name="auto-shared")
+
+        @wf.task
+        async def step(ctx: TaskContext) -> int:
+            _bump("shared")
+            return 3
+
+        compiled = (wf).compile()
+        run = _new_run(workspace, "shared")
+        with run.start() as ctx:
+            first = await WorkflowRuntime().execute(compiled, run_context=ctx)
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            second = await WorkflowRuntime().execute(compiled, run_context=ctx)
+        assert [e.id for e in run.executions] == ["e01", "e02"]
+        assert first.outputs["step"] == second.outputs["step"] == 3
+        assert _COUNTERS["shared"] == 1  # keyed by the run, not the attempt dir
+
+    async def test_hit_returns_the_asset_ref_without_recompute(
+        self, workspace: Workspace, tmp_path: Path
+    ) -> None:
+        from molab.workspace.asset_repository import assets_produced_by
+        from molab.workspace.domain import ExecutionOrigin
+
+        wf = Workflow(name="asset-producer")
 
         @wf.task
         async def produce(ctx: TaskContext) -> str:
-            # Pure contract: the task RETURNS its product; the engine's
-            # materialization layer persists it as a content-hashed artifact.
             _bump("produce")
-            return "produced"
+            return ctx.register(b"produced", title="produce.txt")
 
-        compiled = wf.compile()
-        cache = Caching(store=workspace.cache.as_cache_store())
+        compiled = (wf).compile()
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "art1")
         with run1.start() as ctx1:
-            await WorkflowRuntime().execute(compiled, run_context=ctx1, cache=cache)
+            first = await WorkflowRuntime().execute(compiled, run_context=ctx1, cache=cache)
         assert _COUNTERS["produce"] == 1
-        art1 = run1.assets.query(producer_task="produce", kind="artifact")
-        assert len(art1) == 1
-        hash1 = art1[0].content_hash
-        assert hash1
+        (asset,) = [
+            item
+            for item in assets_produced_by(workspace, run1.executions[-1].id)
+            if isinstance(item.origin, ExecutionOrigin) and item.origin.run_id == run1.id
+        ]
+        assert first.outputs["produce"] == asset.ref
+        assert asset.content.digest
 
-        # Second run — cache HIT. The producer body must not run, yet the artifact
-        # must be resolvable in run2's scope with a byte-identical content_hash.
         run2 = _new_run(workspace, "art2")
         with run2.start() as ctx2:
-            await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)
-        assert _COUNTERS["produce"] == 1  # no recompute
+            second = await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)
+        assert _COUNTERS["produce"] == 1
+        assert second.outputs["produce"] == asset.ref
+        assert [
+            item
+            for item in assets_produced_by(workspace, run2.executions[-1].id)
+            if isinstance(item.origin, ExecutionOrigin) and item.origin.run_id == run2.id
+        ] == []
 
-        art2 = run2.assets.query(producer_task="produce", kind="artifact")
-        assert len(art2) == 1
-        assert art2[0].content_hash == hash1
-
-    async def test_config_change_forces_miss(self, workspace: Workspace) -> None:
+    async def test_config_change_forces_miss(self, workspace: Workspace, tmp_path: Path) -> None:
         """The runtime threads the compiled snapshot's config identity into the
         cache key: same config → HIT, different config → MISS (body reruns)."""
 
@@ -152,10 +198,10 @@ class TestRuntimeCaching:
                 _bump("compute")
                 return self.factor * 10
 
-        cache = Caching(store=workspace.cache.as_cache_store())
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         def _compiled(factor: int):
-            return WorkflowCompiler(name="cfg").add(Compute(factor), name="compute").compile()
+            return (Workflow(name="cfg").add(Compute(factor), name="compute")).compile()
 
         run1 = _new_run(workspace, "cfg1")
         with run1.start() as ctx1:
@@ -177,29 +223,29 @@ class TestRuntimeCaching:
     async def test_cache_none_disables_caching(self, tmp_path: Path) -> None:
         # No workspace run_context → nothing to auto-derive a cache from, and
         # cache=None (default) → caching off, identical to pre-spec behaviour.
-        wf = WorkflowCompiler(name="no-cache")
+        wf = Workflow(name="no-cache")
 
         @wf.task
         async def step(ctx: TaskContext) -> int:
             _bump("step")
             return 1
 
-        compiled = wf.compile()
+        compiled = (wf).compile()
 
-        await WorkflowRuntime().execute(compiled, run_dir=tmp_path / "nc1")
-        await WorkflowRuntime().execute(compiled, run_dir=tmp_path / "nc2")
+        await WorkflowRuntime().execute(compiled)
+        await WorkflowRuntime().execute(compiled)
         assert _COUNTERS["step"] == 2
 
-    async def test_actor_is_never_cached(self, workspace: Workspace) -> None:
-        wf = WorkflowCompiler(name="actor-wf")
+    async def test_actor_is_never_cached(self, workspace: Workspace, tmp_path: Path) -> None:
+        wf = Workflow(name="actor-wf")
 
         @wf.actor
         async def streamer(ctx: TaskContext):
             _bump("streamer")
             yield "chunk"
 
-        compiled = wf.compile()
-        cache = Caching(store=workspace.cache.as_cache_store())
+        compiled = (wf).compile()
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "act1")
         with run1.start() as ctx1:
@@ -216,12 +262,12 @@ class TestRuntimeCaching:
         """A permanently failing cache backend must be VISIBLE: the first put
         failure per (execution, task) logs a WARNING (not debug), while the run
         itself degrades gracefully and completes uncached."""
-        from molexp.workflow._engine import node_cache
+        from molab.workflow._engine import node_cache
 
         warned: list[str] = []
         monkeypatch.setattr(node_cache.logger, "warning", lambda msg: warned.append(str(msg)))
 
-        wf = WorkflowCompiler(name="degraded-cache")
+        wf = Workflow(name="degraded-cache")
 
         @wf.task
         async def first(ctx: TaskContext) -> int:
@@ -233,7 +279,7 @@ class TestRuntimeCaching:
             _bump("second")
             return first + 1
 
-        compiled = wf.compile()
+        compiled = (wf).compile()
         cache = Caching(store=_FailingPutStore())
 
         result = await WorkflowRuntime().execute(compiled, cache=cache)

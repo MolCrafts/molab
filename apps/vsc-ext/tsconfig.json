@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": ["node", "vscode", "react", "react-dom"],
+    "paths": {
+      "@/*": ["./../web/src/*"],
+      "@molcrafts/ui-vega-lite": ["../../../molcrafts-ui/packages/vega-lite/src/index.tsx"],
+      "@molcrafts/ui-vega": ["../../../molcrafts-ui/packages/vega/src/index.tsx"]
+    }
+  },
+  "include": [
+    "src",
+    "webview",
+    "../web/src/types/jsx.d.ts",
+    "../web/src/env.d.ts"
+  ]
+}

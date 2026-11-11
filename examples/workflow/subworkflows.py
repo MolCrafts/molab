@@ -1,9 +1,9 @@
 """Compose an outer workflow out of a reusable inner workflow via ``SubWorkflow``.
 
-Matches ``docs/guide/subworkflows.md``.
+Matches ``docs/en/guide/subworkflows.md``.
 
 ``SubWorkflow`` is the sanctioned composition node: it wraps an inner
-``CompiledWorkflow`` (or a ``WorkflowCompiler``, compiled on construction) and,
+``CompiledWorkflow`` (or a ``Workflow``, compiled on construction) and,
 when executed, runs that inner spec end-to-end through the engine — forwarding
 the outer ``run_context`` by identity. From the outer graph's perspective it is
 a single registered task, so it also slots into ``builder.parallel(body=...)``
@@ -18,16 +18,16 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import (
+from molab.workflow import (
     SubWorkflow,
     Task,
     TaskContext,
-    WorkflowCompiler,
+    Workflow,
     WorkflowRuntime,
 )
 
 
-def build_preprocess() -> WorkflowCompiler:
+def build_preprocess() -> Workflow:
     """The inner pipeline — could live in its own module.
 
     ``load``'s ``seed`` parameter receives the value forwarded into the inner
@@ -35,7 +35,7 @@ def build_preprocess() -> WorkflowCompiler:
     fan-out element drives a *distinct* inner run; standalone, ``seed`` falls
     back to its default.
     """
-    wf = WorkflowCompiler(name="preprocess")
+    wf = Workflow(name="preprocess")
 
     @wf.task
     async def load(seed: int = 0) -> list[float]:
@@ -61,11 +61,10 @@ class Train(Task):
 async def run_chained() -> None:
     """SubWorkflow as one node of an outer chain: preprocess → train."""
     outer = (
-        WorkflowCompiler(name="train")
+        Workflow(name="train")
         .add(SubWorkflow(build_preprocess()), name="preprocess")
         .add(Train(), depends_on=["preprocess"])
-        .compile()
-    )
+    ).compile()
 
     result = await WorkflowRuntime().execute(outer)
     print("── chained ──")
@@ -81,7 +80,7 @@ async def run_parallel_body() -> None:
     *distinct* inner output per element in iteration order. The compiled task set
     stays exactly {enumerate, preprocess, collect} — no per-element node growth.
     """
-    wf = WorkflowCompiler(name="fanout", entry="enumerate")
+    wf = Workflow(name="fanout", entry="enumerate")
 
     @wf.task
     async def enumerate() -> list[int]:

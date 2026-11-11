@@ -1,0 +1,205 @@
+/**
+ * Shared fixture data for unit tests.
+ * Equivalent role to Python's conftest.py — import from here, do not inline in test files.
+ */
+
+import type { ExperimentResponse } from "@/api/generated/models/ExperimentResponse";
+import type { ProjectResponse } from "@/api/generated/models/ProjectResponse";
+import type {
+  ApiAssetResponse,
+  ApiRunResponse,
+  ExperimentSummary,
+  ProjectSummary,
+  RunSummary,
+} from "@/app/types";
+
+export const fixtureProject: ProjectResponse = {
+  id: "proj-alpha",
+  name: "Alpha Project",
+  path: "projects/alpha-project",
+  created: "2026-03-01T00:00:00Z",
+  description: "First project",
+  ref: "molab:project/proj-alpha",
+};
+
+export const fixtureProjectNoDescription: ProjectResponse = {
+  id: "proj-beta",
+  name: "Beta Project",
+  path: "projects/beta-project",
+  created: "2026-03-02T00:00:00Z",
+  ref: "molab:project/proj-beta",
+};
+
+export const fixtureExperiment: ExperimentResponse = {
+  id: "exp-001",
+  projectId: "proj-alpha",
+  name: "Baseline",
+  path: "projects/alpha-project/experiments/baseline",
+  created: "2026-03-01T10:00:00Z",
+  workflow: "workflow.py",
+  description: "Baseline experiment",
+  ref: "molab:experiment/exp-001",
+};
+
+export const fixtureExperimentNoDescription: ExperimentResponse = {
+  id: "exp-002",
+  projectId: "proj-alpha",
+  name: "Variant",
+  path: "projects/alpha-project/experiments/variant",
+  created: "2026-03-02T10:00:00Z",
+  workflow: "variant.py",
+  ref: "molab:experiment/exp-002",
+};
+
+/** A run as the server sends it: the summary counts and the attempts they count. */
+const fixtureAttempts = (runId: string, statuses: readonly string[]) => ({
+  statusSummary: {
+    total: statuses.length,
+    active: statuses.filter((status) => ["queued", "running", "finalizing"].includes(status))
+      .length,
+    notStarted: statuses.length === 0,
+    byStatus: Object.fromEntries(
+      [...new Set(statuses)].map((status) => [
+        status,
+        statuses.filter((item) => item === status).length,
+      ]),
+    ),
+  },
+  executions: statuses.map((status, index) => ({
+    id: `e0${index + 1}`,
+    runId,
+    mode: index === 0 ? "initial" : "rerun",
+    status,
+    createdAt: `2026-03-01T1${index + 1}:00:00Z`,
+  })),
+});
+
+export const fixtureRun: ApiRunResponse = {
+  id: "run-abc",
+  name: "lr=0.001",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=0.001",
+  projectId: "proj-alpha",
+  experimentId: "exp-001",
+  definitionHash: "def-run-abc",
+  experimentRevisionId: "rev-exp-001",
+  ...fixtureAttempts("run-abc", ["succeeded"]),
+  created: "2026-03-01T11:00:00Z",
+  finished: "2026-03-01T12:00:00Z",
+  parameters: { lr: 0.001 },
+  ref: "molab:experiment/exp-001/run/run-abc",
+};
+
+export const fixtureRunPending: ApiRunResponse = {
+  id: "run-def",
+  name: "lr=0.01",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=0.01",
+  projectId: "proj-alpha",
+  experimentId: "exp-001",
+  definitionHash: "def-run-def",
+  experimentRevisionId: "rev-exp-001",
+  ...fixtureAttempts("run-def", []),
+  created: "2026-03-01T13:00:00Z",
+};
+
+export const fixtureRunFailed: ApiRunResponse = {
+  id: "run-ghi",
+  name: "lr=0.1",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=0.1",
+  projectId: "proj-alpha",
+  experimentId: "exp-001",
+  definitionHash: "def-run-ghi",
+  experimentRevisionId: "rev-exp-001",
+  ...fixtureAttempts("run-ghi", ["failed"]),
+  created: "2026-03-01T14:00:00Z",
+};
+
+export const fixtureRunCancelled: ApiRunResponse = {
+  id: "run-jkl",
+  name: "lr=1",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=1",
+  projectId: "proj-alpha",
+  experimentId: "exp-001",
+  definitionHash: "def-run-jkl",
+  experimentRevisionId: "rev-exp-001",
+  ...fixtureAttempts("run-jkl", ["cancelled"]),
+  created: "2026-03-01T15:00:00Z",
+};
+
+/** An earlier success followed by a failure: the run reads failed. */
+export const fixtureRunFailedAfterSuccess: ApiRunResponse = {
+  id: "run-mno",
+  name: "lr=2",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=2",
+  projectId: "proj-alpha",
+  experimentId: "exp-001",
+  definitionHash: "def-run-mno",
+  experimentRevisionId: "rev-exp-001",
+  ...fixtureAttempts("run-mno", ["succeeded", "failed"]),
+  created: "2026-03-01T16:00:00Z",
+};
+
+export const fixtureAsset: ApiAssetResponse = {
+  id: "asset-001",
+  projectId: "proj-alpha",
+  title: "checkpoint.pt",
+  name: "checkpoint.pt",
+  kind: "artifact",
+  scopeKind: "run",
+  scopeIds: ["proj-alpha", "exp-001", "run-abc"],
+  path: "artifacts/checkpoint.pt",
+  createdAt: "2026-03-01T16:00:00Z",
+  updatedAt: "2026-03-01T16:00:00Z",
+  producer: {
+    run_id: "run-abc",
+    execution_id: "exec-001",
+    task_id: null,
+  },
+  tags: {},
+  extra: {
+    mime: "application/octet-stream",
+    size: 1024,
+  },
+};
+
+export const fixtureProjectSummary: ProjectSummary = {
+  id: "proj-alpha",
+  name: "Alpha Project",
+  path: "projects/alpha-project",
+  status: "active",
+  summary: "First project",
+  updatedAt: "2026-03-01T00:00:00Z",
+};
+
+export const fixtureExperimentSummary: ExperimentSummary = {
+  id: "exp-001",
+  name: "Baseline",
+  path: "projects/alpha-project/experiments/baseline",
+  status: "active",
+  summary: "Baseline experiment",
+  workflowFile: "workflow.py",
+  updatedAt: "2026-03-01T10:00:00Z",
+  projectId: "proj-alpha",
+  parameterSpace: {},
+  workflowSource: "workflow.py",
+};
+
+export const fixtureRunSummary: RunSummary = {
+  id: "run-abc",
+  name: "lr=0.001",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=0.001",
+  status: "succeeded",
+  summary: "Status: succeeded",
+  updatedAt: "2026-03-01T12:00:00Z",
+  projectId: "proj-alpha",
+  experimentId: "exp-001",
+  definitionHash: "def-run-abc",
+  experimentRevisionId: "rev-exp-001",
+  statusSummary: { total: 1, active: 0, notStarted: false, byStatus: { succeeded: 1 } },
+  parameters: {},
+  workflowSource: "workflow.py",
+  workflowSnapshot: null,
+  startedAt: "2026-03-01T12:00:00Z",
+  finishedAt: "2026-03-01T12:00:00Z",
+  executionHistory: [],
+  errorMessage: null,
+};

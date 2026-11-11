@@ -1,0 +1,150 @@
+import { describe, expect, it } from "@rstest/core";
+import {
+  experimentRunCompleteness,
+  projectSnapshotCompleteness,
+} from "@/app/renderers/entityWorkbenchData";
+import type {
+  ExperimentSummary,
+  ProjectSummary,
+  RunSummary,
+  WorkflowSummary,
+  WorkspaceSnapshot,
+} from "@/app/types";
+
+const project: ProjectSummary = {
+  id: "matrix",
+  name: "Matrix",
+  path: "projects/matrix",
+  status: "active",
+  summary: "",
+  updatedAt: "2026-06-01T00:00:00Z",
+};
+
+const experiment = (
+  id: string,
+  parameterSpace: Record<string, unknown> = {},
+): ExperimentSummary => ({
+  id,
+  name: id,
+  path: `projects/${project.id}/experiments/${id}`,
+  status: "active",
+  summary: "",
+  workflowFile: "workflow.json",
+  updatedAt: "2026-06-02T00:00:00Z",
+  projectId: project.id,
+  parameterSpace,
+  workflowSource: null,
+});
+
+const run = (
+  id: string,
+  status: RunSummary["status"],
+  parameters: Record<string, unknown>,
+): RunSummary => ({
+  id,
+  name: id,
+  path: `projects/${project.id}/experiments/series/runs/${id}`,
+  status,
+  summary: "",
+  updatedAt: `2026-06-02T00:0${id.slice(-1)}:00Z`,
+  projectId: project.id,
+  experimentId: "series",
+  definitionHash: `def-${id}`,
+  experimentRevisionId: "rev-series",
+  statusSummary: { total: 0, active: 0, notStarted: true, byStatus: {} },
+  parameters,
+  workflowSource: null,
+  workflowSnapshot: null,
+  startedAt: null,
+  finishedAt: null,
+  executionHistory: [],
+  errorMessage: null,
+});
+
+const workflow: WorkflowSummary = {
+  id: "wf-series",
+  name: "series workflow",
+  status: "active",
+  summary: "",
+  updatedAt: "2026-06-02T00:00:00Z",
+  projectId: project.id,
+  experimentId: "series",
+  graph: {
+    task_configs: [
+      { id: "param", type: "task" },
+      { id: "box", type: "task" },
+    ],
+    links: [{ from: "param", to: "box", kind: "parallel" }],
+  },
+};
+
+const snapshot: WorkspaceSnapshot = {
+  workspaces: [],
+  serveScope: null,
+  projects: [project],
+  experiments: [
+    experiment("series", { mode: ["block", "random"], ratio: [1, 2], salt: [54, 108] }),
+    experiment("empty"),
+  ],
+  runs: [
+    run("run-1", "succeeded", { mode: "block", ratio: 1, salt: 54 }),
+    run("run-2", "failed", { mode: "random", ratio: 2, salt: 108 }),
+    run("run-3", "running", { mode: "block", ratio: 2, salt: 54 }),
+  ],
+  assets: [
+    {
+      id: "asset-1",
+      name: "out.dat",
+      kind: "data",
+      status: "active",
+      summary: "",
+      updatedAt: "2026-06-02T00:00:00Z",
+      sizeBytes: 12,
+      projectId: project.id,
+    },
+  ],
+  workflows: [workflow],
+  workspaceRoot: null,
+  consoleEntries: [],
+};
+
+describe("lazy snapshot completeness", () => {
+  it("keeps authoritative totals separate from partially loaded run statuses", () => {
+    const experiments = [
+      { ...snapshot.experiments[0], runCount: 3 },
+      { ...snapshot.experiments[1], runCount: 0 },
+    ];
+    const partial = projectSnapshotCompleteness(
+      { ...project, experimentCount: 2 },
+      experiments,
+      snapshot.runs.slice(0, 1),
+    );
+
+    expect(partial).toEqual({
+      experimentCount: 2,
+      runCount: 3,
+      experimentsComplete: true,
+      runsComplete: false,
+    });
+  });
+
+  it("treats missing server totals as unknown instead of zero", () => {
+    expect(projectSnapshotCompleteness(project, snapshot.experiments, snapshot.runs)).toEqual({
+      experimentCount: null,
+      runCount: null,
+      experimentsComplete: false,
+      runsComplete: false,
+    });
+    expect(experimentRunCompleteness(snapshot.experiments[1], 0)).toEqual({
+      runCount: null,
+      runsComplete: false,
+    });
+  });
+
+  it("marks an experiment complete only after all reported runs are loaded", () => {
+    const summary = { ...snapshot.experiments[0], runCount: 3 };
+    expect(experimentRunCompleteness(summary, 2).runsComplete).toBe(false);
+    expect(experimentRunCompleteness(summary, 3).runsComplete).toBe(true);
+    expect(experimentRunCompleteness(summary, 4).runsComplete).toBe(false);
+  });
+});

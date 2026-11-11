@@ -1,6 +1,6 @@
 """``runtime.execute()`` vs ``runtime.start()`` — the two runtime entry points.
 
-Matches ``docs/guide/workflow-runtime.md``.
+Matches ``docs/en/guide/workflow-runtime.md``.
 
 Execution lives on ``WorkflowRuntime``, not on the compiled artifact.
 ``execute()`` blocks and returns a ``WorkflowResult``; ``start()`` launches
@@ -16,11 +16,11 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import CompiledWorkflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import CompiledWorkflow, Workflow, WorkflowRuntime
 
 
 def build_slow_workflow() -> CompiledWorkflow:
-    wf = WorkflowCompiler(name="slow")
+    wf = Workflow(name="slow")
 
     @wf.task
     async def step_one() -> int:

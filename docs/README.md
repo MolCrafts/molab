@@ -1,6 +1,6 @@
-# MolExp documentation layout
+# Molab documentation layout
 
-MolExp keeps one Zensical source tree per canonical language:
+Molab keeps one Zensical source tree per canonical language:
 
 - `en/` is the English documentation source and is built by `zensical.toml`.
 - `zh/` is the Simplified Chinese documentation source and is built by

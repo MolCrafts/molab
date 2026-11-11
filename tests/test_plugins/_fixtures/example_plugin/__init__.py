@@ -1,13 +1,13 @@
-"""Example third-party molexp plugin used by the test suite.
+"""Example third-party molab plugin used by the test suite.
 
 The shape mirrors what a real downstream package would publish through
 the **two independent** entry-point channels introduced in spec 07:
 
-* ``cli_plugin: CliPlugin`` — a Typer command appended to the molexp CLI
-  (entry-point group ``molexp.cli_plugins``).
+* ``cli_plugin: CliPlugin`` — a Typer command appended to the molab CLI
+  (entry-point group ``molab.cli_plugins``).
 * ``bundle_dir: () -> Path`` — a directory of pre-built ESM assets
   served at ``/api/plugins/example/`` (entry-point group
-  ``molexp.ui_plugins``). The directory contains ``manifest.json`` +
+  ``molab.ui_plugins``). The directory contains ``manifest.json`` +
   ``index.js``; UI semantics live entirely in the manifest.
 
 A real third-party package may contribute either or both. This fixture
@@ -23,11 +23,11 @@ from pathlib import Path
 
 import typer
 
-from molexp.plugins.cli import CliPlugin
+from molab.plugins.cli import CliPlugin
 
 # Unique markers so DOM / stdout assertions can grep for the fixture.
-HELLO_MARKER = "molexp-example-plugin-hello"
-RENDERER_MARKER = "molexp-example-plugin-renderer"
+HELLO_MARKER = "molab-example-plugin-hello"
+RENDERER_MARKER = "molab-example-plugin-renderer"
 
 
 def _hello(name: str = typer.Option("world", help="Who to greet.")) -> None:
@@ -36,7 +36,7 @@ def _hello(name: str = typer.Option("world", help="Who to greet.")) -> None:
 
 
 def _register_cli(app: typer.Typer) -> None:
-    """Attach the plugin's ``hello`` command to the molexp Typer app."""
+    """Attach the plugin's ``hello`` command to the molab Typer app."""
     app.command(name="hello", help="Example third-party plugin command.")(_hello)
 
 

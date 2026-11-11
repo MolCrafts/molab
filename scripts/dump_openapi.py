@@ -1,43 +1,25 @@
-#!/usr/bin/env python
-"""Dump the molexp API OpenAPI schema to repo-root ``openapi.json``.
-
-The UI's ``npm run generate:api`` consumes ``openapi.json`` (an untracked,
-generated artifact). This script regenerates it deterministically so the
-schema → TypeScript codegen pipeline is reproducible and CI-checkable.
-
-Deterministic + boot-free: it constructs the FastAPI app in-process and calls
-``app.openapi()`` (no uvicorn, no network), writing sorted-key JSON so two runs
-are byte-identical.
-"""
+"""Regenerate the checked-in OpenAPI contract from the application factory."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-_DEFAULT_OUT = Path(__file__).resolve().parents[1] / "openapi.json"
+from molab.server.app import create_app
 
 
-def dump_openapi(path: Path | None = None) -> Path:
-    """Write the OpenAPI schema to ``path`` (default repo-root ``openapi.json``).
+def dump_openapi(target: str | Path) -> Path:
+    """Dump the application's OpenAPI schema to *target* and return the path."""
+    target = Path(target)
+    schema = create_app(serve_static=False).openapi()
+    target.write_text(json.dumps(schema, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return target
 
-    Args:
-        path: Destination file; defaults to the repo-root ``openapi.json`` the
-            UI codegen reads.
 
-    Returns:
-        The path written. The content is ``sort_keys``-stable JSON with a
-        trailing newline, generated without booting a server or touching the
-        network.
-    """
-    from molexp.server.app import create_app
-
-    schema = create_app().openapi()
-    out = path or _DEFAULT_OUT
-    out.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return out
+def main() -> None:
+    target = Path(__file__).resolve().parents[1] / "openapi.json"
+    dump_openapi(target)
 
 
 if __name__ == "__main__":
-    written = dump_openapi()
-    print(f"wrote {written}")
+    main()

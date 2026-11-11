@@ -1,0 +1,25 @@
+TeXlyre BusyTeX 1.4.0, TeX Live 2026
+https://github.com/TeXlyre/texlyre-busytex
+npm: texlyre-busytex@1.4.0 (JavaScript driver only; AGPL-3.0-or-later)
+
+Engine assets are not in the npm tarball and are not committed.
+`npm run download:busytex` fetches the official archive once and keeps the
+pdfLaTeX subset under apps/web/public/busytex/ (gitignored):
+
+  https://github.com/TeXlyre/texlyre-busytex/releases/download/assets-v1.4.0/busytex-assets.tar.gz
+  sha256 1caa434fb5aab5bdd59dc303bca2ac7b9b9af02ef1627bf8652caabfa1b7cd2b
+  521751667 bytes
+
+Kept locally: busytex.js, busytex.wasm, busytex_worker.js,
+busytex_pipeline.js, busytex_biber.js, texlive-basic.js, texlive-basic.data.
+The rest of the archive (recommended, extra, biber wasm) is not extracted.
+Packages missing from texlive-basic are fetched by name from
+https://texlive2026.texlyre.org and cached by the engine.
+
+The driver and the wasm are AGPL-3.0-or-later, derived from BusyTeX WASM
+(MIT for the upstream BusyTeX repo scripts, not for these binaries).
+They are not part of molab's BSD-3-Clause license. molab does not copy the
+AGPL sources into src/.
+
+A TeX Live tree installed on the host is not used. The preview runs in the
+browser and cannot see that tree.

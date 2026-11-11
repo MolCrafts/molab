@@ -1,0 +1,90 @@
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
+
+export type {
+  DiscoveredFile,
+  EntityTabContribution,
+  ExecutionColumnContribution,
+  ExecutionColumnRenderProps,
+  ExecutionDetailContribution,
+  ExecutionDetailRenderProps,
+  ExecutionRowData,
+  FileMatchContext,
+  FilePreviewContentProps,
+  FilePreviewPlugin,
+  FileTypeContribution,
+  FileTypeMatcher,
+  PanelSlot,
+  RendererContribution,
+  RendererEntry,
+  RendererResolutionContext,
+  RenderTarget,
+  RunTabBadgeContext,
+} from "@/lib/contribution-types";
+export { buildRendererRegistryKey } from "@/lib/contribution-types";
+
+export type { MolabPluginModule, PluginAPI };
+
+/**
+ * One entry returned by ``GET /api/plugins`` — a discovered third-party
+ * UI bundle's distribution metadata. Carries no UI semantics: `id` is
+ * the entry-point name on the Python side; `manifestUrl` and `entryUrl`
+ * point into the bundle's mounted directory. Real UI semantics live in
+ * the bundle's ``manifest.json`` (see {@link UiBundleManifest}), fetched
+ * by the loader once it sees this descriptor.
+ */
+export interface PluginManifest {
+  id: string;
+  manifestUrl: string;
+  entryUrl: string;
+}
+
+/**
+ * Schema of ``manifest.json`` shipped at the root of each third-party
+ * UI bundle. The browser-side loader fetches it, validates the shape,
+ * and checks ``api_version`` against the
+ * ``UI_PLUGIN_API_VERSION`` constant frozen into this build.
+ */
+export interface UiBundleManifest {
+  id: string;
+  name: string;
+  version: string;
+  api_version: "1";
+  /** Optional override for the entry filename. Defaults to `index.js`. */
+  entry?: string;
+  capabilities?: string[];
+}
+
+export interface UiPluginModule extends Partial<MolabPluginModule> {
+  id: string;
+  /** Human-readable name for Settings / catalog. Defaults to `id`. */
+  name?: string;
+  /** Short description shown under the toggle in Settings. */
+  description?: string;
+  /**
+   * When false the plugin is always on and hidden from the user toggle list.
+   * Defaults to true (panel plugins are user-controllable).
+   */
+  userToggleable?: boolean;
+  /**
+   * Preferred entry. Host constructs `PluginAPI` and tracks disposers.
+   */
+  activate?: (api: PluginAPI) => void | Promise<void>;
+  deactivate?: (api: PluginAPI) => void | Promise<void>;
+  /**
+   * @deprecated v1 shim. Host still accepts `register()`-only modules.
+   */
+  register?: () => void | Promise<void>;
+}
+
+/**
+ * Lightweight metadata for one bundled plugin. The descriptor is safe to keep
+ * in the application entry chunk; `load` is the only edge to the plugin's
+ * implementation and therefore becomes a separate production chunk.
+ */
+export interface InternalPluginDescriptor {
+  id: string;
+  name: string;
+  description?: string;
+  userToggleable: boolean;
+  load: () => Promise<{ default: UiPluginModule }>;
+}
