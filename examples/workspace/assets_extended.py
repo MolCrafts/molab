@@ -19,11 +19,12 @@ import asyncio
 import tempfile
 from pathlib import Path
 
+from molab.workspace.artifact_repository import scan_artifacts, scan_asset_repositories
+
 import molab as me
 from molab.ids import compute_content_hash
 from molab.workflow import Workflow, WorkflowRuntime
 from molab.workspace import Asset
-from molab.workspace.artifact_repository import scan_artifacts, scan_asset_repositories
 
 wf = Workflow(name="extended")
 
