@@ -80,6 +80,18 @@ export const buildSelectionFromLocation = (
   pathname: string,
   searchParams: URLSearchParams,
 ): Selection | null => {
+  const pluginView = parseObjectView(searchParams.get("plugin"));
+  const projectId = searchParams.get("project");
+  if (pluginView && projectId && ["/knowledge", "/workspace", "/projects"].includes(pathname)) {
+    return {
+      objectType: "project",
+      objectId: projectId,
+      pluginView,
+      ...(searchParams.get("focus") ? { pluginFocus: searchParams.get("focus") ?? undefined } : {}),
+      pluginExplorer:
+        pathname === "/workspace" ? "files" : pathname === "/knowledge" ? "knowledge" : "projects",
+    };
+  }
   const objectView = parseObjectView(searchParams.get("tab"));
   const runFocus = parseRunFocus(searchParams);
 
@@ -236,6 +248,20 @@ export const getSelectionPath = (
 
   switch (selection.objectType) {
     case "project":
+      if (selection.pluginView) {
+        const root =
+          selection.pluginExplorer === "files"
+            ? "/workspace"
+            : selection.pluginExplorer === "projects"
+              ? "/projects"
+              : "/knowledge";
+        const params = new URLSearchParams({
+          project: selection.objectId,
+          plugin: selection.pluginView,
+        });
+        if (selection.pluginFocus) params.set("focus", selection.pluginFocus);
+        return `${root}?${params}`;
+      }
       return projectPath(selection.objectId, selection.projectView ?? "overview");
     case "experiment": {
       const experiment = snapshot.experiments.find((item) => item.id === selection.objectId);

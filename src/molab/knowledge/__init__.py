@@ -14,8 +14,9 @@ the class (``class: Finding``), the rest is the narrative. Path is identity::
     Note("/data/group/wiki/cooling.md")
 
 The subclasses are ``Note``, ``Literature``, ``Report``, ``Finding``,
-``Plan``, ``Roadmap``, ``Todo``, ``Milestone``, ``Observation``, and
-``Delegation``. A Plan
+``Plan``, ``Roadmap``, ``Todo``, ``Milestone``, ``Observation``,
+``Hypothesis``, ``Decision``, and ``Delegation``. Each answers one question
+(the first line of its docstring). A Plan
 is the campaign overview; Roadmap, Todo, and Milestone are the other three
 planning documents and cite that Plan. Failure analysis is a Report; harvest
 of a scientific outcome is a Finding.
@@ -49,8 +50,10 @@ cannot supply a git history or an id simply observes nothing.
 
 from .concept import Knowledge
 from .concepts import (
+    Decision,
     Delegation,
     Finding,
+    Hypothesis,
     Literature,
     Milestone,
     Note,
@@ -82,6 +85,7 @@ from .zotero import ZoteroItem
 
 __all__ = [
     "Campaign",
+    "Decision",
     "Delegation",
     "DelegationRecord",
     "Edge",
@@ -89,6 +93,7 @@ __all__ = [
     "Finding",
     "GeneratedPart",
     "GeneratedParts",
+    "Hypothesis",
     "Knowledge",
     "KnowledgeNotFoundError",
     "KnowledgeScope",

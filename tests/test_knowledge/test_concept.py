@@ -887,7 +887,7 @@ class TestAppendSourceLinks:
                 )
                 if "- [" in literal and "](" in literal:
                     offenders.append(f"{path}:{node.lineno}")
-        assert offenders == ["src/molab/knowledge/edges.py:96"]
+        assert offenders == ["src/molab/knowledge/edges.py:99"]
 
 
 class TestConceptWriteReplace:

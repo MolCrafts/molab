@@ -1,4 +1,5 @@
 import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
+import type { DocRelationUpdate as ApiDocRelationUpdate } from "@/api/generated/models/DocRelationUpdate";
 import type { DocSource } from "@/api/generated/models/DocSource";
 import { EmbedRequest } from "@/api/generated/models/EmbedRequest";
 import type { EntityCard } from "@/api/generated/models/EntityCard";
@@ -8,7 +9,34 @@ import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
 export type { EntityCard } from "@/api/generated/models/EntityCard";
 
 export type EmbedTargetKind = "run" | "experiment" | "asset" | "reference";
-export type EmbedRole = "derived_from" | "cites" | "supersedes" | "records" | "references";
+export type EmbedRole =
+  | "derived_from"
+  | "cites"
+  | "supersedes"
+  | "supports"
+  | "contradicts"
+  | "records"
+  | "references";
+
+export interface DocRelation {
+  id: number;
+  target: string;
+  role: EmbedRole;
+  label: string;
+  kind: "document" | "ref" | "external" | "missing";
+}
+
+export interface DocRelations {
+  relPath: string;
+  digest: string;
+  relations: DocRelation[];
+}
+
+export type DocRelationUpdate = { ifMatch: string } & (
+  | { action: "add"; target: string; role: EmbedRole; text?: string }
+  | { action: "replace"; id: number; role: EmbedRole }
+  | { action: "remove"; id: number }
+);
 
 const EMBED_TARGET_KIND: Record<EmbedTargetKind, EmbedRequest.target_kind> = {
   run: EmbedRequest.target_kind.RUN,
@@ -18,6 +46,9 @@ const EMBED_TARGET_KIND: Record<EmbedTargetKind, EmbedRequest.target_kind> = {
 };
 
 export const knowledgeApi = {
+  getDocRelations: (path: string) => KnowledgeService.getDocRelations(path),
+  updateDocRelation: (path: string, body: DocRelationUpdate) =>
+    KnowledgeService.updateDocRelation(path, body as ApiDocRelationUpdate),
   listKnowledge: (options: { tag?: string | null; status?: string | null } = {}) =>
     KnowledgeService.listKnowledge(options.tag ?? undefined, options.status ?? undefined),
   getNote: (path: string) => KnowledgeService.getNote(path),

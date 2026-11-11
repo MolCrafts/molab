@@ -2,10 +2,63 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ManagedAssetResponse } from '../models/ManagedAssetResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class AssetsService {
+    /**
+     * Get Asset
+     * Read an asset by canonical id, across scopes inside the served boundary.
+     * @param assetId
+     * @param molabSession
+     * @returns ManagedAssetResponse Successful Response
+     * @throws ApiError
+     */
+    public static getAsset(
+        assetId: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<ManagedAssetResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/assets/{asset_id}',
+            path: {
+                'asset_id': assetId,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Download Asset
+     * Stream verified asset bytes through their owning scope's repository.
+     * @param assetId
+     * @param molabSession
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static downloadAsset(
+        assetId: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/assets/{asset_id}/download',
+            path: {
+                'asset_id': assetId,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
     /**
      * Preview Asset
      * Render a preview of a sidecar-backed dataset asset.
@@ -50,6 +103,64 @@ export class AssetsService {
             query: {
                 'format': format,
                 'limit': limit,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Get Asset
+     * Read an asset by canonical id, across scopes inside the served boundary.
+     * @param assetId
+     * @param ws
+     * @param molabSession
+     * @returns ManagedAssetResponse Successful Response
+     * @throws ApiError
+     */
+    public static getAssetWs(
+        assetId: string,
+        ws: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<ManagedAssetResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspaces/{ws}/assets/{asset_id}',
+            path: {
+                'asset_id': assetId,
+                'ws': ws,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Download Asset
+     * Stream verified asset bytes through their owning scope's repository.
+     * @param assetId
+     * @param ws
+     * @param molabSession
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static downloadAssetWs(
+        assetId: string,
+        ws: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspaces/{ws}/assets/{asset_id}/download',
+            path: {
+                'asset_id': assetId,
+                'ws': ws,
+            },
+            cookies: {
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,

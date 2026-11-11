@@ -47,6 +47,9 @@ export const editorTabKey = (
   section: EditorSection | null,
 ): string | null => {
   if (selection) {
+    if (selection.objectType === "project" && selection.pluginView) {
+      return `project:${selection.objectId}:plugin:${selection.pluginView}`;
+    }
     switch (selection.objectType) {
       case "task":
         return `task:${selection.runId}/${selection.taskId}`;

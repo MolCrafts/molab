@@ -1,6 +1,6 @@
 """``validate_knowledge`` and the ``index.knowledges`` section each host keeps.
 
-A document is ``<host>/knowledges/<slug>.md`` naming one of six classes. Each
+A document is ``<host>/knowledges/<slug>.md`` naming one of the knowledge classes. Each
 host lists its documents in its ``index.md`` frontmatter (``index.knowledges``),
 asked for through ``Folder.set_index_section`` after every knowledge verb.
 """

@@ -62,8 +62,8 @@ export const useKnowledgeDocs = (filters: KnowledgeDocFilters = {}): UseKnowledg
     await listQuery.refetch();
   }, [listQuery.refetch]);
 
-  const invalidateLists = useCallback(async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: knowledgeKeys.lists() });
+  const invalidateKnowledge = useCallback(async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: knowledgeKeys.all });
   }, [queryClient]);
 
   const createDoc = useCallback(
@@ -76,26 +76,26 @@ export const useKnowledgeDocs = (filters: KnowledgeDocFilters = {}): UseKnowledg
         hostPath: hostPath ?? null,
         ...options,
       });
-      await invalidateLists();
+      await invalidateKnowledge();
       return created.relPath;
     },
-    [invalidateLists],
+    [invalidateKnowledge],
   );
 
   const renameDoc = useCallback(
     async (path: string, name: string): Promise<void> => {
       await knowledgeApi.renameDoc(path, name);
-      await invalidateLists();
+      await invalidateKnowledge();
     },
-    [invalidateLists],
+    [invalidateKnowledge],
   );
 
   const moveDoc = useCallback(
     async (path: string, hostPath: string): Promise<void> => {
       await knowledgeApi.moveDoc(path, hostPath);
-      await invalidateLists();
+      await invalidateKnowledge();
     },
-    [invalidateLists],
+    [invalidateKnowledge],
   );
 
   const deleteDoc = useCallback(

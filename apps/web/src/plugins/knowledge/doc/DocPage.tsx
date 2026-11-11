@@ -169,6 +169,7 @@ export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps
       <EditorActions>
         <DocActions
           relPath={note.relPath}
+          cls={cls}
           name={note.name}
           hostPath={hostPath}
           status={summary?.status ?? null}

@@ -8,7 +8,7 @@
 export type EmbedRequest = {
     target_kind: EmbedRequest.target_kind;
     target: string;
-    role?: ('derived_from' | 'cites' | 'supersedes' | 'records' | 'references' | null);
+    role?: ('derived_from' | 'cites' | 'supersedes' | 'supports' | 'contradicts' | 'records' | 'references' | null);
     text?: (string | null);
 };
 export namespace EmbedRequest {

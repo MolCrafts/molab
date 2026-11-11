@@ -175,6 +175,8 @@ describe("offline showcase contracts", () => {
         "Milestone",
         "Literature",
         "Delegation",
+        "Hypothesis",
+        "Decision",
       ]),
     );
     const search = await json<{ hits: unknown[] }>("/knowledge/search?q=energy");

@@ -752,6 +752,10 @@ class Concept:
 
         klass = type(self)
         existing = None if creating else self.frontmatter()
+        if existing and existing.get("class") != klass.__name__:
+            raise ValueError(
+                f"{self.path} already holds a {existing.get('class')}, not a {klass.__name__}"
+            )
         check_record = getattr(klass, "check_record", None)
         if callable(check_record):
             check_record(dict(merged), existing=existing)

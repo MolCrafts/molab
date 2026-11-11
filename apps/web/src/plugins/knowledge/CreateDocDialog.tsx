@@ -13,7 +13,14 @@ import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
 import { DocSource } from "@/api/generated/models/DocSource";
 import { ChoiceToggle } from "@/app/components/entity";
 import { AppDialog } from "@/components/dialog/AppDialog";
-import { citesRun, DOC_SKELETON, fillSkeleton, type HostRun, toHtmlBody } from "./docTemplates";
+import {
+  citesRun,
+  DOC_RECORD,
+  DOC_SKELETON,
+  fillSkeleton,
+  type HostRun,
+  toHtmlBody,
+} from "./docTemplates";
 import { KNOWLEDGE_CLASSES, type KnowledgeClass, knowledgeClassOf } from "./knowledgeClass";
 import { PlanningFields } from "./PlanningFields";
 import {
@@ -147,7 +154,7 @@ export const CreateDocDialog = ({
       setLocalError({ field: "plan", message: "Choose the Plan this document cites." });
       return;
     }
-    let record: Record<string, unknown> | undefined;
+    let record: Record<string, unknown> | undefined = DOC_RECORD[cls];
     if (planning) {
       const built = buildPlanningRecord(cls, draft);
       if (!built.ok) {

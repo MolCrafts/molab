@@ -205,7 +205,7 @@ class TestManagedAssetResponse:
 
         asset = Asset(
             id="a",
-            scope=AssetScope(kind="project", ids=("p1",)),
+            scope=AssetScope(kind="project", ids=("owner",)),
             title="t",
             content=ContentRef(digest="sha256:abc", size=6, kind="file"),
             media_type="text/plain",
@@ -221,9 +221,11 @@ class TestManagedAssetResponse:
             created_by=_agent(),
         )
         body = ManagedAssetResponse.from_model(asset)
-        assert body.projectId == "p1"
+        assert body.projectId == "owner"
         assert body.ref == "molab:asset/a"
         assert body.originKind == "execution"
+        assert body.originProjectId == "p1"
+        assert body.originExperimentId == "e"
         assert body.runId == "r"
         assert body.executionId == "e01"
         assert body.task == "fit"
@@ -248,6 +250,8 @@ class TestManagedAssetResponse:
         body = ManagedAssetResponse.from_model(asset)
         assert body.projectId is None
         assert body.originKind == "import"
+        assert body.originProjectId is None
+        assert body.originExperimentId is None
         assert body.uri == "/data/qm9"
         assert body.runId is None
         assert body.executionId is None

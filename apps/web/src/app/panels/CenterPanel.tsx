@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { LazySurface } from "@/app/layout/LazySurface";
 import { SurfaceErrorBoundary } from "@/app/layout/SurfaceErrorBoundary";
 import { getNavigationContribution } from "@/app/navigation/sections";
-import { resolveRenderersForSelection } from "@/app/registry";
+import { listEntityTabs, resolveRenderersForSelection } from "@/app/registry";
 import { Watermark } from "@/app/shell/Watermark";
 import type { InspectorTarget, LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
 import { WorkbenchOperationState, WorkbenchRetryAction } from "@/components/workbench";
@@ -71,7 +71,12 @@ export const CenterPanel = ({
     return <Watermark />;
   }
 
-  const renderers = resolveRenderersForSelection(selection, snapshot, "center");
+  const renderers =
+    selection.objectType === "project" && selection.pluginView
+      ? listEntityTabs("project", { selection, snapshot })
+          .filter((view) => view.value === selection.pluginView)
+          .map((view) => ({ id: view.id, title: view.label, Component: view.Component }))
+      : resolveRenderersForSelection(selection, snapshot, "center");
 
   if (renderers.length === 0) {
     return (

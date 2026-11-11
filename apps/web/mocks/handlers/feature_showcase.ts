@@ -8,7 +8,12 @@
 
 import { strToU8, zipSync } from "fflate";
 import { HttpResponse, http } from "msw";
-import { deleteFile, getExperiment, getFile, getRun, writeFile } from "../db";
+import type { EntityCard } from "@/api/generated/models/EntityCard";
+import { deleteFile, getAsset, getExperiment, getFile, getProject, getRun, writeFile } from "../db";
+import { lineageLinks, lineageNotes } from "../db/knowledge-lineage";
+import { showcaseHistoryHandlers } from "./knowledge-history";
+import { showcaseKnowledgeEdges } from "./knowledge-links";
+import { createKnowledgeRelationHandlers } from "./knowledge-relations";
 import { workspaceRoute } from "./workspaceRoute";
 
 interface ShowcaseNote {
@@ -399,6 +404,28 @@ if (manuscript?.content)
     body: manuscript.content,
     links: [],
   });
+for (const note of lineageNotes) {
+  notes.set(note.relPath, {
+    ...note,
+    status: "active",
+    tags: ["example", "lineage", note.cls.toLowerCase()],
+    body: `# ${note.name}\n\n${note.excerpt}\n`,
+    links: [],
+  });
+}
+for (const note of notes.values()) {
+  const typed = lineageLinks[note.relPath];
+  const links =
+    typed ?? note.links.map((target) => ({ target, role: "references", label: target }));
+  if (links.length > 0)
+    note.body += `\n## References\n\n${links.map((link) => `- [@${link.role} ${link.label}](${link.target})`).join("\n")}\n`;
+}
+const initialKnowledgeEdges = showcaseKnowledgeEdges(notes);
+for (const note of notes.values())
+  note.links = initialKnowledgeEdges
+    .filter((edge) => edge.source === note.relPath)
+    .map((edge) => edge.target);
+
 for (const note of notes.values()) writeFile(note.relPath, note.body);
 
 /** A stable, spread-out edit history so the landing's Writing gauge has days to draw. */
@@ -425,6 +452,44 @@ const noteSummary = (note: ShowcaseNote) => ({
   ...showcaseTimes(note.relPath),
 });
 
+/** Resolve only the sources this note actually embeds; sharing this projection
+ * keeps GET and post-edit responses consistent with the graph and backlinks. */
+const noteCards = (path: string): EntityCard[] =>
+  showcaseKnowledgeEdges(notes)
+    .filter((edge) => edge.source === path)
+    .flatMap<EntityCard>((edge) => {
+      const doc = notes.get(edge.target);
+      if (edge.kind === "document" || edge.kind === "missing")
+        return [
+          {
+            kind: doc?.cls?.toLowerCase() ?? "knowledge",
+            id: edge.target,
+            title: doc?.name ?? edge.target,
+            relPath: edge.target,
+            status: doc?.status ?? null,
+            missing: !doc,
+          },
+        ];
+      if (edge.kind !== "ref") return [];
+      const id = edge.target.split("/").pop() ?? "";
+      const hit = [
+        { kind: "run", entity: getRun(id) },
+        { kind: "experiment", entity: getExperiment(id) },
+        { kind: "project", entity: getProject(id) },
+        { kind: "asset", entity: getAsset(id) },
+      ].find((candidate) => candidate.entity?.ref === edge.target);
+      return [
+        {
+          kind: hit?.kind ?? "reference",
+          id,
+          title: hit?.entity?.name ?? edge.target,
+          ref: edge.target,
+          status: hit?.entity && "status" in hit.entity ? hit.entity.status : null,
+          missing: !hit,
+        },
+      ];
+    });
+
 const servedWorkspaces = [
   {
     key: "feature-showcase",
@@ -438,6 +503,8 @@ const servedWorkspaces = [
 ];
 
 export const featureShowcaseHandlers = [
+  ...showcaseHistoryHandlers(notes),
+  ...createKnowledgeRelationHandlers(notes, writeFile),
   http.get("/api/workspaces", () => HttpResponse.json(servedWorkspaces)),
   http.post("/api/workspaces", () =>
     HttpResponse.json(
@@ -452,6 +519,13 @@ export const featureShowcaseHandlers = [
     HttpResponse.json({ detail: "The showcase workspace must remain served" }, { status: 409 }),
   ),
   http.get("/api/health", () => HttpResponse.json({ status: "ok", mock: true })),
+
+  http.get(workspaceRoute("/api/knowledge/graph"), () =>
+    HttpResponse.json({
+      nodes: [...notes.values()].map(noteSummary),
+      edges: showcaseKnowledgeEdges(notes),
+    }),
+  ),
 
   http.get(workspaceRoute("/api/knowledge"), ({ request }) => {
     const url = new URL(request.url);
@@ -490,19 +564,7 @@ export const featureShowcaseHandlers = [
       record: note.record ?? {},
       format: note.relPath.endsWith(".html") ? "html" : "md",
       ...showcaseTimes(note.relPath),
-      cards: [
-        { kind: "experiment", id: "exp-001", title: "AlphaFold Baseline", status: "active" },
-        { kind: "run", id: "run-001", title: "run-001", status: "succeeded" },
-        { kind: "asset", id: "asset-003", title: "alphafold.pt", status: "active" },
-        {
-          kind: "run",
-          id: "deadbeef",
-          title: "missing run",
-          ref: "molab:experiment/exp-001/run/deadbeef",
-          missing: true,
-          status: null,
-        },
-      ],
+      cards: noteCards(path),
     });
   }),
 
@@ -520,45 +582,40 @@ export const featureShowcaseHandlers = [
     return HttpResponse.json({ hits, truncated: false });
   }),
 
-  http.get("/api/knowledge/backlinks", () =>
-    HttpResponse.json({ backlinks: [...notes.values()].slice(0, 1).map(noteSummary) }),
-  ),
-
-  http.get("/api/knowledge/entity-backlinks", ({ request }) => {
-    const url = new URL(request.url);
-    const kind = url.searchParams.get("kind");
-    if (kind === "asset") {
-      const assetId = url.searchParams.get("assetId") ?? "";
-      // The water trajectory is cited by the NVE finding; nothing else is.
-      const backlinks =
-        assetId === "asset-nve-trajectory"
-          ? [
-              {
-                path: "knowledges/alphafold-benchmark.md",
-                title: "Energy drift stays flat under NVE at 0.5 fs",
-                type: "finding",
-                role: "cites",
-              },
-            ]
-          : [];
-      return HttpResponse.json({ entity: `asset:${assetId}`, backlinks });
-    }
-    const entity =
-      url.searchParams.get("runId") ??
-      url.searchParams.get("experimentId") ??
-      url.searchParams.get("projectId") ??
-      "entity";
+  http.get(workspaceRoute("/api/knowledge/backlinks"), ({ request }) => {
+    const path = new URL(request.url).searchParams.get("path") ?? "";
+    const sources = new Set(
+      showcaseKnowledgeEdges(notes)
+        .filter((edge) => edge.kind === "document" && edge.target === path)
+        .map((edge) => edge.source),
+    );
     return HttpResponse.json({
-      entity,
-      backlinks: [
-        {
-          path: "knowledges/alphafold-benchmark.md",
-          title: "AlphaFold benchmark findings",
-          type: "note",
-          role: "records",
-        },
-      ],
+      backlinks: [...notes.values()].filter((note) => sources.has(note.relPath)).map(noteSummary),
     });
+  }),
+
+  http.get(workspaceRoute("/api/knowledge/entity-backlinks"), ({ request }) => {
+    const params = new URL(request.url).searchParams;
+    const kind = params.get("kind");
+    const experimentId = params.get("experimentId") ?? "";
+    const runId = params.get("runId") ?? "";
+    const entity =
+      kind === "asset"
+        ? `molab:asset/${params.get("assetId") ?? ""}`
+        : kind === "run"
+          ? (getRun(runId)?.ref ?? `molab:experiment/${experimentId}/run/${runId}`)
+          : kind === "experiment"
+            ? (getExperiment(experimentId)?.ref ?? `molab:experiment/${experimentId}`)
+            : `molab:project/${params.get("projectId") ?? ""}`;
+    const backlinks = showcaseKnowledgeEdges(notes)
+      .filter((edge) => edge.kind === "ref" && edge.target === entity)
+      .map((edge) => ({
+        path: edge.source,
+        title: notes.get(edge.source)?.name ?? edge.source,
+        type: notes.get(edge.source)?.cls?.toLowerCase() ?? "note",
+        role: edge.role,
+      }));
+    return HttpResponse.json({ entity, backlinks });
   }),
 
   http.put(workspaceRoute("/api/knowledge/doc"), async ({ request }) => {
@@ -569,6 +626,9 @@ export const featureShowcaseHandlers = [
     const body = (await request.json()) as { body?: string };
     note.body = body.body ?? note.body;
     note.excerpt = note.body.slice(0, 160);
+    note.links = showcaseKnowledgeEdges(notes)
+      .filter((edge) => edge.source === path)
+      .map((edge) => edge.target);
     writeFile(note.relPath, note.body);
     return HttpResponse.json({
       name: note.name,
@@ -579,7 +639,7 @@ export const featureShowcaseHandlers = [
       format: note.relPath.endsWith(".html") ? "html" : "md",
       updatedAt: new Date().toISOString(),
       createdAt: showcaseTimes(note.relPath).createdAt,
-      cards: [],
+      cards: noteCards(path),
     });
   }),
 

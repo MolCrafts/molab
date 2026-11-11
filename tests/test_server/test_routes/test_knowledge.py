@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import inspect
+import os
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
 import pytest
 from fastapi.testclient import TestClient
@@ -91,6 +92,8 @@ class TestKnowledgeRouteRedirect:
             "derived_from",
             "cites",
             "supersedes",
+            "supports",
+            "contradicts",
             "records",
             "references",
         }
@@ -285,7 +288,7 @@ class TestEditDoc:
 
 
 class TestUpdateDocMeta:
-    """``update_doc_meta``: tags / status of any of the six classes."""
+    """``update_doc_meta``: tags / status of any of the classes."""
 
     def test_meta_patch_updates_markdown_doc_tags(
         self, served: ServedFactory, lab: RunFixture
@@ -638,6 +641,143 @@ class TestGetBacklinks:
             response = client.get("/api/knowledge/backlinks", params={"path": "knowledges/b.md"})
         assert response.status_code == 200, response.text
         assert [row["relPath"] for row in response.json()["backlinks"]] == ["knowledges/a.md"]
+
+
+class TestKnowledgeGraph:
+    """``get_knowledge_graph``: every document as a node, every typed link as an edge."""
+
+    @staticmethod
+    def _write(ws: Workspace, name: str, body: str) -> None:
+        Note(Path(str(ws.root)) / "knowledges" / name).write(body)
+
+    @staticmethod
+    def _edges(client: TestClient, source: str) -> list[dict[str, str]]:
+        response = client.get("/api/knowledge/graph")
+        assert response.status_code == 200, response.text
+        return [edge for edge in response.json()["edges"] if edge["source"] == source]
+
+    def test_graph_reuses_the_knowledge_link_scan(self) -> None:
+        src = inspect.getsource(knowledge_routes._graph_edges)
+        assert ".scan_links(" in src
+        assert "re.compile" not in src
+
+    def test_nodes_carry_the_display_title(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        self._write(ws, "h-dry-ffv", "# Crosslinking lowers dry FFV\n\nBody.\n")
+        self._write(ws, "untitled", "No heading here.\n")
+        with served(ws) as client:
+            graph = client.get("/api/knowledge/graph").json()
+            listed = client.get("/api/knowledge").json()
+        titles = {n["name"]: n["title"] for n in graph["nodes"]}
+        assert titles["h-dry-ffv"] == "Crosslinking lowers dry FFV"
+        assert titles["untitled"] == "untitled"
+        assert {n["name"]: n["title"] for n in listed["notes"]} == titles
+
+    def test_nodes_equal_the_listed_notes(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, exp, _run = lab
+        self._write(ws, "a", "# A\n\n- [b](b.md)\n")
+        self._write(ws, "b", "# B\n")
+        Note(exp, "deep").write("# Deep\n")
+        with served(ws) as client:
+            listed = client.get("/api/knowledge")
+            graph = client.get("/api/knowledge/graph")
+        assert graph.status_code == 200, graph.text
+        assert set(graph.json()) == {"nodes", "edges"}
+        assert graph.json()["nodes"] == listed.json()["notes"]
+        assert len(graph.json()["nodes"]) >= 4
+
+    def test_typed_link_is_a_document_edge(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, exp, _run = lab
+        self._write(ws, "b", "# B\n")
+        deep = Note(exp, "deep")
+        target = Path(str(ws.root)) / "knowledges" / "b.md"
+        link = Path(os.path.relpath(target, Path(str(deep.path)).parent)).as_posix()
+        deep.write(f"# Deep\n\n- [@derived_from x]({link}#method)\n")
+        with served(ws) as client:
+            nodes = {
+                row["name"]: row["relPath"] for row in client.get("/api/knowledge").json()["notes"]
+            }
+            edges = self._edges(client, nodes["deep"])
+        assert edges == [
+            {
+                "source": nodes["deep"],
+                "target": nodes["b"],
+                "role": "derived_from",
+                "kind": "document",
+            }
+        ]
+        assert nodes["b"] == "knowledges/b.md"
+
+    def test_untyped_link_is_references(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        self._write(ws, "b", "# B\n")
+        self._write(ws, "a", "# A\n\nSee [the other one](b.md).\n")
+        with served(ws) as client:
+            edges = self._edges(client, "knowledges/a.md")
+        assert edges == [
+            {
+                "source": "knowledges/a.md",
+                "target": "knowledges/b.md",
+                "role": "references",
+                "kind": "document",
+            }
+        ]
+
+    def test_ref_and_url_keep_their_spelling(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, exp, run = lab
+        ref = f"{REF_SCHEME}experiment/{exp.id}/run/{run.id}"
+        self._write(
+            ws,
+            "a",
+            "# A\n\n"
+            f"- [@records the run]({ref})\n"
+            "- [@cites paper](https://doi.org/10.1000/xyz)\n"
+            "- [plain](https://example.org/page)\n",
+        )
+        with served(ws) as client:
+            edges = self._edges(client, "knowledges/a.md")
+        found = {(edge["target"], edge["role"], edge["kind"]) for edge in edges}
+        assert found == {
+            (ref, "records", "ref"),
+            ("https://doi.org/10.1000/xyz", "cites", "external"),
+            ("https://example.org/page", "references", "external"),
+        }
+        assert len(edges) == 3
+
+    def test_link_to_absent_file_is_missing(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        self._write(ws, "a", "# A\n\n- [@supersedes old](gone.md)\n")
+        with served(ws) as client:
+            edges = self._edges(client, "knowledges/a.md")
+        assert edges == [
+            {
+                "source": "knowledges/a.md",
+                "target": "knowledges/gone.md",
+                "role": "supersedes",
+                "kind": "missing",
+            }
+        ]
+
+    def test_existing_file_that_is_no_document_is_not_an_edge(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, _run = lab
+        (Path(str(ws.root)) / "data.csv").write_text("x\n", encoding="utf-8")
+        self._write(ws, "a", "# A\n\n- [table](../data.csv)\n- [here](#top)\n")
+        with served(ws) as client:
+            edges = self._edges(client, "knowledges/a.md")
+        assert edges == []
+
+    def test_repeated_link_is_one_edge(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        self._write(ws, "b", "# B\n")
+        self._write(ws, "a", "# A\n\n[b](b.md) and [b](b.md#part) and [@cites b](b.md)\n")
+        with served(ws) as client:
+            edges = self._edges(client, "knowledges/a.md")
+        assert [(edge["role"], edge["kind"]) for edge in edges] == [
+            ("references", "document"),
+            ("cites", "document"),
+        ]
 
 
 class TestExportDoc:
@@ -1349,3 +1489,216 @@ class TestHtmlDocumentsAndTimes:
         archive = zipfile.ZipFile(io.BytesIO(response.content))
         assert "knowledges/page.html" in archive.namelist()
         assert archive.read("knowledges/figs/plot.png") == png
+
+
+class TestHypothesisAndDecision:
+    """``Hypothesis`` and ``Decision`` over HTTP: create, list, graph, and the evidence roles."""
+
+    @pytest.mark.parametrize(
+        ("cls", "record"),
+        [
+            ("Hypothesis", {"verdict": "refuted"}),
+            ("Hypothesis", {"verdict": "supported"}),
+            ("Hypothesis", {"verdict": "unsettled"}),
+            ("Decision", {"status": "open"}),
+            ("Decision", {"status": "made"}),
+        ],
+    )
+    def test_note_detail_preserves_the_reasoning_record(
+        self, served: ServedFactory, lab: RunFixture, cls: str, record: dict[str, str]
+    ) -> None:
+        ws, _exp, run = lab
+        with served(ws) as client:
+            created = self._create(client, run, cls, "Reasoning", record)
+            assert created.status_code == 201, created.text
+            path = created.json()["relPath"]
+            detail = client.get("/api/knowledge/note", params={"path": path})
+            canonical = client.get("/api/knowledge/doc/record", params={"path": path})
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["record"] == canonical.json()["record"] == record
+
+    @staticmethod
+    def _create(
+        client: TestClient, run: Run, cls: str, name: str, record: dict[str, str] | None = None
+    ) -> Any:
+        from molab.workspace.refs import ref_of
+
+        payload: dict[str, object] = {
+            "name": name,
+            "cls": cls,
+            "body": f"# {name}\n",
+            "sources": [{"kind": "run", "ref": str(ref_of(run))}],
+        }
+        if record is not None:
+            payload["record"] = record
+        return client.post("/api/knowledge/doc", json=payload)
+
+    def test_the_create_request_accepts_both_classes(self) -> None:
+        names = get_args(knowledge_routes.DocCreateRequest.model_fields["cls"].annotation)
+        assert {"Hypothesis", "Decision"} <= set(names)
+        from molab.knowledge.concepts import _PRODUCTS
+
+        assert set(names) == set(_PRODUCTS)
+
+    @pytest.mark.parametrize("cls", ["Hypothesis", "Decision"])
+    def test_a_source_is_required(self, served: ServedFactory, lab: RunFixture, cls: str) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            response = client.post("/api/knowledge/doc", json={"name": "x", "cls": cls})
+        assert response.status_code == 422, response.text
+
+    def test_defaults_are_open_and_made(self, served: ServedFactory, lab: RunFixture) -> None:
+        from molab.knowledge import Decision, Hypothesis
+
+        ws, _exp, run = lab
+        with served(ws) as client:
+            hypothesis = self._create(client, run, "Hypothesis", "Tg rises")
+            decision = self._create(client, run, "Decision", "Use OPLS")
+        assert hypothesis.status_code == 201, hypothesis.text
+        assert decision.status_code == 201, decision.text
+        assert hypothesis.json()["cls"] == "Hypothesis"
+        assert decision.json()["cls"] == "Decision"
+        root = Path(str(ws.root))
+        assert "class: Hypothesis" in (root / hypothesis.json()["relPath"]).read_text()
+        assert Hypothesis(root / hypothesis.json()["relPath"]).verdict() == "open"
+        assert Decision(root / decision.json()["relPath"]).status() == "made"
+
+    def test_explicit_values_round_trip_on_the_record(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, run = lab
+        with served(ws) as client:
+            hypothesis = self._create(client, run, "Hypothesis", "Tg", {"verdict": "unsettled"})
+            decision = self._create(client, run, "Decision", "FF", {"status": "open"})
+            assert hypothesis.status_code == 201, hypothesis.text
+            assert decision.status_code == 201, decision.text
+            h_path, d_path = hypothesis.json()["relPath"], decision.json()["relPath"]
+            h_record = client.get("/api/knowledge/doc/record", params={"path": h_path})
+            d_record = client.get("/api/knowledge/doc/record", params={"path": d_path})
+            assert h_record.json()["record"]["verdict"] == "unsettled"
+            assert d_record.json()["record"]["status"] == "open"
+            settled = client.patch(
+                "/api/knowledge/doc/record",
+                params={"path": h_path},
+                json={"record": {"verdict": "refuted"}, "ifMatch": h_record.json()["digest"]},
+            )
+            made = client.patch(
+                "/api/knowledge/doc/record",
+                params={"path": d_path},
+                json={"record": {"status": "made"}, "ifMatch": d_record.json()["digest"]},
+            )
+            bad = client.patch(
+                "/api/knowledge/doc/record",
+                params={"path": h_path},
+                json={"record": {"verdict": "true"}},
+            )
+        assert settled.status_code == 200, settled.text
+        assert settled.json()["record"]["verdict"] == "refuted"
+        assert made.status_code == 200, made.text
+        assert made.json()["record"]["status"] == "made"
+        assert bad.status_code == 422, bad.text
+
+    @pytest.mark.parametrize(
+        ("cls", "record"),
+        [("Hypothesis", {"verdict": "maybe"}), ("Decision", {"status": "pending"})],
+    )
+    def test_an_unknown_value_is_422_and_nothing_lands(
+        self, served: ServedFactory, lab: RunFixture, cls: str, record: dict[str, str]
+    ) -> None:
+        ws, _exp, run = lab
+        with served(ws) as client:
+            response = self._create(client, run, cls, "Bad one", record)
+            names = _listed_names(client)
+        assert response.status_code == 422, response.text
+        assert next(iter(record.values())) in response.text
+        assert "Bad one" not in names
+        assert not (Path(str(ws.root)) / "knowledges" / "bad-one.md").exists()
+
+    def test_the_meta_patch_cannot_store_an_unknown_decision_status(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        from molab.knowledge import Decision
+
+        ws, _exp, run = lab
+        with served(ws) as client:
+            path = self._create(client, run, "Decision", "FF", {"status": "open"}).json()["relPath"]
+            bad = client.patch(
+                "/api/knowledge/doc/meta", params={"path": path}, json={"status": "active"}
+            )
+            good = client.patch(
+                "/api/knowledge/doc/meta", params={"path": path}, json={"status": "made"}
+            )
+        assert bad.status_code == 400, bad.text
+        assert "active" in bad.text
+        assert good.status_code == 200, good.text
+        assert Decision(Path(str(ws.root)) / path).status() == "made"
+
+    def test_both_are_listed_and_are_graph_nodes(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, run = lab
+        with served(ws) as client:
+            hypothesis = self._create(client, run, "Hypothesis", "Tg rises").json()["relPath"]
+            decision = self._create(client, run, "Decision", "Use OPLS").json()["relPath"]
+            notes = client.get("/api/knowledge").json()["notes"]
+            graph = client.get("/api/knowledge/graph").json()["nodes"]
+        listed = {row["relPath"]: row["cls"] for row in notes}
+        nodes = {row["relPath"]: row["cls"] for row in graph}
+        assert listed[hypothesis] == nodes[hypothesis] == "Hypothesis"
+        assert listed[decision] == nodes[decision] == "Decision"
+
+    @pytest.mark.parametrize("role", ["supports", "contradicts"])
+    def test_an_embed_with_an_evidence_role_is_a_graph_edge(
+        self, served: ServedFactory, lab: RunFixture, role: str
+    ) -> None:
+        from molab.workspace.refs import ref_of
+
+        ws, _exp, run = lab
+        target = str(ref_of(run))
+        with served(ws) as client:
+            embedded = client.post(
+                "/api/knowledge/doc/embed",
+                params={"path": "knowledges/idea.md"},
+                json={"target_kind": "run", "target": target, "role": role},
+            )
+            graph = client.get("/api/knowledge/graph")
+        assert embedded.status_code == 200, embedded.text
+        assert embedded.json()["role"] == role
+        text = (Path(str(ws.root)) / "knowledges" / "idea.md").read_text()
+        assert f"- [@{role} " in text
+        assert f"]({target})" in text
+        edges = [e for e in graph.json()["edges"] if e["source"] == "knowledges/idea.md"]
+        assert edges == [
+            {"source": "knowledges/idea.md", "target": target, "role": role, "kind": "ref"}
+        ]
+
+    @pytest.mark.parametrize("role", ["supports", "contradicts"])
+    def test_a_finding_to_hypothesis_link_is_a_document_edge(
+        self, served: ServedFactory, lab: RunFixture, role: str
+    ) -> None:
+        ws, _exp, run = lab
+        with served(ws) as client:
+            hypothesis = self._create(client, run, "Hypothesis", "Tg rises").json()["relPath"]
+            finding = self._create(client, run, "Finding", "Tg result").json()["relPath"]
+            path = Path(str(ws.root)) / finding
+            link = Path(hypothesis).name
+            path.write_text(path.read_text() + f"\n- [@{role} h]({link})\n")
+            edges = client.get("/api/knowledge/graph").json()["edges"]
+        assert {
+            "source": finding,
+            "target": hypothesis,
+            "role": role,
+            "kind": "document",
+        } in edges
+
+    def test_an_unknown_embed_role_is_422(self, served: ServedFactory, lab: RunFixture) -> None:
+        from molab.workspace.refs import ref_of
+
+        ws, _exp, run = lab
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc/embed",
+                params={"path": "knowledges/idea.md"},
+                json={"target_kind": "run", "target": str(ref_of(run)), "role": "proves"},
+            )
+        assert response.status_code == 422, response.text

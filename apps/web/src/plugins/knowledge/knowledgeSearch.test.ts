@@ -13,6 +13,8 @@ describe("knowledge search inventory", () => {
       "Todo",
       "Milestone",
       "Observation",
+      "Hypothesis",
+      "Decision",
       "Delegation",
     ]);
   });

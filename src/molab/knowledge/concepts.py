@@ -29,7 +29,10 @@ _LOG = logging.getLogger(__name__)
 
 
 class Note(Concept):
-    """A note — ``knowledges/<name>.md`` with ``class: Note`` frontmatter."""
+    """None of the other classes: free text with no claim on the reasoning.
+
+    ``knowledges/<name>.md`` with ``class: Note`` frontmatter.
+    """
 
     FILE_DOCUMENT: ClassVar[bool] = True
     DEFAULT_TYPE: ClassVar[str] = NOTE_KIND
@@ -55,7 +58,7 @@ class Note(Concept):
 
 
 class Literature(Concept):
-    """A literature record — bib fields in markdown frontmatter."""
+    """What does a published source say? Bib fields in the frontmatter."""
 
     FILE_DOCUMENT: ClassVar[bool] = True
     DEFAULT_TYPE: ClassVar[str] = REFERENCE_KIND
@@ -81,7 +84,7 @@ class Literature(Concept):
 
 
 class _SourcedKnowledge(Concept):
-    """Finding / Report / Plan / Observation.
+    """Every class but Note and Literature: a document that names its sources.
 
     ``sources`` is required when the document is created by name. An existing
     file reopens with ``Finding(path)`` and reads its sources from edges.
@@ -250,19 +253,23 @@ class _SourcedKnowledge(Concept):
 
 
 class Report(_SourcedKnowledge):
-    """A written-up analysis (including failed-run reports)."""
+    """What do we tell readers? It compiles; it claims nothing new.
+
+    A Report is defined by its purpose, not its length: a result written up
+    at length is still a :class:`Finding`. A failed run's analysis is a Report.
+    """
 
 
 class Finding(_SourcedKnowledge):
-    """A harvested scientific outcome."""
+    """What does the evidence establish? Not a choice, and not a plan."""
 
 
 class Plan(_SourcedKnowledge):
-    """Campaign overview: the question, the scope, and the constraints.
+    """What are we asking, in what scope, under what constraints?
 
     A Plan does not list stages, todos, or milestone criteria. Those are
     :class:`Roadmap`, :class:`Todo`, and :class:`Milestone` documents that
-    cite this Plan.
+    cite this Plan. The claims to test are :class:`Hypothesis` documents.
     """
 
     PLANNING_ROLE: ClassVar[str] = "overview"
@@ -278,8 +285,9 @@ class Plan(_SourcedKnowledge):
 
 
 class Roadmap(_SourcedKnowledge):
-    """Ordered stages of a campaign, and which experiment each stage is.
+    """In what order is the work done?
 
+    Ordered stages of a campaign, and which experiment each stage is.
     ``stages`` in the frontmatter is the whole record. A Roadmap does not
     store todos or completion criteria.
     """
@@ -303,7 +311,10 @@ class Roadmap(_SourcedKnowledge):
 
 
 class Todo(_SourcedKnowledge):
-    """Work items and their status. Not the stage order, and not a criterion."""
+    """What work remains? Not the stage order, and not a criterion.
+
+    ``items`` in the frontmatter is the whole record: each item and its status.
+    """
 
     PLANNING_ROLE: ClassVar[str] = "todo"
     FOREIGN_FIELDS: ClassVar[frozenset[str]] = frozenset({"stages", "criterion"})
@@ -324,9 +335,10 @@ class Todo(_SourcedKnowledge):
 
 
 class Milestone(_SourcedKnowledge):
-    """One checkpoint: the roadmap stage it closes, and the criterion.
+    """When is a stage closed?
 
-    A Milestone does not list the work that meets the criterion.
+    One checkpoint: the roadmap stage it closes, and the criterion. A
+    Milestone does not list the work that meets the criterion.
     """
 
     PLANNING_ROLE: ClassVar[str] = "milestone"
@@ -360,13 +372,74 @@ class Milestone(_SourcedKnowledge):
 
 
 class Observation(_SourcedKnowledge):
-    """A recorded observation or standing choice."""
+    """What was observed or given, before any interpretation?
+
+    A choice is a :class:`Decision`; a conclusion is a :class:`Finding`.
+    """
+
+
+class Hypothesis(_SourcedKnowledge):
+    """What do we claim will turn out to be true?
+
+    ``verdict`` in the frontmatter is the whole record: ``open``,
+    ``supported``, ``refuted``, or ``unsettled`` (the evidence cannot tell).
+    The evidence itself is a :class:`Finding` that links here with role
+    ``supports`` or ``contradicts``.
+    """
+
+    def verdict(self) -> str:
+        """``open``, ``supported``, ``refuted``, or ``unsettled``."""
+        from .reasoning import parse_hypothesis
+
+        return str(parse_hypothesis(self.frontmatter()).verdict)
+
+    @classmethod
+    def check_record(
+        cls,
+        record: Mapping[str, object] | None,
+        *,
+        existing: Mapping[str, object] | None,
+    ) -> None:
+        """Refuse a ``verdict`` outside the vocabulary, in the write or already stored."""
+        from .reasoning import parse_hypothesis
+
+        parse_hypothesis({**(existing or {}), **(record or {})})
+
+
+class Decision(_SourcedKnowledge):
+    """What was chosen, by whom, and why?
+
+    ``status`` in the frontmatter is the whole record: ``made``, or ``open``
+    while the choice waits for a person. An observed fact is an
+    :class:`Observation`; a result is a :class:`Finding`.
+    """
+
+    #: This class's ``status`` is its record's field, not the common lifecycle key.
+    STATUS_IN_RECORD: ClassVar[bool] = True
+
+    def status(self) -> str:
+        """``made``, or ``open`` while the choice waits for a person."""
+        from .reasoning import parse_decision
+
+        return str(parse_decision(self.frontmatter()).status)
+
+    @classmethod
+    def check_record(
+        cls,
+        record: Mapping[str, object] | None,
+        *,
+        existing: Mapping[str, object] | None,
+    ) -> None:
+        """Refuse a ``status`` outside the vocabulary, in the write or already stored."""
+        from .reasoning import parse_decision
+
+        parse_decision({**(existing or {}), **(record or {})})
 
 
 class Delegation(_SourcedKnowledge):
-    """One bounded, resumable piece of supervised work.
+    """What supervised work is under way?
 
-    The frontmatter record (:class:`~molab.knowledge.delegation.DelegationRecord`)
+    One bounded, resumable piece of supervised work. The frontmatter record (:class:`~molab.knowledge.delegation.DelegationRecord`)
     holds the scope, goal, authorized actions, budget and spend, acceptance and
     stop conditions, open waits and worker attempts. The source is the scope
     the delegation is bound to. A supervising agent writes it; molab validates
@@ -410,6 +483,8 @@ _PRODUCTS: dict[str, type[Concept]] = {
     "Todo": Todo,
     "Milestone": Milestone,
     "Observation": Observation,
+    "Hypothesis": Hypothesis,
+    "Decision": Decision,
     "Delegation": Delegation,
 }
 
@@ -513,7 +588,9 @@ HARVEST_TARGETS: MappingProxyType[str, type[_SourcedKnowledge]] = MappingProxyTy
 __all__ = [
     "NOTE_KIND",
     "REFERENCE_KIND",
+    "Decision",
     "Finding",
+    "Hypothesis",
     "Literature",
     "Milestone",
     "Note",

@@ -15,6 +15,8 @@ export namespace EmbedResponse {
         DERIVED_FROM = 'derived_from',
         CITES = 'cites',
         SUPERSEDES = 'supersedes',
+        SUPPORTS = 'supports',
+        CONTRADICTS = 'contradicts',
         RECORDS = 'records',
         REFERENCES = 'references',
     }

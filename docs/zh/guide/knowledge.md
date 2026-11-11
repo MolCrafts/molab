@@ -72,25 +72,54 @@ assert Note(experiment, "Analysis Notes").path == doc.path
 
 ## 文档类
 
-每个类都落成一个 markdown 文件；`class:` frontmatter 标出是哪一个：
+一份文档只属于一个类，一个类只回答一个问题。回答两个问题的文档应当拆成两份。如果一句话
+既能归到这个类、又能归到那个类，错的是定义，不是作者。每个类都落成一个文件；`class:`
+frontmatter 标出是哪一个：
 
-| 类 | `class:` frontmatter | 用途 |
-|---|---|---|
-| `Note` | `class: Note` | 自由笔记 |
-| `Literature` | `class: Literature` | 一条文献记录；书目字段在 frontmatter 里，PDF 只记路径，从不拷贝 |
-| `Report` | `class: Report` | 成文分析，包括失败 Run 的分析 |
-| `Finding` | `class: Finding` | 收获的科学结论 |
-| `Plan` | `class: Plan` | 计划总述：问题、范围、约束 |
-| `Roadmap` | `class: Roadmap` | 有序阶段，以及每个阶段对应哪个 experiment |
-| `Todo` | `class: Todo` | 工作项及其状态 |
-| `Milestone` | `class: Milestone` | 一个检查点：它关闭的阶段，以及关闭条件 |
-| `Observation` | `class: Observation` | 记录的观察或既定选择 |
-| `Delegation` | `class: Delegation` | 一项有边界、可恢复的受监督工作：作用域、目标、授权动作、预算与消耗、验收与停止条件、等待、worker 尝试 |
+| 类 | 它回答的唯一问题 | 记录（frontmatter） | 绝不包含 |
+|---|---|---|---|
+| `Plan` | 我们在问什么，范围多大，受哪些约束？ | 无 | 阶段、工作项、判据、待检验的断言（那些是 Hypothesis） |
+| `Hypothesis` | 我们断言什么会成立？ | `verdict`：`open` \| `supported` \| `refuted` \| `unsettled`（默认 `open`） | 证据本身（那是 Finding） |
+| `Roadmap` | 工作按什么顺序做？ | `stages` | 工作项、判据、状态 |
+| `Todo` | 还剩哪些工作？ | `items` | 阶段、判据 |
+| `Milestone` | 一个阶段何时算关闭？ | `stage`、`criterion`、`status`（`open` \| `met` \| `missed`） | 阶段、工作项 |
+| `Observation` | 在做任何解释之前，观察到了什么、给定了什么？ | 无 | 选择（Decision）、结论（Finding） |
+| `Decision` | 选了什么，谁选的，为什么？ | `status`：`open` \| `made`（默认 `made`） | 观察到的事实、结果 |
+| `Finding` | 证据确立了什么？ | 无 | 选择、计划 |
+| `Report` | 我们要告诉读者什么？它只做汇编，不提出新的断言。 | 无 | 别处没有陈述过的结果 |
+| `Literature` | 一份已发表的文献说了什么？ | 书目字段；PDF 只记路径，从不拷贝 | |
+| `Delegation` | 哪项受监督的工作正在进行？（操作性的） | 委托记录：作用域、目标、授权动作、预算与消耗、验收与停止条件、等待、worker 尝试 | |
+| `Note` | 以上都不是：对推理不作任何断言的自由文本。 | 无 | |
 
-`Report`、`Finding`、`Plan`、`Roadmap`、`Todo`、`Milestone`、`Observation` 在构造时至少需要一个 `SourceRef` —— 它们
-是有出处的文档；`Note` 与 `Literature` 不需要。
+长期有效的选择是 `Decision`，不是 `Observation`。`Report` 由它的目的（告诉读者）界定，
+而不是由篇幅界定：一个结果写得再长，也仍然是 `Finding`。
+
+`verdict` 或 `status` 的取值超出词表时，写入会被拒绝，`molab validate` 也会报告
+（`knowledge.record`）；它绝不会被默认值悄悄替换。
+
+除 `Note` 与 `Literature` 之外，每个类在构造时都至少需要一个 `SourceRef` —— 它们是有出处
+的文档。
 
 Plan、Roadmap、Todo、Milestone 是一次战役的四份文档，各自只做一件事。Plan 不列阶段。Roadmap 不列工作项。Todo 不定义阶段顺序。Milestone 不列具体工作。后三份引用 Plan。`campaign_of(plan)` 读回这一组；`check_campaign` 检查每条 todo 和 milestone 点名的阶段确实在路线图上。
+
+### 控制流在链接和记录里
+
+没有哪个类是为某种控制结构单独设的。推理过程从带类型的链接和记录字段里读出来：
+
+| 控制流 | 知识怎么表达 |
+|---|---|
+| 条件 / 判断 | 一份 `Hypothesis` 和它的 `verdict` |
+| 支持或反对的证据 | 从 `Finding` 指向 `Hypothesis`、角色为 `supports` 或 `contradicts` 的链接 |
+| 通过 / 无法判断 | `verdict: unsettled` |
+| 迭代 | 一份新文档，用 `supersedes` 取代它所修订的那份 |
+| 决策点 | 一份 `Decision`；`status: open` 表示它在等人来定 |
+| 依赖 | `derived_from` |
+| 提及 | `cites`（文献来源）、`references`（其他任何对象）、`records` |
+
+边的角色有 `derived_from`、`supersedes`、`supports`、`contradicts`、`cites`、`records`
+和 `references`。带类型的链接写作 `- [@supports label](target)`；不带角色的链接就是
+`references`。这些角色只是一套词表：molab 不检查 `supports` 或 `contradicts` 链接连接的
+是哪两个类。
 
 ## 交叉引用才是粘合机制
 

@@ -67,7 +67,7 @@ class TestWrite:
 
 
 class TestFromDir:
-    """Opening a file reads ``class`` beside the six classes, not on the base."""
+    """Opening a file reads ``class`` beside the concrete classes, not on the base."""
 
     def test_from_dir_returns_note(self, tmp_path: Path) -> None:
         from molab.knowledge.concepts import _open_document
@@ -95,7 +95,7 @@ class TestFromDir:
 
 
 class TestCite:
-    """All six classes cite with the same verb."""
+    """All classes cite with the same verb."""
 
     def test_finding_cites_literature(self, tmp_path: Path) -> None:
         lit = Literature(tmp_path / "paper")

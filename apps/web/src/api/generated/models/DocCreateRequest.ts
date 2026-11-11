@@ -40,6 +40,8 @@ export namespace DocCreateRequest {
         TODO = 'Todo',
         MILESTONE = 'Milestone',
         OBSERVATION = 'Observation',
+        HYPOTHESIS = 'Hypothesis',
+        DECISION = 'Decision',
         DELEGATION = 'Delegation',
     }
 }

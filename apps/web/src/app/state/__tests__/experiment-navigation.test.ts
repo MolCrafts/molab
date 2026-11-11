@@ -52,6 +52,24 @@ const snapshot: WorkspaceSnapshot = {
 };
 
 describe("experiment navigation", () => {
+  it("round-trips project plugin tabs while retaining their launching explorer", () => {
+    for (const explorer of ["knowledge", "files", "projects"] as const) {
+      const selection = {
+        objectType: "project" as const,
+        objectId: "p 1",
+        pluginView: "relations",
+        pluginFocus: "projects/p 1/knowledges/finding.md",
+        pluginExplorer: explorer,
+      };
+      const path = getSelectionPath(selection, snapshot);
+      const url = new URL(path, "http://localhost");
+      expect(buildSelectionFromLocation(url.pathname, url.searchParams)).toEqual(selection);
+    }
+    expect(
+      buildSelectionFromLocation("/knowledge", new URLSearchParams("project=p1&plugin=bad/value")),
+    ).toEqual({ objectType: "knowledge", objectId: "" });
+  });
+
   it("builds canonical nested experiment view URLs", () => {
     expect(experimentPath("p 1", "e/1")).toBe("/projects/p%201/experiments/e%2F1");
     expect(experimentPath("p 1", "e/1", "workflow")).toBe(

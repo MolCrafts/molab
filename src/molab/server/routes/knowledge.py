@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from molab.knowledge.concepts import Delegation, Note
+from molab.knowledge.concepts import Decision, Delegation, Hypothesis, Note
 from molab.knowledge.edges import EdgeRole
 from molab.server.dependencies import get_workspace
 from molab.workspace import Workspace
@@ -58,6 +58,10 @@ DocFormat = Literal["md", "html", "tex"]
 
 class NoteSummary(BaseModel):
     name: str
+    title: str = Field(
+        default="",
+        description="Display title: frontmatter `title`, else the first H1, else `name`.",
+    )
     relPath: str
     hostPath: str = ""
     excerpt: str
@@ -167,6 +171,8 @@ class DocCreateRequest(BaseModel):
         "Todo",
         "Milestone",
         "Observation",
+        "Hypothesis",
+        "Decision",
         "Delegation",
     ] = "Note"
     sources: list[DocSource] = []
@@ -211,6 +217,31 @@ class DocRecordUpdate(BaseModel):
     body: str | None = None
 
 
+class DocRelation(BaseModel):
+    """One narrative occurrence; its id is valid only with this file digest."""
+
+    id: int
+    target: str
+    role: EdgeRole
+    label: str
+    kind: Literal["document", "ref", "external", "missing"]
+
+
+class DocRelationsResponse(BaseModel):
+    relPath: str
+    digest: str
+    relations: list[DocRelation]
+
+
+class DocRelationUpdate(BaseModel):
+    action: Literal["add", "replace", "remove"]
+    ifMatch: str = Field(min_length=1)
+    id: int | None = Field(default=None, ge=0)
+    target: str | None = None
+    role: EdgeRole = "references"
+    text: str | None = None
+
+
 class DocMoveRequest(BaseModel):
     name: str | None = None
     hostPath: str | None = None
@@ -230,6 +261,32 @@ class DocMetaUpdate(BaseModel):
 
 class BacklinksResponse(BaseModel):
     backlinks: list[NoteSummary]
+
+
+#: What a graph edge points at. ``missing`` is a relative path with no file behind it.
+GraphEdgeKind = Literal["document", "ref", "external", "missing"]
+
+
+class KnowledgeGraphEdge(BaseModel):
+    """One typed link from a document's narrative."""
+
+    source: str = Field(description="`relPath` of the document holding the link.")
+    target: str = Field(
+        description=(
+            "`relPath` of the linked document (`document`), the path the link names "
+            "relative to the served root (`missing`), the reference verbatim (`ref`), "
+            "or the URL verbatim (`external`)."
+        )
+    )
+    role: EdgeRole
+    kind: GraphEdgeKind
+
+
+class KnowledgeGraphResponse(BaseModel):
+    """``GET /knowledge/graph`` — every listed document and every typed link between them."""
+
+    nodes: list[NoteSummary]
+    edges: list[KnowledgeGraphEdge]
 
 
 def _path_of(target: object) -> str:
@@ -433,12 +490,14 @@ def _created_at(note: Concept) -> str | None:
 def _note_summary(workspace: Workspace, note: Concept) -> NoteSummary:
     """Build a :class:`NoteSummary` for *note* (identity + host + excerpt + times)."""
     from molab.knowledge.frontmatter import document_text
+    from molab.knowledge.index_section import document_title
     from molab.knowledge.naming import document_format
 
     body = document_text(note.read() or "", path=note.path)
     status_val = note.status() if isinstance(note, Note) else None
     return NoteSummary(
         name=note.name,
+        title=document_title(dict(note.frontmatter()), body, note.name),
         relPath=_rel(workspace, note.path),
         hostPath=_host_rel(workspace, note.path),
         excerpt=body[:_EXCERPT_CHARS],
@@ -468,6 +527,10 @@ def _document_record(note: Concept) -> dict[str, Any]:
     A corrupt record does not fail the read; the narrative still opens.
     """
     try:
+        if isinstance(note, Hypothesis):
+            return {"verdict": note.verdict()}
+        if isinstance(note, Decision):
+            return {"status": note.status()}
         fields = getattr(note, "planning_fields", None)
         if callable(fields):
             raw = fields()
@@ -980,6 +1043,82 @@ def list_knowledge(
     return KnowledgeListResponse(notes=notes, references=references, total=len(notes))
 
 
+def _graph_edges(workspace: Workspace, doc: Concept, listed: set[str]) -> list[KnowledgeGraphEdge]:
+    """The typed out-links of *doc* as graph edges, in narrative order.
+
+    Classification is :meth:`Concept.scan_links`; nothing here reads markdown.
+    A path link is an edge when it names a listed document or no file at all.
+    A path to an existing file that is not listed (a data file, a directory, a
+    document outside the served root) is not an edge. A fragment is dropped,
+    and a link repeated with one role is one edge. The scan types an http(s)
+    link only for ``cites`` / ``derived_from``; every other http(s) link is
+    reported with the default role.
+
+    Args:
+        workspace: The served root; targets are spelled relative to it.
+        doc: The document whose narrative is scanned.
+        listed: ``relPath`` of every node of the graph.
+    """
+    from collections import Counter
+
+    from molab.knowledge.edges import DEFAULT_EDGE_ROLE, Edge
+
+    web = ("http://", "https://")
+    scan = doc.scan_links(doc.read())
+    links = list(scan.typed_concepts)
+    typed_urls = Counter(edge.target for edge in links if edge.target.startswith(web))
+    for url in scan.external:
+        if typed_urls[url] > 0:
+            typed_urls[url] -= 1
+        else:
+            links.append(Edge(target=url, role=DEFAULT_EDGE_ROLE))
+
+    source = _rel(workspace, doc.path)
+    root = str(workspace.root)
+    missing = set(scan.missing)
+    found: dict[tuple[str, EdgeRole, GraphEdgeKind], None] = {}
+    for edge in links:
+        kind: GraphEdgeKind
+        if edge.is_ref:
+            target, kind = edge.target, "ref"
+        elif edge.target.startswith(web):
+            target, kind = edge.target, "external"
+        else:
+            absolute = edge.target.split("#", 1)[0]
+            target = PurePosixPath(os.path.relpath(absolute, root)).as_posix()
+            if absolute in missing:
+                kind = "missing"
+            elif target in listed:
+                kind = "document"
+            else:
+                continue
+        found[(target, edge.role, kind)] = None
+    return [
+        KnowledgeGraphEdge(source=source, target=target, role=role, kind=kind)
+        for target, role, kind in found
+    ]
+
+
+@router.get("/graph", response_model=KnowledgeGraphResponse)
+def get_knowledge_graph(
+    workspace: Workspace = Depends(get_workspace),
+) -> KnowledgeGraphResponse:
+    """The whole knowledge graph: the unfiltered listing as nodes, typed links as edges.
+
+    Pure derived read. Nothing is indexed, and a TeX manuscript is a node with
+    no out-links.
+    """
+    from molab.knowledge import Knowledge
+
+    nodes = list_knowledge(tag=None, status=None, workspace=workspace).notes
+    listed = {node.relPath for node in nodes}
+    edges: list[KnowledgeGraphEdge] = []
+    for doc in Knowledge(workspace.root, fs=workspace.fs).walk():
+        edges.extend(_graph_edges(workspace, doc, listed))
+    edges.sort(key=lambda edge: edge.source)
+    return KnowledgeGraphResponse(nodes=nodes, edges=edges)
+
+
 @router.get("/note", response_model=NoteDetailResponse)
 def get_note(
     path: str = Query(..., description="The document's workspace-relative path (its identity)."),
@@ -1149,6 +1288,123 @@ def update_doc_meta(
     return _note_summary(workspace, doc)
 
 
+def _relation_path(workspace: Workspace, path: str) -> str:
+    """Constrain authoring handles to workspace-relative paths."""
+    candidate = PurePosixPath(path)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "path must be workspace-relative"
+        )
+    absolute = workspace.fs.join(str(workspace.root), path)
+    root = PurePosixPath(workspace.fs.resolve(workspace.root))
+    if not PurePosixPath(workspace.fs.resolve(absolute)).is_relative_to(root):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "path resolves outside the workspace"
+        )
+    return absolute
+
+
+def _doc_relations(workspace: Workspace, path: str, doc: Concept) -> DocRelationsResponse:
+    from molab.knowledge.record import digest_of
+    from molab.knowledge.relations import relation_links
+    from molab.workspace.refs import is_ref
+
+    digest = digest_of(doc)
+    relations = []
+    for link in relation_links(doc):
+        kind: Literal["document", "ref", "external", "missing"]
+        if is_ref(link.target):
+            target, kind = link.target, "ref"
+        elif link.target.startswith(("http://", "https://")):
+            target, kind = link.target, "external"
+        else:
+            absolute, separator, fragment = link.target.partition("#")
+            target = PurePosixPath(os.path.relpath(absolute, str(workspace.root))).as_posix()
+            if separator:
+                target += f"#{fragment}"
+            kind = "document" if workspace.fs.exists(absolute) else "missing"
+        relations.append(
+            DocRelation(
+                id=link.id,
+                target=target,
+                role=link.role,
+                label=link.label,
+                kind=kind,
+            )
+        )
+    if digest_of(doc) != digest:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Document changed while reading relations")
+    return DocRelationsResponse(relPath=path, digest=digest, relations=relations)
+
+
+@router.get("/doc/relations", response_model=DocRelationsResponse)
+def get_doc_relations(
+    path: str = Query(...),
+    workspace: Workspace = Depends(get_workspace),
+) -> DocRelationsResponse:
+    """Editable typed narrative links and the digest they were read from."""
+    _relation_path(workspace, path)
+    _reject_tex(path)
+    return _doc_relations(workspace, path, _open_doc(workspace, path))
+
+
+@router.patch(
+    "/doc/relations",
+    response_model=DocRelationsResponse,
+    dependencies=[Depends(_require_writable)],
+)
+def update_doc_relation(
+    payload: DocRelationUpdate,
+    path: str = Query(...),
+    workspace: Workspace = Depends(get_workspace),
+) -> DocRelationsResponse:
+    """Edit the original markdown link; reject stale authoring with 409."""
+    import hashlib
+
+    from molab.atomicio import file_lock
+    from molab.knowledge.record import RecordConflictError
+    from molab.knowledge.relations import mutate_relation
+    from molab.workspace.refs import is_ref, parse_ref
+
+    _relation_path(workspace, path)
+    _reject_tex(path)
+    doc = _open_doc(workspace, path)
+    lock_name = hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
+    lock_path = _StdPath(str(workspace.root)) / ".molab" / "locks" / f"knowledge-{lock_name}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target = payload.target
+        if payload.action == "add" and target:
+            if is_ref(target):
+                target = str(parse_ref(target))
+            elif not target.startswith(("http://", "https://")):
+                target = _relation_path(workspace, target)
+                if not workspace.fs.exists(target):
+                    raise ValueError("relation target does not exist")
+        with file_lock(lock_path):
+            mutate_relation(
+                doc,
+                action=payload.action,
+                if_match=payload.ifMatch,
+                occurrence=payload.id,
+                target=target,
+                role=payload.role,
+                text=payload.text,
+            )
+            result = _doc_relations(workspace, path, doc)
+    except RecordConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    _record_history(
+        workspace,
+        doc,
+        "knowledge.relation_changed",
+        f"{payload.action} relation of {doc.name}",
+    )
+    return result
+
+
 @router.get("/doc/record", response_model=DocRecordResponse)
 def get_doc_record(
     path: str = Query(..., description="The document's workspace-relative path (its identity)."),
@@ -1176,7 +1432,8 @@ def replace_doc_record(
 ) -> DocRecordResponse:
     """Replace a document's structured record whole — 409 when ``ifMatch`` is stale.
 
-    Only classes that own a record (Delegation, Roadmap, Todo, Milestone) accept
+    Only classes that own a record (Delegation, Roadmap, Todo, Milestone,
+    Hypothesis, Decision) accept
     it (422 otherwise, and for a record the class rejects). The change is
     recorded in the workspace history as ``knowledge.record_replaced``.
     """

@@ -9,10 +9,17 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import AwareDatetime, BaseModel, Field
 
 from molab.server.dependencies import get_workspace
+from molab.services.replay import (
+    DocumentHistory,
+    ReplayPage,
+    document_history,
+    replay_document,
+    research_replay,
+)
 from molab.workspace.history import GitHistory
 
 if TYPE_CHECKING:
@@ -21,6 +28,69 @@ if TYPE_CHECKING:
 __all__ = ["router"]
 
 router = APIRouter(prefix="/history", tags=["history"])
+
+
+@router.get("/document", response_model=DocumentHistory)
+def read_document_history(
+    document: str,
+    commit: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> DocumentHistory:
+    """Read one knowledge file's Git revisions and compare with its working copy."""
+    try:
+        return document_history(workspace, document, commit=commit, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/replay", response_model=ReplayPage)
+def replay_history(
+    project_id: str | None = Query(None, alias="projectId"),
+    experiment_id: str | None = Query(None, alias="experimentId"),
+    run_id: str | None = Query(None, alias="runId"),
+    kind: str | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+    as_of: AwareDatetime | None = Query(None, alias="asOf"),
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ReplayPage:
+    """Read the experimental sequence oldest first; never execute a step."""
+    try:
+        return research_replay(
+            workspace,
+            project_id=project_id,
+            experiment_id=experiment_id,
+            run_id=run_id,
+            kind=kind,
+            offset=offset,
+            limit=limit,
+            as_of=as_of,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/replay/document")
+def read_replay_document(
+    commit: str,
+    document: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> dict[str, str]:
+    """The exact recorded document version, rendered as text by the caller."""
+    try:
+        return {
+            "name": document.rsplit("/", 1)[-1],
+            "relPath": document,
+            "body": replay_document(workspace, commit, document),
+            "commit": commit,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 class HistoryFact(BaseModel):

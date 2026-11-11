@@ -1,11 +1,61 @@
-import { describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient } from "@tanstack/react-query";
 import {
   artifactPreviewText,
+  assetBytesQueryOptions,
   journalRefetchInterval,
   runKeys,
   structurePreviewText,
+  workspaceFileBytesQueryOptions,
 } from "@/app/state/entityQueries";
 import { getWorkspaceQueryScope } from "../workspaceSwitchEvents";
+
+afterEach(() => {
+  rs.restoreAllMocks();
+});
+
+describe("binary preview queries", () => {
+  it("preserves a workspace asset's bytes without a project or producing attempt", async () => {
+    const binary = new Uint8Array([0, 255, 128, 195, 40]);
+    const fetch = rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response(binary));
+    const client = new QueryClient();
+    try {
+      expect(await client.fetchQuery(assetBytesQueryOptions("", "a"))).toEqual(binary);
+      expect(fetch).toHaveBeenCalledWith("/api/assets/a/download", {
+        credentials: "same-origin",
+      });
+    } finally {
+      client.clear();
+    }
+  });
+
+  it("requests arbitrary workspace binary files through the download route", async () => {
+    const binary = new Uint8Array([0, 255, 128, 195, 40]);
+    const fetch = rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response(binary));
+    const client = new QueryClient();
+    try {
+      expect(await client.fetchQuery(workspaceFileBytesQueryOptions("out/a.dcd"))).toEqual(binary);
+      expect(fetch).toHaveBeenCalledWith("/api/workspace/file/blob?path=out%2Fa.dcd&download=true");
+    } finally {
+      client.clear();
+    }
+  });
+
+  it("reports failed binary reads instead of returning empty bytes", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(
+      async () => new Response(null, { status: 403 }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    try {
+      await expect(client.fetchQuery(assetBytesQueryOptions("p", "a"))).rejects.toThrow("403");
+      await expect(client.fetchQuery(workspaceFileBytesQueryOptions("a.dcd"))).rejects.toThrow(
+        "403",
+      );
+    } finally {
+      client.clear();
+    }
+  });
+});
 
 describe("runKeys.journal", () => {
   it("keys one execution journal", () => {

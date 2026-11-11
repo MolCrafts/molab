@@ -43,7 +43,7 @@ export const useDocDraft = (note: NoteDetailResponse): DocDraft => {
       try {
         const updated = await knowledgeApi.editDoc(note.relPath, body);
         queryClient.setQueryData<NoteDetailResponse>(knowledgeKeys.note(note.relPath), updated);
-        void queryClient.invalidateQueries({ queryKey: knowledgeKeys.lists() });
+        void queryClient.invalidateQueries({ queryKey: knowledgeKeys.all });
         setDraft((current) => (current === body ? null : current));
       } catch (err) {
         setError(

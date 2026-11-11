@@ -3,7 +3,8 @@
 The Open Knowledge Format graph lives as markdown links in each Concept's
 ``index.md`` (see :mod:`molab.knowledge.concept`). This module gives every edge
 a typed *role* — a declared relation (``derived_from`` / ``cites`` /
-``supersedes`` / ``records`` / ``references``) — encoded in the link's
+``supersedes`` / ``supports`` / ``contradicts`` / ``records`` /
+``references``) — encoded in the link's
 ``[label]`` channel, so the writer (:func:`molab.knowledge.concept.append_link`)
 and the reader (:meth:`molab.knowledge.concept.Concept.links`) share one format
 and can never drift.
@@ -33,7 +34,9 @@ from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 if TYPE_CHECKING:
     from .concept import Concept
 
-EdgeRole = Literal["derived_from", "cites", "supersedes", "records", "references"]
+EdgeRole = Literal[
+    "derived_from", "cites", "supersedes", "supports", "contradicts", "records", "references"
+]
 """A declared relation on an OKF knowledge-graph edge."""
 
 DEFAULT_EDGE_ROLE: EdgeRole = "references"
@@ -42,7 +45,7 @@ DEFAULT_EDGE_ROLE: EdgeRole = "references"
 # Kept in lockstep with the ``EdgeRole`` Literal above (a Literal cannot be built
 # from a variable, so the two spellings sit adjacent for easy synchronization).
 _EDGE_ROLES: frozenset[str] = frozenset(
-    {"derived_from", "cites", "supersedes", "records", "references"}
+    {"derived_from", "cites", "supersedes", "supports", "contradicts", "records", "references"}
 )
 
 _ROLE_SIGIL = "@"

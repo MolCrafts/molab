@@ -232,6 +232,8 @@ const originFromExtra = (extra: Record<string, unknown> | undefined): AssetOrigi
   if (!kind) return undefined;
   return {
     kind,
+    projectId: extraString(extra, "originProjectId"),
+    experimentId: extraString(extra, "originExperimentId"),
     runId: extraString(extra, "runId"),
     executionId: extraString(extra, "executionId"),
     task: extraString(extra, "task"),
@@ -260,6 +262,8 @@ export const mapAssets = (
         mediaType: asset.mediaType ?? null,
         origin: {
           kind: asset.originKind,
+          projectId: asset.originProjectId ?? null,
+          experimentId: asset.originExperimentId ?? null,
           runId: asset.runId ?? null,
           executionId: asset.executionId ?? null,
           task: asset.task ?? null,

@@ -12,23 +12,27 @@ import {
   DropdownMenuTrigger,
 } from "@molcrafts/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, MoreHorizontal, Save } from "lucide-react";
+import { Check, Download, MoreHorizontal, Network, Save } from "lucide-react";
 import { type JSX, useState } from "react";
 import { knowledgeApi } from "@/api";
+import { useNavigationState } from "@/app/state/useNavigationState";
 import type { RendererSnapshot } from "@/app/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { usePrompt } from "@/components/PromptDialog";
 import { toast } from "@/components/ui/toast";
 import { WorkbenchIconAction } from "@/components/workbench";
+import { isUnder } from "@/lib/workspace-path";
 import { HostPickerDialog } from "../HostPickerDialog";
 import { listHostOptions } from "../knowledgeDocTree";
 import { knowledgeKeys } from "../queries";
+import { MAP_CLASSES } from "../research-map";
 import { useKnowledgeDocs } from "../useKnowledgeDocs";
 
 const STATUS_WORDS = ["draft", "active", "archived"] as const;
 
 export interface DocActionsProps {
   relPath: string;
+  cls: string;
   name: string;
   hostPath: string;
   status: string | null;
@@ -43,6 +47,7 @@ export interface DocActionsProps {
 
 export const DocActions = ({
   relPath,
+  cls,
   name,
   hostPath,
   status,
@@ -54,6 +59,10 @@ export const DocActions = ({
   writable,
 }: DocActionsProps): JSX.Element => {
   const queryClient = useQueryClient();
+  const nav = useNavigationState(snapshot);
+  const project = snapshot.projects.find(
+    (project) => Boolean(project.path) && isUnder(relPath, project.path),
+  );
   const { renameDoc, moveDoc, deleteDoc } = useKnowledgeDocs();
   const { prompt, dialog: promptDialog } = usePrompt();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -116,6 +125,22 @@ export const DocActions = ({
           <Save aria-hidden />
         </WorkbenchIconAction>
       ) : null}
+      {project && MAP_CLASSES.has(cls) && (
+        <WorkbenchIconAction
+          label="Show lineage"
+          onClick={() =>
+            nav.setSelection({
+              objectType: "project",
+              objectId: project.id,
+              pluginView: "relations",
+              pluginExplorer: "knowledge",
+              pluginFocus: relPath,
+            })
+          }
+        >
+          <Network aria-hidden />
+        </WorkbenchIconAction>
+      )}
       <WorkbenchIconAction label="Export" asChild>
         <a href={knowledgeApi.docExportUrl(relPath)} download>
           <Download aria-hidden />

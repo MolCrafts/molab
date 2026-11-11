@@ -43,7 +43,13 @@ export const applicableRunViews = (
 
 export const useRunViews = (
   attempt: RunAttempt | null,
-): { tabs: RunViewTab[]; dir: string | null; loading: boolean } => {
+): {
+  tabs: RunViewTab[];
+  dir: string | null;
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+} => {
   const prefs = usePluginPreferencesGeneration();
   const generation = useContributionGeneration();
   const listing = useQuery({
@@ -80,7 +86,17 @@ export const useRunViews = (
     ...view,
     count: (counts[index]?.data as number | null | undefined) ?? null,
   }));
-  return { tabs, dir: listing.data?.runDir ?? null, loading: listing.isPending };
+  return {
+    tabs,
+    dir: listing.data?.runDir ?? null,
+    loading: listing.isPending && listing.isFetching,
+    error: listing.error
+      ? listing.error instanceof Error
+        ? listing.error.message
+        : String(listing.error)
+      : null,
+    refetch: () => void listing.refetch(),
+  };
 };
 
 const read = <T,>(query: {

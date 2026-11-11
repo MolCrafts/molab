@@ -15,13 +15,36 @@ from molab.knowledge.edges import (
     parse_role,
 )
 
-ROLES = ("derived_from", "cites", "supersedes", "records", "references")
+ROLES = (
+    "derived_from",
+    "cites",
+    "supersedes",
+    "supports",
+    "contradicts",
+    "records",
+    "references",
+)
 
 
 @pytest.mark.parametrize("role", ROLES)
 def test_encode_parse_round_trip(role: str) -> None:
     encoded = encode_label(role, "my-target")
     assert parse_role(encoded) == (role, "my-target")
+
+
+def test_the_vocabulary_is_exactly_these_roles() -> None:
+    from typing import get_args
+
+    from molab.knowledge.edges import _EDGE_ROLES, EdgeRole
+
+    assert set(get_args(EdgeRole)) == set(ROLES) == set(_EDGE_ROLES)
+
+
+@pytest.mark.parametrize("role", ["supports", "contradicts"])
+def test_evidence_roles_write_the_sigil(role: str) -> None:
+    from molab.knowledge.edges import link_line
+
+    assert link_line(encode_label(role, "h1"), "h1.md") == f"- [@{role} h1](h1.md)"
 
 
 def test_default_role_encodes_to_bare_label() -> None:
@@ -66,7 +89,7 @@ class TestLinkLine:
                 )
                 if "- [" in literal and "](" in literal:
                     offenders.append(f"{path}:{node.lineno}")
-        assert offenders == ["src/molab/knowledge/edges.py:96"]
+        assert offenders == ["src/molab/knowledge/edges.py:99"]
 
 
 class TestBacklink:

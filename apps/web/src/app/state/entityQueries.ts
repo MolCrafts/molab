@@ -175,7 +175,7 @@ export const projectAssetsQueryOptions = (projectId: string) =>
 export const assetDetailQueryOptions = (projectId: string, assetId: string) =>
   queryOptions({
     queryKey: assetKeys.detail(projectId, assetId),
-    queryFn: () => assetsApi.getProjectAsset(projectId, assetId),
+    queryFn: () => assetsApi.getAsset(assetId),
   });
 
 /** An asset's bytes as text, cut at `limit` (the asset preview, L08). Bytes never change. */

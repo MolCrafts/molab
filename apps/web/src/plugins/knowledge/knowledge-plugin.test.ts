@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
-import { registerRendererContribution, tryResolveRenderer } from "@/app/registry";
+import { listEntityTabs, registerRendererContribution, tryResolveRenderer } from "@/app/registry";
+import { createPluginAPI } from "@/plugins/api/create_api";
 import {
   resetContributionRuntimeForTests,
   runWithPluginContext,
@@ -10,6 +11,7 @@ import {
   setPluginEnabled,
 } from "@/plugins/preferences";
 import type { UiPluginModule } from "@/plugins/types";
+import knowledgePlugin from "./plugin";
 
 const knowledgeMeta: Pick<UiPluginModule, "id" | "name" | "userToggleable"> = {
   id: "knowledge",
@@ -53,6 +55,20 @@ beforeEach(() => {
 });
 
 describe("knowledge plugin", () => {
+  it("registers Relations only for projects, and removes it on disable or disposal", async () => {
+    const { api, disposeAll } = createPluginAPI("knowledge");
+    await knowledgePlugin.activate(api);
+    expect(listEntityTabs("project").map((view) => view.value)).toEqual(["relations"]);
+    expect(listEntityTabs("experiment")).toEqual([]);
+    expect(listEntityTabs("knowledge")).toEqual([]);
+    setPluginEnabled("knowledge", false);
+    expect(listEntityTabs("project")).toEqual([]);
+    setPluginEnabled("knowledge", true);
+    expect(listEntityTabs("project")).toHaveLength(1);
+    disposeAll();
+    expect(listEntityTabs("project")).toEqual([]);
+  });
+
   it("exposes a toggleable knowledge catalog entry shape", () => {
     expect(knowledgeMeta.id).toBe("knowledge");
     expect(knowledgeMeta.name).toBe("Knowledge");

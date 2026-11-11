@@ -231,3 +231,14 @@ class TestBulkNeverEntersHistory:
             subprocess.run(["git", "check-ignore", "-q", rel], cwd=tmp_path, check=False).returncode
             == 0
         )
+
+
+def test_show_preserves_exact_document_whitespace(tmp_path):
+    history = GitHistory(tmp_path)
+    history.init()
+    path = tmp_path / "indented.md"
+    content = "  indented evidence  \n\n"
+    path.write_text(content, encoding="utf-8")
+    commit = history.sweep()
+    assert commit is not None
+    assert history.show(commit, "indented.md") == content

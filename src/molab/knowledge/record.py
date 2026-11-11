@@ -2,8 +2,9 @@
 
 The record of a document is its frontmatter minus the keys every document
 carries (:data:`COMMON_KEYS`). Classes that own a structured record — a
-:class:`~molab.knowledge.concepts.Delegation`, or a planning document whose
-role stores fields (Roadmap / Todo / Milestone) — can have it replaced whole.
+:class:`~molab.knowledge.concepts.Delegation`, a Hypothesis, a Decision, or a
+planning document whose role stores fields (Roadmap / Todo / Milestone) — can
+have it replaced whole.
 The caller passes the digest it read; a changed file is a conflict, not a
 silent overwrite.
 """
@@ -57,8 +58,13 @@ def digest_of(doc: Concept) -> str:
 
 
 def _common_keys(klass: type) -> frozenset[str]:
-    """The common keys this class does not own. A Milestone's ``status`` is its record's."""
-    if getattr(klass, "PLANNING_ROLE", None) == "milestone":
+    """The common keys this class does not own.
+
+    A Milestone's ``status`` is its record's, and so is a Decision's.
+    """
+    if getattr(klass, "PLANNING_ROLE", None) == "milestone" or getattr(
+        klass, "STATUS_IN_RECORD", False
+    ):
         return COMMON_KEYS - {"status"}
     return COMMON_KEYS
 

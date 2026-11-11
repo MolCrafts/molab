@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { parseDocBlocks } from "./doc/blocks";
 import {
+  DOC_RECORD,
   DOC_SKELETON,
   fillSkeleton,
   isSourcedClass,
@@ -14,6 +15,12 @@ describe("DOC_SKELETON", () => {
     expect(DOC_SKELETON.Finding).toContain('!!! success "Claim"');
     expect(DOC_SKELETON.Todo).toContain("::molab-todo-list");
     expect(DOC_SKELETON.Delegation).toContain("::molab-approval");
+    expect(DOC_SKELETON.Hypothesis).toContain('!!! question "Claim"');
+    expect(DOC_SKELETON.Decision).toContain("## Decided by");
+    expect(DOC_RECORD.Hypothesis).toEqual({ verdict: "open" });
+    expect(DOC_RECORD.Decision).toEqual({ status: "made" });
+    expect(isSourcedClass("Hypothesis")).toBe(true);
+    expect(isSourcedClass("Decision")).toBe(true);
     expect(Object.values(DOC_SKELETON).some((body) => /^# /m.test(body))).toBe(false);
     expect(isSourcedClass("Finding")).toBe(true);
     expect(isSourcedClass("Note")).toBe(false);

@@ -59,6 +59,76 @@ describe("Files explorer", () => {
     });
   });
 
+  it("opens project plugins in place while keeping ordinary files as file selections", () => {
+    const snapshot = buildEmptySnapshot();
+    snapshot.projects = [
+      {
+        id: "p-id",
+        path: "projects/project-slug",
+        name: "P",
+        status: "active",
+        summary: "",
+        updatedAt: "",
+      },
+    ];
+    snapshot.workspaceRoot = {
+      id: "root",
+      name: "Workspace",
+      path: "",
+      kind: "directory",
+      childrenLoaded: true,
+      sizeBytes: 0,
+      updatedAt: "",
+      children: [
+        {
+          id: "p-dir",
+          name: "project-slug",
+          path: "projects/project-slug",
+          kind: "directory",
+          children: [],
+          childrenLoaded: true,
+          sizeBytes: 0,
+          updatedAt: "",
+        },
+        {
+          id: "readme",
+          name: "README.md",
+          path: "README.md",
+          kind: "file",
+          children: [],
+          sizeBytes: 0,
+          updatedAt: "",
+        },
+      ],
+    };
+    let pluginProject = "";
+    let selected: Selection | null = null;
+    const [root] = buildFilesExplorerNodes(snapshot, {
+      writeDeniedReason: null,
+      onOpenProjectPlugins: (id) => {
+        pluginProject = id;
+      },
+      onSelect: (next) => {
+        selected = next;
+      },
+      onCreateDirectory: () => {},
+      onCreateFile: () => {},
+      pathContext: { root: "/workspace", workspace: null },
+      onRefresh: () => {},
+    });
+    root.children?.[0].onSelect?.();
+    expect(pluginProject).toBe("p-id");
+    expect(selected).toBeNull();
+    root.children?.[0].actions?.find((action) => action.id === "open")?.onSelect();
+    expect(selected).toEqual({ objectType: "project", objectId: "p-id" });
+    root.children?.[1].onSelect?.();
+    expect(selected).toMatchObject({
+      objectType: "workspace-file",
+      filePath: "README.md",
+      fileKind: "markdown",
+    });
+  });
+
   it("offers Sync on a remote tree and marks a saved rule", () => {
     const snapshot = buildEmptySnapshot();
     snapshot.workspaceRoot = {

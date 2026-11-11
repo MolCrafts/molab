@@ -9,6 +9,14 @@ export const KnowledgeExplorer = ({
   onSelect,
 }: Pick<NavigationExplorerProps, "snapshot" | "selection" | "onSelect">): JSX.Element => (
   <LeftExplorer title="Knowledge">
-    <DocTree snapshot={snapshot} activeId={selection?.objectId} onSelect={onSelect} />
+    <DocTree
+      snapshot={snapshot}
+      activeId={
+        selection?.objectType === "project"
+          ? `group:host:${snapshot.projects.find((project) => project.id === selection.objectId)?.path ?? ""}`
+          : selection?.objectId
+      }
+      onSelect={onSelect}
+    />
   </LeftExplorer>
 );

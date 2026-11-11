@@ -212,6 +212,14 @@ class HistoryEntry(BaseModel):
         )
 
 
+class FileRevision(BaseModel):
+    """A Git file revision, including edits made outside Molab."""
+
+    commit: str
+    occurred_at: str
+    summary: str
+
+
 def _git_available() -> bool:
     return shutil.which("git") is not None
 
@@ -365,7 +373,27 @@ class GitHistory:
 
     def show(self, commit: str, rel_path: PathArg) -> str | None:
         """Return a file's bytes as of *commit* (git is the content store)."""
-        return self._git("show", f"{commit}:{rel_path}")
+        return self._git("show", f"{commit}:{rel_path}", strip_output=False)
+
+    def file_revisions(self, path: PathArg, *, limit: int = 50) -> list[FileRevision]:
+        """Changes to one literal file path, newest first; no commit-trailer requirement."""
+        if not self.enabled():
+            return []
+        _, spec = self._pathspec(path)
+        output = self._git(
+            "--literal-pathspecs",
+            "log",
+            f"--max-count={limit}",
+            "--format=%H%x1f%cI%x1f%s",
+            "--",
+            spec,
+        )
+        return [
+            FileRevision(commit=commit, occurred_at=at, summary=summary)
+            for line in (output or "").splitlines()
+            if len(parts := line.split("\x1f", 2)) == 3
+            for commit, at, summary in [parts]
+        ]
 
     # ── internals ────────────────────────────────────────────────────────
 
@@ -496,7 +524,11 @@ class GitHistory:
         return absolute, spec
 
     def _git(
-        self, *args: str, check: bool = False, env: dict[str, str] | None = None
+        self,
+        *args: str,
+        check: bool = False,
+        env: dict[str, str] | None = None,
+        strip_output: bool = True,
     ) -> str | None:
         cmd = [
             "git",
@@ -517,6 +549,7 @@ class GitHistory:
                 cwd=self.root,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
                 env=merged,
             )
@@ -530,7 +563,7 @@ class GitHistory:
                 raise RuntimeError(f"git {args[0]} failed: {proc.stderr.strip()}")
             logger.debug(f"git {args[0]} exited {proc.returncode}: {proc.stderr.strip()}")
             return None
-        return proc.stdout.strip()
+        return proc.stdout.strip() if strip_output else proc.stdout
 
 
 def _parse(sha: str, body: str) -> HistoryEntry | None:

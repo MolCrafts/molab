@@ -1,9 +1,8 @@
 /**
  * Pure, React-free, IO-free builders for the Knowledge document shell:
  *
- * - {@link buildDocTree} groups documents by the server-reported `hostPath`.
- *   The empty host is the knowledge-base group; every other host is one flat
- *   group. Documents are never nested.
+ * - {@link buildDocTree} nests hosts under their workspace, project and
+ *   experiment, with files under the server-reported `hostPath`.
  * - {@link buildOutline} extracts a document's H1–H3 headings, in order,
  *   ignoring H4+ and any `#` lines inside fenced code blocks.
  */
@@ -41,48 +40,56 @@ export interface OutlineHeading {
 export const KB_GROUP_ID = "group:knowledge-base";
 const KB_GROUP_NAME = "Workspace";
 
-/**
- * Group documents by `hostPath`. The workspace root (`""`) is the knowledge-base
- * group and leads. Every other host is `group:host:<hostPath>`. Children are
- * flat documents. Empty input yields an empty tree.
- */
-export const buildDocTree = (entries: DocEntry[]): DocTreeNode[] => {
+/** Workspace → project → experiment hosts, with files under their actual
+ * host. Empty hosts remain visible. Parentage uses server paths, not ids. */
+export const buildDocTree = (
+  entries: DocEntry[],
+  hosts: ReadonlyArray<{ path: string; name: string }> = [],
+): DocTreeNode[] => {
   const groups = new Map<string, DocTreeNode>();
-
+  for (const host of [
+    { path: "", name: KB_GROUP_NAME },
+    ...hosts,
+    ...entries.map((entry) => ({ path: entry.hostPath, name: entry.hostPath })),
+  ]) {
+    if (groups.has(host.path)) continue;
+    groups.set(host.path, {
+      id: host.path === "" ? KB_GROUP_ID : `group:host:${host.path}`,
+      name: host.name,
+      kind: "group",
+      relPath: null,
+      hostPath: host.path,
+      children: [],
+    });
+  }
   for (const entry of entries) {
-    const hostPath = entry.hostPath;
-    const id = hostPath === "" ? KB_GROUP_ID : `group:host:${hostPath}`;
-    let group = groups.get(id);
-    if (!group) {
-      group = {
-        id,
-        name: hostPath === "" ? KB_GROUP_NAME : hostPath,
-        kind: "group",
-        relPath: null,
-        hostPath,
-        children: [],
-      };
-      groups.set(id, group);
-    }
-    group.children.push({
+    groups.get(entry.hostPath)?.children.push({
       id: entry.relPath,
       name: entry.name,
       kind: "doc",
       relPath: entry.relPath,
-      hostPath,
+      hostPath: entry.hostPath,
       children: [],
     });
   }
-
-  const ordered = [...groups.values()].sort((a, b) => {
-    if (a.hostPath === "" && b.hostPath !== "") return -1;
-    if (b.hostPath === "" && a.hostPath !== "") return 1;
-    return a.hostPath.localeCompare(b.hostPath);
-  });
-  for (const group of ordered) {
-    group.children.sort((a, b) => a.name.localeCompare(b.name));
+  for (const group of groups.values()) {
+    if (group.hostPath === "") continue;
+    const parent = [...groups.values()]
+      .filter(
+        (candidate) =>
+          candidate.hostPath === "" || group.hostPath.startsWith(`${candidate.hostPath}/`),
+      )
+      .sort((a, b) => b.hostPath.length - a.hostPath.length)[0];
+    parent.children.push(group);
   }
-  return ordered;
+  for (const group of groups.values()) {
+    group.children.sort(
+      (a, b) =>
+        Number(b.kind === "group") - Number(a.kind === "group") || a.name.localeCompare(b.name),
+    );
+  }
+  const root = groups.get("");
+  return root ? [root] : [];
 };
 
 const FENCE_RE = /^[ \t]{0,3}(?:`{3,}|~{3,})/;

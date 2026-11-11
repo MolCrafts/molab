@@ -8,6 +8,7 @@ import type { ComponentType, SVGProps } from "react";
 import { compareSet } from "@/app/compare/useCompareSet";
 import { entityMeta } from "@/app/entities/kinds";
 import { listAllNavigationContributions } from "@/app/navigation/sections";
+import { listEntityTabs } from "@/app/registry";
 import { runLabel } from "@/app/runs/runTitle";
 import type { WorkspaceSnapshot } from "@/app/types";
 import type { EditorTab } from "./editorTabs";
@@ -58,6 +59,18 @@ export const describeEditorTab = (tab: EditorTab, snapshot: TabSnapshot): Editor
   const icon = entityMeta(tab.kind).icon as EditorTabPresentation["icon"];
   switch (tab.kind) {
     case "project": {
+      const params = new URLSearchParams(tab.path.split("?")[1]);
+      const plugin = params.get("plugin");
+      if (plugin) {
+        const project = snapshot.projects.find(
+          (candidate) => candidate.id === params.get("project"),
+        );
+        const view = listEntityTabs("project").find((view) => view.value === plugin);
+        return {
+          label: `${view?.label ?? plugin} · ${project?.name ?? params.get("project")}`,
+          icon: view?.Icon ?? icon,
+        };
+      }
       const project = snapshot.projects.find((candidate) => candidate.id === id);
       return { label: project?.name ?? tab.label, icon };
     }

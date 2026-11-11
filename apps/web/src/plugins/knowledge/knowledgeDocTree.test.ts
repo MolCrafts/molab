@@ -19,7 +19,7 @@ const findByRelPath = (nodes: DocTreeNode[], relPath: string): DocTreeNode | nul
 };
 
 describe("buildDocTree", () => {
-  it("groups by hostPath, knowledge base first, documents flat", () => {
+  it("nests project hosts under the workspace and retains file leaves", () => {
     const entries: DocEntry[] = [
       { relPath: "knowledges/a.md", hostPath: "", name: "A" },
       { relPath: "projects/p/knowledges/b.md", hostPath: "projects/p", name: "B" },
@@ -27,18 +27,42 @@ describe("buildDocTree", () => {
 
     const tree = buildDocTree(entries);
 
-    expect(tree).toHaveLength(2);
+    expect(tree).toHaveLength(1);
     expect(tree[0]?.id).toBe(KB_GROUP_ID);
     expect(tree[0]?.hostPath).toBe("");
-    expect(tree[1]?.hostPath).toBe("projects/p");
-    expect(tree[1]?.id).toBe("group:host:projects/p");
-    expect(tree.every((group) => group.children.every((child) => child.kind === "doc"))).toBe(true);
+    expect(tree[0]?.children[0]?.hostPath).toBe("projects/p");
+    expect(tree[0]?.children[0]?.id).toBe("group:host:projects/p");
+    expect(tree[0]?.children.map((child) => child.kind)).toEqual(["group", "doc"]);
     expect(findByRelPath(tree, "knowledges/a.md")?.kind).toBe("doc");
     expect(findByRelPath(tree, "projects/p/knowledges/b.md")?.kind).toBe("doc");
   });
 
-  it("yields an empty tree for empty input", () => {
-    expect(buildDocTree([])).toEqual([]);
+  it("keeps the workspace visible for empty input", () => {
+    expect(buildDocTree([])[0]).toMatchObject({ id: KB_GROUP_ID, children: [] });
+  });
+  it("keeps empty projects and nests experiment files by server paths without prefix collisions", () => {
+    const tree = buildDocTree(
+      [
+        {
+          relPath: "projects/p/experiments/e/knowledges/a.md",
+          hostPath: "projects/p/experiments/e",
+          name: "a.md",
+        },
+        { relPath: "projects/pe/knowledges/b.md", hostPath: "projects/pe", name: "b.md" },
+      ],
+      [
+        { path: "projects/p", name: "P" },
+        { path: "projects/pe", name: "PE" },
+        { path: "projects/empty", name: "Empty" },
+        { path: "projects/p/experiments/e", name: "Experiment" },
+      ],
+    );
+    const projects = tree[0].children;
+    expect(projects.map((node) => node.name)).toEqual(["Empty", "P", "PE"]);
+    expect(projects[0].children).toEqual([]);
+    expect(projects[1].children[0].name).toBe("Experiment");
+    expect(projects[1].children[0].children[0].name).toBe("a.md");
+    expect(projects[2].children[0].name).toBe("b.md");
   });
 });
 

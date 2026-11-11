@@ -18,6 +18,8 @@ describe("knowledgeClass", () => {
       "Todo",
       "Milestone",
       "Observation",
+      "Hypothesis",
+      "Decision",
       "Delegation",
     ]);
   });
@@ -33,6 +35,8 @@ describe("knowledgeClass", () => {
       "todo.json",
       "milestone.json",
       "observation.json",
+      "hypothesis.json",
+      "decision.json",
       "delegation.json",
     ]);
     expect(knowledgeHeadFile("Note")).toBe("note.json");
@@ -44,6 +48,8 @@ describe("knowledgeClass", () => {
     expect(knowledgeHeadFile("Todo")).toBe("todo.json");
     expect(knowledgeHeadFile("Milestone")).toBe("milestone.json");
     expect(knowledgeHeadFile("Observation")).toBe("observation.json");
+    expect(knowledgeHeadFile("Hypothesis")).toBe("hypothesis.json");
+    expect(knowledgeHeadFile("Decision")).toBe("decision.json");
     expect(knowledgeHeadFile("Delegation")).toBe("delegation.json");
   });
 

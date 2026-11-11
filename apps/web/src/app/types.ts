@@ -238,6 +238,9 @@ export interface AssetSummary {
 /** An asset's origin, as the server records it (`ManagedAssetResponse`). */
 export interface AssetOrigin {
   kind: string;
+  /** The immutable producing scope; distinct from the asset owner. */
+  projectId?: string | null;
+  experimentId?: string | null;
   runId: string | null;
   executionId: string | null;
   task: string | null;
@@ -350,6 +353,12 @@ export interface ObjectSelection {
   experimentView?: ExperimentView;
   /** Route-backed view within a project. Only meaningful for project selections. */
   projectView?: ProjectView;
+  /** A contributed project view opened as its own workbench editor tab. */
+  pluginView?: string;
+  /** Document to select when opening a knowledge relation view. */
+  pluginFocus?: string;
+  /** Keep the explorer that launched a project plugin. */
+  pluginExplorer?: "knowledge" | "files" | "projects";
 }
 
 export interface WorkflowSelection {

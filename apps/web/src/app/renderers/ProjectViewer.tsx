@@ -55,7 +55,11 @@ import type {
 } from "@/app/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { toast } from "@/components/ui/toast";
-import { WorkbenchOperationState, WorkbenchRetryAction } from "@/components/workbench";
+import {
+  WorkbenchAction,
+  WorkbenchOperationState,
+  WorkbenchRetryAction,
+} from "@/components/workbench";
 import { formatBytes } from "@/lib/format-bytes";
 import { formatRelative } from "@/lib/format-time";
 import { PlanProgress, usePlanCampaigns } from "@/plugins/knowledge/PlanProgress";
@@ -510,17 +514,32 @@ export const ProjectViewer = ({
         icon={Blocks}
         title={project.name}
         actions={
-          <ProjectEditorActions
-            projectId={project.id}
-            projectName={project.name}
-            experimentCount={completeness.experimentCount ?? experiments.length}
-            runCount={completeness.runCount ?? runs.length}
-            active={runs.some((run) => isActiveStatus(normalizeStatus(run.status)))}
-            onNewExperiment={() => setNewExperimentOpen(true)}
-            onOpenRuns={() => openRuns()}
-            onCompareAll={compareAll}
-            onDelete={deleteProject}
-          />
+          <>
+            <WorkbenchAction
+              size="compact"
+              onClick={() =>
+                setSelection({
+                  objectType: "project",
+                  objectId: project.id,
+                  pluginView: "relations",
+                  pluginExplorer: "projects",
+                })
+              }
+            >
+              Relations
+            </WorkbenchAction>
+            <ProjectEditorActions
+              projectId={project.id}
+              projectName={project.name}
+              experimentCount={completeness.experimentCount ?? experiments.length}
+              runCount={completeness.runCount ?? runs.length}
+              active={runs.some((run) => isActiveStatus(normalizeStatus(run.status)))}
+              onNewExperiment={() => setNewExperimentOpen(true)}
+              onOpenRuns={() => openRuns()}
+              onCompareAll={compareAll}
+              onDelete={deleteProject}
+            />
+          </>
         }
         activeTab={activeTab}
         onActiveTabChange={setProjectTab}

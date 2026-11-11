@@ -615,7 +615,7 @@ def knowledge_write(
             "--class",
             help=(
                 "Note, Literature, Report, Finding, Plan, Roadmap, Todo, "
-                "Milestone, Observation, or Delegation."
+                "Milestone, Observation, Hypothesis, Decision, or Delegation."
             ),
         ),
     ] = "Note",

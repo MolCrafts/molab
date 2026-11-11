@@ -51,9 +51,9 @@ const Message = ({
     <AssetTile kind={kind} size={mode === "full" ? "lg" : "md"} />
     <p className="text-body text-foreground">{title}</p>
     <p className="text-label text-muted-foreground">{detail}</p>
-    {mode === "full" && asset.projectId ? (
+    {mode === "full" ? (
       <Button asChild size="sm" variant="secondary">
-        <a href={assetsApi.downloadUrl(asset.projectId, asset.id)} download>
+        <a href={assetsApi.downloadUrl(asset.projectId ?? "", asset.id)} download>
           Download
         </a>
       </Button>
@@ -157,7 +157,6 @@ export const AssetContent = ({ asset, kind, mode }: AssetContentProps): JSX.Elem
       : TEXT_CAP;
   const tooLarge = !wantsBytes && kind === "structure" && (asset.sizeBytes ?? 0) > cap;
   const readsText =
-    Boolean(asset.projectId) &&
     !wantsBytes &&
     !tooLarge &&
     (kind === "table" ||
@@ -170,21 +169,11 @@ export const AssetContent = ({ asset, kind, mode }: AssetContentProps): JSX.Elem
   });
   const bytes = useQuery({
     ...assetBytesQueryOptions(asset.projectId ?? "", asset.id),
-    enabled: Boolean(asset.projectId && wantsBytes && kind !== "image"),
+    enabled: Boolean(wantsBytes && kind !== "image"),
   });
   const meta = ASSET_KIND_META[kind];
   const size = asset.sizeBytes != null ? formatBytes(asset.sizeBytes) : null;
 
-  if (!asset.projectId)
-    return (
-      <Message
-        asset={asset}
-        kind={kind}
-        mode={mode}
-        title="No preview"
-        detail="This asset has no project to read it from."
-      />
-    );
   if (kind === "image") return <ImageContent asset={asset} />;
   if (tooLarge)
     return (

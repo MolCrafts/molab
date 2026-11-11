@@ -67,6 +67,28 @@ export const DOC_SKELETON: Record<KnowledgeClass, string> = {
     "    What this has not been checked against.",
     "",
   ].join("\n"),
+  Hypothesis: [
+    '!!! question "Claim"',
+    "    One testable claim, as one sentence.",
+    "",
+    "## Would support it",
+    "",
+    "## Would refute it",
+    "",
+    "## Builds on",
+    "",
+  ].join("\n"),
+  Decision: [
+    '!!! note "Decision"',
+    "    What was chosen, as one sentence.",
+    "",
+    "## Decided by",
+    "",
+    "## Why",
+    "",
+    "## Alternatives considered",
+    "",
+  ].join("\n"),
   Plan: [
     '!!! abstract "Goal"',
     "    What this plan decides, in one sentence.",
@@ -100,6 +122,15 @@ export const DOC_SKELETON: Record<KnowledgeClass, string> = {
     "## Activity",
     "",
   ].join("\n"),
+};
+
+/**
+ * The record a class starts with: a new Hypothesis has no verdict yet, and a
+ * Decision written down is one already made.
+ */
+export const DOC_RECORD: Partial<Record<KnowledgeClass, Record<string, unknown>>> = {
+  Hypothesis: { verdict: "open" },
+  Decision: { status: "made" },
 };
 
 export interface SkeletonFacts {
@@ -141,6 +172,8 @@ const SOURCED: ReadonlySet<KnowledgeClass> = new Set([
   "Todo",
   "Milestone",
   "Observation",
+  "Hypothesis",
+  "Decision",
   "Delegation",
 ]);
 

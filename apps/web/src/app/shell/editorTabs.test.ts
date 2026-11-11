@@ -6,11 +6,14 @@ import {
   type EditorTab,
   type EditorTabsState,
   EMPTY_EDITOR_TABS,
+  editorOpenMode,
   editorTabKey,
   followLocation,
   MAX_EDITOR_TABS,
   openEditorTab,
+  openPreviewTab,
   parseStoredEditorTabs,
+  pinEditorTab,
 } from "./editorTabs";
 
 const tab = (key: string, path = `/${key}`): EditorTab => ({ key, path, kind: "run", label: key });
@@ -21,6 +24,31 @@ const stateOf = (keys: string[], activeKey: string | null): EditorTabsState => (
 });
 
 describe("editorTabKey", () => {
+  it("keeps project plugin views in independent, reusable editor tabs", () => {
+    const relations = editorTabKey(
+      {
+        objectType: "project",
+        objectId: "p1",
+        pluginView: "relations",
+        pluginExplorer: "knowledge",
+      },
+      null,
+    );
+    expect(relations).toBe("project:p1:plugin:relations");
+    expect(relations).not.toBe(editorTabKey({ objectType: "project", objectId: "p1" }, null));
+    expect(relations).not.toBe(
+      editorTabKey({ objectType: "project", objectId: "p2", pluginView: "relations" }, null),
+    );
+    const file = { ...tab("file:note.md", "/knowledge/note.md"), kind: "knowledge" as const };
+    const view = {
+      ...tab(relations ?? "", "/knowledge?project=p1&plugin=relations"),
+      kind: "project" as const,
+    };
+    const opened = followLocation(followLocation(EMPTY_EDITOR_TABS, file, null), view, null);
+    expect(opened.tabs.map((tab) => tab.key)).toEqual([file.key, view.key]);
+    expect(followLocation(opened, view, null).tabs).toHaveLength(2);
+  });
+
   it("names the entity, not the view, so switching a view keeps one tab", () => {
     const overview = editorTabKey({ objectType: "run", objectId: "r1" }, null);
     const logs = editorTabKey({ objectType: "run", objectId: "r1", objectView: "logs" }, null);
@@ -151,6 +179,66 @@ describe("parseStoredEditorTabs", () => {
   });
 });
 
+const previewOf = (key: string): EditorTab => ({ ...tab(key), preview: true });
+
+describe("openPreviewTab", () => {
+  it("opens the first single click as the one italic tab", () => {
+    const next = openPreviewTab(stateOf(["a"], "a"), tab("b"));
+    expect(next.tabs.map((item) => item.key)).toEqual(["a", "b"]);
+    expect(next.tabs[1]?.preview).toBe(true);
+    expect(next.activeKey).toBe("b");
+  });
+
+  it("replaces the italic tab in place and leaves concrete tabs", () => {
+    const before: EditorTabsState = {
+      tabs: [tab("a"), previewOf("b"), tab("c")],
+      activeKey: "b",
+    };
+    const next = openPreviewTab(before, tab("d"));
+    expect(next.tabs.map((item) => [item.key, Boolean(item.preview)])).toEqual([
+      ["a", false],
+      ["d", true],
+      ["c", false],
+    ]);
+    expect(next.activeKey).toBe("d");
+  });
+
+  it("activates a concrete tab instead of demoting it", () => {
+    const before: EditorTabsState = {
+      tabs: [tab("a"), previewOf("b")],
+      activeKey: "b",
+    };
+    const next = openPreviewTab(before, tab("a"));
+    expect(next.activeKey).toBe("a");
+    expect(next.tabs.find((item) => item.key === "a")?.preview).toBe(false);
+    expect(next.tabs.find((item) => item.key === "b")?.preview).toBe(true);
+  });
+});
+
+describe("pinEditorTab", () => {
+  it("makes the italic tab concrete where it stands", () => {
+    const before: EditorTabsState = { tabs: [previewOf("a"), tab("b")], activeKey: "a" };
+    const next = pinEditorTab(before, "a");
+    expect(next.tabs[0]?.preview).toBe(false);
+    expect(next.tabs.map((item) => item.key)).toEqual(["a", "b"]);
+    expect(next.activeKey).toBe("a");
+  });
+
+  it("leaves a concrete tab untouched", () => {
+    const before = stateOf(["a"], "a");
+    expect(pinEditorTab(before, "a")).toBe(before);
+  });
+});
+
+describe("editorOpenMode", () => {
+  it("reads a preview or pin navigation and follows anything else", () => {
+    expect(editorOpenMode({ editorOpen: "preview" })).toBe("preview");
+    expect(editorOpenMode({ editorOpen: "pin" })).toBe("pin");
+    expect(editorOpenMode(null)).toBe("follow");
+    expect(editorOpenMode({ editorOpen: "nope" })).toBe("follow");
+  });
+});
+
 describe("followLocation", () => {
   it("closes a requested tab once the URL has left it", () => {
     const next = followLocation(stateOf(["a", "b"], "a"), tab("b"), "a");
@@ -173,6 +261,23 @@ describe("followLocation", () => {
     const next = followLocation(stateOf(["a", "b"], "a"), null, null);
     expect(next.tabs).toHaveLength(2);
     expect(next.activeKey).toBeNull();
+  });
+
+  it("keeps an italic tab italic when its view changes", () => {
+    const before: EditorTabsState = { tabs: [previewOf("a")], activeKey: "a" };
+    const next = followLocation(before, { ...tab("a"), path: "/a?tab=logs" }, null, "follow");
+    expect(next.tabs[0]).toMatchObject({ path: "/a?tab=logs", preview: true });
+  });
+
+  it("pins on a double-click navigation", () => {
+    const before: EditorTabsState = { tabs: [previewOf("a")], activeKey: "a" };
+    const next = followLocation(before, tab("a"), null, "pin");
+    expect(next.tabs[0]?.preview).toBe(false);
+  });
+
+  it("opens a single click as a preview tab", () => {
+    const next = followLocation(stateOf(["a"], "a"), tab("b"), null, "preview");
+    expect(next.tabs.find((item) => item.key === "b")?.preview).toBe(true);
   });
 });
 

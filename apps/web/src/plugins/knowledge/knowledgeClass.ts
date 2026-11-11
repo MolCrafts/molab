@@ -10,6 +10,8 @@ export const KNOWLEDGE_CLASSES = [
   "Todo",
   "Milestone",
   "Observation",
+  "Hypothesis",
+  "Decision",
   "Delegation",
 ] as const;
 
@@ -25,6 +27,8 @@ export const KNOWLEDGE_HEAD_FILES = [
   "todo.json",
   "milestone.json",
   "observation.json",
+  "hypothesis.json",
+  "decision.json",
   "delegation.json",
 ] as const;
 
@@ -40,6 +44,8 @@ const HEAD_BY_CLASS: Record<KnowledgeClass, KnowledgeHeadFile> = {
   Todo: "todo.json",
   Milestone: "milestone.json",
   Observation: "observation.json",
+  Hypothesis: "hypothesis.json",
+  Decision: "decision.json",
   Delegation: "delegation.json",
 };
 

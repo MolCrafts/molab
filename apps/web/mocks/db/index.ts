@@ -1169,6 +1169,7 @@ outputs:
     }
   }
   for (const asset of db.assets.values()) {
+    asset.ref ??= `molab:asset/${asset.id}`;
     const run = asset.producer?.run_id ? getRun(String(asset.producer.run_id)) : undefined;
     const executionId = run?.executions?.[0]?.id;
     if (executionId && asset.producer) asset.producer.executionId = executionId;
@@ -1400,6 +1401,7 @@ export function toManagedAsset(asset: ApiAssetResponse): ManagedAssetResponse {
   const executionId = producer ? String(producer.executionId ?? "") || null : null;
   const task = producer && producer.task_id != null ? String(producer.task_id) : null;
   const size = typeof asset.extra?.size === "number" ? asset.extra.size : 0;
+  const originRun = runId ? getRun(runId) : undefined;
   return {
     id: asset.id,
     projectId: asset.projectId || null,
@@ -1411,6 +1413,8 @@ export function toManagedAsset(asset: ApiAssetResponse): ManagedAssetResponse {
     size,
     file: asset.path,
     originKind: producer ? "execution" : "import",
+    originProjectId: originRun?.projectId ?? null,
+    originExperimentId: originRun?.experimentId ?? null,
     runId,
     executionId,
     task,

@@ -1,15 +1,13 @@
 /**
  * Mock handlers for the unified /api/assets surface.
  *
- * The real backend is catalog-driven and returns a discriminated union of
- * typed Asset kinds (data / artifact / log / checkpoint / …). These handlers
- * emulate the query filters and per-kind endpoints (`content`, `tail`,
- * `data/import`).
+ * Detail and download read registered files independently of their owning
+ * directory. The offline catalog also provides query and lineage fixtures.
  */
 
 import { HttpResponse, http } from "msw";
 import type { ApiAssetResponse } from "../../src/app/types";
-import { getAllAssets, getAsset, getFile, setAsset, writeFile } from "../db";
+import { getAllAssets, getAsset, getFile, setAsset, toManagedAsset, writeFile } from "../db";
 import { workspaceRoute } from "./workspaceRoute";
 
 interface LineageNodeShape {
@@ -102,7 +100,7 @@ export const assetHandlers = [
     if (!asset) {
       return HttpResponse.json({ detail: "Asset not found" }, { status: 404 });
     }
-    return HttpResponse.json(asset);
+    return HttpResponse.json(toManagedAsset(asset));
   }),
 
   // GET /api/assets/:assetId/lineage - upstream + downstream neighbors
@@ -125,8 +123,8 @@ export const assetHandlers = [
     return HttpResponse.json({ asset_id: assetId, ancestors, descendants });
   }),
 
-  // GET /api/assets/:assetId/content - download raw bytes
-  http.get(workspaceRoute(`${API_BASE}/assets/:assetId/content`), ({ params }) => {
+  // The asset's registered bytes, independent of the directory that owns it.
+  http.get(workspaceRoute(`${API_BASE}/assets/:assetId/download`), ({ params }) => {
     const asset = getAsset(params.assetId as string);
     if (!asset) {
       return HttpResponse.json({ detail: "Asset not found" }, { status: 404 });

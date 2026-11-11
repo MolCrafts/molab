@@ -162,7 +162,7 @@ const groupPresentation = (
   if (experiment) return { label: experiment.name, icon: FlaskConical };
   const run = snapshot.runs.find((row) => row.path === hostPath);
   if (run) return { label: runLabel(run), icon: PlayCircle };
-  return { label: hostLabel(snapshot, hostPath), icon: BookOpen };
+  return { label: hostPath.split("/").pop() || hostLabel(snapshot, hostPath), icon: BookOpen };
 };
 
 const collectExpandIds = (nodes: DocTreeNode[], acc: string[]): string[] => {
@@ -267,7 +267,21 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
   }, [operationSuccess]);
 
   const tree = buildDocTree(
-    notes.map((n) => ({ relPath: n.relPath, name: n.name, hostPath: n.hostPath ?? "" })),
+    notes.map((n) => ({
+      relPath: n.relPath,
+      name: n.relPath.split("/").pop() ?? n.name,
+      hostPath: n.hostPath ?? "",
+    })),
+    [
+      ...snapshot.projects.filter(
+        (project) =>
+          !project.workspaceKey ||
+          snapshot.workspaces.some(
+            (workspace) => workspace.active && workspace.key === project.workspaceKey,
+          ),
+      ),
+      ...snapshot.experiments,
+    ],
   );
 
   const guard = async (
@@ -389,13 +403,38 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
       node.id === KB_GROUP_ID
         ? { label: node.name, icon: BookOpen }
         : groupPresentation(snapshot, node.hostPath);
+    const project = snapshot.projects.find((project) => project.path === node.hostPath);
     return {
       id: node.id,
       label: presented.label,
+      onSelect: project
+        ? () =>
+            onSelect({
+              objectType: "project",
+              objectId: project.id,
+              pluginView: "relations",
+              pluginExplorer: "knowledge",
+            })
+        : undefined,
       icon: presented.icon,
       iconClassName: "text-muted-foreground",
       labelClassName: "font-semibold",
       actions: [
+        ...(project
+          ? [
+              {
+                id: "plugins",
+                label: "Open Relations",
+                onSelect: () =>
+                  onSelect({
+                    objectType: "project",
+                    objectId: project.id,
+                    pluginView: "relations",
+                    pluginExplorer: "knowledge",
+                  }),
+              },
+            ]
+          : []),
         {
           id: "new-doc",
           label: "New document",

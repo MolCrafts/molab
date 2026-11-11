@@ -17,8 +17,10 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from molab.knowledge import (
+    Decision,
     Delegation,
     Finding,
+    Hypothesis,
     Knowledge,
     Literature,
     Milestone,
@@ -42,6 +44,8 @@ _CONTEXT_CLASSES = (
     Todo,
     Milestone,
     Observation,
+    Hypothesis,
+    Decision,
     Delegation,
 )
 

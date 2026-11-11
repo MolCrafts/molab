@@ -16,6 +16,8 @@ export type ManagedAssetResponse = {
     size: number;
     file: string;
     originKind: string;
+    originProjectId?: (string | null);
+    originExperimentId?: (string | null);
     runId?: (string | null);
     executionId?: (string | null);
     task?: (string | null);

@@ -75,30 +75,63 @@ assert Note(experiment, "Analysis Notes").path == doc.path
 
 ## The classes
 
-Every class lands one markdown file; the `class:` frontmatter names which one:
+A document belongs to exactly one class, and a class answers exactly one
+question. A document that answers two questions is two documents. If a
+statement could be filed under two classes, the definitions are wrong, not the
+author. Every class lands one file; the `class:` frontmatter names which one:
 
-| Class | `class:` frontmatter | Purpose |
-|---|---|---|
-| `Note` | `class: Note` | A free note |
-| `Literature` | `class: Literature` | A reference; bib fields in frontmatter, PDFs pointed at, never copied |
-| `Report` | `class: Report` | A written-up analysis, including a failed run's |
-| `Finding` | `class: Finding` | A harvested scientific outcome |
-| `Plan` | `class: Plan` | Campaign overview: question, scope, constraints |
-| `Roadmap` | `class: Roadmap` | Ordered stages, and which experiment each stage is |
-| `Todo` | `class: Todo` | Work items and their status |
-| `Milestone` | `class: Milestone` | One checkpoint: the stage it closes and the criterion |
-| `Observation` | `class: Observation` | A recorded observation or standing choice |
-| `Delegation` | `class: Delegation` | One bounded, resumable piece of supervised work: scope, goal, authorized actions, budget and spend, acceptance and stop conditions, waits, worker attempts |
+| Class | The one question it answers | Record (frontmatter) | Never contains |
+|---|---|---|---|
+| `Plan` | What are we asking, in what scope, under what constraints? | none | stages, work items, criteria, the claims to test (those are Hypotheses) |
+| `Hypothesis` | What do we claim will turn out to be true? | `verdict`: `open` \| `supported` \| `refuted` \| `unsettled` (default `open`) | the evidence itself (that is a Finding) |
+| `Roadmap` | In what order is the work done? | `stages` | items, criteria, status |
+| `Todo` | What work remains? | `items` | stages, criteria |
+| `Milestone` | When is a stage closed? | `stage`, `criterion`, `status` (`open` \| `met` \| `missed`) | stages, items |
+| `Observation` | What was observed or given, before any interpretation? | none | a choice (Decision), a conclusion (Finding) |
+| `Decision` | What was chosen, by whom, and why? | `status`: `open` \| `made` (default `made`) | an observed fact, a result |
+| `Finding` | What does the evidence establish? | none | a choice, a plan |
+| `Report` | What do we tell readers? It compiles; it claims nothing new. | none | a result stated nowhere else |
+| `Literature` | What does a published source say? | bibliographic fields; PDFs pointed at, never copied | |
+| `Delegation` | What supervised work is under way? (operational) | the delegation record: scope, goal, authorized actions, budget and spend, acceptance and stop conditions, waits, worker attempts | |
+| `Note` | None of the above: free text with no claim on the reasoning. | none | |
 
-`Report`, `Finding`, `Plan`, `Roadmap`, `Todo`, `Milestone`, and `Observation`
-require at least one `SourceRef` at construction — they are sourced documents;
-`Note` and `Literature` do not.
+A standing choice is a `Decision`, not an `Observation`. A `Report` is defined
+by its purpose (telling readers), not by its length: a result written up at
+length is still a `Finding`.
+
+A `verdict` or `status` outside its vocabulary is refused on write and
+reported by `molab validate` (`knowledge.record`); it is never replaced by the
+default.
+
+Every class but `Note` and `Literature` requires at least one `SourceRef` at
+construction — they are sourced documents.
 
 Plan, Roadmap, Todo, and Milestone are one campaign and four jobs. A Plan does
 not list stages. A Roadmap does not list work items. A Todo does not define the
 stage order. A Milestone does not list the work. Roadmap, Todo, and Milestone
 cite the Plan. `campaign_of(plan)` reads that set; `check_campaign` checks that
 every todo and milestone names a stage the roadmap has.
+
+### Control flow lives in the links and the records
+
+There is no class per control structure. The reasoning is read from the typed
+links and the record fields:
+
+| Control flow | How knowledge says it |
+|---|---|
+| condition / judgement | a `Hypothesis` and its `verdict` |
+| evidence for or against | a link with role `supports` or `contradicts`, from a `Finding` to a `Hypothesis` |
+| pass / cannot tell | `verdict: unsettled` |
+| iteration | a new document that `supersedes` the one it revises |
+| decision point | a `Decision`; `status: open` means it waits for a person |
+| dependency | `derived_from` |
+| mention | `cites` (a source), `references` (anything else), `records` |
+
+The edge roles are `derived_from`, `supersedes`, `supports`, `contradicts`,
+`cites`, `records`, and `references`. A typed link is written
+`- [@supports label](target)`; a link with no role is `references`. The roles
+are a vocabulary only: molab does not check which classes a `supports` or
+`contradicts` link joins.
 
 ## Cross-reference is what ties knowledge together
 
@@ -269,8 +302,8 @@ at each human gate — `parameters`, `plan`, `dry_run` or `results` — and the
 knowledge path, experiment path or `molab:` ref it is about). Its source is
 the scope it is bound to.
 
-A document whose class owns a record (Delegation, Roadmap, Todo, Milestone)
-can have that record replaced whole over HTTP:
+A document whose class owns a record (Delegation, Roadmap, Todo, Milestone,
+Hypothesis, Decision) can have that record replaced whole over HTTP:
 
 - `GET /api/knowledge/doc/record?path=…` returns `{record, digest}`.
 - `PATCH /api/knowledge/doc/record?path=…` with `{record, ifMatch, body?}`

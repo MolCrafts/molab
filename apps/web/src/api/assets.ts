@@ -1,4 +1,5 @@
 import type { ManagedAssetResponse } from "@/api/generated/models/ManagedAssetResponse";
+import { AssetsService } from "@/api/generated/services/AssetsService";
 import { ProjectsService } from "@/api/generated/services/ProjectsService";
 import type { ApiAssetResponse } from "@/app/types";
 
@@ -33,6 +34,8 @@ export const projectAssetView = (asset: ManagedAssetResponse): ApiAssetResponse 
     digest: asset.digest,
     size: asset.size,
     originKind: asset.originKind,
+    originProjectId: asset.originProjectId ?? null,
+    originExperimentId: asset.originExperimentId ?? null,
     runId: asset.runId ?? null,
     executionId: asset.executionId ?? null,
     task: asset.task ?? null,
@@ -46,12 +49,14 @@ export const projectAssetView = (asset: ManagedAssetResponse): ApiAssetResponse 
 });
 
 export const assetsApi = {
+  getAsset: async (assetId: string): Promise<ApiAssetResponse> =>
+    projectAssetView(await AssetsService.getAsset(assetId)),
   listProjectAssets: async (projectId: string): Promise<ApiAssetResponse[]> =>
     (await ProjectsService.listProjectAssets(projectId)).map(projectAssetView),
   getProjectAsset: async (projectId: string, assetId: string): Promise<ApiAssetResponse> =>
     projectAssetView(await ProjectsService.getProjectAsset(projectId, assetId)),
-  downloadUrl: (projectId: string, assetId: string): string =>
-    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/download`,
+  downloadUrl: (_projectId: string, assetId: string): string =>
+    `/api/assets/${encodeURIComponent(assetId)}/download`,
   /** The asset's bytes as text, cut at `limit` characters (`partial` when cut). */
   getText: async (
     projectId: string,

@@ -15,7 +15,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from molab.workspace.refs import MolabRef
+from molab.fs.window import iter_file_chunks
+from molab.workspace.refs import InvalidRefError, MolabRef
 
 from ..dependencies import get_workspace
 from ..exceptions import AssetNotFoundError
@@ -25,8 +26,41 @@ from ..preview import (
     preview_frames,
     snapshot_reader,
 )
+from ..schemas import ManagedAssetResponse
 
 router = APIRouter(prefix="/assets", tags=["assets"])
+
+
+@router.get("/{asset_id}", response_model=ManagedAssetResponse)
+def get_asset(
+    asset_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ManagedAssetResponse:
+    """Read an asset by canonical id, across scopes inside the served boundary."""
+    asset = workspace.find(MolabRef(asset_id=asset_id))
+    return ManagedAssetResponse.from_model(asset)
+
+
+@router.get("/{asset_id}/download")
+def download_asset(
+    asset_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> StreamingResponse:
+    """Stream verified asset bytes through their owning scope's repository."""
+    asset = workspace.find(MolabRef(asset_id=asset_id))
+    try:
+        payload = workspace.assets_at(asset.scope).payload_path(asset.id)
+    except InvalidRefError:
+        raise
+    except (KeyError, ValueError) as exc:
+        raise AssetNotFoundError(asset_id) from exc
+    if not workspace.fs.is_file(payload):
+        raise AssetNotFoundError(asset_id)
+    return StreamingResponse(
+        iter_file_chunks(workspace.fs, payload, size=workspace.fs.getsize(payload)),
+        media_type=asset.media_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{asset.id}"'},
+    )
 
 
 def _resolve_dataset_path(workspace, asset_id: str) -> Path:  # noqa: ANN001

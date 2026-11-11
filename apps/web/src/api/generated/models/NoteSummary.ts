@@ -4,6 +4,10 @@
 /* eslint-disable */
 export type NoteSummary = {
     name: string;
+    /**
+     * Display title: frontmatter `title`, else the first H1, else `name`.
+     */
+    title?: string;
     relPath: string;
     hostPath?: string;
     excerpt: string;

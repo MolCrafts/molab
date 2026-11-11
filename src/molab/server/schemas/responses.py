@@ -699,6 +699,8 @@ class ManagedAssetResponse(ApiModel):
     size: int
     file: str
     originKind: str
+    originProjectId: str | None = None
+    originExperimentId: str | None = None
     runId: str | None = None
     executionId: str | None = None
     task: str | None = None
@@ -715,8 +717,11 @@ class ManagedAssetResponse(ApiModel):
             The response model.
         """
         origin = asset.origin
+        origin_project_id = origin_experiment_id = None
         run_id = execution_id = task = uri = None
         if isinstance(origin, ExecutionOrigin):
+            origin_project_id = origin.project_id
+            origin_experiment_id = origin.experiment_id
             run_id = origin.run_id
             execution_id = origin.execution_id
             task = origin.task
@@ -733,6 +738,8 @@ class ManagedAssetResponse(ApiModel):
             size=asset.content.size,
             file=asset.file,
             originKind=origin.kind,
+            originProjectId=origin_project_id,
+            originExperimentId=origin_experiment_id,
             runId=run_id,
             executionId=execution_id,
             task=task,

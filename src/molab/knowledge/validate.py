@@ -52,7 +52,8 @@ RULE_HINTS: dict[str, str] = {
     "knowledge.class": (
         "A knowledge document names its class in frontmatter. Write it with "
         "`molab knowledge write NAME TEXT --on HOST --class CLASS` "
-        "(Note, Literature, Report, Finding, Plan, Roadmap, Todo, Milestone, Observation, or Delegation)."
+        "(Note, Literature, Report, Finding, Plan, Roadmap, Todo, Milestone, Observation, "
+        "Hypothesis, Decision, or Delegation)."
     ),
     "knowledge.stray": (
         "knowledges/ holds documents (<slug>.md or <slug>.html) and figs/ only. Keep data "

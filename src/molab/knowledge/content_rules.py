@@ -4,8 +4,8 @@
 time, but a document written straight to disk never passed that gate. These
 rules read what is on disk and report, for :mod:`molab.knowledge.validate`:
 
-* ``knowledge.record`` (error) — a Roadmap / Todo / Milestone / Delegation
-  whose structured record its class rejects, or a Report / Note whose
+* ``knowledge.record`` (error) — a Roadmap / Todo / Milestone / Delegation /
+  Hypothesis / Decision whose structured record its class rejects, or a Report / Note whose
   ``worker_report`` / ``brief`` record is invalid or on the wrong class.
 * ``knowledge.campaign`` (error) — a Plan's campaign names a stage its roadmap
   does not have (:func:`~molab.knowledge.planning.check_campaign`).
@@ -117,12 +117,22 @@ def _record_issue(doc: Concept) -> ContentIssue | None:
     check_record = getattr(klass, "check_record", None)
     payload = _record(doc)
     kind = payload.get("kind")
+    if kind in ("research", "capability") and klass.__name__ != "Delegation":
+        return ContentIssue(
+            str(doc.path),
+            "knowledge.record",
+            f"a {kind} record belongs on a Delegation, not a {klass.__name__}",
+            "error",
+        )
     worker = isinstance(kind, str) and kind in WORKER_RECORD_CLASSES
     if role not in _PLANNING_RECORD_ROLES and check_record is None and not worker:
         return None
     if role == "milestone":
         # A milestone's lifecycle status is its record's status.
         payload["status"] = doc.frontmatter().get("status", "open")
+    elif getattr(klass, "STATUS_IN_RECORD", False) and "status" in doc.frontmatter():
+        # So is a Decision's. An absent one stays absent; the class defaults it.
+        payload["status"] = doc.frontmatter()["status"]
     try:
         if check_record is not None:
             check_record(payload, existing=None)

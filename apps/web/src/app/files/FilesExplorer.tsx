@@ -88,6 +88,7 @@ export interface SyncTarget {
 }
 
 interface WorkspaceTreeActions {
+  onOpenProjectPlugins?: (projectId: string) => void;
   onDownload?: (path: string) => void;
   onSelect: (selection: Selection) => void;
   onIntentEntity?: (type: WorkspaceSemantic["type"], id: string) => void;
@@ -228,6 +229,8 @@ export const buildFilesExplorerNodes = (
         isFile || semantic
           ? () => {
               if (isFile) actions.onSelect(fileSelection);
+              else if (semantic?.type === "project" && actions.onOpenProjectPlugins)
+                actions.onOpenProjectPlugins(semantic.id);
               else if (semantic)
                 actions.onSelect({ objectType: semantic.type, objectId: semantic.id });
             }
@@ -257,6 +260,15 @@ export const buildFilesExplorerNodes = (
             ...syncAction,
           ]
         : [
+            ...(semantic?.type === "project" && actions.onOpenProjectPlugins
+              ? [
+                  {
+                    id: "project-plugins",
+                    label: "Open Relations",
+                    onSelect: () => actions.onOpenProjectPlugins?.(semantic.id),
+                  },
+                ]
+              : []),
             ...(semantic
               ? [
                   {
@@ -419,6 +431,13 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
   };
 
   const nodes = buildFilesExplorerNodes(props.snapshot, {
+    onOpenProjectPlugins: (projectId) =>
+      props.onSelect({
+        objectType: "project",
+        objectId: projectId,
+        pluginView: "relations",
+        pluginExplorer: "files",
+      }),
     onSelect: props.onSelect,
     onDownload: (path) =>
       window.location.assign(workspaceApi.downloadUrl(path, activeWorkspace?.key)),

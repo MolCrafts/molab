@@ -9,6 +9,7 @@ export interface KnowledgeListFilters {
 
 export const knowledgeKeys = {
   all: ["knowledge"] as const,
+  graph: () => [...knowledgeKeys.all, "graph"] as const,
   lists: () => [...knowledgeKeys.all, "list"] as const,
   list: ({ tag = null, status = null }: KnowledgeListFilters = {}) =>
     [...knowledgeKeys.lists(), { tag, status }] as const,
@@ -75,3 +76,11 @@ export const useKnowledgeNoteQuery = (path: string, enabled = true) =>
 
 export const useKnowledgeBacklinksQuery = (path: string, enabled = true) =>
   useQuery({ ...knowledgeBacklinksQueryOptions(path), enabled: enabled && path.length > 0 });
+
+/** The server owns document identity and typed link resolution. */
+export const knowledgeGraphQueryOptions = () =>
+  queryOptions({
+    queryKey: knowledgeKeys.graph(),
+    queryFn: () => KnowledgeService.getKnowledgeGraph(),
+    staleTime: 30_000,
+  });

@@ -15,7 +15,6 @@ import { useKnowledgeListQuery, useKnowledgeNoteQuery } from "@/plugins/knowledg
 import { TexDocumentView } from "@/plugins/knowledge/TexDocumentView";
 import { isTexDocument } from "@/plugins/knowledge/texDocument";
 import { DocPage } from "./doc/DocPage";
-import { KnowledgeOverview } from "./KnowledgeOverview";
 
 const formatReference = (ref: ReferenceSummary): string => {
   const authors =
@@ -29,8 +28,8 @@ const formatReference = (ref: ReferenceSummary): string => {
 };
 
 /**
- * Knowledge browser. With no selection it shows a class dashboard; selecting
- * a document opens its narrative as Notion-style cells (double-click to edit).
+ * File-based knowledge browser. Project plugins open separately; selecting
+ * a document opens its narrative as editable cells.
  */
 export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
   const nav = useNavigationState(snapshot);
@@ -175,5 +174,11 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
       />
     );
   }
-  return <KnowledgeOverview notes={data?.notes ?? []} snapshot={snapshot} onOpen={open} />;
+  return (
+    <WorkbenchOperationState
+      kind="empty"
+      title="No document selected"
+      detail="Choose a file from the explorer. Select a project to open its Relations tab."
+    />
+  );
 };

@@ -11,9 +11,12 @@ import type { DocMetaUpdate } from '../models/DocMetaUpdate';
 import type { DocMoveRequest } from '../models/DocMoveRequest';
 import type { DocRecordResponse } from '../models/DocRecordResponse';
 import type { DocRecordUpdate } from '../models/DocRecordUpdate';
+import type { DocRelationsResponse } from '../models/DocRelationsResponse';
+import type { DocRelationUpdate } from '../models/DocRelationUpdate';
 import type { EmbedRequest } from '../models/EmbedRequest';
 import type { EmbedResponse } from '../models/EmbedResponse';
 import type { EntityBacklinksResponse } from '../models/EntityBacklinksResponse';
+import type { KnowledgeGraphResponse } from '../models/KnowledgeGraphResponse';
 import type { KnowledgeListResponse } from '../models/KnowledgeListResponse';
 import type { KnowledgeSearchResponse } from '../models/KnowledgeSearchResponse';
 import type { MessageResponse } from '../models/MessageResponse';
@@ -127,6 +130,30 @@ export class KnowledgeService {
             query: {
                 'tag': tag,
                 'status': status,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Get Knowledge Graph
+     * The whole knowledge graph: the unfiltered listing as nodes, typed links as edges.
+     *
+     * Pure derived read. Nothing is indexed, and a TeX manuscript is a node with
+     * no out-links.
+     * @param molabSession
+     * @returns KnowledgeGraphResponse Successful Response
+     * @throws ApiError
+     */
+    public static getKnowledgeGraph(
+        molabSession?: (string | null),
+    ): CancelablePromise<KnowledgeGraphResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/graph',
+            cookies: {
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -338,6 +365,62 @@ export class KnowledgeService {
         });
     }
     /**
+     * Get Doc Relations
+     * Editable typed narrative links and the digest they were read from.
+     * @param path
+     * @param molabSession
+     * @returns DocRelationsResponse Successful Response
+     * @throws ApiError
+     */
+    public static getDocRelations(
+        path: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<DocRelationsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/doc/relations',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Update Doc Relation
+     * Edit the original markdown link; reject stale authoring with 409.
+     * @param path
+     * @param requestBody
+     * @param molabSession
+     * @returns DocRelationsResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateDocRelation(
+        path: string,
+        requestBody: DocRelationUpdate,
+        molabSession?: (string | null),
+    ): CancelablePromise<DocRelationsResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/knowledge/doc/relations',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'path': path,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Get Doc Record
      * A document's structured record and its file digest (for ``ifMatch``).
      * @param path The document's workspace-relative path (its identity).
@@ -367,7 +450,8 @@ export class KnowledgeService {
      * Replace Doc Record
      * Replace a document's structured record whole — 409 when ``ifMatch`` is stale.
      *
-     * Only classes that own a record (Delegation, Roadmap, Todo, Milestone) accept
+     * Only classes that own a record (Delegation, Roadmap, Todo, Milestone,
+     * Hypothesis, Decision) accept
      * it (422 otherwise, and for a record the class rejects). The change is
      * recorded in the workspace history as ``knowledge.record_replaced``.
      * @param path The document's workspace-relative path (its identity).

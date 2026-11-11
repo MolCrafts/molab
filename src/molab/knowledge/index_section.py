@@ -48,7 +48,16 @@ __all__ = [
 ]
 
 
-def _title(meta: dict[str, object], body: str, fallback: str) -> str:
+def document_title(meta: dict[str, object], body: str, fallback: str) -> str:
+    """A document's display title: frontmatter ``title``, else its first H1, else its ``name``, else *fallback*.
+
+    The one rule for a title, shared by the index rows and the listing API.
+
+    Args:
+        meta: The document's frontmatter.
+        body: Its narrative.
+        fallback: What to show when the document offers nothing.
+    """
     from .search import extract_title
 
     for value in (meta.get("title"), extract_title(body), meta.get("name")):
@@ -83,7 +92,7 @@ def section_rows(host_dir: PathArg, *, fs: FileSystem) -> list[dict[str, JSONVal
             {
                 "path": f"{KNOWLEDGE_CONTAINER}/{entry.name}",
                 "class": declared if isinstance(declared, str) else "",
-                "title": _title(meta, body, stem),
+                "title": document_title(meta, body, stem),
             }
         )
     return rows
