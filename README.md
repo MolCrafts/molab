@@ -53,7 +53,7 @@ What that unlocks is a research workflow you can trust and revisit: experiments 
 
 ## Install
 
-Distribution name on PyPI will be **`molcrafts-molab`** (CLI / import: `molab`). The former name `molexp` is retired — do not install it. Until the first publish, install from GitHub:
+Distribution name on PyPI will be **`molcrafts-molab`** (CLI / import: `molab`). Until the first publish, install from GitHub:
 
 ```bash
 pip install "git+https://github.com/MolCrafts/molab"
@@ -70,7 +70,7 @@ uv tool install "git+https://github.com/MolCrafts/molab"      # or, from a check
 uv tool install --editable /path/to/molab
 ```
 
-Existing workspaces that still have `.molexp/` or `~/.molexp` are not upgraded. This release reads `.molab/`.
+Workspace metadata uses `.molab/`; user configuration is stored under `~/.molab/`.
 
 Requires Python >= 3.12. Core depends on `pydantic`, `pyyaml`, `typer`, `rich`, `fastapi`, `uvicorn`, `zarr`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molcrafts-molab[gh]` the GitHub capability (httpx); `molcrafts-molab[molvis]` molvis snapshots, headless included; `molcrafts-molab[all]` bundles the optional extras, and `molcrafts-molab[dev]` pulls everything for development.
 

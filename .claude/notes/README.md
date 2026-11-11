@@ -1,6 +1,6 @@
 # `.claude/notes/` — passive internal context
 
-This directory holds **passive** internal-agent context for the molexp
+This directory holds **passive** internal-agent context for the molab
 repository. Its contents outlive any single feature or spec.
 
 | File | Purpose |

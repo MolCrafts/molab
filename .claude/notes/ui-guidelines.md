@@ -1,4 +1,4 @@
-# UI Guidelines — MolExp
+# UI Guidelines — Molab
 
 Product-local UI record, maintained by `/mol:ui`. The shared MolCrafts
 constitution is **not** restated here; it lives in the `mol` plugin at
@@ -23,8 +23,8 @@ will never be rewritten.
 ## Accent
 
 ```css
-:root { --molexp-accent: oklch(0.55 0.19 295); }
-.dark { --molexp-accent: oklch(0.72 0.16 295); }
+:root { --molab-accent: oklch(0.55 0.19 295); }
+.dark { --molab-accent: oklch(0.72 0.16 295); }
 ```
 
 Hue 295 (violet) stays ≥40° from `--status-running` (250). Product accent
@@ -32,7 +32,7 @@ never signals run/plan state — running uses the status ramp only.
 
 ## Token decisions
 
-MolExp owns an independent OKLCH token layer (not shared with MolVis).
+Molab owns an independent OKLCH token layer (not shared with MolVis).
 Workbench surfaces: `background`, `surface`, `surface-subtle`, `canvas`.
 `interactive` is the neutral hover surface so accent stays for emphasis and
 selection. Fixed MolCrafts status vocabulary has separate accessible
@@ -60,7 +60,7 @@ Declared frame in `AppShell` (every route renders into it):
 
 ```text
 ┌───────────────────────────────────────────────────────────────┐
-│ ContextBar — MolExp · filter · approvals · refresh      44px  │
+│ ContextBar — Molab · filter · approvals · refresh      44px  │
 ├────────────┬─────────────────────────────────┬────────────────┤
 │ Navigator  │ Breadcrumb + inspector toggle   │ Node Inspector │
 │ tree 28px  │ Work surface (canvas)           │ (toggleable)   │
@@ -85,7 +85,7 @@ Declared frame in `AppShell` (every route renders into it):
   refresh. Idle is neutral, an active refresh shows `Syncing…` in running blue,
   and completion gets one neutral 180ms acknowledgement.
 - Active served workspace identity is always visible: ContextBar chip next to
-  MolExp, and a mono subtitle under the Projects list header (even for a single
+  Molab, and a mono subtitle under the Projects list header (even for a single
   remote mount such as `Arrhenius:/home/…`).
 - Mobile: nav + the same stateful inspector become edge drawers; the status bar
   stays full-width.
@@ -310,7 +310,7 @@ Canonical content rules for entity surfaces live in the mol plugin:
 `skills/ui/references/information-design.md`
 
 (loaded by `/mol:ui` stage `info` and by the `web-design` agent). This
-section records **MolExp-only** field homes and nav labels; do not fork
+section records **Molab-only** field homes and nav labels; do not fork
 the shared constitution here.
 
 ### Navigator label
@@ -338,7 +338,7 @@ children that live on Experiments / Runs / Assets tabs.
 
 `EntityTabBar` matches MolVis `PanelTabStrip` **topology**: full-width band,
 equal flex columns, line underline + accent text for active. Labels are
-**text only** (no glyph strip) — MolExp is a workbench of named surfaces.
+**text only** (no glyph strip) — Molab is a workbench of named surfaces.
 
 Inventory tabs (Experiments / Runs / Assets / Executions / …) use
 `InventoryCanvas` (same air as Overview) + shadcn / `DataTable` — not card
@@ -346,7 +346,7 @@ lists. Backend-specific run tabs (e.g. **Molq**) register via
 `registerEntityTabContribution` with optional `matches`; never hard-code
 “Scheduler” in core viewers.
 
-### Fact ownership (MolExp chrome)
+### Fact ownership (Molab chrome)
 
 | Fact | Home | Not on center overview |
 |---|---|---|

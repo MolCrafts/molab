@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from molpy import Block, Frame
 
-_IMPORT_SENTINEL = os.environ.get("MOLEXP_TEST_IMPORT_SENTINEL")
+_IMPORT_SENTINEL = os.environ.get("MOLAB_TEST_IMPORT_SENTINEL")
 if _IMPORT_SENTINEL:
     Path(_IMPORT_SENTINEL).write_text("imported", encoding="utf-8")
 
@@ -49,6 +49,6 @@ READER = TwoAtomReader
 
 
 if __name__ == "__main__":
-    _MAIN_SENTINEL = os.environ.get("MOLEXP_TEST_MAIN_SENTINEL")
+    _MAIN_SENTINEL = os.environ.get("MOLAB_TEST_MAIN_SENTINEL")
     if _MAIN_SENTINEL:
         Path(_MAIN_SENTINEL).write_text("main", encoding="utf-8")

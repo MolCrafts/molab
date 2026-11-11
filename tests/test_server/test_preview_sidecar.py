@@ -57,7 +57,7 @@ def _make_sidecar_dataset(
 class TestSidecarPreview:
     def test_resolve_does_not_import_the_sidecar(self, tmp_path, monkeypatch):
         sentinel = tmp_path / "import.sentinel"
-        monkeypatch.setenv("MOLEXP_TEST_IMPORT_SENTINEL", str(sentinel))
+        monkeypatch.setenv("MOLAB_TEST_IMPORT_SENTINEL", str(sentinel))
 
         dataset = _make_sidecar_dataset(tmp_path)
         info = resolve_sidecar(dataset)
@@ -69,8 +69,8 @@ class TestSidecarPreview:
     def test_load_runs_body_but_not_main_guard(self, tmp_path, monkeypatch):
         import_sentinel = tmp_path / "import.sentinel"
         main_sentinel = tmp_path / "main.sentinel"
-        monkeypatch.setenv("MOLEXP_TEST_IMPORT_SENTINEL", str(import_sentinel))
-        monkeypatch.setenv("MOLEXP_TEST_MAIN_SENTINEL", str(main_sentinel))
+        monkeypatch.setenv("MOLAB_TEST_IMPORT_SENTINEL", str(import_sentinel))
+        monkeypatch.setenv("MOLAB_TEST_MAIN_SENTINEL", str(main_sentinel))
 
         dataset = _make_sidecar_dataset(tmp_path)
         reader = load_preview(dataset)

@@ -1,6 +1,6 @@
 # NOTES.md — Evolving Decisions
 
-Captured by `/molexp-note`. Stable entries are promoted to CLAUDE.md then deleted here.
+Project decisions. Stable entries are promoted to CLAUDE.md then deleted here.
 
 <!-- Format: ## <slug> | <date> | <author>
 Decision body.
@@ -8,15 +8,15 @@ Decision body.
 
 ## cross-layer-data-reference | 2026-05-06 | impl
 
-Cross-layer references go through URI / asset_id / string id, never `from <upstream_layer> import SomeType` to define a shape in `<downstream_layer>`. If two layers need the same type, move the type to the downstream common layer (or a shared root); duplicating it in the upper layer is the bug pattern. **Counter-example**: `molexp.workflow.proposal` once imported `molexp.agent.types.ArtifactRef` — corrected to `code_artifact: Path | None`.
+Cross-layer references go through URI / asset_id / string id, never `from <upstream_layer> import SomeType` to define a shape in `<downstream_layer>`. If two layers need the same type, move the type to the downstream common layer (or a shared root); duplicating it in the upper layer is the bug pattern. **Counter-example**: `molab.workflow.proposal` once imported `molab.agent.types.ArtifactRef` — corrected to `code_artifact: Path | None`.
 
-Pure data types → `pydantic.BaseModel(frozen=True)`. Runtime containers (live callables / asyncio objects / non-pydantic instances) → plain Python class with explicit `__init__`. **`arbitrary_types_allowed=True` is forbidden in `src/molexp/agent/`** — anything that needs it is a runtime container by definition. See full table in `CLAUDE.md ## Data type ownership`.
+Pure data types → `pydantic.BaseModel(frozen=True)`. Runtime containers (live callables / asyncio objects / non-pydantic instances) → plain Python class with explicit `__init__`. **`arbitrary_types_allowed=True` is forbidden in `src/molab/agent/`** — anything that needs it is a runtime container by definition. See full table in `CLAUDE.md ## Data type ownership`.
 
 **Status:** stable
 
 ## three-layer-rectification | 2026-05-09 | impl
 
-The molexp dependency DAG was inverted by the rectification spec:
+The molab dependency DAG was inverted by the rectification spec:
 **workspace ← workflow ← agent**, where the arrows point from "uses" to "is used by".
 
 Why the inversion: pre-2026-05-09 the codebase had workspace importing
@@ -32,13 +32,13 @@ upstream concern. The fix:
 - workflow becomes a graph engine that uses workspace for caching
   (`WorkspaceCacheStore` backed by `SubsystemStore("workflow.cache")`)
   and for atomic state writes (`workspace.atomic_write_json` for
-  `workflow.json` snapshots). The `~/.molexp/cache/` user-home
+  `workflow.json` snapshots). The `~/.molab/cache/` user-home
   shortcut is gone.
 
 Mechanical enforcement: three import-guard tests
 (`tests/test_<layer>/test_import_guard.py`). The audit + design lives
-in `.claude/specs/molexp-rectification.md`; the binding "done"
-contract is `molexp-rectification.acceptance.md` (criteria
+in `.claude/specs/molab-rectification.md`; the binding "done"
+contract is `molab-rectification.acceptance.md` (criteria
 P0-01..P0-07, P1-01..P1-05, P2-01..P2-04, P3-01..P3-05, P4-01..P4-02,
 P5-01..P5-02, P6-01..P6-03).
 
@@ -82,8 +82,8 @@ pristine `HEAD e0ebdec7`.
 
 ```bash
 python -m pytest tests/test_perf -m perf          # small: 5x4x10 = 200 runs (default)
-MOLEXP_PERF_SCALE=full python -m pytest tests/test_perf -m perf   # 50x20x10 = 10 000 runs
-MOLEXP_PERF=1 python -m pytest tests/test_perf    # adds the informational wall-clock locks
+MOLAB_PERF_SCALE=full python -m pytest tests/test_perf -m perf   # 50x20x10 = 10 000 runs
+MOLAB_PERF=1 python -m pytest tests/test_perf    # adds the informational wall-clock locks
 ```
 
 Keep CI on `small`: the full fixture takes ~134 s to build on NFS (I/O bound;
@@ -133,6 +133,6 @@ a scripted 5x4x10 tree (200 runs):
   1000 writes / 103 MB — the per-record rewrite was O(N^2) in bytes.
 
 The CLI shares this now (`target_to_filesystem(cached=True)` is the default,
-mirror under `~/.molexp/remote_cache/`), so a CLI verb against a remote target
+mirror under `~/.molab/remote_cache/`), so a CLI verb against a remote target
 no longer pays raw per-call SSH. `revalidate_before` makes each invocation
 revalidate what it touches once, then pin.
