@@ -1,5 +1,8 @@
-import { describe, expect, it } from "@rstest/core";
+import { beforeEach, describe, expect, it } from "@rstest/core";
 import type { WorkspaceSnapshot } from "@/app/types";
+import { createPluginAPI } from "@/plugins/api/create_api";
+import { resetContributionRuntimeForTests } from "@/plugins/contribution-runtime";
+import { registerCoreNavigation } from "@/plugins/core/navigation";
 import { buildTrail } from "./breadcrumbTrail";
 
 const snapshot = {
@@ -12,7 +15,10 @@ const snapshot = {
       name: "ase · nve · 2 fs",
       projectId: "p1",
       experimentId: "e1",
-      executionHistory: [{ executionId: "e01" }, { executionId: "e02" }],
+      executionHistory: [
+        { executionId: "e01", mode: "initial" },
+        { executionId: "e02", mode: "resume" },
+      ],
     },
   ],
   workflows: [],
@@ -20,13 +26,18 @@ const snapshot = {
 } as unknown as WorkspaceSnapshot;
 
 describe("buildTrail", () => {
+  beforeEach(() => {
+    resetContributionRuntimeForTests();
+    registerCoreNavigation(createPluginAPI("core").api);
+  });
+
   it("walks a run from its project down to the latest attempt", () => {
     const trail = buildTrail({ objectType: "run", objectId: "r1" }, "projects", snapshot);
     expect(trail.map((item) => [item.kind, item.label])).toEqual([
       ["project", "NVE Drift"],
       ["experiment", "Integrator Benchmark"],
       ["run", "ase · nve · 2 fs"],
-      ["attempt", "e02"],
+      ["attempt", "#2 · resume"],
     ]);
     // Every ancestor navigates; the attempt opens the run's attempts view.
     expect(trail[0]?.to).toBeTruthy();
@@ -58,7 +69,33 @@ describe("buildTrail", () => {
     expect(trail[1]?.label).toBe("trajectory.xyz");
   });
 
-  it("has no trail for a section page", () => {
-    expect(buildTrail(null, "runs", snapshot)).toEqual([]);
+  it("names an attempt that recorded no mode by its order alone", () => {
+    const bare = {
+      ...snapshot,
+      runs: [
+        {
+          ...snapshot.runs[0],
+          executionHistory: [{ executionId: "e01" }, { executionId: "e02" }],
+        },
+      ],
+    } as unknown as WorkspaceSnapshot;
+    const trail = buildTrail({ objectType: "run", objectId: "r1" }, "projects", bare);
+    expect(trail.at(-1)?.label).toBe("#2");
+  });
+
+  it("names a project with that project alone", () => {
+    const trail = buildTrail({ objectType: "project", objectId: "p1" }, "projects", snapshot);
+    expect(trail.map((item) => [item.kind, item.label])).toEqual([["project", "NVE Drift"]]);
+  });
+
+  it("names a section page with that section alone", () => {
+    expect(buildTrail(null, "dashboard", snapshot)).toEqual([
+      { kind: "section", label: "Dashboard" },
+    ]);
+    expect(buildTrail(null, "runs", snapshot)).toEqual([{ kind: "section", label: "Runs" }]);
+    expect(buildTrail(null, "settings", snapshot)).toEqual([
+      { kind: "section", label: "Settings" },
+    ]);
+    expect(buildTrail(null, "missing", snapshot)).toEqual([]);
   });
 });
