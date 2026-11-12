@@ -10,7 +10,6 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from molab.atomicio import file_lock
 from molab.fs.window import iter_file_chunks
 from molab.plugins.submit_molq.submit import SubmitHandler
 from molab.workflow import read_journal
@@ -24,6 +23,7 @@ from molab.workspace import (
     RunNotFoundError as WorkspaceRunNotFoundError,
 )
 from molab.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace.entity_record import record_lock
 from molab.workspace.execution_dirs import JOBS, product_dirs
 from molab.workspace.execution_repository import (
     RUN_LOG_FILENAME,
@@ -144,13 +144,6 @@ def _attempt_with_request_key(run, key: str):  # noqa: ANN001, ANN202
     return None
 
 
-def _request_key_lock(workspace, run) -> Path:  # noqa: ANN001
-    """Lock serializing keyed attempt creation on one Run."""
-    lock = Path(str(workspace.root)) / ".molab" / "locks" / f"{run.id}.request-key.lock"
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    return lock
-
-
 def _execution_repository(workspace, run) -> ExecutionRepository:  # noqa: ANN001
     return ExecutionRepository(
         workspace.root,
@@ -233,7 +226,7 @@ def _start_locally(run, execution_id: str) -> None:  # noqa: ANN001
     import sys
 
     _require_recoverable(run)
-    attempt_dir = Path(str(run.run_dir)) / "executions" / execution_id
+    attempt_dir = run.execution_dir(execution_id)
     jobs_dir = attempt_dir / JOBS.name
     jobs_dir.mkdir(parents=True, exist_ok=True)
     argv = [sys.executable, "-m", "molab.cli", "execute", str(run.run_dir)]
@@ -329,7 +322,10 @@ def create_execution(
     if body.request_key is None:
         state = _create_attempt(run, body, target)
     else:
-        with file_lock(_request_key_lock(workspace, run)):
+        # Serialize "find the keyed attempt, else create it" on this run's
+        # attempt set: the workspace's per-record lock on its executions dir.
+        executions = _execution_repository(workspace, run).executions_dir
+        with record_lock(workspace.fs, executions, workspace.root):
             existing = _attempt_with_request_key(run, body.request_key)
             if existing is not None:
                 return _execution_response(existing)

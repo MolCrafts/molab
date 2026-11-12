@@ -45,7 +45,6 @@ if TYPE_CHECKING:
 
 __all__ = ["RenderedPage", "export_page", "render_page", "serve"]
 
-ASSET_REF = re.compile(r"^molab:asset/([0-9a-fA-F-]{8,})$")
 _ADMONITION = re.compile(r'^(!!!|\?\?\?\+?)\s+([A-Za-z]+)(?:\s+"([^"]*)")?\s*$')
 _COMPONENT = re.compile(r"^::(molab-[a-z][a-z0-9-]*)(?:\{(.*)\})?\s*$")
 _SOURCE_LINE = re.compile(r"^- \[@[a-z_]+ ")
@@ -175,12 +174,17 @@ class _Linker:
 
     def target(self, href: str) -> str | None:
         """The URL to put in the page, or ``None`` to drop the link (keep its text)."""
-        match = ASSET_REF.match(href)
-        if match:
-            self.assets.append(match.group(1))
-            return self.asset_url(match.group(1))
-        if href.startswith("molab:"):
-            return None
+        from molab.workspace.refs import InvalidRefError, is_ref, parse_ref
+
+        if is_ref(href):
+            try:
+                asset_id = parse_ref(href).asset_id
+            except InvalidRefError:
+                return None
+            if asset_id is None:
+                return None
+            self.assets.append(asset_id)
+            return self.asset_url(asset_id)
         if "://" in href or href.startswith(("#", "mailto:")):
             return href
         if self.doc_url and href.endswith((".md", ".html")):

@@ -665,7 +665,7 @@ def serve(
             kind = _served_kind_label(w)
             rprint(f"  {mark} [cyan]{w.key}[/cyan] [dim]({kind})[/dim] {w.label}")
 
-    from molab.server.app import _find_bundled_webapp, create_app
+    from molab.server.app import create_app, find_bundled_webapp
 
     web_proc: subprocess.Popen[bytes] | None = None
     tunnel_handle: TunnelBackend | None = None
@@ -692,7 +692,7 @@ def serve(
             advertised_ui_host, dial_ui_host, dial_ui_port = _await_dev_ui_origin(
                 web_proc, fallback_port=ui_port
             )
-        webapp = _find_bundled_webapp()
+        webapp = find_bundled_webapp()
         if not use_tunnel:
             _print_access_banner(
                 dev=True,
@@ -707,7 +707,7 @@ def serve(
                     f"use the Dev UI URL above for live reload)[/dim]"
                 )
     else:
-        webapp = _find_bundled_webapp()
+        webapp = find_bundled_webapp()
         if webapp is None:
             _log.warning(
                 "API-only: no bundled UI at src/molab/dist. "

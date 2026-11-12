@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from molab._typing import JSONValue
 
 from .history import AgentRef
+from .refs import MolabRef
 from .timestamps import as_utc as _as_utc
 
 
@@ -445,8 +446,8 @@ class Asset(BaseModel):
 
     @property
     def ref(self) -> str:
-        """``molab:asset/<id>``."""
-        return f"molab:asset/{self.id}"
+        """``molab:asset/<id>``, composed by :mod:`molab.workspace.refs`."""
+        return str(MolabRef(asset_id=self.id))
 
     @field_validator("created_at", mode="after")
     @classmethod

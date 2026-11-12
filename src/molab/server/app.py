@@ -109,7 +109,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 
-def _find_bundled_webapp() -> Path | None:
+def find_bundled_webapp() -> Path | None:
     """Locate the ``dist`` directory shipped inside the installed package.
 
     Uses ``importlib.resources`` so this works regardless of whether the
@@ -280,7 +280,7 @@ def create_app(
         if static_dir is not None:
             webapp_path = Path(static_dir)
         else:
-            webapp_path = _find_bundled_webapp()
+            webapp_path = find_bundled_webapp()
 
     if webapp_path is not None and webapp_path.is_dir() and (webapp_path / "index.html").exists():
         _mount_webapp(app, webapp_path)

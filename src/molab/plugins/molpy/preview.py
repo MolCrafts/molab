@@ -15,8 +15,9 @@ the frame count and ``reader[index]`` is the frame. It can wrap a per-format
 reader, or build its frames with ``molpy.Frame``. molab never parses a
 dataset itself.
 
-This module tracks molpy's public surface; the host
-(:mod:`molab.server.preview`) only finds the sidecar and caps the frames.
+This module tracks molpy's public surface and raises plain Python
+errors; the host (:mod:`molab.server.preview`) finds the sidecar, checks that
+it names a reader, caps the frames, and turns a failure into its HTTP error.
 """
 
 from __future__ import annotations
@@ -25,8 +26,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
-
-from molab.server.exceptions import NoReaderInSidecarError, PreviewReaderError
 
 if TYPE_CHECKING:
     from molpy import Frame
@@ -56,29 +55,21 @@ class FrameReader(Protocol):
 def open_reader(sidecar: ModuleType, dataset_path: Path) -> FrameReader:
     """Open *dataset_path* with the reader the *sidecar* names.
 
+    The sidecar defines :data:`SIDECAR_READER`; the host checks that before it
+    calls. An error the reader raises while opening propagates.
+
     Raises:
-        NoReaderInSidecarError: The sidecar defines no :data:`SIDECAR_READER`.
-        PreviewReaderError: The reader cannot be opened on the dataset, or
-            what it returns is not a :class:`FrameReader`.
+        TypeError: :data:`SIDECAR_READER` is not callable, or what it returns
+            is not a :class:`FrameReader`.
     """
-    sidecar_path = str(getattr(sidecar, "__file__", dataset_path))
-    reader_factory = getattr(sidecar, SIDECAR_READER, None)
-    if reader_factory is None:
-        raise NoReaderInSidecarError(sidecar_path)
+    reader_factory = getattr(sidecar, SIDECAR_READER)
     if not callable(reader_factory):
-        raise PreviewReaderError(
-            str(dataset_path), f"{SIDECAR_READER} in {sidecar_path} is not callable"
-        )
-    try:
-        reader = reader_factory(dataset_path)
-    except Exception as exc:
-        raise PreviewReaderError(str(dataset_path), f"opening the reader failed: {exc}") from exc
+        raise TypeError(f"{SIDECAR_READER} in {sidecar.__file__} is not callable")
+    reader = reader_factory(dataset_path)
     # str, bytes, and bytearray implement len and indexing. They are not readers.
     if isinstance(reader, (str, bytes, bytearray)) or not isinstance(reader, FrameReader):
-        raise PreviewReaderError(
-            str(dataset_path),
-            f"{SIDECAR_READER} returned a {type(reader).__name__}, "
-            "which has no len / reader[index]",
+        raise TypeError(
+            f"{SIDECAR_READER} returned a {type(reader).__name__}, which has no len / reader[index]"
         )
     return reader
 
@@ -88,11 +79,8 @@ def frames_to_extxyz(frames: Sequence[Frame]) -> bytes:
     from molpy.io import write_xyz
 
     parts: list[bytes] = []
-    try:
-        for frame in frames:
-            buf = bytearray()
-            write_xyz(buf, frame)
-            parts.append(bytes(buf))
-        return b"".join(parts)
-    except Exception as exc:
-        raise PreviewReaderError("<frames>", f"XYZ encoding failed: {exc}") from exc
+    for frame in frames:
+        buf = bytearray()
+        write_xyz(buf, frame)
+        parts.append(bytes(buf))
+    return b"".join(parts)
