@@ -138,12 +138,13 @@ links and the class fields:
 | condition / judgement | a `Hypothesis` and its `verdict` |
 | evidence for or against | a link with role `supports` or `contradicts`, from a `Finding` to a `Hypothesis` |
 | pass / cannot tell | `verdict: unsettled` |
-| iteration | a new document that `supersedes` the one it revises |
-| dependency | `derived_from` |
-| mention | `cites` (a source), `references` (anything else), `records` |
+| iteration | the document rewritten in place, or a successor written with `replaces` (the old one is deleted, its readers relinked; git keeps it) |
+| dependency | `derived_from` (a run that made the bytes, a document revised) |
+| mention | `cites` (a source), `references` (anything else) |
 
-The edge roles are `derived_from`, `supersedes`, `supports`, `contradicts`,
-`cites`, `records`, and `references`. A typed link is written
+The edge roles are `derived_from`, `supports`, `contradicts`, `cites`, and
+`references`. `molab init` relabels a link written with a retired role
+(`@records`, `@supersedes`) as `@derived_from`. A typed link is written
 `- [@supports label](target)`; a link with no role is `references`. The roles
 are a vocabulary only: molab does not check which classes a `supports` or
 `contradicts` link joins.

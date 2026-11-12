@@ -285,7 +285,7 @@ export function GraphViewMenu({
                       <option value="all">All relations</option>
                       <option value="lineage">Lineage only</option>
                       <option value="evidence">Evidence only</option>
-                      <option value="citations">Citations & records only</option>
+                      <option value="citations">Citations only</option>
                       <option value="custom" disabled>
                         Custom
                       </option>

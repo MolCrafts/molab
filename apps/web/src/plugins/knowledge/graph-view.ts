@@ -3,10 +3,7 @@ import type { MapNode, ResearchMap } from "./research-map";
 export const RELATION_GROUPS = [
   {
     label: "Lineage",
-    roles: [
-      { value: "derived_from", label: "Derived from" },
-      { value: "supersedes", label: "Supersedes" },
-    ],
+    roles: [{ value: "derived_from", label: "Derived from" }],
   },
   {
     label: "Evidence",
@@ -16,10 +13,9 @@ export const RELATION_GROUPS = [
     ],
   },
   {
-    label: "Citations & records",
+    label: "Citations",
     roles: [
       { value: "cites", label: "Cites" },
-      { value: "records", label: "Records" },
       { value: "references", label: "References" },
     ],
   },

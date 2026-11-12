@@ -6,10 +6,9 @@ or an :class:`~molab.workspace.domain.Asset` — as a typed provenance edge
 written by :func:`~molab.knowledge.concept.append_link`. This module holds
 what that edge writer does not:
 
-- :func:`default_role_for` — the per-kind default :class:`EdgeRole` (all drawn
-  from the frozen vocabulary; no new roles): a run or experiment ->
-  ``records``, a :class:`Literature` -> ``cites``, everything else (including
-  any ``Asset``) -> ``references``.
+- :func:`default_role_for` — the per-kind default :class:`EdgeRole`: a run or
+  experiment -> ``derived_from``, a :class:`Literature` -> ``cites``,
+  everything else (including any ``Asset``) -> ``references``.
 - :func:`summarize_entity` / :class:`EntitySummary` — a pure read projection of
   an entity's ``id`` / ``kind`` / ``title`` for a UI card. No new state. A
   document's kind is its class name.
@@ -65,8 +64,7 @@ class EntitySummary(BaseModel, frozen=True):
 def default_role_for(target: Concept | Folder | Asset) -> EdgeRole:
     """Return the per-kind default embed :class:`EdgeRole` for *target*.
 
-    All roles come from the frozen vocabulary (no new roles): a ``Run`` or
-    ``Experiment`` folder -> ``records``, a ``Literature`` -> ``cites``,
+    A ``Run`` or ``Experiment`` folder -> ``derived_from``, a ``Literature`` -> ``cites``,
     and any ``Asset`` (or other folder kind) -> ``references``
     (:data:`~molab.knowledge.edges.DEFAULT_EDGE_ROLE`).
 
@@ -87,7 +85,7 @@ def default_role_for(target: Concept | Folder | Asset) -> EdgeRole:
     if isinstance(target, Literature):
         return "cites"
     if isinstance(target, (Run, Experiment)):
-        return "records"
+        return "derived_from"
     if isinstance(target, (Asset, Concept, Folder)):
         return DEFAULT_EDGE_ROLE
     raise TypeError(f"embed target must be a Concept, Folder or Asset, got {type(target).__name__}")

@@ -361,7 +361,6 @@ const MapView = ({
     ...(
       [
         ["derived_from", "ink", "none"],
-        ["supersedes", "amber", "6 5"],
         ["supports", "green", "none"],
         ["contradicts", "red", "none"],
       ] as const

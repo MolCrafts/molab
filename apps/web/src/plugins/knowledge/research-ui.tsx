@@ -107,20 +107,16 @@ const Link = ({ children, onClick }: { children: ReactNode; onClick: () => void 
 
 const roleLabels: Record<string, string> = {
   derived_from: "Derived from",
-  supersedes: "Supersedes",
   supports: "Supports",
   contradicts: "Contradicts",
   cites: "Cites",
-  records: "Records",
   references: "Refers to",
 };
 const backLabels: Record<string, string> = {
   derived_from: "Source of",
-  supersedes: "Superseded by",
   supports: "Supported by",
   contradicts: "Contradicted by",
   cites: "Cited by",
-  records: "Recorded by",
   references: "Referred to by",
 };
 

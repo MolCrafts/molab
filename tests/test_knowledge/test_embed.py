@@ -54,8 +54,8 @@ class TestLinkTarget:
 
 class TestDefaultRoleFor:
     def test_run_and_experiment_record(self, run: Any, experiment: Any) -> None:
-        assert default_role_for(run) == "records"
-        assert default_role_for(experiment) == "records"
+        assert default_role_for(run) == "derived_from"
+        assert default_role_for(experiment) == "derived_from"
 
     def test_a_literature_cites(self, experiment: Any) -> None:
         lit = Literature(experiment, "Smith 2024")

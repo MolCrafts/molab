@@ -6,8 +6,7 @@ import { knowledgeLineage } from "./knowledge-map";
 export type KnowledgeAuditCode =
   | "missing-reference"
   | "unresolved-contradiction"
-  | "verdict-evidence-review"
-  | "superseded-reference";
+  | "verdict-evidence-review";
 
 export interface KnowledgeAuditIssue {
   id: string;
@@ -106,41 +105,6 @@ export const auditKnowledge = (
     }
   }
 
-  const replacements = new Map<string, Set<string>>();
-  for (const edge of graph.edges) {
-    if (
-      edge.kind !== "document" ||
-      edge.role !== "supersedes" ||
-      edge.source === edge.target ||
-      !nodes.has(edge.source) ||
-      !nodes.has(edge.target)
-    )
-      continue;
-    if (!replacements.has(edge.target)) replacements.set(edge.target, new Set());
-    replacements.get(edge.target)?.add(edge.source);
-  }
-  for (const edge of graph.edges) {
-    const newer = replacements.get(edge.target);
-    if (
-      edge.kind !== "document" ||
-      !nodes.has(edge.source) ||
-      !newer ||
-      newer.has(edge.source) ||
-      edge.source === edge.target
-    )
-      continue;
-    add({
-      code: "superseded-reference",
-      severity: "review",
-      document: edge.source,
-      title: "References a superseded document",
-      detail:
-        "This may be an intentional historical citation. Check the replacement before updating the reference.",
-      target: edge.target,
-      related: [edge.target, ...newer],
-    });
-  }
-
   const severityOrder = { error: 0, review: 1, info: 2 };
   return {
     issues: [...issues.values()].sort(
@@ -207,11 +171,7 @@ export const knowledgeChangeImpact = (
       edge.source === path && ["supports", "contradicts"].includes(edge.role) ? edge.target : null;
     const id = reader ?? claim;
     if (!id || !nodes.has(id)) continue;
-    const reason = claim
-      ? "claim"
-      : ["derived_from", "supersedes"].includes(edge.role)
-        ? "provenance"
-        : "citation";
+    const reason = claim ? "claim" : edge.role === "derived_from" ? "provenance" : "citation";
     add(id, 1, path, reason);
     for (const descendant of knowledgeLineage(graph, id).descendants)
       add(descendant.id, descendant.depth + 1, descendant.via, reason);

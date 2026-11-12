@@ -123,13 +123,13 @@ HTTP 上为 422，消息写明每条规则和出问题的文本。移动或重�
 | 条件 / 判断 | 一份 `Hypothesis` 和它的 `verdict` |
 | 支持或反对的证据 | 从 `Finding` 指向 `Hypothesis`、角色为 `supports` 或 `contradicts` 的链接 |
 | 通过 / 无法判断 | `verdict: unsettled` |
-| 迭代 | 一份新文档，用 `supersedes` 取代它所修订的那份 |
-| 依赖 | `derived_from` |
-| 提及 | `cites`（文献来源）、`references`（其他任何对象）、`records` |
+| 迭代 | 原地重写那份文档，或用 `replaces` 写一份继任文档（旧的被删除、读它的文档改链；git 保留它） |
+| 依赖 | `derived_from`（产生这些字节的 run、被修订的文档） |
+| 提及 | `cites`（文献来源）、`references`（其他任何对象） |
 
-边的角色有 `derived_from`、`supersedes`、`supports`、`contradicts`、`cites`、`records`
-和 `references`。带类型的链接写作 `- [@supports label](target)`；不带角色的链接就是
-`references`。这些角色只是一套词表：molab 不检查 `supports` 或 `contradicts` 链接连接的
+边的角色有 `derived_from`、`supports`、`contradicts`、`cites` 和 `references`。`molab init`
+会把用已退役角色（`@records`、`@supersedes`）写的链接改标为 `@derived_from`。带类型的链接
+写作 `- [@supports label](target)`；不带角色的链接就是 `references`。这些角色只是一套词表：molab 不检查 `supports` 或 `contradicts` 链接连接的
 是哪两个类。
 
 ## 交叉引用才是粘合机制

@@ -85,7 +85,11 @@ export const lineageLinks: Record<string, { target: string; role: EmbedRole; lab
   ],
   [lineagePaths.observation]: [
     { target: lineagePaths.plan, role: "derived_from", label: "Validation plan" },
-    { target: "molab:experiment/exp-nve/run/md-001", role: "records", label: "Example NVE run" },
+    {
+      target: "molab:experiment/exp-nve/run/md-001",
+      role: "derived_from",
+      label: "Example NVE run",
+    },
   ],
   [lineagePaths.finding]: [
     { target: lineagePaths.observation, role: "derived_from", label: "Temperature observation" },
@@ -106,7 +110,7 @@ export const lineageLinks: Record<string, { target: string; role: EmbedRole; lab
   [lineagePaths.policy]: [
     { target: lineagePaths.finding, role: "derived_from", label: "Low-step finding" },
     { target: lineagePaths.counterexample, role: "derived_from", label: "Coarse-step finding" },
-    { target: lineagePaths.oldPolicy, role: "supersedes", label: "Initial timestep policy" },
+    { target: lineagePaths.oldPolicy, role: "derived_from", label: "Initial timestep policy" },
   ],
   [lineagePaths.report]: [
     { target: lineagePaths.policy, role: "derived_from", label: "Revised policy" },

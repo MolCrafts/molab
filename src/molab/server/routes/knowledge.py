@@ -132,7 +132,7 @@ class EmbedRequest(BaseModel):
     target_kind: Literal["run", "asset", "experiment", "reference"]
     target: str
     # ``None`` defers to :func:`molab.knowledge.embed.default_role_for`
-    # (run/experiment -> records, reference -> cites, asset/other -> references).
+    # (run/experiment -> derived_from, reference -> cites, asset/other -> references).
     # An explicit role overrides.
     role: EdgeRole | None = None
     text: str | None = None

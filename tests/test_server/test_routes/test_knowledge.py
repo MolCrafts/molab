@@ -90,10 +90,8 @@ class TestKnowledgeRouteRedirect:
         assert set(get_args(EdgeRole)) == {
             "derived_from",
             "cites",
-            "supersedes",
             "supports",
             "contradicts",
-            "records",
             "references",
         }
         # The route module holds the knowledge layer's own objects.
@@ -743,7 +741,7 @@ class TestKnowledgeGraph:
             ws,
             "a",
             "# A\n\n"
-            f"- [@records the run]({ref})\n"
+            f"- [@derived_from the run]({ref})\n"
             "- [@cites paper](https://doi.org/10.1000/xyz)\n"
             "- [plain](https://example.org/page)\n",
         )
@@ -751,7 +749,7 @@ class TestKnowledgeGraph:
             edges = self._edges(client, "knowledges/a.md")
         found = {(edge["target"], edge["role"], edge["kind"]) for edge in edges}
         assert found == {
-            (ref, "records", "ref"),
+            (ref, "derived_from", "ref"),
             ("https://doi.org/10.1000/xyz", "cites", "external"),
             ("https://example.org/page", "references", "external"),
         }
@@ -759,14 +757,14 @@ class TestKnowledgeGraph:
 
     def test_link_to_absent_file_is_missing(self, served: ServedFactory, lab: RunFixture) -> None:
         ws, _exp, _run = lab
-        self._write(ws, "a", "# A\n\n- [@supersedes old](gone.md)\n")
+        self._write(ws, "a", "# A\n\n- [@derived_from old](gone.md)\n")
         with served(ws) as client:
             edges = self._edges(client, "knowledges/a.md")
         assert edges == [
             {
                 "source": "knowledges/a.md",
                 "target": "knowledges/gone.md",
-                "role": "supersedes",
+                "role": "derived_from",
                 "kind": "missing",
             }
         ]
@@ -843,7 +841,7 @@ class TestNoteCards:
         ws, _exp, run = lab
         target = str(ref_of(run))
         note = Note(Path(str(ws.root)) / "knowledges" / "idea")
-        append_link(note, target, role="records")
+        append_link(note, target, role="derived_from")
         with served(ws) as client:
             response = client.get("/api/knowledge/note", params={"path": "knowledges/idea.md"})
         assert response.status_code == 200, response.text
@@ -863,7 +861,7 @@ class TestNoteCards:
         ws, exp, _run = lab
         target = str(MolabRef(experiment_id=exp.id, run_id="deadbeef"))
         note = Note(Path(str(ws.root)) / "knowledges" / "idea")
-        append_link(note, target, role="records")
+        append_link(note, target, role="derived_from")
         with served(ws) as client:
             response = client.get("/api/knowledge/note", params={"path": "knowledges/idea.md"})
         assert response.status_code == 200, response.text
@@ -879,7 +877,7 @@ class TestNoteCards:
         _seed_note(ws)
         target = str(MolabRef(experiment_id="dup-exp"))
         note = Note(Path(str(ws.root)) / "knowledges" / "idea")
-        append_link(note, target, role="records")
+        append_link(note, target, role="derived_from")
         with served(ws) as client:
             response = client.get("/api/knowledge/note", params={"path": "knowledges/idea.md"})
         assert response.status_code == 200, response.text
@@ -948,7 +946,7 @@ class TestEntityBacklinks:
 
         ws, exp, run = lab
         note = Note(Path(str(ws.root)) / "knowledges" / "idea")
-        append_link(note, str(run.resolve()), role="records")
+        append_link(note, str(run.resolve()), role="derived_from")
         with served(ws) as client:
             response = client.get(
                 "/api/knowledge/entity-backlinks",
@@ -1256,7 +1254,7 @@ class TestExportNotebook:
         ws, _exp, run = lab
         png = b"\x89PNG\r\n\x1a\n" + b"y" * 4
         note = Note(Path(str(ws.root)) / "knowledges" / "idea")
-        append_link(note, str(ref_of(run)), role="records")
+        append_link(note, str(ref_of(run)), role="derived_from")
         with served(ws) as client:
             uploaded = client.post(
                 "/api/knowledge/doc/media",

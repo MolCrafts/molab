@@ -1,8 +1,8 @@
 /**
  * Deterministic placement of a research map. A document sits one column right
- * of the deepest document it rests on (`derived_from`, `supersedes`), so those
+ * of the deepest document it rests on (`derived_from`), so those
  * arrows point left, back to their footing; rows in a column follow where
- * their references sit. A mention (`cites`, `records`, `references`) is drawn
+ * their references sit. A mention (`cites`, `references`) is drawn
  * wherever its two documents already are. The Knowledge relations view
  * hands these positions to its graph canvas.
  */
@@ -42,13 +42,8 @@ export function shapeOf(node: MapNode): MapShape {
   return CARDS.has(node.cls) ? "card" : "pill";
 }
 
-/** The roles that say one document rests on, revises or judges another. The others (`cites`, `records`, `references`) are mentions. */
-const STRUCTURAL: ReadonlySet<string> = new Set([
-  "derived_from",
-  "supersedes",
-  "supports",
-  "contradicts",
-]);
+/** The roles that say one document rests on or judges another. The others (`cites`, `references`) are mentions. */
+const STRUCTURAL: ReadonlySet<string> = new Set(["derived_from", "supports", "contradicts"]);
 
 /** Longest chain of structural references leaving each node; a circle is cut where it closes. A mention moves nothing. */
 function depths(map: KnowledgeMap): Map<string, number> {

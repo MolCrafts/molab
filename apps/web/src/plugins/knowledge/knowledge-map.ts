@@ -146,7 +146,7 @@ export const knowledgeLineage = (graph: KnowledgeGraphResponse, path: string) =>
   for (const edge of graph.edges) {
     if (
       edge.kind !== "document" ||
-      !["derived_from", "supersedes"].includes(edge.role) ||
+      edge.role !== "derived_from" ||
       !ids.has(edge.source) ||
       !ids.has(edge.target)
     )

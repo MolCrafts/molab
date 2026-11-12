@@ -28,8 +28,8 @@ describe("knowledge evidence audit", () => {
       edges: [
         edge("note", "lost.md", Edge.role.CITES, Edge.kind.MISSING),
         edge("note", "lost.md", Edge.role.REFERENCES, Edge.kind.MISSING),
-        edge("note", "molab:run/missing", Edge.role.RECORDS, Edge.kind.REF),
-        edge("note", "molab:run/unloaded", Edge.role.RECORDS, Edge.kind.REF),
+        edge("note", "molab:run/missing", Edge.role.DERIVED_FROM, Edge.kind.REF),
+        edge("note", "molab:run/unloaded", Edge.role.DERIVED_FROM, Edge.kind.REF),
       ],
     };
     const result = auditKnowledge(graph, {
@@ -69,26 +69,6 @@ describe("knowledge evidence audit", () => {
       edges: [edge("note", "h", Edge.role.REFERENCES), edge("h", "note", Edge.role.CONTRADICTS)],
     };
     expect(codes(graph, { fields: { h: { verdict: "supported" } } })).toEqual([]);
-  });
-
-  it("identifies stale readers while preserving replacement provenance and historical citation intent", () => {
-    const graph = {
-      nodes: [doc("old"), doc("new"), doc("reader")],
-      edges: [
-        edge("new", "old", Edge.role.SUPERSEDES),
-        edge("reader", "old", Edge.role.CITES),
-        edge("reader", "old", Edge.role.REFERENCES),
-      ],
-    };
-    const result = auditKnowledge(graph);
-    expect(result.issues).toHaveLength(1);
-    expect(result.issues[0]).toMatchObject({
-      code: "superseded-reference",
-      document: "reader",
-      target: "old",
-      related: ["old", "new"],
-    });
-    expect(result.issues[0].detail).toContain("intentional historical citation");
   });
 });
 

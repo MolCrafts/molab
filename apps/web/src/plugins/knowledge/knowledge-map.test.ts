@@ -179,7 +179,7 @@ describe("knowledge provenance lineage", () => {
         link(finding, plan),
         link(report, finding),
         link(report, plan),
-        link(plan, outside, Edge.role.SUPERSEDES),
+        link(plan, outside, Edge.role.DERIVED_FROM),
         link(report, finding),
       ],
     };

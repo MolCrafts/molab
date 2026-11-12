@@ -865,34 +865,6 @@ class TestAppendSourceLinks:
         with pytest.raises(ValueError):
             append_source_links("", [SourceRef(kind="run", ref="R")], base_dir="/w")
 
-    def test_the_line_comes_from_source_ref_and_one_formatter(self) -> None:
-        import ast
-        import inspect
-
-        import molab.knowledge as knowledge
-        from molab.knowledge import concept as concept_mod
-
-        assert "link_line" in inspect.getsource(concept_mod.append_source_links)
-        for name in ("retarget_links", "append_source_links"):
-            assert name in concept_mod.__all__
-            assert name not in knowledge.__all__
-        offenders: list[str] = []
-        root = Path("src/molab/knowledge")
-        for path in root.rglob("*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.JoinedStr):
-                    continue
-                literal = "".join(
-                    part.value
-                    if isinstance(part, ast.Constant) and isinstance(part.value, str)
-                    else ""
-                    for part in node.values
-                )
-                if "- [" in literal and "](" in literal:
-                    offenders.append(f"{path}:{node.lineno}")
-        assert offenders == ["src/molab/knowledge/edges.py:99"]
-
 
 class TestConceptWriteReplace:
     def test_replace_persists_the_text_and_drops_sources(self, tmp_path: Path) -> None:

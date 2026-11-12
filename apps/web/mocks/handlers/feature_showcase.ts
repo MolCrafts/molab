@@ -125,7 +125,7 @@ for (const [cls, name, excerpt, hostPath] of [
     excerpt,
     status: "active",
     tags: ["example", cls.toLowerCase()],
-    body: `# ${name}\n\n${excerpt}\n\nSynthetic example for interface exploration.\n\n[@records benchmark](molab:experiment/exp-nve/run/md-001)`,
+    body: `# ${name}\n\n${excerpt}\n\nSynthetic example for interface exploration.\n\n[@derived_from benchmark](molab:experiment/exp-nve/run/md-001)`,
     links: [],
   };
   notes.set(relPath, note);
@@ -680,7 +680,7 @@ export const featureShowcaseHandlers = [
       const hostPath = getExperiment(run.experimentId)?.path ?? "";
       const name = body.name ?? `${run.id}-${params.operation}`;
       const relPath = documentRelPath(hostPath, name);
-      const reportBody = `# ${name}\n\n${narrative}\n\n[@records ${run.id}](${run.ref})`;
+      const reportBody = `# ${name}\n\n${narrative}\n\n[@derived_from ${run.id}](${run.ref})`;
       notes.set(relPath, {
         cls: body.cls ?? "Finding",
         name,

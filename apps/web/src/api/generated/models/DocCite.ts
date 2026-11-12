@@ -16,10 +16,8 @@ export namespace DocCite {
     export enum role {
         DERIVED_FROM = 'derived_from',
         CITES = 'cites',
-        SUPERSEDES = 'supersedes',
         SUPPORTS = 'supports',
         CONTRADICTS = 'contradicts',
-        RECORDS = 'records',
         REFERENCES = 'references',
     }
 }

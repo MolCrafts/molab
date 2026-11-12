@@ -9,14 +9,8 @@ import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
 export type { EntityCard } from "@/api/generated/models/EntityCard";
 
 export type EmbedTargetKind = "run" | "experiment" | "asset" | "reference";
-export type EmbedRole =
-  | "derived_from"
-  | "cites"
-  | "supersedes"
-  | "supports"
-  | "contradicts"
-  | "records"
-  | "references";
+/** An edge role, as the server's vocabulary spells it (generated from its OpenAPI). */
+export type EmbedRole = NonNullable<EmbedRequest["role"]>;
 
 export interface DocRelation {
   id: number;

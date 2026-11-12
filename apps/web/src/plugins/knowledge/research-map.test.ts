@@ -43,7 +43,7 @@ const graph: KnowledgeGraph = {
     link(OBS, PLAN),
     link(REPORT, PLAN),
     link(REPORT, FFV),
-    link(REVISED, PLAN, "supersedes"),
+    link(REVISED, PLAN, "derived_from"),
     link(REVISED, FFV),
     link(FFV, "molab:asset/01a", "derived_from", "ref"),
     link(FFV, "https://doi.org/10.1/x", "cites", "external"),
@@ -122,7 +122,7 @@ describe("research map", () => {
   it("draws an arrow for every link between two nodes, in the direction of the reference, with the link's role", () => {
     expect(has(HYP, PLAN, "derived_from")).toBe(true);
     expect(has(REPORT, FFV, "derived_from")).toBe(true);
-    expect(has(REVISED, PLAN, "supersedes")).toBe(true);
+    expect(has(REVISED, PLAN, "derived_from")).toBe(true);
     expect(has(PLAN, HYP, "derived_from")).toBe(false);
     // Links from hidden documents, self-links and links that leave the map are not arrows; the same link twice is one arrow.
     expect(map.edges).toHaveLength(6);

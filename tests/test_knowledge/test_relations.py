@@ -59,13 +59,13 @@ def test_add_uses_canonical_links_for_documents_refs_and_web(tmp_path, suffix):
     doc.write("# Idea\n")
     for target, role in [
         (str(tmp_path / "knowledges" / "result.md"), "supports"),
-        ("molab:experiment/E1/run/R1", "records"),
+        ("molab:experiment/E1/run/R1", "derived_from"),
         ("https://example.org/paper", "cites"),
     ]:
         mutate_relation(
             doc, action="add", target=target, role=role, text="Evidence", if_match=digest_of(doc)
         )
-    assert [link.role for link in relation_links(doc)] == ["supports", "records", "cites"]
+    assert [link.role for link in relation_links(doc)] == ["supports", "derived_from", "cites"]
     assert [link.label for link in relation_links(doc)] == ["Evidence"] * 3
     mutate_relation(doc, action="remove", occurrence=1, if_match=digest_of(doc))
     assert [link.role for link in relation_links(doc)] == ["supports", "cites"]

@@ -129,12 +129,11 @@
 .tw-map-pill .tw-map-content { padding: 0 16px 0 14px; }
 .tw-map-pill span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tw-map-port { opacity: 0; pointer-events: none; }
-/* An arrow's stroke says what kind of reference it is: provenance is solid ink, evidence for is green and against red, a revision dashed ochre, a mention faint and dashed. */
+/* An arrow's stroke says what kind of reference it is: provenance is solid ink, evidence for is green and against red, a mention faint and dashed. */
 .tw-role-derived_from svg path { stroke: var(--tw-muted) !important; }
 .tw-role-supports svg path { stroke: var(--tw-green) !important; }
 .tw-role-contradicts svg path { stroke: var(--tw-red) !important; }
-.tw-role-supersedes svg path { stroke: var(--tw-amber) !important; stroke-dasharray: 6 5; }
-.tw-role-cites svg path, .tw-role-references svg path, .tw-role-records svg path { stroke: var(--tw-faint) !important; stroke-dasharray: 3 5; }
+.tw-role-cites svg path, .tw-role-references svg path { stroke: var(--tw-faint) !important; stroke-dasharray: 3 5; }
 
 /* No conversation composer occupies the bottom edge in Molab. */
 @media (max-width: 900px) {

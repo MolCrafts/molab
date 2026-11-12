@@ -258,3 +258,36 @@ def test_init_never_rewrites_a_sealed_attempt_and_its_legacy_keys_still_read(tmp
     assert record_path.read_bytes() == before
     reread = Workspace.load(target).get_project("p").get_experiment("e").get_run(run.id)
     assert [item.status for item in reread.executions] == [ExecutionStatus.CANCELLED]
+
+
+def test_init_relabels_retired_edge_roles_as_derived_from(tmp_path, app):
+    from pathlib import Path
+
+    from molab.knowledge import Note
+
+    target = tmp_path / "lab"
+    Workspace(target, name="lab").materialize()
+    doc = target / "knowledges" / "trail.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(
+        "---\nclass: Note\nname: Trail\n---\n# Trail\n\n"
+        "- [@records the run](molab:experiment/E1/run/R1)\n"
+        "- [@supersedes old](old.md)\n"
+        "- [@cites paper](paper.md)\n\n"
+        "```\n[@records kept](code.md)\n```\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["init", str(target)])
+
+    assert result.exit_code == 0, result.output
+    edges = [
+        (edge.target if edge.is_ref else Path(edge.target).name, edge.role)
+        for edge in Note(doc).links()
+    ]
+    assert edges == [
+        ("molab:experiment/E1/run/R1", "derived_from"),
+        ("old.md", "derived_from"),
+        ("paper.md", "cites"),
+    ]
+    assert "[@records kept](code.md)" in doc.read_text(encoding="utf-8")
