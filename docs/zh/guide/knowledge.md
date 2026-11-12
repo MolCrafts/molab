@@ -97,7 +97,9 @@ frontmatter 标出是哪一个：
 
 `molab init` 会把旧版 molab 写下的知识改成这些类，且不丢任何值：已退役的 `Delegation` 变成 `Plan`；
 类没有声明的 frontmatter 键（委派记录、`holds_under`、Todo 的 `gaps`）挪到正文末尾 `## Moved fields`
-下的一个 YAML 代码块里。已声明的键若取值被类拒绝，则原样留下，由 `molab validate` 报告。
+下的一个 YAML 代码块里。指向某次尝试记录文件（`runs/<run>/executions/<x>/execution.json`）的链接改写为
+该 execution 的 `molab:` 引用 —— `Report` 和 `Finding` 正是靠它落在字节上。已声明的键若取值被类拒绝，
+则原样留下，由 `molab validate` 报告。
 
 除各类自己的字段外，每份文档的 frontmatter 都带同一组键：`class`、`name`、`created_by`、
 `created_at`、`tags`。类没有声明的键，或被字段拒绝的取值（超出词表的 `verdict`），写入时会被

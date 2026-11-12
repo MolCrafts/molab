@@ -104,8 +104,10 @@ listed, searched or opened, and `molab validate` reports it (`knowledge.class`).
 losing a value: a `Delegation` (retired) becomes a `Plan`, and a frontmatter
 key the class does not declare (a delegation record, `holds_under`, a Todo's
 `gaps`) moves to a fenced YAML block under `## Moved fields` at the end of the
-narrative. A declared key whose value the class refuses is left for
-`molab validate` to report.
+narrative. A link to an attempt's record file
+(`runs/<run>/executions/<x>/execution.json`) becomes that execution's `molab:`
+ref, which is what anchors a `Report` or `Finding`. A declared key whose value
+the class refuses is left for `molab validate` to report.
 
 Beside its fields, every document's frontmatter carries the same keys:
 `class`, `name`, `created_by`, `created_at`, `tags`. A key the class does not

@@ -151,3 +151,58 @@ class TestRetiredClass:
         assert after == {"class": "Plan", "name": "Supervision", "created_by": "tack"}
         assert _moved(body) == record
         assert _knowledge_errors(lab) == []
+
+
+class TestAttemptRecordLinks:
+    """An older Finding cited its attempt by the path of ``execution.json``."""
+
+    @staticmethod
+    def _finding(run: Any, target: str) -> Path:
+        folder = Path(str(run.resolve())).parent.parent / "knowledges"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / "box.md"
+        path.write_text(
+            "---\nclass: Finding\nname: Box\n---\nThe box is the MD start.\n"
+            f"- [@derived_from execution.json]({target})\n",
+            encoding="utf-8",
+        )
+        return path
+
+    @staticmethod
+    def _record(run: Any, attempt: str) -> Path:
+        record = Path(str(run.resolve())) / "executions" / attempt / "execution.json"
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text("{}", encoding="utf-8")
+        return record
+
+    def test_a_link_to_an_attempt_record_becomes_the_execution_ref(
+        self, lab: Any, run: Any
+    ) -> None:
+        self._record(run, "e16")
+        run_dir = Path(str(run.resolve())).name
+        path = self._finding(run, f"../runs/{run_dir}/executions/e16/execution.json")
+        assert any(rule == "knowledge.unanchored" for rule, _p in _knowledge_errors(lab))
+
+        migrate_knowledge(lab)
+
+        ref = f"molab:experiment/{run.experiment.id}/run/{run.id}/execution/e16"
+        assert f"- [@derived_from execution.json]({ref})\n" in path.read_text(encoding="utf-8")
+        assert _knowledge_errors(lab) == []
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            "../runs/{run}/executions/e16/out/result.json",
+            "../runs/{run}/executions/e99/execution.json",
+            "../runs/{run}/execution.json",
+        ],
+    )
+    def test_a_link_to_anything_else_is_kept(self, lab: Any, run: Any, target: str) -> None:
+        self._record(run, "e16")
+        (Path(str(run.resolve())) / "execution.json").write_text("{}", encoding="utf-8")
+        path = self._finding(run, target.format(run=Path(str(run.resolve())).name))
+        before = path.read_text(encoding="utf-8")
+
+        migrate_knowledge(lab)
+
+        assert path.read_text(encoding="utf-8") == before

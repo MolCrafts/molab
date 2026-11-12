@@ -12,7 +12,10 @@ Each step makes an old document legal without losing what it says:
 * a link labelled with a retired role is relabelled (:data:`RETIRED_ROLES`):
   ``records`` and ``supersedes`` fold into ``derived_from``, since the run a
   document records and the document it revises are both what it derives from.
-  A link inside code is left alone.
+  A link inside code is left alone;
+* a link to an attempt's record file (``…/executions/<x>/execution.json``)
+  becomes that execution's ``molab:`` ref: an older molab cited an attempt by
+  the path of its record, and a Report or Finding rests on the ref.
 
 A declared key whose value the class refuses (a ``verdict`` outside the
 vocabulary) is not a shape to migrate: it is left for ``molab validate`` to
@@ -22,6 +25,7 @@ run changes nothing.
 
 from __future__ import annotations
 
+import posixpath
 from typing import TYPE_CHECKING
 
 import yaml
@@ -70,7 +74,7 @@ def migrate_knowledge(ws: Workspace) -> list[str]:
         moved = _undeclared(meta, set(model.model_fields) if model is not None else set())
         head = {key: value for key, value in meta.items() if key not in moved}
         head["class"] = current
-        narrative = _relabel(_with_moved(body, moved, str(current), path))
+        narrative = _attempt_refs(_relabel(_with_moved(body, moved, str(current), path)), path, ws)
         if head == meta and narrative == body:
             continue
         doc = klass(path, fs=ws.fs)
@@ -102,6 +106,50 @@ def _with_moved(body: str, moved: Mapping[str, object], cls: str, path: str) -> 
         f"```yaml\n{data}```\n"
     )
     return append_markdown(body, block, path=path)
+
+
+def _attempt_refs(body: str, path: str, ws: Workspace) -> str:
+    """*body* with each local link to an attempt's record spelled as the execution's ref.
+
+    The record is ``<run>/executions/<x>/execution.json``, it must exist, and
+    ``<run>`` must be a run of *ws*. Every other link is kept as written.
+    """
+    from molab.workspace.execution_repository import EXECUTION_RECORD_FILENAME
+    from molab.workspace.naming import EXECUTION_CONTAINER
+    from molab.workspace.refs import MolabRef
+    from molab.workspace.run import Run
+
+    from .concept import markdown_links
+    from .content_rules import _is_local
+
+    pieces: list[str] = []
+    cursor = 0
+    for link in markdown_links(body):
+        target = link.group(2)
+        if not _is_local(target):
+            continue
+        record = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
+        attempt = posixpath.dirname(record)
+        container = posixpath.dirname(attempt)
+        if (
+            posixpath.basename(record) != EXECUTION_RECORD_FILENAME
+            or posixpath.basename(container) != EXECUTION_CONTAINER
+            or not ws.fs.is_file(record)
+        ):
+            continue
+        run = ws.folder_at(posixpath.dirname(container))
+        if not isinstance(run, Run):
+            continue
+        ref = MolabRef(
+            experiment_id=run.experiment.id,
+            run_id=run.id,
+            execution_id=posixpath.basename(attempt),
+        )
+        pieces.append(body[cursor : link.start(2)])
+        pieces.append(str(ref))
+        cursor = link.end(2)
+    pieces.append(body[cursor:])
+    return "".join(pieces)
 
 
 def _relabel(body: str) -> str:
