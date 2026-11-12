@@ -291,3 +291,31 @@ def test_init_relabels_retired_edge_roles_as_derived_from(tmp_path, app):
         ("paper.md", "cites"),
     ]
     assert "[@records kept](code.md)" in doc.read_text(encoding="utf-8")
+
+
+def test_init_leaves_knowledge_an_older_molab_wrote_with_nothing_to_report(tmp_path, app):
+    from molab.knowledge.validate import validate_knowledge
+
+    target = tmp_path / "lab"
+    Workspace(target, name="lab").materialize()
+    docs = target / "knowledges"
+    docs.mkdir(parents=True, exist_ok=True)
+    (docs / "supervision.md").write_text(
+        "---\nclass: Delegation\nname: Supervision\nkind: research\ngoal: Replay\n"
+        "scope: molab:experiment/E1\nstate: done\n---\n# Supervision\n",
+        encoding="utf-8",
+    )
+    (docs / "gaps.md").write_text(
+        "---\nclass: Todo\nname: Gaps\nitems:\n  - id: a\n    title: A\n    status: done\n"
+        "gaps:\n  - id: a\n    component: molpy\n---\n# Gaps\n",
+        encoding="utf-8",
+    )
+    assert {issue["rule"] for issue in validate_knowledge(target, errors_only=True)} == {
+        "knowledge.class",
+        "knowledge.fields",
+    }
+
+    result = CliRunner().invoke(app, ["init", str(target)])
+
+    assert result.exit_code == 0, result.output
+    assert validate_knowledge(target, errors_only=True) == []

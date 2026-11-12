@@ -100,6 +100,13 @@ result written up at length is still a `Finding`.
 A file whose `class:` is absent or names no class is not a document: it is not
 listed, searched or opened, and `molab validate` reports it (`knowledge.class`).
 
+`molab init` brings knowledge an older molab wrote up to these classes without
+losing a value: a `Delegation` (retired) becomes a `Plan`, and a frontmatter
+key the class does not declare (a delegation record, `holds_under`, a Todo's
+`gaps`) moves to a fenced YAML block under `## Moved fields` at the end of the
+narrative. A declared key whose value the class refuses is left for
+`molab validate` to report.
+
 Beside its fields, every document's frontmatter carries the same keys:
 `class`, `name`, `created_by`, `created_at`, `tags`. A key the class does not
 declare, or a value its fields refuse (a `verdict` outside its vocabulary), is
