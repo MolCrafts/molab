@@ -17,7 +17,7 @@ import pytest
 from molab import htmldoc
 from molab.knowledge import Finding, Hypothesis, Knowledge, Note, SourceRef
 from molab.knowledge.concepts import _open_document
-from molab.knowledge.record import record_of, replace_record
+from molab.knowledge.fields import own_fields, replace_fields
 from molab.knowledge.write import write_knowledge
 
 BODY = (
@@ -99,7 +99,7 @@ class TestWrite:
         assert "<molab-markdown>\n" in doc.read()
         assert len(doc.sources) == 1  # ty: ignore[unresolved-attribute]
 
-    def test_replace_record_keeps_the_html_form(self, experiment: Any) -> None:
+    def test_replace_fields_keeps_the_html_form(self, experiment: Any) -> None:
         doc = write_knowledge(
             experiment,
             name="claim",
@@ -107,14 +107,13 @@ class TestWrite:
             sources=[SourceRef.of(experiment)],
             created_by="t",
             text="<p>plan</p>\n",
-            record={"verdict": "open"},
+            fields={"verdict": "open"},
             format="html",
         )
-        replace_record(doc, {"verdict": "supported"})
+        replace_fields(doc, {"verdict": "supported"})
 
         assert Path(doc.path).read_text(encoding="utf-8").startswith("<!doctype html>")
-        assert record_of(doc)["verdict"] == "supported"
-        assert "created_at" not in record_of(doc)
+        assert own_fields(doc.frontmatter()) == {"verdict": "supported"}
         assert doc.read().startswith("<p>plan</p>\n")
 
 

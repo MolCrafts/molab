@@ -26,7 +26,7 @@ interface ShowcaseNote {
   tags: string[];
   body: string;
   links: string[];
-  record?: Record<string, unknown>;
+  fields?: Record<string, unknown>;
 }
 
 const documentSlug = (name: string): string => {
@@ -433,9 +433,10 @@ export const featureShowcaseHandlers = [
     return HttpResponse.json({
       name: note.name,
       relPath: note.relPath,
+      cls: note.cls ?? "Note",
       body: note.body,
       links: note.links,
-      record: note.record ?? {},
+      fields: note.fields ?? {},
       format: note.relPath.endsWith(".html") ? "html" : "md",
       ...showcaseTimes(note.relPath),
       cards: noteCards(path),
@@ -507,9 +508,10 @@ export const featureShowcaseHandlers = [
     return HttpResponse.json({
       name: note.name,
       relPath: note.relPath,
+      cls: note.cls ?? "Note",
       body: note.body,
       links: note.links,
-      record: note.record ?? {},
+      fields: note.fields ?? {},
       format: note.relPath.endsWith(".html") ? "html" : "md",
       updatedAt: new Date().toISOString(),
       createdAt: showcaseTimes(note.relPath).createdAt,
@@ -517,16 +519,29 @@ export const featureShowcaseHandlers = [
     });
   }),
 
-  http.patch(workspaceRoute("/api/knowledge/doc/record"), async ({ request }) => {
+  http.get(workspaceRoute("/api/knowledge/doc/fields"), ({ request }) => {
     const path = new URL(request.url).searchParams.get("path") ?? "";
     const note = notes.get(path);
     if (!note) return HttpResponse.json({ detail: "Note not found" }, { status: 404 });
-    const payload = (await request.json()) as { record?: Record<string, unknown> };
-    note.record = payload.record ?? {};
     return HttpResponse.json({
       relPath: note.relPath,
       cls: note.cls ?? "Note",
-      record: note.record,
+      fields: note.fields ?? {},
+      digest: `sha256:${Date.now().toString(16)}`,
+    });
+  }),
+
+  http.patch(workspaceRoute("/api/knowledge/doc/fields"), async ({ request }) => {
+    const path = new URL(request.url).searchParams.get("path") ?? "";
+    const note = notes.get(path);
+    if (!note) return HttpResponse.json({ detail: "Note not found" }, { status: 404 });
+    const payload = (await request.json()) as { fields?: Record<string, unknown> };
+    note.fields = payload.fields ?? {};
+    if (typeof note.fields.status === "string") note.status = note.fields.status;
+    return HttpResponse.json({
+      relPath: note.relPath,
+      cls: note.cls ?? "Note",
+      fields: note.fields,
       digest: `sha256:${Date.now().toString(16)}`,
     });
   }),
@@ -536,9 +551,8 @@ export const featureShowcaseHandlers = [
     const path = url.searchParams.get("path") ?? "";
     const note = notes.get(path);
     if (!note) return HttpResponse.json({ detail: "Note not found" }, { status: 404 });
-    const body = (await request.json()) as { tags?: string[]; status?: string };
+    const body = (await request.json()) as { tags?: string[] };
     if (body.tags) note.tags = body.tags;
-    if (body.status) note.status = body.status;
     return HttpResponse.json(noteSummary(note));
   }),
 
@@ -548,7 +562,7 @@ export const featureShowcaseHandlers = [
       body?: string;
       hostPath?: string | null;
       cls?: string;
-      record?: Record<string, unknown>;
+      fields?: Record<string, unknown>;
       format?: "md" | "html";
     };
     const name = body.name ?? "note";
@@ -565,7 +579,7 @@ export const featureShowcaseHandlers = [
       tags: [],
       body: body.body ?? "",
       links: [],
-      record: body.record,
+      fields: body.fields,
     };
     if (notes.has(relPath))
       return HttpResponse.json({ detail: "Document already exists" }, { status: 409 });

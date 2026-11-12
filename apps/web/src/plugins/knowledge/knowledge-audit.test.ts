@@ -113,20 +113,20 @@ describe("knowledge evidence audit", () => {
       edges: [edge("a", "h", Edge.role.SUPPORTS), edge("b", "h", Edge.role.CONTRADICTS)],
     };
     const supported = { h: { verdict: "supported" } };
-    const issue = auditKnowledge(graph, { records: supported }).issues[0];
+    const issue = auditKnowledge(graph, { fields: supported }).issues[0];
     expect(issue).toMatchObject({ code: "verdict-evidence-review", document: "h", related: ["b"] });
     expect(supported.h.verdict).toBe("supported");
     expect(
-      auditKnowledge(graph, { records: { h: { verdict: "refuted" } } }).issues[0].related,
+      auditKnowledge(graph, { fields: { h: { verdict: "refuted" } } }).issues[0].related,
     ).toEqual(["a"]);
-    expect(codes(graph, { records: { h: { verdict: "open" } } })).toEqual([
+    expect(codes(graph, { fields: { h: { verdict: "open" } } })).toEqual([
       "unresolved-contradiction",
     ]);
-    expect(codes(graph, { records: { h: { verdict: "unsettled" } } })).toEqual([
+    expect(codes(graph, { fields: { h: { verdict: "unsettled" } } })).toEqual([
       "unresolved-contradiction",
     ]);
     expect(
-      codes({ ...graph, edges: [graph.edges[1]] }, { records: { h: { verdict: "refuted" } } }),
+      codes({ ...graph, edges: [graph.edges[1]] }, { fields: { h: { verdict: "refuted" } } }),
     ).toEqual([]);
     expect(auditKnowledge(graph)).toMatchObject({ issues: [], uncheckedHypotheses: ["h"] });
   });
@@ -136,7 +136,7 @@ describe("knowledge evidence audit", () => {
       nodes: [doc("h", "Hypothesis"), doc("note")],
       edges: [edge("note", "h", Edge.role.REFERENCES), edge("h", "note", Edge.role.CONTRADICTS)],
     };
-    expect(codes(graph, { records: { h: { verdict: "supported" } } })).toEqual([]);
+    expect(codes(graph, { fields: { h: { verdict: "supported" } } })).toEqual([]);
   });
 
   it("identifies stale readers while preserving replacement provenance and historical citation intent", () => {

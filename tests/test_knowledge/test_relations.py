@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from molab.knowledge.concepts import Note
-from molab.knowledge.record import RecordConflictError, digest_of
+from molab.knowledge.fields import DigestConflictError, digest_of
 from molab.knowledge.relations import mutate_relation, relation_links
 
 
@@ -38,7 +38,7 @@ def test_occurrence_and_digest_prevent_wrong_or_stale_edits(tmp_path):
     digest = digest_of(doc)
     mutate_relation(doc, action="replace", occurrence=1, role="supports", if_match=digest)
     assert doc.read() == "[First](result.md) and [@supports Second](result.md).\n"
-    with pytest.raises(RecordConflictError):
+    with pytest.raises(DigestConflictError):
         mutate_relation(doc, action="remove", occurrence=0, if_match=digest)
     with pytest.raises(ValueError, match="occurrence"):
         mutate_relation(doc, action="remove", occurrence=5, if_match=digest_of(doc))

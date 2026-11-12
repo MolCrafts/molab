@@ -239,7 +239,7 @@ function Links({
   );
 }
 
-/** A preview of one knowledge document: what its record says, the references it makes and receives, and its text. */
+/** A preview of one knowledge document: what its fields say, the references it makes and receives, and its text. */
 export function DocumentPanel({
   node,
   map,

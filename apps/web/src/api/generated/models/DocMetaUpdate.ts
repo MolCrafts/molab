@@ -3,14 +3,11 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Partial update of a document's tags/status.
+ * Set a document's tags; ``None`` leaves them untouched and returns the summary.
  *
- * Each field is independently optional; ``None`` means "leave untouched", which
- * maps onto ``Note.set_tags`` / ``Note.set_status`` each preserving the sibling
- * field. A request with both ``None`` is a no-op that returns the current summary.
+ * A class's own fields (a Note ``status``) are ``PATCH /knowledge/doc/fields``.
  */
 export type DocMetaUpdate = {
     tags?: (Array<string> | null);
-    status?: (string | null);
 };
 

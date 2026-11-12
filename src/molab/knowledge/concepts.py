@@ -1,27 +1,83 @@
-"""Knowledge classes: one markdown file each.
+"""Knowledge classes: one file each, and the fields each class declares.
 
-A :class:`Note` and a :class:`Literature` are ``knowledges/<name>.md`` files.
-Frontmatter holds the structured fields; the narrative holds the links.
+A document is ``knowledges/<name>.md`` (or ``.html``). Its frontmatter names
+the class and carries the fields that class declares in ``FIELDS``; the
+narrative holds the links. A new class subclasses an existing one, and its
+fields model extends the parent's, so everything that handles the parent
+handles it.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
+
+from pydantic import BaseModel, ConfigDict
 
 from molab.fs import FileSystem, LocalFS, PathArg
 
 from .concept import Concept
 from .knowledge_item import SourceRef
-from .reference_meta import ReferenceMeta
 
 if TYPE_CHECKING:
     from molab._typing import JSONValue
     from molab.workspace.run import Run
 
 _LOG = logging.getLogger(__name__)
+
+
+class NoteFields(BaseModel):
+    """What a Note stores beyond the common keys: its lifecycle status."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: str = "active"
+
+
+class LiteratureFields(BaseModel):
+    """The bibliographic fields a Literature stores.
+
+    A write folds in only the fields its caller set, so the ``source`` default
+    is what an absent ``source`` reads as, never a value stamped over a stored
+    one. A PDF is pointed at (``pdf_path`` / ``pdf_asset_id``), never copied.
+
+    Attributes:
+        title: Work title.
+        authors: Ordered author names.
+        year: Publication year.
+        doi: Digital Object Identifier.
+        venue: Journal / conference / publisher.
+        url: Canonical URL.
+        pdf_path: Filesystem pointer to a PDF (never copied).
+        pdf_asset_id: Asset id of an imported PDF, if any.
+        source: Provenance label (``"manual"`` / ``"zotero"`` / …).
+        source_key: Stable key in the external source (e.g. a Zotero key).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    title: str | None = None
+    authors: tuple[str, ...] = ()
+    year: int | None = None
+    doi: str | None = None
+    venue: str | None = None
+    url: str | None = None
+    pdf_path: str | None = None
+    pdf_asset_id: str | None = None
+    source: str = "manual"
+    source_key: str | None = None
+
+
+HypothesisVerdict = Literal["open", "supported", "refuted", "unsettled"]
+
+
+class HypothesisFields(BaseModel):
+    """Where a Hypothesis stands against the evidence. A closed vocabulary."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    verdict: HypothesisVerdict = "open"
 
 
 class Note(Concept):
@@ -31,13 +87,15 @@ class Note(Concept):
     """
 
     FILE_DOCUMENT: ClassVar[bool] = True
+    FIELDS: ClassVar[type[NoteFields]] = NoteFields
+
+    def fields(self) -> NoteFields:
+        """This note's fields, read from its frontmatter."""
+        return self._fields_of(type(self).FIELDS)
 
     def status(self) -> str:
         """This note's lifecycle status (``"active"`` by default)."""
-        raw = self.frontmatter().get("status")
-        if isinstance(raw, str) and raw:
-            return raw
-        return "active"
+        return self.fields().status
 
     @classmethod
     def mount(cls, host: object, name: str, *, body: str = "") -> Note:
@@ -56,14 +114,11 @@ class Literature(Concept):
     """What does a published source say? Bib fields in the frontmatter."""
 
     FILE_DOCUMENT: ClassVar[bool] = True
+    FIELDS: ClassVar[type[LiteratureFields]] = LiteratureFields
 
-    @property
-    def record(self) -> ReferenceMeta:
-        """This literature item's bibliographic record, from its frontmatter."""
-        meta = self.frontmatter()
-        return ReferenceMeta.model_validate(
-            {key: meta[key] for key in ReferenceMeta.model_fields if key in meta}
-        )
+    def fields(self) -> LiteratureFields:
+        """This literature item's bibliographic fields, from its frontmatter."""
+        return self._fields_of(type(self).FIELDS)
 
     def citation(self) -> str:
         """The human-readable citation text."""
@@ -122,7 +177,6 @@ class _SourcedKnowledge(Concept):
         """Edges with role ``derived_from`` or ``cites``.
 
         A document that is not on disk yet returns the constructor list.
-        Frontmatter ``sources:`` rows are not a second record.
         """
         from pathlib import PurePosixPath
 
@@ -255,29 +309,22 @@ class Observation(_SourcedKnowledge):
 class Hypothesis(_SourcedKnowledge):
     """What do we claim will turn out to be true?
 
-    ``verdict`` in the frontmatter is the whole record: ``open``,
-    ``supported``, ``refuted``, or ``unsettled`` (the evidence cannot tell).
-    The evidence itself is a :class:`Finding` that links here with role
-    ``supports`` or ``contradicts``.
+    ``verdict`` is its one field: ``open``, ``supported``, ``refuted``, or
+    ``unsettled`` (the evidence cannot tell). A value outside the vocabulary
+    is refused on write and reported by ``molab validate``; it is never read
+    as the default. The evidence itself is a :class:`Finding` that links here
+    with role ``supports`` or ``contradicts``.
     """
+
+    FIELDS: ClassVar[type[HypothesisFields]] = HypothesisFields
+
+    def fields(self) -> HypothesisFields:
+        """This hypothesis's fields, read from its frontmatter."""
+        return self._fields_of(type(self).FIELDS)
 
     def verdict(self) -> str:
         """``open``, ``supported``, ``refuted``, or ``unsettled``."""
-        from .reasoning import parse_hypothesis
-
-        return str(parse_hypothesis(self.frontmatter()).verdict)
-
-    @classmethod
-    def check_record(
-        cls,
-        record: Mapping[str, object] | None,
-        *,
-        existing: Mapping[str, object] | None,
-    ) -> None:
-        """Refuse a ``verdict`` outside the vocabulary, in the write or already stored."""
-        from .reasoning import parse_hypothesis
-
-        parse_hypothesis({**(existing or {}), **(record or {})})
+        return self.fields().verdict
 
 
 #: The one class-name → Knowledge subclass table on the knowledge side. The
@@ -351,35 +398,6 @@ def _open_document(path: PathArg, *, fs: FileSystem | None = None) -> Concept:
     return _PRODUCTS[class_name](raw, fs=disk)
 
 
-def _write_document(path: PathArg, text: str, *, fs: FileSystem | None = None) -> Concept:
-    """Persist *text* verbatim. The class comes from its frontmatter ``class``.
-
-    A sourced class is bound without constructor sources, so a legacy
-    ``sources:`` row is never passed into a constructor that requires them.
-    The file need not exist yet. :class:`~molab.knowledge.concept.Concept`
-    does not choose or construct the subclass.
-
-    Raises:
-        ValueError: Frontmatter has no ``class``, or the name is unknown.
-    """
-    from .frontmatter import split_frontmatter
-
-    meta, _body = split_frontmatter(text, path=path)
-    class_name = meta.get("class")
-    if not isinstance(class_name, str) or class_name == "":
-        raise ValueError("knowledge document requires a frontmatter class")
-    klass = _product(class_name)
-    disk = fs if fs is not None else LocalFS()
-    if issubclass(klass, _SourcedKnowledge):
-        handle = klass.__new__(klass)
-        Concept.__init__(handle, str(path), fs=disk)
-        handle._sources = []
-    else:
-        handle = klass(path, fs=disk)
-    handle.write(text, replace=True)
-    return handle
-
-
 HARVEST_TARGETS: MappingProxyType[str, type[_SourcedKnowledge]] = MappingProxyType(
     {
         "Finding": Finding,
@@ -393,8 +411,11 @@ HARVEST_TARGETS: MappingProxyType[str, type[_SourcedKnowledge]] = MappingProxyTy
 __all__ = [
     "Finding",
     "Hypothesis",
+    "HypothesisFields",
     "Literature",
+    "LiteratureFields",
     "Note",
+    "NoteFields",
     "Observation",
     "Plan",
     "Report",

@@ -21,12 +21,10 @@ describe("knowledgeApi.updateDocMeta", () => {
     const fetchSpy = rs.spyOn(globalThis, "fetch");
 
     const result = await knowledgeApi.updateDocMeta("notes/intro", {
-      status: "draft",
       tags: ["physics"],
     });
 
     expect(patchSpy).toHaveBeenCalledWith("notes/intro", {
-      status: "draft",
       tags: ["physics"],
     });
     expect(fetchSpy).not.toHaveBeenCalled();

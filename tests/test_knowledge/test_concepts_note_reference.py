@@ -4,7 +4,7 @@ Notes and references are ``Concept`` subclasses — directories whose path is
 their identity, mountable anywhere and usable with no workspace at all. A note's
 body lives in ``index.md`` and its citations are markdown links (resolved by
 ``out_edges``); a reference's structured bib fields live in ``meta.json``
-(``ReferenceMeta``). Each is its own Concept directory, reconstructed from its
+(``LiteratureFields``). Each is its own Concept directory, reconstructed from its
 ``meta.json`` ``type`` via the shared concept-type registry.
 """
 
@@ -15,8 +15,7 @@ from pathlib import Path
 import pytest
 
 from molab.knowledge.concept import Concept
-from molab.knowledge.concepts import Literature, Note
-from molab.knowledge.reference_meta import ReferenceMeta
+from molab.knowledge.concepts import Literature, LiteratureFields, Note
 
 
 def _mount[C: Concept](cls: type[C], root: Path, name: str) -> C:
@@ -30,14 +29,14 @@ def _mount[C: Concept](cls: type[C], root: Path, name: str) -> C:
     return concept
 
 
-class TestReferenceMeta:
+class TestLiteratureFields:
     """The bibliographic fields of a Literature."""
 
     def test_an_unknown_key_is_refused(self) -> None:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            ReferenceMeta.model_validate({"title": "T", "tags": ["x"]})
+            LiteratureFields.model_validate({"title": "T", "tags": ["x"]})
 
 
 class TestConceptRegistry:
@@ -108,13 +107,13 @@ class TestNote:
     def test_tags_and_status_round_trip(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
         note.write(tags=["analysis", "rdf"])
-        note.write(status="draft")
+        note.write(fields={"status": "draft"})
         assert note.tags() == ["analysis", "rdf"]
         assert note.status() == "draft"
 
     def test_set_tags_preserves_status(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
-        note.write(status="draft")
+        note.write(fields={"status": "draft"})
         note.write(tags=["x"])
         assert note.status() == "draft"
 

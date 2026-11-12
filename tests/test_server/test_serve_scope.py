@@ -477,7 +477,7 @@ class TestScopedKnowledgeGraph:
 
 
 class TestScopedRecordHistory:
-    def test_record_replacement_is_committed_at_the_workspace_root(self, client_at: tuple) -> None:
+    def test_fields_replacement_is_committed_at_the_workspace_root(self, client_at: tuple) -> None:
         import subprocess
 
         from molab.workspace.history import GitHistory
@@ -491,17 +491,17 @@ class TestScopedRecordHistory:
                     "name": "Study",
                     "cls": "Hypothesis",
                     "sources": [{"kind": "project", "ref": f"molab:project/{alpha.id}"}],
-                    "record": {"verdict": "open"},
+                    "fields": {"verdict": "open"},
                 },
             )
             assert created.status_code == 201, created.text
             path = created.json()["relPath"]
-            got = client.get("/api/knowledge/doc/record", params={"path": path}).json()
+            got = client.get("/api/knowledge/doc/fields", params={"path": path}).json()
             replaced = client.patch(
-                "/api/knowledge/doc/record",
+                "/api/knowledge/doc/fields",
                 params={"path": path},
                 json={
-                    "record": {**got["record"], "verdict": "supported"},
+                    "fields": {**got["fields"], "verdict": "supported"},
                     "ifMatch": got["digest"],
                 },
             )
@@ -512,7 +512,7 @@ class TestScopedRecordHistory:
             text=True,
             check=True,
         ).stdout
-        assert "knowledge.record_replaced" in log
+        assert "knowledge.fields_replaced" in log
 
 
 class TestServedValidation:
@@ -606,7 +606,7 @@ class TestKnowledgeEditHistory:
             )
             assert (
                 client.patch(
-                    "/api/knowledge/doc/meta", params={"path": path}, json={"status": "retracted"}
+                    "/api/knowledge/doc/meta", params={"path": path}, json={"tags": ["retracted"]}
                 ).status_code
                 == 200
             )

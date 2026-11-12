@@ -143,7 +143,7 @@ describe("research map", () => {
     expect(at(PLAN).note).toBe("");
   });
 
-  it("reads a hypothesis's verdict from its record, and the class default when the record does not say", () => {
+  it("reads a hypothesis's verdict from its fields, and the class default when they do not say", () => {
     const H = "knowledges/h-dry-ffv.md";
     const H_BARE = "knowledges/h-water-model.md";
     const reasoned = buildResearchMap(
@@ -160,7 +160,7 @@ describe("research map", () => {
     );
     const state = (id: string) => reasoned.nodes.find((entry) => entry.id === id)!.state;
     expect(state(H)).toBe("refuted");
-    // A record that does not say is the class's default, as Molab reads it.
+    // Fields that do not say are the class's default, as Molab reads it.
     expect(state(H_BARE)).toBe("open");
     expect(state(FFV)).toBeNull();
     expect(reasoned.edges).toContainEqual({ from: FFV, to: H, role: "contradicts" });

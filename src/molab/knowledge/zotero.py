@@ -1,7 +1,7 @@
 """Read-only Zotero ingestion for the OKF workspace concepts (wsokf-05).
 
 Reads a local ``zotero.sqlite`` (opened read-only) and yields one
-:class:`~molab.knowledge.reference_meta.ReferenceMeta` per item: the fields a
+:class:`~molab.knowledge.concepts.LiteratureFields` per item: the fields a
 :class:`~molab.knowledge.concepts.Literature` document stores, with ``source``
 ``"zotero"`` and the item key as ``source_key``. Each item's first PDF is
 *resolved to a path* under Zotero's own ``storage/`` tree — no bytes are read
@@ -15,7 +15,7 @@ import sqlite3
 from os import PathLike
 from pathlib import Path
 
-from .reference_meta import ReferenceMeta
+from .concepts import LiteratureFields
 
 _STORAGE_PREFIX = "storage:"
 _YEAR = re.compile(r"\d{4}")
@@ -28,7 +28,7 @@ class ZoteroLibrary:
         """Bind the database file. Nothing is read until :meth:`items`."""
         self.path = Path(path)
 
-    def items(self) -> list[ReferenceMeta]:
+    def items(self) -> list[LiteratureFields]:
         """Non-attachment, non-note items, as the fields a Literature stores.
 
         Only what the library holds is set, so a re-import leaves a field
@@ -46,7 +46,7 @@ class ZoteroLibrary:
                 "WHERE it.typeName NOT IN ('attachment', 'note') "
                 "ORDER BY i.itemID"
             ).fetchall()
-            items: list[ReferenceMeta] = []
+            items: list[LiteratureFields] = []
             for item_id, key in rows:
                 fields = _item_fields(conn, item_id)
                 found: dict[str, object] = {
@@ -60,7 +60,7 @@ class ZoteroLibrary:
                     "source_key": key,
                 }
                 items.append(
-                    ReferenceMeta.model_validate(
+                    LiteratureFields.model_validate(
                         {name: value for name, value in found.items() if value is not None}
                     )
                 )

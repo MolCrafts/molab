@@ -35,13 +35,7 @@ export interface UseKnowledgeDocs {
       body?: string;
       cls?: DocCreateRequest.cls;
       sources?: DocSource[];
-      record?: Record<string, unknown> | null;
-      title?: string | null;
-      authors?: string[] | null;
-      year?: number | null;
-      doi?: string | null;
-      venue?: string | null;
-      url?: string | null;
+      fields?: Record<string, unknown>;
     },
   ) => Promise<string>;
   renameDoc: (path: string, name: string) => Promise<void>;

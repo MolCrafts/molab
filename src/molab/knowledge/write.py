@@ -10,7 +10,7 @@ cycle. Every such import therefore sits in a function body (or an
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from .concept import Knowledge, append_link
@@ -38,7 +38,7 @@ def write_knowledge(
     text: str,
     cite: Sequence[tuple[Folder | Concept | PathArg, EdgeRole]] = (),
     title: str = "",
-    record: object | None = None,
+    fields: Mapping[str, object] | None = None,
     fs: FileSystem | None = None,
     replaces: Sequence[PathArg] = (),
     format: KnowledgeFormat | None = None,
@@ -53,7 +53,7 @@ def write_knowledge(
     or ``knowledge.rewritten``) that also carries the deletion of each
     *replaces* document, so a superseded document leaves the tree instead of
     piling up beside its successor. A new document is stamped ``created_at``
-    (ISO-8601 UTC, seconds) unless *record* already carries one. The host's ``index.knowledges`` section (in its ``index.md``) is
+    (ISO-8601 UTC, seconds). The host's ``index.knowledges`` section (in its ``index.md``) is
     rebuilt after the write. The write runs under the document's lock, and a
     history failure never fails it: it is logged by the history
     (:func:`~molab.knowledge.mutation.mutation`).
@@ -67,7 +67,9 @@ def write_knowledge(
         text: Narrative. ``""`` on an existing document leaves the body.
         cite: Optional ``(target, role)`` pairs.
         title: History summary. Falls back to *name*.
-        record: Extra frontmatter, merged under ``created_by`` and ``name``.
+        fields: The fields *of* declares (:attr:`~molab.knowledge.concept.Concept.FIELDS`),
+            merged over a rewritten document's. A key *of* does not declare
+            is refused before anything is written.
         fs: Disk to write through. Defaults to the host's own disk.
         replaces: Documents this one supersedes. Each is deleted after the
             write; git keeps its text.
@@ -80,18 +82,18 @@ def write_knowledge(
 
     Raises:
         TypeError: If *host* is not a recognised host.
-        ValueError: If *of* requires sources and *sources* is empty, a
-            *replaces* entry is not a knowledge document or is the written one,
-            or the name already exists in the other *format*.
+        ValueError: If *of* requires sources and *sources* is empty, *fields*
+            break *of*'s fields, a *replaces* entry is not a knowledge document
+            or is the written one, or the name already exists in the other
+            *format*.
     """
+    from .fields import check_fields
     from .index_section import refresh_section
     from .location import _host_fs
     from .mutation import mutation
 
     disk = fs if fs is not None else _host_fs(host)
-    from .concept import _record_as_dict
-
-    preview = _record_as_dict(record) if record is not None else None
+    check_fields(of, fields or {})
     path = _landed_path(host, name, of, format, disk)
     sourced = _sourced_class(of)
     if sourced is not None:
@@ -110,21 +112,19 @@ def write_knowledge(
                 f"{name!r} collides with existing document {previous_name!r} at {path}; "
                 "choose a distinct name or explicitly replace the old document"
             )
-    check_record = getattr(of, "check_record", None)
-    if check_record is not None:
-        check_record(preview, existing=existing)
     if sourced is not None and not sources:
         raise ValueError(f"{of.__name__} requires at least one SourceRef")
     item = probe
     created = not item.exists()
     retired = _replaced_paths(replaces, item.path, disk)
-    payload = _merged_record(record, created_by=created_by, name=name, created=created)
+    head: dict[str, object] = {**(fields or {}), "created_by": created_by, "name": name}
+    if created:
+        from molab.workspace.timestamps import utc_now
+
+        head["created_at"] = utc_now().replace(microsecond=0).isoformat()
     event = "knowledge.created" if created else "knowledge.rewritten"
     with mutation(item, event, title or name) as change:
-        if item.exists() and text == "":
-            item.write(None, payload)
-        else:
-            item.write(text, payload)
+        item.write(None if not created and text == "" else text, head)
         _apply_cites(item, cite)
         for old in retired:
             from .concepts import _open_document
@@ -225,22 +225,6 @@ def mount_note(host: Folder | Concept | PathArg, name: str, *, body: str = "") -
     from .concepts import Note
 
     return write_knowledge(host, name=name, of=Note, created_by="", text=body)
-
-
-def _merged_record(
-    record: object | None, *, created_by: str, name: str, created: bool
-) -> dict[str, object]:
-    """Frontmatter for a write: *record* under ``created_by``, ``name`` and, on create, ``created_at``."""
-    from .concept import _record_as_dict
-
-    payload = _record_as_dict(record) if record is not None else {}
-    payload["created_by"] = created_by
-    payload["name"] = name
-    if created and not payload.get("created_at"):
-        from molab.workspace.timestamps import utc_now
-
-        payload["created_at"] = utc_now().replace(microsecond=0).isoformat()
-    return payload
 
 
 def _cite_target(_item: Knowledge, source: Folder | Concept | PathArg) -> str:

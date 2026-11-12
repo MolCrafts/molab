@@ -113,7 +113,7 @@ def import_zotero(
 
     rprint(f"[green]OK[/green] Imported {len(refs)} literature record(s) into {tree.path}")
     for ref in refs:
-        meta = ref.record
+        meta = ref.fields()
         title = meta.title or "(untitled)"
         year = f" ({meta.year})" if meta.year else ""
         rel = Path(ref.path).relative_to(tree.path).as_posix()
@@ -579,19 +579,19 @@ def _rel_to_workspace(workspace: Workspace, doc_path: object) -> str:
     return Path(str(doc_path)).relative_to(Path(str(workspace.root))).as_posix()
 
 
-def _load_record(raw: str | None) -> dict[str, object] | None:
-    """A ``--record`` JSON object, or the object in a JSON file.
+def _load_fields(raw: str | None) -> dict[str, object]:
+    """A ``--fields`` JSON object, or the object in a JSON file.
 
     Inline JSON is told by its leading ``{``; anything else is a path. The
-    inline text is never probed as a path, whose name limit a record of any
+    inline text is never probed as a path, whose name limit an object of any
     size would exceed.
     """
     if raw is None:
-        return None
+        return {}
     text = raw if raw.lstrip().startswith("{") else Path(raw).read_text(encoding="utf-8")
     loaded = json.loads(text)
     if not isinstance(loaded, dict):
-        raise ValueError("--record must be a JSON object")
+        raise ValueError("--fields must be a JSON object")
     return loaded
 
 
@@ -627,11 +627,14 @@ def knowledge_write(
             help="File path or DOI (10.… or DOI:…). Repeat once per source.",
         ),
     ] = None,
-    record: Annotated[
+    fields: Annotated[
         str | None,
         typer.Option(
-            "--record",
-            help="JSON object of this class's frontmatter fields, or a path to that JSON.",
+            "--fields",
+            help=(
+                "JSON object of the fields this class declares (a Hypothesis verdict, a "
+                "Literature's bibliography, a Note status), or a path to that JSON."
+            ),
         ),
     ] = None,
     replaces: Annotated[
@@ -676,7 +679,7 @@ def knowledge_write(
         else ()
     )
     try:
-        payload = _load_record(record)
+        payload = _load_fields(fields)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
@@ -688,7 +691,7 @@ def knowledge_write(
             sources=sources,
             created_by=created_by,
             text=text,
-            record=payload,
+            fields=payload,
             fs=workspace.fs,
             replaces=[workspace.fs.join(str(workspace.resolve()), item) for item in replaces or ()],
             format=doc_format,

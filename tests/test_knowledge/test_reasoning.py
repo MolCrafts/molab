@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from molab.knowledge import Finding, Hypothesis, SourceRef
-from molab.knowledge.record import has_record, record_of, replace_record
+from molab.knowledge.fields import own_fields, replace_fields
 from molab.knowledge.validate import validate_knowledge
 from molab.knowledge.write import write_knowledge
 
@@ -22,7 +22,7 @@ def _write(lab: Any, of: type, name: str, record: dict[str, object] | None = Non
         sources=[SourceRef.of(project)],
         created_by="t",
         text=f"# {name}\n",
-        record=record,
+        fields=record or {},
     )
 
 
@@ -30,7 +30,7 @@ def _record_issues(lab: Any) -> list[tuple[str, str]]:
     return [
         (issue["path"], issue["detail"])
         for issue in validate_knowledge(lab, errors_only=True)
-        if issue["rule"] == "knowledge.record"
+        if issue["rule"] == "knowledge.fields"
     ]
 
 
@@ -52,7 +52,7 @@ class TestHypothesis:
     def test_an_explicit_verdict_round_trips(self, lab: Any, verdict: str) -> None:
         doc = _write(lab, Hypothesis, "Tg rises", {"verdict": verdict})
         assert Hypothesis(doc.path).verdict() == verdict
-        assert record_of(doc)["verdict"] == verdict
+        assert own_fields(doc.frontmatter())["verdict"] == verdict
 
     def test_an_unknown_verdict_is_refused_and_nothing_lands(self, lab: Any) -> None:
         with pytest.raises(ValueError, match="verdict"):
@@ -65,13 +65,12 @@ class TestHypothesis:
             doc.write(None, {"verdict": "proven"})
         assert doc.verdict() == "open"
 
-    def test_the_record_is_replaceable_and_validated(self, lab: Any) -> None:
+    def test_the_fields_are_replaceable_and_validated(self, lab: Any) -> None:
         doc = _write(lab, Hypothesis, "Tg rises")
-        assert has_record(doc)
-        replace_record(doc, {"verdict": "supported"})
+        replace_fields(doc, {"verdict": "supported"})
         assert doc.verdict() == "supported"
         with pytest.raises(ValueError, match="verdict"):
-            replace_record(doc, {"verdict": "yes"})
+            replace_fields(doc, {"verdict": "yes"})
         assert doc.verdict() == "supported"
 
     def test_validate_flags_a_hand_written_verdict(self, lab: Any) -> None:

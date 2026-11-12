@@ -932,33 +932,6 @@ class TestConceptWriteReplace:
         assert path.stat().st_mtime_ns == before
 
 
-class TestConceptWriteDocument:
-    def test_a_legacy_observation_is_persisted_verbatim(self, tmp_path: Path) -> None:
-        from molab.knowledge.concepts import _write_document
-
-        text = "---\nclass: Observation\nsources:\n- kind: run\n  ref: R\n---\n\n# obs\n"
-        path = tmp_path / "knowledges" / "obs-1.md"
-
-        handle = _write_document(path, text)
-
-        assert type(handle).__name__ == "Observation"
-        assert path.read_text(encoding="utf-8") == text
-
-    def test_a_missing_or_unknown_class_writes_nothing(self, tmp_path: Path) -> None:
-        from molab.knowledge.concepts import _write_document
-
-        missing = tmp_path / "missing.md"
-        unknown = tmp_path / "unknown.md"
-
-        with pytest.raises(ValueError):
-            _write_document(missing, "# hi\n")
-        with pytest.raises(ValueError):
-            _write_document(unknown, "---\nclass: Widget\n---\n\n")
-
-        assert not missing.exists()
-        assert not unknown.exists()
-
-
 class TestRemoveLegacyFiles:
     def test_named_files_go_and_an_attachment_stays(self, tmp_path: Path) -> None:
         from molab.knowledge.concept import remove_legacy_files

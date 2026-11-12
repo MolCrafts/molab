@@ -1,7 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { parseDocBlocks } from "./doc/blocks";
 import {
-  DOC_RECORD,
   DOC_SKELETON,
   fillSkeleton,
   isSourcedClass,
@@ -15,7 +14,6 @@ describe("DOC_SKELETON", () => {
     expect(DOC_SKELETON.Finding).toContain('!!! success "Claim"');
     expect(DOC_SKELETON.Plan).toContain("## Work items");
     expect(DOC_SKELETON.Hypothesis).toContain('!!! question "Claim"');
-    expect(DOC_RECORD.Hypothesis).toEqual({ verdict: "open" });
     expect(isSourcedClass("Hypothesis")).toBe(true);
     expect(Object.values(DOC_SKELETON).some((body) => /^# /m.test(body))).toBe(false);
     expect(isSourcedClass("Finding")).toBe(true);

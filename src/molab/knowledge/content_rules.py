@@ -4,8 +4,9 @@
 document written straight to disk never passed that gate. These rules read what
 is on disk and report, for :mod:`molab.knowledge.validate`:
 
-* ``knowledge.record`` (error) — a document whose structured record its class
-  rejects (a Hypothesis ``verdict`` outside the vocabulary).
+* ``knowledge.fields`` (error) — a frontmatter key the document's class does
+  not declare, or a value it rejects (a Hypothesis ``verdict`` outside the
+  vocabulary).
 * ``knowledge.local_source`` (warning) — a link to a local file outside the
   workspace, or to one that does not exist: the record is not portable.
 * ``knowledge.literature_metadata`` (warning) — a Literature record with no DOI
@@ -28,7 +29,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .record import COMMON_KEYS
+from .fields import check_fields, own_fields
 
 if TYPE_CHECKING:
     from molab.fs import FileSystem
@@ -38,9 +39,10 @@ if TYPE_CHECKING:
 __all__ = ["CONTENT_RULE_HINTS", "ContentIssue", "content_issues"]
 
 CONTENT_RULE_HINTS: dict[str, str] = {
-    "knowledge.record": (
-        "The document's structured fields do not validate for its class. Rewrite them "
-        "with `molab knowledge write NAME --class CLASS --record '{...}'`."
+    "knowledge.fields": (
+        "The frontmatter holds a key its class does not declare, or a value the class "
+        "refuses. Rewrite the fields with `molab knowledge write NAME --class CLASS "
+        "--fields '{...}'`, or replace them whole with PATCH /api/knowledge/doc/fields."
     ),
     "knowledge.local_source": (
         "Link a source inside the workspace: import data with `molab asset import`, "
@@ -49,7 +51,7 @@ CONTENT_RULE_HINTS: dict[str, str] = {
     ),
     "knowledge.literature_metadata": (
         "Put the bibliographic fields in frontmatter (title, authors, year, doi or "
-        "url), e.g. `molab knowledge write NAME --class Literature --record '{...}'`."
+        "url), e.g. `molab knowledge write NAME --class Literature --fields '{...}'`."
     ),
     "knowledge.ephemeral_link": (
         "Cite the product by its `molab:asset/<id>` ref; molab's viewers render it. "
@@ -82,19 +84,12 @@ class ContentIssue:
     severity: str
 
 
-def _record(doc: Concept) -> dict[str, object]:
-    return {key: value for key, value in doc.frontmatter().items() if key not in COMMON_KEYS}
-
-
-def _record_issue(doc: Concept) -> ContentIssue | None:
-    """``knowledge.record`` for a document whose class owns a record."""
-    check_record = getattr(type(doc), "check_record", None)
-    if check_record is None:
-        return None
+def _fields_issue(doc: Concept) -> ContentIssue | None:
+    """``knowledge.fields`` for a frontmatter the document's class refuses."""
     try:
-        check_record(_record(doc), existing=None)
-    except (ValueError, TypeError) as exc:
-        return ContentIssue(str(doc.path), "knowledge.record", str(exc), "error")
+        check_fields(type(doc), own_fields(doc.frontmatter()))
+    except ValueError as exc:
+        return ContentIssue(str(doc.path), "knowledge.fields", str(exc), "error")
     return None
 
 
@@ -211,7 +206,7 @@ def content_issues(
             continue
     found: list[ContentIssue] = []
     for doc in docs:
-        for check in (_record_issue, _ephemeral_issue, _versioned_issue, _anchor_issue):
+        for check in (_fields_issue, _ephemeral_issue, _versioned_issue, _anchor_issue):
             issue = check(doc)
             if issue is not None:
                 found.append(issue)

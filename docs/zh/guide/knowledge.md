@@ -76,29 +76,31 @@ assert Note(experiment, "Analysis Notes").path == doc.path
 既能归到这个类、又能归到那个类，错的是定义，不是作者。每个类都落成一个文件；`class:`
 frontmatter 标出是哪一个：
 
-| 类 | 它回答的唯一问题 | 记录（frontmatter） | 绝不包含 |
+| 类 | 它回答的唯一问题 | 字段（`FIELDS`） | 绝不包含 |
 |---|---|---|---|
 | `Plan` | 我们在问什么，范围多大，受哪些约束？ | 无；工作项写在正文里 | 待检验的断言（那些是 Hypothesis） |
 | `Hypothesis` | 我们断言什么会成立？ | `verdict`：`open` \| `supported` \| `refuted` \| `unsettled`（默认 `open`） | 证据本身（那是 Finding） |
 | `Observation` | 在做任何解释之前，观察到了什么、给定了什么？ | 无 | 结论（Finding） |
 | `Finding` | 证据确立了什么？ | 无 | 选择、计划 |
 | `Report` | 我们要告诉读者什么？它只做汇编，不提出新的断言。 | 无 | 别处没有陈述过的结果 |
-| `Literature` | 一份已发表的文献说了什么？ | 书目字段；PDF 只记路径，从不拷贝 | |
-| `Note` | 以上都不是：对推理不作任何断言的自由文本。 | 无 | |
+| `Literature` | 一份已发表的文献说了什么？ | `LiteratureFields`：书目字段；PDF 只记路径，从不拷贝 | |
+| `Note` | 以上都不是：对推理不作任何断言的自由文本。 | `status`（默认 `active`） | |
 
 `Report` 由它的目的（告诉读者）界定，而不是由篇幅界定：一个结果写得再长，也仍然是 `Finding`。
 
-`verdict` 的取值超出词表时，写入会被拒绝，`molab validate` 也会报告
-（`knowledge.record`）；它绝不会被默认值悄悄替换。
+除各类自己的字段外，每份文档的 frontmatter 都带同一组键：`class`、`name`、`created_by`、
+`created_at`、`tags`。类没有声明的键，或被字段拒绝的取值（超出词表的 `verdict`），写入时会被
+拒绝，`molab validate` 也会报告（`knowledge.fields`）；它绝不会被默认值悄悄替换。类的字段是一个
+pydantic 模型，子类扩展父类的模型。
 
 除 `Note` 与 `Literature` 之外，每个类在构造时都至少需要一个 `SourceRef` —— 它们是有出处
 的文档。
 
 `Plan` 是唯一的计划文档。它的工作项写在叙事正文里；它要检验的断言是 `Hypothesis` 文档。
 
-### 控制流在链接和记录里
+### 控制流在链接和字段里
 
-没有哪个类是为某种控制结构单独设的。推理过程从带类型的链接和记录字段里读出来：
+没有哪个类是为某种控制结构单独设的。推理过程从带类型的链接和类的字段里读出来：
 
 | 控制流 | 知识怎么表达 |
 |---|---|

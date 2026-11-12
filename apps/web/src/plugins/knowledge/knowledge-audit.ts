@@ -27,7 +27,8 @@ export interface KnowledgeAuditIssue {
 }
 
 export interface KnowledgeAuditContext {
-  records?: Readonly<Record<string, Record<string, unknown> | undefined>>;
+  /** Each document's own fields (a Hypothesis `verdict`), by path. */
+  fields?: Readonly<Record<string, Record<string, unknown> | undefined>>;
   cardsByPath?: Readonly<Record<string, readonly EntityCard[] | undefined>>;
   /** Canonical server refs already resolved by the workbench, never parsed here. */
   refIndex?: ReadonlyMap<string, MolabRefTarget>;
@@ -138,12 +139,12 @@ export const auditKnowledge = (
     );
     const against = evidence.filter((edge) => edge.role === "contradicts");
     const forClaim = evidence.filter((edge) => edge.role === "supports");
-    const record = context.records?.[node.relPath];
-    if (record === undefined) {
+    const fields = context.fields?.[node.relPath];
+    if (fields === undefined) {
       uncheckedHypotheses.push(node.relPath);
       continue;
     }
-    const verdict = record.verdict ?? "open";
+    const verdict = fields.verdict ?? "open";
     if (against.length > 0 && (verdict === "open" || verdict === "unsettled")) {
       add({
         code: "unresolved-contradiction",

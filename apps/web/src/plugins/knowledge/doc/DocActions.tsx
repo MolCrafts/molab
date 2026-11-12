@@ -1,6 +1,6 @@
 /**
  * A knowledge page's editor actions (L10), in the tab row: Save (only while
- * edited; ⌘S first), Export, and ⋯ — Rename…, Move to…, the status words,
+ * edited; ⌘S first), Export, and ⋯ — Rename…, Move to…, a Note's status words,
  * Copy path, Delete…. Icons only; the menu is words only.
  */
 
@@ -69,7 +69,14 @@ export const DocActions = ({
   const [moving, setMoving] = useState(false);
 
   const setStatus = useMutation({
-    mutationFn: (next: string) => knowledgeApi.updateDocMeta(relPath, { status: next }),
+    // `status` is a Note field: read the fields and their digest, replace them whole.
+    mutationFn: async (next: string) => {
+      const current = await knowledgeApi.getDocFields(relPath);
+      await knowledgeApi.replaceDocFields(relPath, {
+        fields: { ...current.fields, status: next },
+        ifMatch: current.digest,
+      });
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: knowledgeKeys.lists() }),
     onError: (err) => toast(err instanceof Error ? err.message : "Couldn't set the status."),
   });
@@ -159,18 +166,22 @@ export const DocActions = ({
           <DropdownMenuItem disabled={!writable} onSelect={() => setMoving(true)}>
             Move to…
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {STATUS_WORDS.map((word) => (
-            <DropdownMenuItem
-              key={word}
-              disabled={!writable}
-              onSelect={() => setStatus.mutate(word)}
-              className="justify-between"
-            >
-              {word.charAt(0).toUpperCase() + word.slice(1)}
-              {status === word ? <Check aria-hidden className="size-icon-sm" /> : null}
-            </DropdownMenuItem>
-          ))}
+          {cls === "Note" ? (
+            <>
+              <DropdownMenuSeparator />
+              {STATUS_WORDS.map((word) => (
+                <DropdownMenuItem
+                  key={word}
+                  disabled={!writable}
+                  onSelect={() => setStatus.mutate(word)}
+                  className="justify-between"
+                >
+                  {word.charAt(0).toUpperCase() + word.slice(1)}
+                  {status === word ? <Check aria-hidden className="size-icon-sm" /> : null}
+                </DropdownMenuItem>
+              ))}
+            </>
+          ) : null}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={() => {

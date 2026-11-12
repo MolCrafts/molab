@@ -46,7 +46,7 @@ class TestContentRules:
     def test_a_malformed_record_is_an_error(self, lab: Any) -> None:
         _doc(lab, "plan", PLAN)
         _doc(lab, "claim", _hypothesis("likely"))
-        assert ("knowledge.record", "knowledges/claim.md", "error") in _issues(lab)
+        assert ("knowledge.fields", "knowledges/claim.md", "error") in _issues(lab)
 
     def test_a_link_outside_the_workspace_or_missing_warns(self, lab: Any) -> None:
         _doc(
@@ -77,11 +77,11 @@ class TestContentRules:
         _doc(lab, "plan", PLAN)
         _doc(lab, "claim", _hypothesis("likely"))
         rules = {i["rule"] for i in validate_knowledge(lab, errors_only=True)}
-        assert rules == {"knowledge.record"}
+        assert rules == {"knowledge.fields"}
 
     def test_every_content_rule_has_a_hint(self) -> None:
         for rule in (
-            "knowledge.record",
+            "knowledge.fields",
             "knowledge.local_source",
             "knowledge.literature_metadata",
         ):

@@ -267,7 +267,7 @@ const MapView = ({
       return cls === "Finding" || cls in STATEFUL || entitySources.has(node.relPath);
     });
   }, [auditGraph]);
-  // Reuse cached records, and resolve Finding/entity source cards only on audit demand.
+  // Reuse cached fields, and resolve Finding/entity source cards only on audit demand.
   const auditDetails = useQueries({
     queries: auditNodes.map((node) => ({
       ...knowledgeNoteQueryOptions(node.relPath),
@@ -277,12 +277,12 @@ const MapView = ({
   const refIndex = useMemo(() => buildMolabRefIndex(snapshot), [snapshot]);
   const audit = auditOpen
     ? auditKnowledge(auditGraph, {
-        records: {
-          ...auditContext.records,
+        fields: {
+          ...auditContext.fields,
           ...Object.fromEntries(
             auditNodes.flatMap((node, index) =>
-              auditDetails[index]?.data?.record
-                ? [[node.relPath, auditDetails[index].data.record]]
+              auditDetails[index]?.data?.fields
+                ? [[node.relPath, auditDetails[index].data.fields]]
                 : [],
             ),
           ),
@@ -538,9 +538,9 @@ export const KnowledgeRelations = ({ selection: target, snapshot }: RendererProp
   );
   const heads = useMemo(() => scoped.nodes.filter((node) => node.cls in STATEFUL), [scoped]);
   const details = useQueries({ queries: heads.map((node) => knowledgeNoteQueryOptions(node.id)) });
-  const records = Object.fromEntries(
+  const fields = Object.fromEntries(
     heads.flatMap((node, index) =>
-      details[index]?.data?.record ? [[node.id, details[index].data?.record]] : [],
+      details[index]?.data?.fields ? [[node.id, details[index].data?.fields]] : [],
     ),
   );
   const cardsByPath = Object.fromEntries(
@@ -560,7 +560,7 @@ export const KnowledgeRelations = ({ selection: target, snapshot }: RendererProp
   const map = projectResearchMap(
     graph.data ?? { nodes: [], edges: [] },
     project?.path ?? "",
-    records,
+    fields,
   );
   const pending = graph.isPending || details.some((detail) => detail.isPending);
   return (
@@ -587,7 +587,7 @@ export const KnowledgeRelations = ({ selection: target, snapshot }: RendererProp
               snapshot={snapshot}
               graph={graph.data ?? { nodes: [], edges: [] }}
               auditGraph={auditGraph}
-              auditContext={{ records, cardsByPath }}
+              auditContext={{ fields, cardsByPath }}
               focus={target.objectType === "project" ? target.pluginFocus : undefined}
               onOpenPage={(id) => nav.setSelection({ objectType: "knowledge", objectId: id })}
             />

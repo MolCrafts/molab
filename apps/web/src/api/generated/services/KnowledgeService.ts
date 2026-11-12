@@ -6,12 +6,12 @@ import type { BacklinksResponse } from '../models/BacklinksResponse';
 import type { Body_uploadDocMedia } from '../models/Body_uploadDocMedia';
 import type { DocBodyUpdate } from '../models/DocBodyUpdate';
 import type { DocCreateRequest } from '../models/DocCreateRequest';
+import type { DocFieldsResponse } from '../models/DocFieldsResponse';
+import type { DocFieldsUpdate } from '../models/DocFieldsUpdate';
 import type { DocMediaResponse } from '../models/DocMediaResponse';
 import type { DocMetaUpdate } from '../models/DocMetaUpdate';
 import type { DocMoveRequest } from '../models/DocMoveRequest';
 import type { DocPageResponse } from '../models/DocPageResponse';
-import type { DocRecordResponse } from '../models/DocRecordResponse';
-import type { DocRecordUpdate } from '../models/DocRecordUpdate';
 import type { DocRelationsResponse } from '../models/DocRelationsResponse';
 import type { DocRelationUpdate } from '../models/DocRelationUpdate';
 import type { EmbedRequest } from '../models/EmbedRequest';
@@ -337,7 +337,7 @@ export class KnowledgeService {
     }
     /**
      * Update Doc Meta
-     * Update a document's tags/status — ``Knowledge.write`` for every knowledge class.
+     * Set a document's tags — ``Knowledge.write`` for every knowledge class.
      * @param path The note Concept's workspace-relative document path (its identity).
      * @param requestBody
      * @param molabSession
@@ -422,20 +422,20 @@ export class KnowledgeService {
         });
     }
     /**
-     * Get Doc Record
-     * A document's structured record and its file digest (for ``ifMatch``).
+     * Get Doc Fields
+     * A document's own fields and its file digest (for ``ifMatch``).
      * @param path The document's workspace-relative path (its identity).
      * @param molabSession
-     * @returns DocRecordResponse Successful Response
+     * @returns DocFieldsResponse Successful Response
      * @throws ApiError
      */
-    public static getDocRecord(
+    public static getDocFields(
         path: string,
         molabSession?: (string | null),
-    ): CancelablePromise<DocRecordResponse> {
+    ): CancelablePromise<DocFieldsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/knowledge/doc/record',
+            url: '/api/knowledge/doc/fields',
             cookies: {
                 'molab_session': molabSession,
             },
@@ -448,25 +448,26 @@ export class KnowledgeService {
         });
     }
     /**
-     * Replace Doc Record
-     * Replace a document's structured record whole — 409 when ``ifMatch`` is stale.
+     * Replace Doc Fields
+     * Replace a document's own fields whole — 409 when ``ifMatch`` is stale.
      *
-     * Only classes that own a record (Hypothesis) accept it (422 otherwise, and for a record the class rejects). The change is
-     * recorded in the workspace history as ``knowledge.record_replaced``.
+     * The class's fields check them: a key it does not declare, or a value it
+     * refuses, answers 422. The change is recorded in the workspace history as
+     * ``knowledge.fields_replaced``.
      * @param path The document's workspace-relative path (its identity).
      * @param requestBody
      * @param molabSession
-     * @returns DocRecordResponse Successful Response
+     * @returns DocFieldsResponse Successful Response
      * @throws ApiError
      */
-    public static replaceDocRecord(
+    public static replaceDocFields(
         path: string,
-        requestBody: DocRecordUpdate,
+        requestBody: DocFieldsUpdate,
         molabSession?: (string | null),
-    ): CancelablePromise<DocRecordResponse> {
+    ): CancelablePromise<DocFieldsResponse> {
         return __request(OpenAPI, {
             method: 'PATCH',
-            url: '/api/knowledge/doc/record',
+            url: '/api/knowledge/doc/fields',
             cookies: {
                 'molab_session': molabSession,
             },

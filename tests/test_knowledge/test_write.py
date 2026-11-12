@@ -253,8 +253,7 @@ class TestWriteKnowledgePath:
         page = write_knowledge(Knowledge(wiki), name="Tg", of=Note, created_by="t", text="# Tg\n")
         assert page.path == wiki / "tg.md"
 
-    def test_literature_needs_no_sources_and_keeps_a_record(self, lab: Any) -> None:
-        from molab.knowledge.reference_meta import ReferenceMeta
+    def test_literature_needs_no_sources_and_keeps_its_fields(self, lab: Any) -> None:
         from molab.knowledge.write import write_knowledge
 
         item = write_knowledge(
@@ -263,7 +262,7 @@ class TestWriteKnowledgePath:
             of=Literature,
             created_by="t",
             text="",
-            record=ReferenceMeta(title="T"),
+            fields={"title": "T"},
         )
         assert item.frontmatter()["title"] == "T"
 

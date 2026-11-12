@@ -19,8 +19,8 @@ export const MAP_CLASSES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The classes whose record carries the state of the reasoning: the field that
- * holds it and what Molab reads when the record does not say.
+ * The classes whose fields carry the state of the reasoning: the field that
+ * holds it and what Molab reads when the document does not say.
  */
 export const STATEFUL: Readonly<Record<string, { field: string; initial: string }>> = {
   Hypothesis: { field: "verdict", initial: "open" },
@@ -60,12 +60,12 @@ export interface ResearchMap {
 const EXPERIMENT_KNOWLEDGE = /(?:^|\/)experiments\/([^/]+)\/knowledges\//;
 
 /**
- * Build the map from Molab's knowledge graph and the records of the documents
+ * Build the map from Molab's knowledge graph and the own fields of the documents
  * in {@link STATEFUL} classes, by path.
  */
 export function buildResearchMap(
   graph: KnowledgeGraph,
-  records: Readonly<Record<string, Record<string, unknown>>> = {},
+  fields: Readonly<Record<string, Record<string, unknown>>> = {},
   classes: ReadonlySet<string> = MAP_CLASSES,
 ): ResearchMap {
   const docs = graph.nodes.filter((doc) => classes.has(doc.cls ?? "Note"));
@@ -76,7 +76,7 @@ export function buildResearchMap(
   const nodes: MapNode[] = docs.map((doc) => {
     const host = doc.relPath.match(EXPERIMENT_KNOWLEDGE)?.[1] ?? null;
     const stateful = STATEFUL[doc.cls ?? "Note"];
-    const value = stateful === undefined ? undefined : records[doc.relPath]?.[stateful.field];
+    const value = stateful === undefined ? undefined : fields[doc.relPath]?.[stateful.field];
     return {
       id: doc.relPath,
       cls: doc.cls ?? "Note",

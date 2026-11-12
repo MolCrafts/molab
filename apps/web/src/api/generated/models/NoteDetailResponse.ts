@@ -6,10 +6,17 @@ import type { EntityCard } from './EntityCard';
 export type NoteDetailResponse = {
     name: string;
     relPath: string;
+    /**
+     * The knowledge class, or `Tex` for a TeX file.
+     */
+    cls: string;
     body: string;
     links: Array<string>;
     cards?: Array<EntityCard>;
-    record?: Record<string, any>;
+    /**
+     * The fields the class declares, as stored (no common key).
+     */
+    fields?: Record<string, any>;
     format?: NoteDetailResponse.format;
     /**
      * ISO-8601 UTC time the file was last modified.

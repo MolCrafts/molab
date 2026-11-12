@@ -152,7 +152,7 @@ def summarize_entity(target: Concept | Folder | Asset) -> EntitySummary:
     if isinstance(target, Asset):
         return EntitySummary(id=target.id, kind="asset", title=target.title)
     if isinstance(target, Concept):
-        bib_title = target.record.title if isinstance(target, Literature) else None
+        bib_title = target.fields().title if isinstance(target, Literature) else None
         title = bib_title or extract_title(target.read()) or target.name
         # A document's identity is its path.
         return EntitySummary(id=str(target.path), kind=type(target).__name__, title=title)

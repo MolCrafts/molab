@@ -404,21 +404,24 @@ class TestCreateDoc:
                 json={
                     "name": "Glass Paper",
                     "cls": "Literature",
-                    "title": "Glass transition",
-                    "authors": ["Lin"],
-                    "year": 2020,
-                    "doi": "10.1000/glass",
+                    "fields": {
+                        "title": "Glass transition",
+                        "authors": ["Lin"],
+                        "year": 2020,
+                        "doi": "10.1000/glass",
+                    },
                 },
             )
         assert response.status_code == 201, response.text
         assert response.json()["cls"] == "Literature"
         doc = Literature(Path(str(ws.root)) / "knowledges" / "glass-paper.md")
-        assert doc.record.title == "Glass transition"
-        assert doc.record.authors == ("Lin",)
-        assert doc.record.year == 2020
-        assert doc.record.doi == "10.1000/glass"
+        fields = doc.fields()
+        assert fields.title == "Glass transition"
+        assert fields.authors == ("Lin",)
+        assert fields.year == 2020
+        assert fields.doi == "10.1000/glass"
 
-    def test_hypothesis_record_round_trips_on_the_note(
+    def test_hypothesis_fields_round_trip_on_the_note(
         self, served: ServedFactory, lab: RunFixture
     ) -> None:
         from molab.workspace.refs import ref_of
@@ -438,7 +441,7 @@ class TestCreateDoc:
             plan_path = plan.json()["relPath"]
             opened_plan = client.get("/api/knowledge/note", params={"path": plan_path})
             assert opened_plan.status_code == 200, opened_plan.text
-            assert opened_plan.json()["record"] == {}
+            assert opened_plan.json()["fields"] == {}
 
             created = client.post(
                 "/api/knowledge/doc",
@@ -447,7 +450,7 @@ class TestCreateDoc:
                     "cls": "Hypothesis",
                     "body": "Fragments pack.\n",
                     "sources": [{"kind": "file", "ref": plan_path}],
-                    "record": {"verdict": "supported"},
+                    "fields": {"verdict": "supported"},
                 },
             )
             assert created.status_code == 201, created.text
@@ -455,7 +458,7 @@ class TestCreateDoc:
             path = created.json()["relPath"]
             opened = client.get("/api/knowledge/note", params={"path": path})
         assert opened.status_code == 200, opened.text
-        assert opened.json()["record"] == {"verdict": "supported"}
+        assert opened.json()["fields"] == {"verdict": "supported"}
         text = (Path(str(ws.root)) / path).read_text(encoding="utf-8")
         assert "knowledges/knowledges" not in text
         assert plan_path.rsplit("/", 1)[-1] in text
@@ -1230,8 +1233,8 @@ class TestExportNotebook:
         assert any(card["id"] == run.id for card in idea["cards"])
 
 
-class TestDocRecordRoutes:
-    """Create a Hypothesis over HTTP, read its record, replace it with ``ifMatch``."""
+class TestDocFieldsRoutes:
+    """Create a Hypothesis over HTTP, read its fields, replace them with ``ifMatch``."""
 
     @staticmethod
     def _create(client: TestClient, exp: Experiment, host: str) -> dict[str, object]:
@@ -1243,7 +1246,7 @@ class TestDocRecordRoutes:
                 "hostPath": host,
                 "createdBy": "scientist",
                 "sources": [{"kind": "experiment", "ref": exp.id}],
-                "record": {"verdict": "open"},
+                "fields": {"verdict": "open"},
             },
         )
         assert response.status_code == 201, response.text
@@ -1256,50 +1259,52 @@ class TestDocRecordRoutes:
             created = self._create(client, exp, host)
             assert created["cls"] == "Hypothesis"
             path = created["relPath"]
-            got = client.get("/api/knowledge/doc/record", params={"path": path})
+            got = client.get("/api/knowledge/doc/fields", params={"path": path})
             assert got.status_code == 200, got.text
-            record = got.json()["record"]
-            assert record["verdict"] == "open"
+            fields = got.json()["fields"]
+            assert fields["verdict"] == "open"
             replaced = client.patch(
-                "/api/knowledge/doc/record",
+                "/api/knowledge/doc/fields",
                 params={"path": path},
                 json={
-                    "record": {**record, "verdict": "supported"},
+                    "fields": {**fields, "verdict": "supported"},
                     "ifMatch": got.json()["digest"],
                     "body": "## Status\n\nsupported\n",
                 },
             )
             assert replaced.status_code == 200, replaced.text
-            assert replaced.json()["record"]["verdict"] == "supported"
+            assert replaced.json()["fields"]["verdict"] == "supported"
             assert replaced.json()["digest"] != got.json()["digest"]
             stale = client.patch(
-                "/api/knowledge/doc/record",
+                "/api/knowledge/doc/fields",
                 params={"path": path},
-                json={"record": record, "ifMatch": got.json()["digest"]},
+                json={"fields": fields, "ifMatch": got.json()["digest"]},
             )
             assert stale.status_code == 409, stale.text
         text = (Path(str(ws.root)) / path).read_text(encoding="utf-8")
         assert "created_by: scientist" in text
         assert "## Status" in text
 
-    def test_invalid_record_is_422(self, served: ServedFactory, lab: RunFixture) -> None:
+    def test_invalid_fields_are_422(self, served: ServedFactory, lab: RunFixture) -> None:
         ws, exp, _run = lab
         with served(ws) as client:
             created = self._create(client, exp, _experiment_host(ws, exp))
             response = client.patch(
-                "/api/knowledge/doc/record",
+                "/api/knowledge/doc/fields",
                 params={"path": created["relPath"]},
-                json={"record": {"verdict": "sleeping"}},
+                json={"fields": {"verdict": "sleeping"}},
             )
         assert response.status_code == 422, response.text
 
-    def test_note_record_cannot_be_replaced(self, served: ServedFactory, lab: RunFixture) -> None:
+    def test_a_note_rejects_an_undeclared_field(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
         ws, _exp, _run = lab
         with served(ws) as client:
             response = client.patch(
-                "/api/knowledge/doc/record",
+                "/api/knowledge/doc/fields",
                 params={"path": "knowledges/idea.md"},
-                json={"record": {"x": 1}},
+                json={"fields": {"x": 1}},
             )
         assert response.status_code == 422, response.text
 
@@ -1431,29 +1436,29 @@ class TestHypothesis:
     """``Hypothesis`` over HTTP: create, list, graph, and the evidence roles."""
 
     @pytest.mark.parametrize(
-        ("cls", "record"),
+        ("cls", "fields"),
         [
             ("Hypothesis", {"verdict": "refuted"}),
             ("Hypothesis", {"verdict": "supported"}),
             ("Hypothesis", {"verdict": "unsettled"}),
         ],
     )
-    def test_note_detail_preserves_the_reasoning_record(
-        self, served: ServedFactory, lab: RunFixture, cls: str, record: dict[str, str]
+    def test_note_detail_preserves_the_fields(
+        self, served: ServedFactory, lab: RunFixture, cls: str, fields: dict[str, str]
     ) -> None:
         ws, _exp, run = lab
         with served(ws) as client:
-            created = self._create(client, run, cls, "Reasoning", record)
+            created = self._create(client, run, cls, "Reasoning", fields)
             assert created.status_code == 201, created.text
             path = created.json()["relPath"]
             detail = client.get("/api/knowledge/note", params={"path": path})
-            canonical = client.get("/api/knowledge/doc/record", params={"path": path})
+            canonical = client.get("/api/knowledge/doc/fields", params={"path": path})
         assert detail.status_code == 200, detail.text
-        assert detail.json()["record"] == canonical.json()["record"] == record
+        assert detail.json()["fields"] == canonical.json()["fields"] == fields
 
     @staticmethod
     def _create(
-        client: TestClient, run: Run, cls: str, name: str, record: dict[str, str] | None = None
+        client: TestClient, run: Run, cls: str, name: str, fields: dict[str, str] | None = None
     ) -> Any:
         from molab.workspace.refs import ref_of
 
@@ -1463,8 +1468,8 @@ class TestHypothesis:
             "body": f"# {name}\n",
             "sources": [{"kind": "run", "ref": str(ref_of(run))}],
         }
-        if record is not None:
-            payload["record"] = record
+        if fields is not None:
+            payload["fields"] = fields
         return client.post("/api/knowledge/doc", json=payload)
 
     def test_the_create_request_accepts_every_class(self) -> None:
@@ -1491,7 +1496,7 @@ class TestHypothesis:
         assert "class: Hypothesis" in (root / hypothesis.json()["relPath"]).read_text()
         assert Hypothesis(root / hypothesis.json()["relPath"]).verdict() == "open"
 
-    def test_explicit_values_round_trip_on_the_record(
+    def test_explicit_values_round_trip_on_the_fields(
         self, served: ServedFactory, lab: RunFixture
     ) -> None:
         ws, _exp, run = lab
@@ -1499,35 +1504,35 @@ class TestHypothesis:
             hypothesis = self._create(client, run, "Hypothesis", "Tg", {"verdict": "unsettled"})
             assert hypothesis.status_code == 201, hypothesis.text
             h_path = hypothesis.json()["relPath"]
-            h_record = client.get("/api/knowledge/doc/record", params={"path": h_path})
-            assert h_record.json()["record"]["verdict"] == "unsettled"
+            h_fields = client.get("/api/knowledge/doc/fields", params={"path": h_path})
+            assert h_fields.json()["fields"]["verdict"] == "unsettled"
             settled = client.patch(
-                "/api/knowledge/doc/record",
+                "/api/knowledge/doc/fields",
                 params={"path": h_path},
-                json={"record": {"verdict": "refuted"}, "ifMatch": h_record.json()["digest"]},
+                json={"fields": {"verdict": "refuted"}, "ifMatch": h_fields.json()["digest"]},
             )
             bad = client.patch(
-                "/api/knowledge/doc/record",
+                "/api/knowledge/doc/fields",
                 params={"path": h_path},
-                json={"record": {"verdict": "true"}},
+                json={"fields": {"verdict": "true"}},
             )
         assert settled.status_code == 200, settled.text
-        assert settled.json()["record"]["verdict"] == "refuted"
+        assert settled.json()["fields"]["verdict"] == "refuted"
         assert bad.status_code == 422, bad.text
 
     @pytest.mark.parametrize(
-        ("cls", "record"),
+        ("cls", "fields"),
         [("Hypothesis", {"verdict": "maybe"})],
     )
     def test_an_unknown_value_is_422_and_nothing_lands(
-        self, served: ServedFactory, lab: RunFixture, cls: str, record: dict[str, str]
+        self, served: ServedFactory, lab: RunFixture, cls: str, fields: dict[str, str]
     ) -> None:
         ws, _exp, run = lab
         with served(ws) as client:
-            response = self._create(client, run, cls, "Bad one", record)
+            response = self._create(client, run, cls, "Bad one", fields)
             names = _listed_names(client)
         assert response.status_code == 422, response.text
-        assert next(iter(record.values())) in response.text
+        assert next(iter(fields.values())) in response.text
         assert "Bad one" not in names
         assert not (Path(str(ws.root)) / "knowledges" / "bad-one.md").exists()
 

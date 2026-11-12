@@ -199,7 +199,7 @@ class TestKnowledgeWrite:
                 "Hypothesis",
                 "--source",
                 str(plan_path),
-                "--record",
+                "--fields",
                 str(record),
                 "--path",
                 root,
@@ -283,26 +283,21 @@ class TestKnowledgeWrite:
         host_dir = Path(str(host.resolve()))
         rel = host_dir.relative_to(Path(str(ws.root))).as_posix()
         (host_dir / "knowledges").mkdir(exist_ok=True)
-        record = tmp_path / "record.json"
-        record.write_text('{"tags": ["membrane"]}', encoding="utf-8")
-        for name, extra in (("plain", []), ("recorded", ["--record", str(record)])):
-            result = CliRunner().invoke(
-                knowledge_app,
-                [
-                    "write", name, "Water uptake plateaus.",
-                    "--on", rel + container,
-                    "--class", "Observation",
-                    "--created-by", "tack",
-                    *extra,
-                    "--path", str(ws.root),
-                ],
-            )  # fmt: skip
-            assert result.exit_code == 0, result.output
-            landed = host_dir / "knowledges" / f"{name}.md"
-            assert landed.is_file()
-            assert str(ref_of(host)) in landed.read_text(encoding="utf-8")
+        result = CliRunner().invoke(
+            knowledge_app,
+            [
+                "write", "plain", "Water uptake plateaus.",
+                "--on", rel + container,
+                "--class", "Observation",
+                "--created-by", "tack",
+                "--path", str(ws.root),
+            ],
+        )  # fmt: skip
+        assert result.exit_code == 0, result.output
+        landed = host_dir / "knowledges" / "plain.md"
+        assert landed.is_file()
+        assert str(ref_of(host)) in landed.read_text(encoding="utf-8")
         assert not (host_dir / "knowledges" / "knowledges").exists()
-        assert "membrane" in (host_dir / "knowledges" / "recorded.md").read_text(encoding="utf-8")
 
     @pytest.mark.parametrize(
         ("doc_class", "record", "field", "stored"),
@@ -326,7 +321,7 @@ class TestKnowledgeWrite:
                 "write", "claim", "Uptake plateaus.",
                 "--on", "projects/membranes",
                 "--class", doc_class,
-                *(["--record", record] if record else []),
+                *(["--fields", record] if record else []),
                 "--path", str(ws.root),
             ],
         )  # fmt: skip
@@ -355,7 +350,7 @@ class TestKnowledgeWrite:
                 "write", "claim", "Uptake plateaus.",
                 "--on", "projects/membranes",
                 "--class", doc_class,
-                "--record", record,
+                "--fields", record,
                 "--path", str(ws.root),
             ],
         )  # fmt: skip

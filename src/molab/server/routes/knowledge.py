@@ -29,9 +29,9 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from molab.knowledge.concepts import Hypothesis, Note
+from molab.knowledge.concepts import LiteratureFields, Note
 from molab.knowledge.edges import EdgeRole
 from molab.server.dependencies import get_workspace
 from molab.workspace import Workspace
@@ -77,16 +77,11 @@ class NoteSummary(BaseModel):
     )
 
 
-class ReferenceSummary(BaseModel):
+class ReferenceSummary(LiteratureFields):
+    """A Literature row: its identity and its bibliographic fields."""
+
     name: str
     relPath: str
-    title: str | None = None
-    authors: list[str] = []
-    year: int | None = None
-    doi: str | None = None
-    venue: str | None = None
-    url: str | None = None
-    source: str = "manual"
 
 
 class KnowledgeListResponse(BaseModel):
@@ -111,10 +106,14 @@ class EntityCard(BaseModel):
 class NoteDetailResponse(BaseModel):
     name: str
     relPath: str
+    cls: str = Field(description="The knowledge class, or `Tex` for a TeX file.")
     body: str
     links: list[str]
     cards: list[EntityCard] = []
-    record: dict[str, Any] = Field(default_factory=dict)
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description="The fields the class declares, as stored (no common key).",
+    )
     format: DocFormat = "md"
     updatedAt: str | None = Field(
         default=None, description="ISO-8601 UTC time the file was last modified."
@@ -170,14 +169,12 @@ class DocCreateRequest(BaseModel):
         "Hypothesis",
     ] = "Note"
     sources: list[DocSource] = []
-    record: dict[str, Any] | None = None
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description="The fields the class declares (a Hypothesis `verdict`, a Literature's "
+        "bibliography, a Note `status`); any other key is refused with 422.",
+    )
     createdBy: str = "ui"
-    title: str | None = None
-    authors: list[str] | None = None
-    year: int | None = None
-    doi: str | None = None
-    venue: str | None = None
-    url: str | None = None
 
 
 class DocMediaResponse(BaseModel):
@@ -190,23 +187,23 @@ class DocBodyUpdate(BaseModel):
     body: str
 
 
-class DocRecordResponse(BaseModel):
-    """A document's structured record and the digest of the file it came from."""
+class DocFieldsResponse(BaseModel):
+    """A document's own fields and the digest of the file they came from."""
 
     relPath: str
     cls: str
-    record: dict[str, Any]
+    fields: dict[str, Any]
     digest: str
 
 
-class DocRecordUpdate(BaseModel):
-    """Replace a document's structured record whole.
+class DocFieldsUpdate(BaseModel):
+    """Replace a document's own fields whole; an omitted key is removed.
 
     ``ifMatch`` is the digest the caller read; a changed file answers 409.
     ``body`` optionally rewrites the narrative in the same write.
     """
 
-    record: dict[str, Any]
+    fields: dict[str, Any]
     ifMatch: str | None = None
     body: str | None = None
 
@@ -242,15 +239,14 @@ class DocMoveRequest(BaseModel):
 
 
 class DocMetaUpdate(BaseModel):
-    """Partial update of a document's tags/status.
+    """Set a document's tags; ``None`` leaves them untouched and returns the summary.
 
-    Each field is independently optional; ``None`` means "leave untouched", which
-    maps onto ``Note.set_tags`` / ``Note.set_status`` each preserving the sibling
-    field. A request with both ``None`` is a no-op that returns the current summary.
+    A class's own fields (a Note ``status``) are ``PATCH /knowledge/doc/fields``.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     tags: list[str] | None = None
-    status: str | None = None
 
 
 class BacklinksResponse(BaseModel):
@@ -504,30 +500,19 @@ def _note_summary(workspace: Workspace, note: Concept) -> NoteSummary:
     )
 
 
-def _document_record(note: Concept) -> dict[str, Any]:
-    """Role fields the viewer shows. A document with none is ``{}``.
-
-    A corrupt record does not fail the read; the narrative still opens.
-    """
-    if not isinstance(note, Hypothesis):
-        return {}
-    try:
-        return {"verdict": note.verdict()}
-    except ValueError:
-        return {}
-
-
 def _note_detail(workspace: Workspace, note: Concept, path: str) -> NoteDetailResponse:
     """Build a :class:`NoteDetailResponse` for *note* at its identity *path*."""
+    from molab.knowledge.fields import own_fields
     from molab.knowledge.naming import document_format
 
     return NoteDetailResponse(
         name=note.name,
         relPath=path,
+        cls=type(note).__name__,
         body=note.read(),
         links=list(note.out_edges()),
         cards=_resolve_cards(workspace, note),
-        record=_document_record(note),
+        fields=own_fields(note.frontmatter()),
         format=document_format(note.path),
         updatedAt=_updated_at(workspace, note.path),
         createdAt=_created_at(note),
@@ -625,7 +610,7 @@ def _document_card(workspace: Workspace, document: Concept) -> EntityCard:
         id=summary.id,
         title=summary.title,
         relPath=_rel(workspace, document),
-        status=_entity_status(document),
+        status=_card_facts(document)[0],
     )
 
 
@@ -645,11 +630,6 @@ def _path_card(workspace: Workspace, target: str) -> EntityCard | None:
         return None
     name = _StdPath(path).name or path
     return EntityCard(kind="document", id=name, title=target, missing=True)
-
-
-def _entity_status(entity: Concept | Folder | Asset) -> str | None:
-    """A ``Note`` entity's lifecycle status; ``None`` for anything else."""
-    return entity.status() if isinstance(entity, Note) else None
 
 
 def _resolve_embed_entity(
@@ -737,9 +717,12 @@ def _tex_text(workspace: Workspace, path: str) -> str:
 def _tex_detail(workspace: Workspace, path: str) -> NoteDetailResponse:
     """A TeX file as a read-only note detail. The body is the file itself."""
     body = _tex_text(workspace, path)
+    from molab.knowledge.tex_docs import TEX_CLASS
+
     return NoteDetailResponse(
         name=_StdPath(path).stem,
         relPath=path,
+        cls=TEX_CLASS,
         body=body,
         links=[],
         cards=[],
@@ -943,20 +926,7 @@ def list_knowledge(
         rel = summary.relPath
         notes.append(summary)
         if isinstance(item, Literature):
-            meta = item.record
-            references.append(
-                ReferenceSummary(
-                    name=item.name,
-                    relPath=rel,
-                    title=meta.title,
-                    authors=list(meta.authors),
-                    year=meta.year,
-                    doi=meta.doi,
-                    venue=meta.venue,
-                    url=meta.url,
-                    source=meta.source,
-                )
-            )
+            references.append(ReferenceSummary(name=item.name, relPath=rel, **dict(item.fields())))
 
     if tag is None and status is None:
         for absolute in iter_tex_documents(workspace.root, workspace.fs):
@@ -1087,22 +1057,11 @@ def create_doc(
 ) -> NoteSummary:
     """Create one knowledge class under *hostPath* (the workspace root when omitted)."""
     from molab.knowledge.concepts import _product
-    from molab.knowledge.reference_meta import ReferenceMeta
     from molab.knowledge.write import write_knowledge
 
     klass = _product(body.cls)
     host = _resolve_host(workspace, body.hostPath)
     sources = [_source_from_request(workspace, item) for item in body.sources]
-    record: object | None = body.record
-    if body.cls == "Literature":
-        record = ReferenceMeta(
-            title=body.title,
-            authors=tuple(body.authors or ()),
-            year=body.year,
-            doi=body.doi,
-            venue=body.venue,
-            url=body.url,
-        )
     try:
         note = write_knowledge(
             host,
@@ -1111,7 +1070,7 @@ def create_doc(
             sources=sources,
             created_by=body.createdBy or "ui",
             text=body.body,
-            record=record,
+            fields=body.fields,
             fs=workspace.fs,
             format=body.format,
         )
@@ -1206,11 +1165,11 @@ def update_doc_meta(
     ),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteSummary:
-    """Update a document's tags/status — ``Knowledge.write`` for every knowledge class."""
+    """Set a document's tags — ``Knowledge.write`` for every knowledge class."""
     _reject_tex(path)
     doc = _open_doc(workspace, path)
-    if payload.tags is not None or payload.status is not None:
-        doc.write(tags=payload.tags, status=payload.status)
+    if payload.tags is not None:
+        doc.write(tags=payload.tags)
     return _note_summary(workspace, doc)
 
 
@@ -1231,7 +1190,7 @@ def _relation_path(workspace: Workspace, path: str) -> str:
 
 
 def _doc_relations(workspace: Workspace, path: str, doc: Concept) -> DocRelationsResponse:
-    from molab.knowledge.record import digest_of
+    from molab.knowledge.fields import digest_of
     from molab.knowledge.relations import relation_links
     from molab.workspace.refs import is_ref
 
@@ -1285,7 +1244,7 @@ def update_doc_relation(
     workspace: Workspace = Depends(get_workspace),
 ) -> DocRelationsResponse:
     """Edit the original markdown link; reject stale authoring with 409."""
-    from molab.knowledge.record import RecordConflictError
+    from molab.knowledge.fields import DigestConflictError
     from molab.knowledge.relations import mutate_relation
     from molab.workspace.refs import is_ref, parse_ref
 
@@ -1310,55 +1269,59 @@ def update_doc_relation(
             role=payload.role,
             text=payload.text,
         )
-    except RecordConflictError as exc:
+    except DigestConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     return _doc_relations(workspace, path, doc)
 
 
-@router.get("/doc/record", response_model=DocRecordResponse)
-def get_doc_record(
+@router.get("/doc/fields", response_model=DocFieldsResponse)
+def get_doc_fields(
     path: str = Query(..., description="The document's workspace-relative path (its identity)."),
     workspace: Workspace = Depends(get_workspace),
-) -> DocRecordResponse:
-    """A document's structured record and its file digest (for ``ifMatch``)."""
-    from molab.knowledge.record import digest_of, record_of
+) -> DocFieldsResponse:
+    """A document's own fields and its file digest (for ``ifMatch``)."""
+    from molab.knowledge.fields import digest_of, own_fields
 
     _reject_tex(path)
     doc = _open_doc(workspace, path)
-    return DocRecordResponse(
-        relPath=path, cls=type(doc).__name__, record=record_of(doc), digest=digest_of(doc)
+    return DocFieldsResponse(
+        relPath=path,
+        cls=type(doc).__name__,
+        fields=own_fields(doc.frontmatter()),
+        digest=digest_of(doc),
     )
 
 
 @router.patch(
-    "/doc/record",
-    response_model=DocRecordResponse,
+    "/doc/fields",
+    response_model=DocFieldsResponse,
     dependencies=[Depends(_require_writable)],
 )
-def replace_doc_record(
-    payload: DocRecordUpdate,
+def replace_doc_fields(
+    payload: DocFieldsUpdate,
     path: str = Query(..., description="The document's workspace-relative path (its identity)."),
     workspace: Workspace = Depends(get_workspace),
-) -> DocRecordResponse:
-    """Replace a document's structured record whole — 409 when ``ifMatch`` is stale.
+) -> DocFieldsResponse:
+    """Replace a document's own fields whole — 409 when ``ifMatch`` is stale.
 
-    Only classes that own a record (Hypothesis) accept it (422 otherwise, and for a record the class rejects). The change is
-    recorded in the workspace history as ``knowledge.record_replaced``.
+    The class's fields check them: a key it does not declare, or a value it
+    refuses, answers 422. The change is recorded in the workspace history as
+    ``knowledge.fields_replaced``.
     """
-    from molab.knowledge.record import RecordConflictError, record_of, replace_record
+    from molab.knowledge.fields import DigestConflictError, own_fields, replace_fields
 
     _reject_tex(path)
     doc = _open_doc(workspace, path)
     try:
-        digest = replace_record(doc, payload.record, if_match=payload.ifMatch, body=payload.body)
-    except RecordConflictError as exc:
+        digest = replace_fields(doc, payload.fields, if_match=payload.ifMatch, body=payload.body)
+    except DigestConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-    except (TypeError, ValueError) as exc:
+    except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-    return DocRecordResponse(
-        relPath=path, cls=type(doc).__name__, record=record_of(doc), digest=digest
+    return DocFieldsResponse(
+        relPath=path, cls=type(doc).__name__, fields=own_fields(doc.frontmatter()), digest=digest
     )
 
 

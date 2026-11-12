@@ -1,4 +1,5 @@
 import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
+import type { DocFieldsUpdate } from "@/api/generated/models/DocFieldsUpdate";
 import type { DocRelationUpdate as ApiDocRelationUpdate } from "@/api/generated/models/DocRelationUpdate";
 import type { DocSource } from "@/api/generated/models/DocSource";
 import { EmbedRequest } from "@/api/generated/models/EmbedRequest";
@@ -74,8 +75,11 @@ export const knowledgeApi = {
       text: request.text ?? null,
     }),
   editDoc: (path: string, body: string) => KnowledgeService.editDoc(path, { body }),
-  updateDocMeta: (path: string, patch: { tags?: string[]; status?: string }) =>
+  updateDocMeta: (path: string, patch: { tags?: string[] }) =>
     KnowledgeService.updateDocMeta(path, patch),
+  getDocFields: (path: string) => KnowledgeService.getDocFields(path),
+  replaceDocFields: (path: string, update: DocFieldsUpdate) =>
+    KnowledgeService.replaceDocFields(path, update),
   createDoc: (
     name: string,
     options: {
@@ -84,13 +88,7 @@ export const knowledgeApi = {
       body?: string;
       cls?: DocCreateRequest.cls;
       sources?: DocSource[];
-      record?: Record<string, unknown> | null;
-      title?: string | null;
-      authors?: string[] | null;
-      year?: number | null;
-      doi?: string | null;
-      venue?: string | null;
-      url?: string | null;
+      fields?: Record<string, unknown>;
     } = {},
   ): Promise<NoteSummary> =>
     KnowledgeService.createDoc({
@@ -100,13 +98,7 @@ export const knowledgeApi = {
       body: options.body ?? "",
       cls: options.cls,
       sources: options.sources,
-      record: options.record,
-      title: options.title,
-      authors: options.authors,
-      year: options.year,
-      doi: options.doi,
-      venue: options.venue,
-      url: options.url,
+      fields: options.fields,
     }),
   uploadDocMedia: async (path: string, file: File): Promise<string> => {
     const body = new FormData();

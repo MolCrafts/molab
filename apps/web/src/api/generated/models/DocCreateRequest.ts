@@ -13,14 +13,11 @@ export type DocCreateRequest = {
     format?: DocCreateRequest.format;
     cls?: DocCreateRequest.cls;
     sources?: Array<DocSource>;
-    record?: (Record<string, any> | null);
+    /**
+     * The fields the class declares (a Hypothesis `verdict`, a Literature's bibliography, a Note `status`); any other key is refused with 422.
+     */
+    fields?: Record<string, any>;
     createdBy?: string;
-    title?: (string | null);
-    authors?: (Array<string> | null);
-    year?: (number | null);
-    doi?: (string | null);
-    venue?: (string | null);
-    url?: (string | null);
 };
 export namespace DocCreateRequest {
     /**

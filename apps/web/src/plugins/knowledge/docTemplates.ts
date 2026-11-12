@@ -94,11 +94,6 @@ export const DOC_SKELETON: Record<KnowledgeClass, string> = {
   ].join("\n"),
 };
 
-/** The record a class starts with: a new Hypothesis has no verdict yet. */
-export const DOC_RECORD: Partial<Record<KnowledgeClass, Record<string, unknown>>> = {
-  Hypothesis: { verdict: "open" },
-};
-
 export interface SkeletonFacts {
   /** The run a sourced document cites (`molab:` ref). */
   sourceRef?: string | null;

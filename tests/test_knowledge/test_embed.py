@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from molab.knowledge import Literature, Note, ReferenceMeta
+from molab.knowledge import Literature, Note
 from molab.knowledge.embed import (
     EntitySummary,
     default_role_for,
@@ -67,7 +67,7 @@ class TestDefaultRoleFor:
 
     def test_a_literature_cites(self, experiment: Any) -> None:
         lit = Literature(experiment, "Smith 2024")
-        lit.write(ReferenceMeta(title="Smith 2024", year=2024))
+        lit.write(fields={"title": "Smith 2024", "year": 2024})
 
         assert default_role_for(lit) == "cites"
 
@@ -102,7 +102,7 @@ class TestSummarizeEntity:
 
     def test_a_reference_kind_title_comes_from_the_head(self, tmp_path: Path) -> None:
         document = Literature(tmp_path / "abstract-1")
-        document.write(ReferenceMeta(title="Head Title"))
+        document.write(fields={"title": "Head Title"})
 
         summary = summarize_entity(document)
 
@@ -114,7 +114,7 @@ class TestSummarizeEntity:
 
     def test_a_literature_falls_back_to_its_bib_title(self, experiment: Any) -> None:
         lit = Literature(experiment, "Smith 2024")
-        lit.write(ReferenceMeta(title="Smith 2024", year=2024))
+        lit.write(fields={"title": "Smith 2024", "year": 2024})
 
         summary = summarize_entity(lit)
 

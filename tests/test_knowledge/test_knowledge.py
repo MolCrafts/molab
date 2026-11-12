@@ -11,7 +11,6 @@ from molab.knowledge import (
     KnowledgeNotFoundError,
     Literature,
     Note,
-    ReferenceMeta,
     SourceRef,
 )
 from molab.workspace import Experiment, Workspace
@@ -45,10 +44,10 @@ class TestWrite:
 
     def test_literature_write_persists_bib_in_frontmatter(self, tmp_path: Path) -> None:
         lit = Literature(tmp_path / "lecun2015")
-        lit.write(ReferenceMeta(title="Deep Learning", year=2015))
+        lit.write(fields={"title": "Deep Learning", "year": 2015})
         assert "title: Deep Learning" in lit.path.read_text()
-        assert lit.record.title == "Deep Learning"
-        assert lit.record.year == 2015
+        assert lit.fields().title == "Deep Learning"
+        assert lit.fields().year == 2015
 
     def test_finding_write_persists_source_ref(self, tmp_path: Path) -> None:
         finding = Finding(

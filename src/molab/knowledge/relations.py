@@ -12,8 +12,8 @@ from typing import Literal
 
 from .concept import Concept, append_link, markdown_links
 from .edges import EdgeRole, encode_label, link_line, parse_role, validate_role
+from .fields import DigestConflictError, digest_of
 from .frontmatter import append_markdown
-from .record import RecordConflictError, digest_of
 
 
 @dataclass(frozen=True)
@@ -87,7 +87,7 @@ def mutate_relation(
 
     with mutation(doc, "knowledge.relation_changed", f"{action} relation of {doc.name}"):
         if digest_of(doc) != if_match:
-            raise RecordConflictError(f"{doc.path} changed since it was read")
+            raise DigestConflictError(f"{doc.path} changed since it was read")
         validate_role(role)
         if action == "add":
             if not target:

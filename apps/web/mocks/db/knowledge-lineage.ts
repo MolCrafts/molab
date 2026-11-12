@@ -22,7 +22,7 @@ export const lineageNotes = [
     relPath: lineagePaths.literature,
     hostPath: project,
     excerpt: "Illustrative reference for timestep selection; not a published scientific result.",
-    record: {},
+    fields: {},
   },
   {
     cls: "Hypothesis",
@@ -31,7 +31,7 @@ export const lineageNotes = [
     hostPath: benchmark,
     excerpt:
       "A 2 fs timestep preserves the same energy drift as 0.5 fs. Synthetic claim, refuted by the coarse-step example.",
-    record: { verdict: "refuted" },
+    fields: { verdict: "refuted" },
   },
   {
     cls: "Finding",
@@ -40,7 +40,7 @@ export const lineageNotes = [
     hostPath: benchmark,
     excerpt:
       "Illustrative counterexample: the 2 fs trace drifts above the demonstration threshold.",
-    record: {},
+    fields: {},
   },
   {
     cls: "Plan",
@@ -48,7 +48,7 @@ export const lineageNotes = [
     relPath: lineagePaths.oldPolicy,
     hostPath: project,
     excerpt: "Initial example policy: use 2 fs pending validation. Kept for revision history.",
-    record: {},
+    fields: {},
   },
   {
     cls: "Plan",
@@ -57,7 +57,7 @@ export const lineageNotes = [
     hostPath: project,
     excerpt:
       "Use 0.5 fs in the example benchmark; replaces the initial policy after reviewing both findings.",
-    record: {},
+    fields: {},
   },
   {
     cls: "Report",
@@ -66,7 +66,7 @@ export const lineageNotes = [
     hostPath: project,
     excerpt:
       "Synthetic review tracing the plan, observation, conflicting evidence and policy revision.",
-    record: {},
+    fields: {},
   },
 ];
 export const lineageLinks: Record<string, { target: string; role: EmbedRole; label: string }[]> = {

@@ -3,12 +3,12 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * A document's structured record and the digest of the file it came from.
+ * A document's own fields and the digest of the file they came from.
  */
-export type DocRecordResponse = {
+export type DocFieldsResponse = {
     relPath: string;
     cls: string;
-    record: Record<string, any>;
+    fields: Record<string, any>;
     digest: string;
 };
 

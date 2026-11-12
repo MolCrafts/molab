@@ -65,7 +65,7 @@ PINNED_ALL: frozenset[str] = frozenset(
         "Observation",
         "Hypothesis",
         "Plan",
-        "ReferenceMeta",
+        "LiteratureFields",
         "Report",
         "SearchHit",
         "SearchResult",

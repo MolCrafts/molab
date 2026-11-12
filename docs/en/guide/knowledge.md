@@ -80,22 +80,25 @@ question. A document that answers two questions is two documents. If a
 statement could be filed under two classes, the definitions are wrong, not the
 author. Every class lands one file; the `class:` frontmatter names which one:
 
-| Class | The one question it answers | Record (frontmatter) | Never contains |
+| Class | The one question it answers | Fields (`FIELDS`) | Never contains |
 |---|---|---|---|
 | `Plan` | What are we asking, in what scope, under what constraints? | none; its work items live in its body | the claims to test (those are Hypotheses) |
 | `Hypothesis` | What do we claim will turn out to be true? | `verdict`: `open` \| `supported` \| `refuted` \| `unsettled` (default `open`) | the evidence itself (that is a Finding) |
 | `Observation` | What was observed or given, before any interpretation? | none | a conclusion (Finding) |
 | `Finding` | What does the evidence establish? | none | a choice, a plan |
 | `Report` | What do we tell readers? It compiles; it claims nothing new. | none | a result stated nowhere else |
-| `Literature` | What does a published source say? | bibliographic fields; PDFs pointed at, never copied | |
-| `Note` | None of the above: free text with no claim on the reasoning. | none | |
+| `Literature` | What does a published source say? | `LiteratureFields`: the bibliography; PDFs pointed at, never copied | |
+| `Note` | None of the above: free text with no claim on the reasoning. | `status` (default `active`) | |
 
 A `Report` is defined by its purpose (telling readers), not by its length: a
 result written up at length is still a `Finding`.
 
-A `verdict` outside its vocabulary is refused on write and
-reported by `molab validate` (`knowledge.record`); it is never replaced by the
-default.
+Beside its fields, every document's frontmatter carries the same keys:
+`class`, `name`, `created_by`, `created_at`, `tags`. A key the class does not
+declare, or a value its fields refuse (a `verdict` outside its vocabulary), is
+refused on write and reported by `molab validate` (`knowledge.fields`); it is
+never replaced by the default. A class's fields are a pydantic model, so a
+subclass extends its parent's.
 
 Every class but `Note` and `Literature` requires at least one `SourceRef` at
 construction — they are sourced documents.
@@ -103,10 +106,10 @@ construction — they are sourced documents.
 A `Plan` is the one planning document. Its work items live in its narrative
 body; the claims it sets out to test are `Hypothesis` documents.
 
-### Control flow lives in the links and the records
+### Control flow lives in the links and the fields
 
 There is no class per control structure. The reasoning is read from the typed
-links and the record fields:
+links and the class fields:
 
 | Control flow | How knowledge says it |
 |---|---|
@@ -277,17 +280,16 @@ A knowledge document is `<host>/knowledges/<slug>.md`. Old directory layouts and
 - For the concrete Python API around records and assets, see [Workspace API](workspace-api.md).
 - For reusable data and provenance, see [Assets and Reproducibility](../concept/assets-and-reproducibility.md).
 
-## Structured records
+## Class fields
 
-A `Hypothesis` is the one class whose structured record, its `verdict`, is
-validated on write (`molab knowledge write --record` and the route below). A
-`Literature` record holds its bibliographic fields. A Hypothesis record can be
-replaced whole over HTTP:
+A document's fields are validated against its class on every write
+(`molab knowledge write --fields JSON`, `fields` on `POST /api/knowledge/doc`,
+and the route below). They can be replaced whole over HTTP:
 
-- `GET /api/knowledge/doc/record?path=…` returns `{record, digest}`.
-- `PATCH /api/knowledge/doc/record?path=…` with `{record, ifMatch, body?}`
-  replaces it; a stale `ifMatch` answers 409, an invalid record 422. Each
-  replacement is a `knowledge.record_replaced` history commit.
+- `GET /api/knowledge/doc/fields?path=…` returns `{fields, digest}`.
+- `PATCH /api/knowledge/doc/fields?path=…` with `{fields, ifMatch, body?}`
+  replaces them; a stale `ifMatch` answers 409, an undeclared key or a refused
+  value 422. Each replacement is a `knowledge.fields_replaced` history commit.
 
 `POST …/runs/{run}/executions` accepts `requestKey` (idempotency: the same key
 returns the attempt already created) and `requestedBy` (the software agent

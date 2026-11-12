@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 
 from molab.knowledge.concept import Concept
-from molab.knowledge.reference_meta import ReferenceMeta
+from molab.knowledge.concepts import LiteratureFields
 from molab.knowledge.zotero import ZoteroLibrary
 
 
@@ -92,7 +92,7 @@ class TestReadZoteroItems:
         assert set(items) == {"AAAA", "BBBB"}  # attachment item excluded
 
         a = items["AAAA"]
-        assert isinstance(a, ReferenceMeta)
+        assert isinstance(a, LiteratureFields)
         assert a.source == "zotero"
         assert a.title == "Deep Learning"
         assert a.authors == ("Yann LeCun",)
@@ -157,4 +157,4 @@ class TestConceptImportZotero:
 
 def _bib_title() -> dict[str, object]:
     """A rewrite that sets only the title."""
-    return {"record": ReferenceMeta(title="Renamed")}
+    return {"fields": {"title": "Renamed"}}

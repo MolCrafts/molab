@@ -14,7 +14,6 @@ import { DocSource } from "@/api/generated/models/DocSource";
 import { ChoiceToggle } from "@/app/components/entity";
 import { AppDialog } from "@/components/dialog/AppDialog";
 import {
-  DOC_RECORD,
   DOC_SKELETON,
   fillSkeleton,
   type HostRun,
@@ -32,13 +31,8 @@ export interface CreateDocInput {
   cls: DocCreateRequest.cls;
   body: string;
   sources?: { kind: DocSource.kind; ref: string }[];
-  record?: Record<string, unknown> | null;
-  title?: string;
-  authors?: string[];
-  year?: number;
-  doi?: string;
-  venue?: string;
-  url?: string;
+  /** The fields the class declares (a Literature's bibliography). */
+  fields?: Record<string, unknown>;
 }
 
 /** The field a validation message belongs under. */
@@ -121,7 +115,6 @@ export const CreateDocDialog = ({
       setLocalError({ field: "source", message: "Choose a run this document records." });
       return;
     }
-    const record = DOC_RECORD[cls];
     const yearNumber = year.trim() ? Number(year) : undefined;
     if (year.trim() && !Number.isInteger(yearNumber)) {
       setLocalError({ field: "year", message: "Year must be a whole number." });
@@ -152,15 +145,16 @@ export const CreateDocDialog = ({
       format,
       body: format === "html" ? toHtmlBody(filled) : filled,
       ...(runSourced ? { sources: [{ kind: DocSource.kind.RUN, ref: sourceRef }] } : {}),
-      ...(record ? { record } : {}),
       ...(cls === "Literature"
         ? {
-            title: title.trim() || undefined,
-            authors: authorList.length > 0 ? authorList : undefined,
-            year: yearNumber,
-            doi: doi.trim() || undefined,
-            venue: venue.trim() || undefined,
-            url: url.trim() || undefined,
+            fields: {
+              title: title.trim() || undefined,
+              authors: authorList.length > 0 ? authorList : undefined,
+              year: yearNumber,
+              doi: doi.trim() || undefined,
+              venue: venue.trim() || undefined,
+              url: url.trim() || undefined,
+            },
           }
         : {}),
     });

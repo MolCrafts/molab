@@ -92,7 +92,7 @@ class TestProjectKnowledge:
             sources=[SourceRef.of(plan)],
             created_by="test",
             text="The fragments pack.\n",
-            record={"verdict": "open"},
+            fields={"verdict": "open"},
         )
         rows = {row.cls: row.path for row in project_knowledge(ws)}
         assert rows["Plan"] == "knowledges/overview.md"

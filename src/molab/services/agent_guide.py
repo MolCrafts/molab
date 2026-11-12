@@ -65,7 +65,7 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
     ),
     (
         "Write a knowledge document",
-        "molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --record JSON --created-by AGENT",
+        "molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --fields JSON --created-by AGENT",
     ),
     (
         "Preview a knowledge document as a reader sees it (or export one HTML file)",

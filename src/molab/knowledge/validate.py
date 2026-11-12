@@ -5,14 +5,14 @@ The workspace validator holds the tree to the layout law and does not know
 checks what lives inside it, at every host (the root, each project,
 experiment and run):
 
-* ``knowledge.class`` (error) — a document whose record has no ``class:``
+* ``knowledge.class`` (error) — a document whose frontmatter has no ``class:``
   or names a class that is not a knowledge class.
 * ``knowledge.stray`` (error) — an entry of ``knowledges/`` that is not a
   document (``.md`` / ``.html``) or the ``figs/`` figure directory.
 * ``knowledge.duplicate`` (error) — two documents with one stem (``a.md``
   beside ``a.html``): one name, one file.
-* the content rules of :mod:`molab.knowledge.content_rules` — malformed
-  records, links that leave the workspace, Literature without bibliographic
+* the content rules of :mod:`molab.knowledge.content_rules` — fields the
+  class does not declare or refuses, links that leave the workspace, Literature without bibliographic
   fields, ephemeral links, versioned names, unanchored Reports.
 * ``knowledge.section_drift`` (warning) — the host's ``index.knowledges``
   section differs from a rebuild from the files. Like the derived ``index:``

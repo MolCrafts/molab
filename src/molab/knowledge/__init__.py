@@ -51,6 +51,7 @@ from .concepts import (
     Finding,
     Hypothesis,
     Literature,
+    LiteratureFields,
     Note,
     Observation,
     Plan,
@@ -60,7 +61,6 @@ from .edges import Edge, EdgeRole
 from .errors import KnowledgeNotFoundError
 from .knowledge_item import SourceKind, SourceRef
 from .parts import GeneratedPart, GeneratedParts
-from .reference_meta import ReferenceMeta
 from .search import (
     SearchHit,
     SearchResult,
@@ -85,10 +85,10 @@ __all__ = [
     "KnowledgeScope",
     "KnowledgeSourceStore",
     "Literature",
+    "LiteratureFields",
     "Note",
     "Observation",
     "Plan",
-    "ReferenceMeta",
     "Report",
     "SearchHit",
     "SearchResult",

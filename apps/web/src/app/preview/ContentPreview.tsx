@@ -145,8 +145,6 @@ const DocumentPreview = ({
       />
     );
   }
-  const record = note.data.record ?? {};
-  const cls = typeof record.class === "string" ? record.class : "Document";
   const firstParagraph =
     note.data.body
       .split(/\n\s*\n/)
@@ -157,7 +155,7 @@ const DocumentPreview = ({
     <PreviewFrame
       {...props}
       lead={<KindIcon icon={entityMeta("knowledge").icon} />}
-      context={`${cls} · ${target.path.split("/knowledges/")[0] || "workspace"}`}
+      context={`${note.data.cls} · ${target.path.split("/knowledges/")[0] || "workspace"}`}
       copies={[{ label: "Path", value: target.path }]}
     >
       {firstParagraph ? (

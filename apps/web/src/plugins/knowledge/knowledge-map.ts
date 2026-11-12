@@ -61,18 +61,18 @@ export const projectKnowledgeMap = (graph: KnowledgeGraphResponse, projectPath: 
   return { nodes, edges };
 };
 
-/** The research map of one project, with the records of its stateful documents.
+/** The research map of one project, with the own fields of its stateful documents.
  * References leaving this project stay with their document, never disappear. */
 export const projectResearchMap = (
   graph: KnowledgeGraphResponse,
   projectPath: string,
-  records: Readonly<Record<string, Record<string, unknown>>>,
+  fields: Readonly<Record<string, Record<string, unknown>>>,
 ): ResearchMap => {
   const scope = projectKnowledgeMap(graph, projectPath);
   const ids = new Set(scope.nodes.map((node) => node.id));
   return buildResearchMap(
     { nodes: scope.nodes, edges: graph.edges.filter((edge) => ids.has(edge.source)) },
-    records,
+    fields,
     new Set(scope.nodes.map((node) => node.cls)),
   );
 };

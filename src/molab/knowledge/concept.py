@@ -1,9 +1,10 @@
 """``Concept`` — a knowledge document whose **path is its identity**.
 
 A product document is one file, ``knowledges/<name>.md`` (YAML frontmatter +
-markdown) or ``knowledges/<name>.html`` (the record as JSON in
+markdown) or ``knowledges/<name>.html`` (the frontmatter as JSON in
 ``<script id="molab-record">``, a body of ``<molab-markdown>`` blocks and
-``<molab-…>`` elements). The record names the class; the narrative's markdown
+``<molab-…>`` elements). The frontmatter names the class and carries the
+fields that class declares (:attr:`Concept.FIELDS`); the narrative's markdown
 links are the graph.
 A bare :class:`Concept` is only a root handle for ``walk`` / ``search`` /
 ``import_zotero``. It does not construct a subclass.
@@ -25,6 +26,8 @@ import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
+
+from pydantic import BaseModel
 
 from molab.fs import FileSystem, LocalFS, PathArg
 
@@ -101,11 +104,16 @@ class Concept:
     A bare ``Knowledge`` is a root handle: it walks, searches and opens
     documents, and it is not a document itself. Product subclasses are one
     file, ``knowledges/<name>.md`` or ``knowledges/<name>.html``, whose
-    record names the class.
+    frontmatter names the class.
     """
 
     #: Product documents are markdown files, not directories.
     FILE_DOCUMENT: ClassVar[bool] = False
+    #: The frontmatter fields this class owns beyond the keys every document
+    #: carries (:data:`~molab.knowledge.fields.COMMON_KEYS`): a pydantic model
+    #: that refuses an unknown key. ``None`` owns none, so no other key is
+    #: written. A subclass that adds fields extends its parent's model.
+    FIELDS: ClassVar[type[BaseModel] | None] = None
 
     def __init__(
         self,
@@ -300,7 +308,7 @@ class Concept:
         Returns:
             The ranked hits. Each entry path is relative to this handle and
             keeps its ``.md`` / ``.html`` suffix. ``cls`` is the Knowledge
-            class name. An HTML document is titled by its record ``name`` (or
+            class name. An HTML document is titled by its frontmatter ``name`` (or
             ``title``) and ranked on its text without tags.
         """
         from .concepts import _PRODUCTS
@@ -363,6 +371,20 @@ class Concept:
             return {}
         meta, _body = split_frontmatter(text, path=self._path)
         return meta
+
+    def fields(self) -> BaseModel | None:
+        """This document's :attr:`FIELDS`, read from its frontmatter; ``None`` without.
+
+        A key the class does not declare is not read (``molab validate``
+        reports it); a declared value the model rejects raises ``ValueError``.
+        """
+        model = type(self).FIELDS
+        return None if model is None else self._fields_of(model)
+
+    def _fields_of[M: BaseModel](self, model: type[M]) -> M:
+        """*model* built from this document's frontmatter keys that it declares."""
+        meta = self.frontmatter()
+        return model.model_validate({key: meta[key] for key in model.model_fields if key in meta})
 
     def read(self) -> str:
         """This document's narrative: the markdown body, or the HTML ``<body>`` content."""
@@ -589,7 +611,7 @@ class Concept:
 
         A markdown document exports its narrative, without frontmatter. An
         HTML document exports the whole file: it is already a standalone page,
-        and its record is an inert script element.
+        and its frontmatter is an inert script element.
         """
         from .naming import is_html_document
 
@@ -654,50 +676,50 @@ class Concept:
 
     def write(
         self,
-        text: str | object | None = None,
-        data: object | None = None,
+        text: str | None = None,
+        fields: Mapping[str, object] | None = None,
         *,
         tags: list[str] | None = None,
-        status: str | None = None,
         replace: bool = False,
     ) -> None:
         """Write this document.
 
-        A string is the narrative, or a full markdown document with YAML
-        frontmatter. Structured records (``ReferenceMeta``, sources, tags)
-        fold into the frontmatter. One file: ``knowledges/<name>.md``, or
-        ``.html`` for an HTML document (the record and body in that format).
+        A string is the narrative, or a full document whose frontmatter is
+        merged over the stored one. One file: ``knowledges/<name>.md``, or
+        ``.html`` for an HTML document (the frontmatter and body in that
+        format).
 
         With ``replace=True``, *text* is the whole file. It is persisted
         verbatim: no frontmatter merge and no source rendering. Equal bytes
         are left untouched.
 
         Args:
-            text: Narrative, a full markdown document, or a structured record
-                when *data* is omitted.
-            data: Structured record folded into the frontmatter.
+            text: Narrative, or a full document. ``None`` keeps the narrative.
+            fields: Frontmatter keys to set, merged over the stored ones: the
+                class's own :attr:`FIELDS`, or a key every document carries.
             tags: Frontmatter tags. ``None`` leaves stored tags alone.
-            status: Frontmatter status. ``None`` leaves stored status alone.
             replace: Persist *text* as the whole file.
 
         Runs under the document's lock and records one history commit,
-        ``knowledge.meta_changed`` for a tags/status-only call and
+        ``knowledge.meta_changed`` when the narrative is kept and
         ``knowledge.edited`` otherwise
         (:func:`~molab.knowledge.mutation.mutation`).
 
         Raises:
             TypeError: ``replace=True`` and *text* is not a ``str``.
-            ValueError: ``replace=True`` and the frontmatter ``class`` is not
-                this document's class.
+            ValueError: The frontmatter ``class`` is not this document's
+                class, or the class's fields refuse what the write leaves
+                (:func:`~molab.knowledge.fields.check_fields`): checked when
+                the call creates the file, replaces it, or writes a field.
         """
         from .frontmatter import dump_frontmatter, split_frontmatter
         from .mutation import mutation
         from .naming import as_knowledge_file
 
         self._require_document("write")
-        if text is None and data is None and not replace:
+        if text is None and not replace:
             event = "knowledge.meta_changed"
-            summary = f"{self.name}: status {status}" if status else f"{self.name}: tags"
+            summary = f"{self.name}: tags" if fields is None else f"{self.name}: fields"
         else:
             event, summary = "knowledge.edited", f"edit {self.name}"
         with mutation(self, event, summary):
@@ -714,40 +736,28 @@ class Concept:
                     )
                 if self._fs.is_file(self._path) and self._fs.read_text(self._path) == text:
                     return
-                self._accept_written_record(meta, creating=not self._fs.is_file(self._path))
+                self._accept_head(meta, written=meta, whole=True)
                 self._fs.mkdir(self._fs.dirname(self._path), parents=True, exist_ok=True)
                 self._fs.atomic_write_text(self._path, text)
                 return
 
             if self.__class__.FILE_DOCUMENT:
                 self._path = as_knowledge_file(self._path)
-            record = data
-            narrative: str | None
-            incoming_fm: dict[str, object] = {}
-            if text is None:
-                narrative = None
-            elif isinstance(text, str):
-                incoming_fm, body = split_frontmatter(text, path=self._path)
-                if incoming_fm:
+            head: dict[str, object] = {}
+            narrative = text
+            if text is not None:
+                incoming, body = split_frontmatter(text, path=self._path)
+                if incoming:
+                    head.update(incoming)
                     narrative = body
-                else:
-                    narrative = text
-            else:
-                record = text if record is None else record
-                narrative = None
-            extra: dict[str, object] = dict(incoming_fm)
+            if fields is not None:
+                head.update(fields)
             if tags is not None:
-                extra["tags"] = list(tags)
-            if status is not None:
-                extra["status"] = status
-            if record is not None:
-                dumped = _record_as_dict(record)
-                extra = {**dumped, **extra}
-            extra["class"] = type(self).__name__
+                head["tags"] = list(tags)
+            head["class"] = type(self).__name__
             sources = list(getattr(self, "_sources", None) or [])
-            existing_fm = self.frontmatter()
-            merged = {**existing_fm, **extra}
-            self._accept_written_record(merged, creating=not self.exists())
+            merged = {**self.frontmatter(), **head}
+            self._accept_head(merged, written=head, whole=not self.exists())
             if narrative is None:
                 narrative = self.read()
             parent = str(PurePosixPath(self._path).parent)
@@ -757,17 +767,26 @@ class Concept:
             )
             self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body, path=self._path))
 
-    def _accept_written_record(self, merged: Mapping[str, object], *, creating: bool) -> None:
-        """Refuse a record ``write_knowledge`` would refuse. Nothing is written yet."""
+    def _accept_head(
+        self, merged: Mapping[str, object], *, written: Mapping[str, object], whole: bool
+    ) -> None:
+        """Refuse a frontmatter the class would not hold. Nothing is written yet.
+
+        The class's fields are checked over everything the file will carry
+        when the call writes the whole head (a new file, a replace) or writes
+        one of the class's fields; a call that leaves them alone does not
+        answer for them.
+        """
+        from .fields import check_fields, own_fields
+
         klass = type(self)
-        existing = None if creating else self.frontmatter()
-        if existing and existing.get("class") != klass.__name__:
+        stored = self.frontmatter() if self.exists() else {}
+        if stored and stored.get("class") != klass.__name__:
             raise ValueError(
-                f"{self.path} already holds a {existing.get('class')}, not a {klass.__name__}"
+                f"{self.path} already holds a {stored.get('class')}, not a {klass.__name__}"
             )
-        check_record = getattr(klass, "check_record", None)
-        if callable(check_record):
-            check_record(dict(merged), existing=existing)
+        if whole or own_fields(written):
+            check_fields(klass, own_fields(merged))
 
     def links(self) -> list[Edge]:
         """The documents this one cites — typed markdown links in the narrative."""
@@ -869,7 +888,7 @@ class Concept:
                 of=Literature,
                 created_by="zotero",
                 text="",
-                record=item,
+                fields=item.model_dump(mode="json", exclude_unset=True),
                 fs=self._fs,
             )
             refs.append(written)  # ty: ignore[invalid-argument-type]
@@ -939,23 +958,6 @@ def _refresh_sections(fs: FileSystem, *document_paths: str) -> None:
             continue
         seen.add(host)
         refresh_section(path, fs=fs)
-
-
-def _record_as_dict(record: object) -> dict[str, object]:
-    """Flatten a write() record into frontmatter keys.
-
-    A model contributes only the fields its caller set: a default is
-    what an absent key reads as, never a value written over a stored one.
-    """
-    from pydantic import BaseModel
-
-    if isinstance(record, BaseModel):
-        payload = dict(record.model_dump(mode="json", exclude_unset=True))
-    elif isinstance(record, Mapping):
-        payload = {str(key): value for key, value in record.items()}
-    else:
-        payload = {}
-    return payload
 
 
 def _skip_link(target: str) -> bool:
