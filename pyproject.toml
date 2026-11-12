@@ -20,8 +20,6 @@ dependencies = [
     # The standalone knowledge preview uses CommonMark tokens directly.
     "markdown-it-py>=2.2.0",
     "fastapi>=0.100.0",
-    # Sharing uses Starlette's ASGI types, connection and static-file APIs directly.
-    "starlette>=0.46.0",
     # File() / UploadFile routes (knowledge doc media) import this at startup.
     "python-multipart>=0.0.9",
     "uvicorn>=0.23.0",
@@ -68,7 +66,6 @@ dev = [
 
 [project.scripts]
 molab = "molab.cli:app"
-molab-sharing = "molab.sharing_cli:app"
 
 [dependency-groups]
 # The manual's build tools only: docs.yml installs this group alone
