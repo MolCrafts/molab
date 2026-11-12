@@ -169,7 +169,10 @@ def _mount_webapp(app: FastAPI, webapp_dir: Path) -> None:
     async def _spa_fallback(full_path: str) -> FileResponse:
         if full_path == "api" or full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found")
-        candidate = webapp_dir / full_path
+        root = webapp_dir.resolve()
+        candidate = (root / full_path).resolve()
+        if not candidate.is_relative_to(root):
+            raise HTTPException(status_code=404, detail="Not found")
         if full_path and candidate.is_file():
             return FileResponse(str(candidate))
         return FileResponse(index_html, headers=no_cache_headers)
@@ -208,6 +211,7 @@ def create_app(
     static_dir: str | Path | None = None,
     *,
     serve_static: bool = True,
+    allow_dev_origins: bool = True,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -216,6 +220,7 @@ def create_app(
             *serve_static* is ``True`` the bundled ``dist`` directory
             is auto-detected via ``importlib.resources``.
         serve_static: Set to ``False`` to run in API-only mode.
+        allow_dev_origins: Disable for managed services behind a single site origin.
     """
     from .openapi_ids import molab_operation_id
 
@@ -237,13 +242,14 @@ def create_app(
         "http://127.0.0.1:5173",
     ]
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if allow_dev_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # 2. Exception Handlers
     register_exception_handlers(app)

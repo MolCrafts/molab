@@ -161,6 +161,9 @@ class TestWorkflowDryRun:
 
         assert exit_code == 0, output
         [report] = _json_lines(output)
+        assert report.pop("source") == "code"
+        assert report.pop("entrypoint") == str(script)
+        assert report.pop("workflow_hash").startswith("sha256:")
         assert report == {
             "experiment": {"id": None, "name": "e", "path": "projects/p/experiments/e"},
             "workflow": {"name": "pbix"},

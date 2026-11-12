@@ -9,6 +9,7 @@ import type { DocCreateRequest } from '../models/DocCreateRequest';
 import type { DocMediaResponse } from '../models/DocMediaResponse';
 import type { DocMetaUpdate } from '../models/DocMetaUpdate';
 import type { DocMoveRequest } from '../models/DocMoveRequest';
+import type { DocPageResponse } from '../models/DocPageResponse';
 import type { DocRecordResponse } from '../models/DocRecordResponse';
 import type { DocRecordUpdate } from '../models/DocRecordUpdate';
 import type { DocRelationsResponse } from '../models/DocRelationsResponse';
@@ -522,6 +523,36 @@ export class KnowledgeService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/knowledge/doc/export',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Doc Page
+     * Render a document the way a reader sees it, as one self-contained page.
+     *
+     * The same page ``molab knowledge serve --export`` writes: markdown rendered,
+     * sources listed, assets inlined. 404 when the document or an asset it shows
+     * is missing.
+     * @param path The document's workspace-relative path (its identity).
+     * @param molabSession
+     * @returns DocPageResponse Successful Response
+     * @throws ApiError
+     */
+    public static docPage(
+        path: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<DocPageResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/doc/page',
             cookies: {
                 'molab_session': molabSession,
             },

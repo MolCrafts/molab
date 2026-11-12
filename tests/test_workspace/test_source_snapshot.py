@@ -44,6 +44,39 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 class TestSourceManifest:
+    @pytest.mark.parametrize(
+        "statement", ["import lib.render", "from lib import render", "from lib.render import COLOR"]
+    )
+    def test_namespace_submodules_are_captured_and_change_the_digest(
+        self, tmp_path: Path, statement: str
+    ) -> None:
+        from molab.workspace.source_snapshot import (
+            copy_sources,
+            local_import_digest,
+            source_manifest,
+        )
+
+        (tmp_path / "lib").mkdir()
+        _write(tmp_path / "entry.py", statement + "\n")
+        _write(tmp_path / "lib" / "render.py", "from .cells import COLOR\n")
+        helper = tmp_path / "lib" / "cells.py"
+        _write(helper, "COLOR = 'gray'\n")
+
+        manifest = source_manifest(tmp_path / "entry.py", now=_NOW)
+        assert {item.name for item in manifest.files} == {
+            "entry.py",
+            "lib/render.py",
+            "lib/cells.py",
+        }
+        copy_sources(manifest, tmp_path / "attempt")
+        assert (tmp_path / "attempt/source/lib/cells.py").read_text(
+            encoding="utf-8"
+        ) == helper.read_text(encoding="utf-8")
+        before = local_import_digest(tmp_path / "entry.py")
+        assert before is not None
+        _write(helper, "COLOR = 'blue'\n")
+        assert local_import_digest(tmp_path / "entry.py") != before
+
     def test_names_the_entrypoint_first_then_the_closure(self, tmp_path: Path) -> None:
         from molab.workspace.source_snapshot import source_manifest
 
@@ -88,6 +121,43 @@ class TestSourceManifest:
         # entry + transitive first-party (deep -> helper); stdlib (os) and
         # third-party (numpy) have no sibling .py and are excluded.
         assert {f.name for f in m.files} == {"entry.py", "deep.py", "helper.py"}
+
+    def test_submodules_of_a_package_are_captured(self, tmp_path: Path) -> None:
+        """``from lib import render`` and ``from lib.cells import X`` bring the submodule files."""
+        from molab.workspace.source_snapshot import source_manifest
+
+        src = tmp_path / "src"
+        (src / "lib").mkdir(parents=True)
+        _write(src / "lib" / "__init__.py", '"""Helpers."""\n')
+        _write(src / "lib" / "render.py", "from .cells import Cell\n")
+        _write(src / "lib" / "cells.py", "class Cell: ...\n")
+        _write(src / "lib" / "unused.py", "X = 1\n")
+        _write(src / "lib" / "deep.py", "Y = 2\n")
+        _write(src / "entry.py", "from lib import render as pictures\nimport lib.deep\n")
+
+        names = {f.name for f in source_manifest(src / "entry.py", now=_NOW).files}
+
+        assert names == {
+            "entry.py",
+            "lib/__init__.py",
+            "lib/render.py",
+            "lib/cells.py",
+            "lib/deep.py",
+        }
+
+    def test_a_submodule_edit_changes_the_import_digest(self, tmp_path: Path) -> None:
+        from molab.workspace.source_snapshot import local_import_digest
+
+        src = tmp_path / "src"
+        (src / "lib").mkdir(parents=True)
+        _write(src / "lib" / "__init__.py", "")
+        _write(src / "lib" / "render.py", "COLOR = 'gray'\n")
+        _write(src / "entry.py", "from lib import render\n")
+        before = local_import_digest(src / "entry.py")
+
+        _write(src / "lib" / "render.py", "COLOR = 'blue'\n")
+
+        assert local_import_digest(src / "entry.py") != before
 
     def test_locator_is_the_resolved_entrypoint(self, tmp_path: Path) -> None:
         from molab.workspace.source_snapshot import source_manifest

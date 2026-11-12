@@ -6,7 +6,7 @@ one marked block of that file, between :data:`BEGIN_MARKER` and
 :data:`END_MARKER`, and rewrites only that block; everything outside it is the
 user's. The block is rendered from the same constants the writers and the
 validator use — the naming law, the declared attempt directories and their
-purposes, the six knowledge classes — so it cannot describe a layout molab
+purposes, the knowledge classes — so it cannot describe a layout molab
 does not write. The "to do X, run Y" table lists only commands that exist;
 a test resolves each one in the CLI.
 

@@ -420,7 +420,7 @@ def get_execution_outputs(
 
     from molab.workspace.asset_repository import assets_produced_by
 
-    produced = assets_produced_by(workspace, execution_id)
+    produced = assets_produced_by(workspace, execution_id, run_id=run.id)
     asset_responses = [ManagedAssetResponse.from_model(asset) for asset in produced]
     # Registered bytes live with the asset record, outside this attempt.
     # What remains under a product directory is a working file.
@@ -488,7 +488,9 @@ def download_asset_content(
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    produced = {asset.id: asset for asset in assets_produced_by(workspace, execution_id)}
+    produced = {
+        asset.id: asset for asset in assets_produced_by(workspace, execution_id, run_id=run.id)
+    }
     asset = produced.get(asset_id)
     if asset is None:
         raise HTTPException(status_code=404, detail="asset was not registered by this attempt")

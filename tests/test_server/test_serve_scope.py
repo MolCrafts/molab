@@ -439,6 +439,43 @@ class TestScopedKnowledgeListing:
         assert all(not row["relPath"].endswith("index.md") for row in response.json()["notes"])
 
 
+class TestScopedKnowledgeGraph:
+    """A served node's graph holds the documents the listing holds, and no others."""
+
+    def test_project_root_graph_stays_inside_the_served_node(self, client_at: tuple) -> None:
+        import os
+
+        from molab.knowledge import Note
+
+        _ws, alpha, experiment, _run, beta, open_at = client_at
+        Note(alpha, "project note").write("# p\n")
+        other = Note(beta, "other project")
+        other.write("# b\n\n- [@cites p](nowhere.md)\n")
+        inner = Note(experiment, "experiment note")
+        here = Path(str(inner.path)).parent
+        up = Path(os.path.relpath(Path(str(alpha.resolve())) / "knowledges", here)).as_posix()
+        out = Path(os.path.relpath(Path(str(other.path)), here)).as_posix()
+        inner.write(f"# e\n\n- [@derived_from p]({up}/project-note.md)\n- [b]({out})\n")
+        with open_at(Path(str(alpha.resolve()))) as client:
+            listed = client.get("/api/knowledge")
+            graph = client.get("/api/knowledge/graph")
+        assert graph.status_code == 200, graph.text
+        body = graph.json()
+        assert body["nodes"] == listed.json()["notes"]
+        paths = {row["relPath"] for row in body["nodes"]}
+        assert "knowledges/project-note.md" in paths
+        assert not any("other-project" in path for path in paths)
+        source = next(path for path in paths if path.endswith("experiment-note.md"))
+        assert body["edges"] == [
+            {
+                "source": source,
+                "target": "knowledges/project-note.md",
+                "role": "derived_from",
+                "kind": "document",
+            }
+        ]
+
+
 class TestScopedRecordHistory:
     def test_record_replacement_is_committed_at_the_workspace_root(self, client_at: tuple) -> None:
         import subprocess

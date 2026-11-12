@@ -122,6 +122,53 @@ class TestRunsAdopt:
         assert "--params" in result.output
         assert (job / "md.log").exists()
 
+    def test_a_later_attempt_needs_a_mode(self, lab: Path, tmp_path: Path) -> None:
+        first = tmp_path / "first.log"
+        first.write_text("one\n")
+        second = tmp_path / "second.log"
+        second.write_text("two\n")
+        adopted = _invoke(
+            "runs",
+            "adopt",
+            "alpha",
+            "sweep",
+            "t=1",
+            "--log",
+            str(first),
+            "--json",
+            "-ws",
+            str(lab),
+        )
+        assert json.loads(adopted.stdout)["execution_id"] == "e01"
+
+        refused = runner.invoke(
+            app,
+            ["runs", "adopt", "alpha", "sweep", "t=1", "--log", str(second), "-ws", str(lab)],
+        )
+        assert refused.exit_code == 1
+        assert second.exists()
+
+        again = _invoke(
+            "runs",
+            "adopt",
+            "alpha",
+            "sweep",
+            "t=1",
+            "--log",
+            str(second),
+            "--mode",
+            "rerun",
+            "--json",
+            "-ws",
+            str(lab),
+        )
+        payload = json.loads(again.stdout)
+        assert payload["execution_id"] == "e02"
+        assert payload["mode"] == "rerun"
+        record = json.loads((lab / payload["path"] / "execution.json").read_text())
+        assert record["mode"] == "rerun"
+        assert record["based_on_execution_id"] == "e01"
+
 
 class TestIndexShowWrite:
     def test_write_replaces_the_body_and_keeps_the_frontmatter(self, lab: Path) -> None:

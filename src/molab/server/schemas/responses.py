@@ -101,7 +101,7 @@ class WorkflowDryRunBranch(ApiModel):
 
 
 class WorkflowDryRunRun(ApiModel):
-    """One run the experiment would dispatch."""
+    """One source-declared or registered run, according to the selected view."""
 
     params: dict[str, Any] = Field(..., description="The run's parameters")
 
@@ -116,7 +116,8 @@ class WorkflowDryRunTask(ApiModel):
 class WorkflowDryRunResponse(ApiModel):
     """The walk of an experiment's stored workflow, without running a task.
 
-    The same document ``molab workflow dry-run --json`` prints for a script.
+    ``source=code`` shares the CLI's source preview. ``source=stored`` is
+    the saved graph and registered inventory, not a current source sweep.
     """
 
     experiment: WorkflowDryRunExperiment
@@ -127,6 +128,11 @@ class WorkflowDryRunResponse(ApiModel):
     branches: list[WorkflowDryRunBranch] = Field(default_factory=list)
     runs: list[WorkflowDryRunRun] = Field(default_factory=list)
     tasks: list[WorkflowDryRunTask] = Field(default_factory=list)
+    source: Literal["stored", "code"] = "stored"
+    definition_hash: str | None = None
+    workflow_hash: str | None = None
+    entrypoint: str | None = None
+    registered_runs: list[WorkflowDryRunRun] = Field(default_factory=list)
 
 
 # ── Project ─────────────────────────────────────────────────────────────────

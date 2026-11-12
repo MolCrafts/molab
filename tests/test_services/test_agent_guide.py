@@ -103,6 +103,9 @@ class TestRender:
             assert name in block
         for klass in ("Note", "Literature", "Report", "Finding", "Plan", "Observation"):
             assert f"`{klass}`" in block
+        assert "| `Hypothesis` | What do we claim will turn out to be true? |" in block
+        assert "| `Decision` | What was chosen, by whom, and why? |" in block
+        assert "standing choice" not in block
         from molab.workspace.execution_dirs import list_execution_dirs
 
         for directory in list_execution_dirs():

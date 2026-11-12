@@ -17,6 +17,7 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "generate:api": "npx openapi-typescript-codegen --input ../../openapi.json --output src/api/generated --client fetch && node scripts/patch-generated-api.mjs",
+    "generate:sharing": "openapi --input ../../sharing.openapi.json --output src/api/sharing-generated --exportCore false --exportServices false --exportModels true",
     "download:busytex": "node scripts/download-busytex.mjs"
   },
   "dependencies": {

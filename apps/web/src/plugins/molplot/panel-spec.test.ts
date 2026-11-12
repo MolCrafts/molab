@@ -10,7 +10,7 @@ const palette = {
   muted: "var(--m)",
   rule: "var(--r)",
   ground: "var(--g)",
-  font: "Geist, sans-serif",
+  font: "Geist Variable, sans-serif",
 } as unknown as OverviewPalette;
 
 const options = {
@@ -41,7 +41,7 @@ describe("seriesSpec", () => {
 
   it("draws in the app's type, never Vega's serif default", () => {
     const spec = seriesSpec(palette, options) as { config: { font: string } };
-    expect(spec.config.font).toBe("Geist, sans-serif");
+    expect(spec.config.font).toBe("Geist Variable, sans-serif");
   });
 });
 

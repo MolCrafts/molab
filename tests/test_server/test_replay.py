@@ -109,6 +109,58 @@ def test_saved_attempts_fill_missing_git_events(study, monkeypatch):
     assert all(event.commit is None for event in page.events)
 
 
+def test_canvas_replay_carries_exact_versions_links_and_deletions(study, served):
+    ws, exp, *_ = study
+    first = write_knowledge(
+        exp,
+        name="Question",
+        of=Plan,
+        sources=[SourceRef.of(exp)],
+        created_by="scientist",
+        text="# Original question\n\nInitial hypothesis",
+    )
+    write_knowledge(
+        exp,
+        name="Followup",
+        of=Plan,
+        sources=[SourceRef.of(exp)],
+        created_by="scientist",
+        text="# Followup\n\n[@derived_from Question](question.md)",
+    )
+    write_knowledge(
+        exp,
+        name="Question",
+        of=Plan,
+        sources=[SourceRef.of(exp)],
+        created_by="scientist",
+        text="# Revised question\n\nRevised hypothesis",
+    )
+    document = first.path.relative_to(ws.root).as_posix()
+    with served(ws) as client:
+        assert client.delete("/api/knowledge/doc", params={"path": document}).status_code == 200
+    history = GitHistory(ws.root)
+    before = history.entries()
+    events = research_replay(ws, kind="knowledge", limit=200).events
+    versions = [
+        event.details["knowledge"]
+        for event in events
+        if event.details.get("knowledge", {}).get("path") == document
+    ]
+    assert versions[0]["node"]["title"] == "Original question"
+    assert "Initial hypothesis" in versions[0]["body"]
+    assert versions[1]["node"]["title"] == "Revised question"
+    assert versions[-1] == {"path": document, "deleted": True}
+    followup = next(
+        event.details["knowledge"]
+        for event in events
+        if event.details.get("knowledge", {}).get("path", "").endswith("/followup.md")
+    )
+    assert any(
+        edge["target"] == document and edge["role"] == "derived_from" for edge in followup["edges"]
+    )
+    assert history.entries() == before
+
+
 def test_no_git_still_has_execution_replay_and_explicit_coverage(study):
     ws, *_ = study
     shutil.rmtree(Path(str(ws.root)) / ".git")

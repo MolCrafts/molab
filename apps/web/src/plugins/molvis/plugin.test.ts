@@ -2,6 +2,7 @@ import type { AttemptFile, RunAttempt } from "@molcrafts/molab-plugin";
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { applicableRunViews } from "@/app/renderers/run/useRunViews";
 import { listRunViewContributions } from "@/lib/contribution-runtime";
+import { filePreviewPayload, filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { createPluginAPI } from "@/plugins/api/create_api";
 import { resetContributionRuntimeForTests } from "@/plugins/contribution-runtime";
 import molvisPlugin from "./plugin";
@@ -45,6 +46,7 @@ describe("MolVis run view", () => {
     const view = molvis([
       file("out/trajectory.xyz"),
       file("out/dump.lammpstrj"),
+      file("out/relax/network.dcd"),
       file("growth.mrec/zarr.json"),
       file("growth.mrec/frame/zarr.json"),
       file("log.lammps"),
@@ -53,6 +55,7 @@ describe("MolVis run view", () => {
     expect(view?.files.map((f) => f.relPath)).toEqual([
       "out/trajectory.xyz",
       "out/dump.lammpstrj",
+      "out/relax/network.dcd",
       "growth.mrec/zarr.json",
       "growth.mrec/frame/zarr.json",
     ]);
@@ -69,5 +72,19 @@ describe("MolVis run view", () => {
 
   it("does not exist for an attempt without a structure", () => {
     expect(molvis([file("run.log"), file("metrics.mlp.jsonl")])).toBeUndefined();
+  });
+
+  it("claims a DCD as bytes and a data file as whole text", () => {
+    const dcd = filePreviewPluginRegistry.getPluginForFile("network.dcd", "out/network.dcd");
+    const data = filePreviewPluginRegistry.getPluginForFile("network.data", "out/network.data");
+    expect(dcd?.id).toBe("molvis:structure");
+    expect(data?.id).toBe("molvis:structure");
+    if (!dcd || !data) return;
+    expect(filePreviewPayload(dcd, { name: "network.dcd", path: "out/network.dcd" })).toBe("bytes");
+    expect(filePreviewPayload(data, { name: "network.data", path: "out/network.data" })).toBe(
+      "text",
+    );
+    expect(data.whole).toBe(true);
+    expect(filePreviewPluginRegistry.getPluginForFile("log.lammps", "log.lammps")).toBeNull();
   });
 });

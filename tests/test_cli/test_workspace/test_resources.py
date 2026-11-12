@@ -402,12 +402,15 @@ def _greeting(tmp_path: Path) -> tuple[Workspace, str]:
 
 
 class TestAssetList:
-    def test_shows_title_and_kind(self, tmp_path: Path) -> None:
-        ws, _asset_id = _greeting(tmp_path)
+    @pytest.mark.parametrize("width", [64, 80, 120])
+    def test_shows_title_and_kind(self, tmp_path: Path, monkeypatch, width: int) -> None:
+        monkeypatch.setattr(resources, "_console", Console(width=width))
+        ws, asset_id = _greeting(tmp_path)
         result = CliRunner().invoke(resources.asset_app, ["list", "-ws", str(ws.root)])
         assert result.exit_code == 0, result.output
         assert "greeting" in result.output
         assert "text/plain" in result.output
+        assert asset_id in result.output
 
 
 class TestAssetInfo:

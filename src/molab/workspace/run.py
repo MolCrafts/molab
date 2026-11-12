@@ -542,7 +542,7 @@ class Run(Folder):
         workspace = self.experiment.project.workspace
         produced = [
             asset
-            for asset in assets_produced_by(workspace, execution_id)
+            for asset in assets_produced_by(workspace, execution_id, run_id=self.id)
             if asset.title == "results"
             and isinstance(asset.origin, ExecutionOrigin)
             and asset.origin.run_id == self.id

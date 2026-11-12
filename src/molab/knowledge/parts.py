@@ -70,7 +70,7 @@ class GeneratedParts:
         execution = _execution(run, execution_id)
         workspace = run.experiment.project.workspace
         found: list[GeneratedPart] = []
-        for asset in assets_produced_by(workspace, execution.id):
+        for asset in assets_produced_by(workspace, execution.id, run_id=run.id):
             if not _is_part(asset):
                 continue
             found.append(

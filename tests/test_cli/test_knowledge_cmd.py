@@ -286,6 +286,67 @@ class TestKnowledgeWrite:
         assert not (host_dir / "knowledges" / "knowledges").exists()
         assert "membrane" in (host_dir / "knowledges" / "recorded.md").read_text(encoding="utf-8")
 
+    @pytest.mark.parametrize(
+        ("doc_class", "record", "field", "stored"),
+        [
+            ("Hypothesis", None, "verdict", "open"),
+            ("Hypothesis", '{"verdict": "supported"}', "verdict", "supported"),
+            ("Decision", None, "status", "made"),
+            ("Decision", '{"status": "open"}', "status", "open"),
+        ],
+    )
+    def test_write_a_hypothesis_and_a_decision(
+        self, tmp_path: Path, doc_class: str, record: str | None, field: str, stored: str
+    ) -> None:
+        from molab.knowledge.concepts import _open_document
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        ws.add_project("membranes")
+        result = CliRunner().invoke(
+            knowledge_app,
+            [
+                "write", "claim", "Uptake plateaus.",
+                "--on", "projects/membranes",
+                "--class", doc_class,
+                *(["--record", record] if record else []),
+                "--path", str(ws.root),
+            ],
+        )  # fmt: skip
+        assert result.exit_code == 0, result.output
+        doc = _open_document(
+            tmp_path / "lab" / "projects" / "membranes" / "knowledges" / "claim.md"
+        )
+        assert type(doc).__name__ == doc_class
+        assert getattr(doc, field)() == stored
+
+    @pytest.mark.parametrize(
+        ("doc_class", "record"),
+        [("Hypothesis", '{"verdict": "maybe"}'), ("Decision", '{"status": "pending"}')],
+    )
+    def test_write_refuses_an_unknown_verdict_or_status(
+        self, tmp_path: Path, doc_class: str, record: str
+    ) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        ws.add_project("membranes")
+        result = CliRunner().invoke(
+            knowledge_app,
+            [
+                "write", "claim", "Uptake plateaus.",
+                "--on", "projects/membranes",
+                "--class", doc_class,
+                "--record", record,
+                "--path", str(ws.root),
+            ],
+        )  # fmt: skip
+        assert result.exit_code != 0
+        landed = tmp_path / "lab" / "projects" / "membranes" / "knowledges" / "claim.md"
+        assert not landed.exists()
+
     def test_write_on_a_non_host_directory_exits(self, tmp_path: Path) -> None:
         from molab.workspace import Workspace
 

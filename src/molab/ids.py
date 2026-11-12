@@ -51,12 +51,13 @@ stat cannot validate.
 """
 
 
-def slugify(text: str, max_len: int = 50) -> str:
+def slugify(text: str, max_len: int = 50, *, allow_unicode: bool = False) -> str:
     """Convert text to a valid slug.
 
     Args:
         text: Input text.
         max_len: Maximum length.
+        allow_unicode: Keep Unicode letters and digits (document filenames).
 
     Returns:
         Slugified string: lowercased, spaces/underscores → hyphens,
@@ -67,7 +68,7 @@ def slugify(text: str, max_len: int = 50) -> str:
     # Replace spaces and underscores with hyphens
     slug = re.sub(r"[\s_]+", "-", slug)
     # Remove non-alphanumeric characters except hyphens
-    slug = re.sub(r"[^a-z0-9-]", "", slug)
+    slug = re.sub(r"[^\w-]" if allow_unicode else r"[^a-z0-9-]", "", slug)
     # Remove leading/trailing hyphens
     slug = slug.strip("-")
     # Collapse multiple hyphens

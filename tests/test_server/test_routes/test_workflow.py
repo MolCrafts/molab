@@ -366,6 +366,11 @@ class TestDryRunWorkflow:
         assert response.json() == {
             "experiment": {"id": exp.id, "name": "e", "path": "projects/p/experiments/e"},
             "workflow": {"name": "pbix"},
+            "source": "stored",
+            "definitionHash": exp.metadata.definition_hash,
+            "workflowHash": None,
+            "entrypoint": "missing.py:build",
+            "registeredRuns": [{"params": {"x": 1}}],
             "waves": [["monomers", "pack"], ["equilibrate"]],
             "branches": [],
             "runs": [{"params": {"x": 1}}],

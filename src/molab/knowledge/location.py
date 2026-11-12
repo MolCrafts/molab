@@ -48,7 +48,8 @@ __all__ = [
 def document_slug(name: str) -> str:
     """Slugify *name*, keeping up to :data:`DOCUMENT_SLUG_MAX` characters.
 
-    A name that slugifies to nothing (a CJK-only name) is kept as given.
+    Unicode letters and digits survive, so mixed CJK/ASCII titles retain
+    their distinguishing words instead of collapsing to their ASCII prefix.
 
     Args:
         name: Human document name.
@@ -56,7 +57,7 @@ def document_slug(name: str) -> str:
     Returns:
         The filename stem, without a suffix.
     """
-    return slugify(name, max_len=DOCUMENT_SLUG_MAX) or name
+    return slugify(name, max_len=DOCUMENT_SLUG_MAX, allow_unicode=True) or name
 
 
 def enclosing_workspace_root(path: PathArg, *, fs: FileSystem) -> Path | None:

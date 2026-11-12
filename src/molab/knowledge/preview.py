@@ -319,6 +319,21 @@ def _payload(workspace: Workspace, asset_id: str) -> Path:
     return Path(payload_path_for(workspace, asset_id))
 
 
+def standalone_page(doc: Path, workspace: Workspace) -> RenderedPage:
+    """Render *doc* as one page that needs nothing else: every asset it shows is inlined.
+
+    The page a reader is handed, whether written to a file (:func:`export_page`)
+    or answered over HTTP. Links to other documents are shown as text.
+    """
+
+    def inline(asset_id: str) -> str:
+        path = _payload(workspace, asset_id)
+        data = path.read_bytes()
+        return f"data:{_mime(path, data)};base64,{base64.b64encode(data).decode()}"
+
+    return render_page(doc, Path(str(workspace.root)), asset_url=inline)
+
+
 def export_page(doc: Path, workspace: Workspace, out: Path) -> RenderedPage:
     """Write *doc* to *out* as one self-contained file, assets inlined.
 
@@ -329,12 +344,7 @@ def export_page(doc: Path, workspace: Workspace, out: Path) -> RenderedPage:
         RuntimeError: A PDF was asked for and Playwright is not installed.
     """
 
-    def inline(asset_id: str) -> str:
-        path = _payload(workspace, asset_id)
-        data = path.read_bytes()
-        return f"data:{_mime(path, data)};base64,{base64.b64encode(data).decode()}"
-
-    page = render_page(doc, Path(str(workspace.root)), asset_url=inline)
+    page = standalone_page(doc, workspace)
     if out.suffix.lower() == ".pdf":
         _print_pdf(page.html, out)
     else:

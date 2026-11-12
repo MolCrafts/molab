@@ -10,14 +10,17 @@ import re
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from molab._typing import JSONValue
+from molab.knowledge import Note
 from molab.knowledge.frontmatter import split_frontmatter
+from molab.knowledge.index_section import document_title
 from molab.knowledge.naming import is_knowledge_file
+from molab.knowledge.relations import relation_links
 from molab.workspace import Experiment, Project, Run, Workspace
 from molab.workspace.domain import ExecutionOrigin
 from molab.workspace.fs_local import LocalFS
@@ -190,11 +193,51 @@ def research_replay(
             )
     for fact in reversed(facts):
         document = None
+        knowledge: dict[str, JSONValue] | None = None
         if fact.event.startswith("knowledge."):
             candidate = repo / fact.subject.id
             if not candidate.is_relative_to(boundary):
                 continue
             document = candidate.relative_to(serve_path).as_posix()
+            if fact.event == "knowledge.deleted":
+                knowledge = {"path": document, "deleted": True}
+            else:
+                text = history.show(fact.commit, fact.subject.id)
+                if text is not None:
+                    meta, body = split_frontmatter(text, path=candidate)
+                    links: list[JSONValue] = []
+                    for link in relation_links(Note(candidate), body):
+                        target = link.target.split("#", 1)[0]
+                        edge_kind = "ref" if target.startswith("molab:") else "external"
+                        if not target.startswith(("molab:", "http://", "https://")):
+                            path = Path(target)
+                            if not path.is_relative_to(serve_path):
+                                continue
+                            target = path.relative_to(serve_path).as_posix()
+                            edge_kind = "document"
+                        links.append(
+                            {
+                                "source": document,
+                                "target": target,
+                                "role": link.role,
+                                "kind": edge_kind,
+                            }
+                        )
+                    knowledge = {
+                        "path": document,
+                        "deleted": False,
+                        "node": {
+                            "name": candidate.stem,
+                            "title": document_title(meta, body, candidate.stem),
+                            "relPath": document,
+                            "hostPath": candidate.parent.parent.relative_to(serve_path).as_posix(),
+                            "cls": str(meta.get("class") or fact.subject.type),
+                            "excerpt": body[:240],
+                        },
+                        "record": cast("dict[str, JSONValue]", meta),
+                        "body": body,
+                        "edges": links,
+                    }
             if fact.subject.type == "Delegation" and fact.event != "knowledge.deleted":
                 text = history.show(fact.commit, fact.subject.id)
                 meta, _ = split_frontmatter(text or "", path=fact.subject.id)
@@ -266,6 +309,7 @@ def research_replay(
             details={
                 "subject": fact.subject.model_dump(),
                 "relations": [rel.model_dump() for rel in fact.relations],
+                **({"knowledge": knowledge} if knowledge is not None else {}),
             },
         )
     # Dict insertion is deterministic and leaves queued → running → terminal

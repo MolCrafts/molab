@@ -780,6 +780,31 @@ class TestKnowledgeGraph:
         ]
 
 
+class TestDocPage:
+    """``doc_page``: a document rendered as one self-contained page."""
+
+    def test_page_reuses_the_knowledge_preview_renderer(self) -> None:
+        assert "standalone_page(" in inspect.getsource(knowledge_routes.doc_page)
+
+    def test_markdown_is_rendered_and_raw_html_is_not_executed(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, _run = lab
+        Note(Path(str(ws.root)) / "knowledges" / "claim").write(
+            "# A plateau appears\n\n**Above 0.2** it flattens.\n\n<script>steal()</script>\n"
+        )
+        with served(ws) as client:
+            response = client.get("/api/knowledge/doc/page", params={"path": "knowledges/claim.md"})
+            missing = client.get("/api/knowledge/doc/page", params={"path": "knowledges/none.md"})
+        assert response.status_code == 200, response.text
+        page = response.json()
+        assert page["title"] == "A plateau appears"
+        assert "<h1>A plateau appears</h1>" in page["html"]
+        assert "<strong>Above 0.2</strong>" in page["html"]
+        assert "<script>steal()</script>" not in page["html"]
+        assert missing.status_code == 404
+
+
 class TestExportDoc:
     """``export_doc``: portable markdown of one document."""
 

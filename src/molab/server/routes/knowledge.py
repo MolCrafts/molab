@@ -1530,6 +1530,36 @@ def export_doc(
     )
 
 
+class DocPageResponse(BaseModel):
+    """``GET /knowledge/doc/page``: one document as a self-contained HTML page."""
+
+    title: str
+    html: str = Field(description="The whole page; every asset it shows is inlined.")
+
+
+@router.get("/doc/page", response_model=DocPageResponse)
+def doc_page(
+    path: str = Query(..., description="The document's workspace-relative path (its identity)."),
+    workspace: Workspace = Depends(get_workspace),
+) -> DocPageResponse:
+    """Render a document the way a reader sees it, as one self-contained page.
+
+    The same page ``molab knowledge serve --export`` writes: markdown rendered,
+    sources listed, assets inlined. 404 when the document or an asset it shows
+    is missing.
+    """
+    from molab.knowledge.preview import standalone_page
+
+    doc = _open_doc(workspace, path)
+    try:
+        page = standalone_page(_StdPath(str(doc.path)), workspace)
+    except (FileNotFoundError, LookupError) as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"{path!r} shows an asset that is missing: {exc}"
+        ) from exc
+    return DocPageResponse(title=page.title, html=page.html)
+
+
 def _figure_name(raw: str | None) -> str:
     """A safe ``figs/`` filename, or 415 when the suffix is not an image."""
     name = _StdPath(raw or "image").name

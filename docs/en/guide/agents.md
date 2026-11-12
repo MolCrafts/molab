@@ -4,7 +4,7 @@ Coding agents such as Claude Code and Codex edit a workspace the way a person do
 
 ## What an agent reads
 
-`molab init` writes a root `AGENTS.md` (and a `CLAUDE.md` that imports it with an `@AGENTS.md` line). molab owns only the block between `<!-- molab:begin -->` and `<!-- molab:end -->`, which it renders from code: the layout tree, what each attempt directory is for, the six knowledge classes, the scratch contract, and a "to do this, run that" table of commands. Anything you write outside the markers is kept. `molab agents sync` refreshes the block. It also appends any missing managed rules to `.gitignore` and writes the validation baseline when there is none.
+`molab init` writes a root `AGENTS.md` (and a `CLAUDE.md` that imports it with an `@AGENTS.md` line). molab owns only the block between `<!-- molab:begin -->` and `<!-- molab:end -->`, which it renders from code: the layout tree, what each attempt directory is for, the twelve knowledge classes, the scratch contract, and a "to do this, run that" table of commands. Anything you write outside the markers is kept. `molab agents sync` refreshes the block. It also appends any missing managed rules to `.gitignore` and writes the validation baseline when there is none.
 
 The guide tells an agent to start at `./index.md`. Each `index.md` frontmatter is that level's record plus a derived `index:` block, and `index.children[].path` leads down to every project, experiment and run. A run's `index.executions[]` lists its attempts, and `index.knowledges` lists a level's knowledge documents. The frontmatter belongs to molab, so an agent may edit only the body.
 

@@ -222,13 +222,23 @@ def asset_by_digest(workspace: Workspace, digest: str) -> Asset | None:
     return found[0]
 
 
-def assets_produced_by(workspace: Workspace, execution_id: str) -> builtins.list[Asset]:
-    """Assets whose origin is attempt *execution_id*."""
+def assets_produced_by(
+    workspace: Workspace, execution_id: str, *, run_id: str | None = None
+) -> builtins.list[Asset]:
+    """Assets from an attempt, bounded by its run when *run_id* is given.
+
+    Execution labels such as ``e01`` are run-local. Callers reading one
+    attempt must supply its run; omitting it explicitly queries all runs.
+    """
     found: list[Asset] = []
     for repository in scan_asset_repositories(workspace):
         for asset in repository.list():
             origin = asset.origin
-            if isinstance(origin, ExecutionOrigin) and origin.execution_id == execution_id:
+            if (
+                isinstance(origin, ExecutionOrigin)
+                and origin.execution_id == execution_id
+                and (run_id is None or origin.run_id == run_id)
+            ):
                 found.append(asset)
     return found
 

@@ -103,6 +103,15 @@ def write_knowledge(
     else:
         probe = of(path, fs=disk)
     existing = probe.frontmatter() if probe.exists() else None
+    if existing is not None:
+        from .naming import knowledge_stem
+
+        previous_name = existing.get("name")
+        if previous_name and previous_name != name and name != knowledge_stem(disk.basename(path)):
+            raise ValueError(
+                f"{name!r} collides with existing document {previous_name!r} at {path}; "
+                "choose a distinct name or explicitly replace the old document"
+            )
     check_planning_record(of, preview, creating=existing is None)
     check_worker_record(of, preview, existing=existing)
     check_record = getattr(of, "check_record", None)
@@ -163,6 +172,24 @@ def _landed_path(
 
     paths = {fmt: str(_folder(host, name, of, format=fmt)) for fmt in KNOWLEDGE_FORMATS}
     on_disk = [fmt for fmt in KNOWLEDGE_FORMATS if disk.is_file(paths[fmt])]
+    if not on_disk:
+        # Keep the identity of a previously written mixed-language title.
+        # Only an exact stored name may claim its old ASCII-only filename.
+        from molab.ids import slugify
+
+        from .frontmatter import split_frontmatter
+        from .location import DOCUMENT_SLUG_MAX
+
+        legacy = slugify(name, max_len=DOCUMENT_SLUG_MAX) or name
+        for fmt in KNOWLEDGE_FORMATS:
+            candidate = str(_folder(host, legacy, of, format=fmt))
+            if (
+                disk.is_file(candidate)
+                and split_frontmatter(disk.read_text(candidate), path=candidate)[0].get("name")
+                == name
+            ):
+                paths[fmt] = candidate
+                on_disk.append(fmt)
     if format is None:
         return paths[on_disk[0] if on_disk else "md"]
     clash = [fmt for fmt in on_disk if fmt != format]
