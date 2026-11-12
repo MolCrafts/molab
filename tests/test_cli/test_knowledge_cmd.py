@@ -243,6 +243,41 @@ class TestKnowledgeWrite:
         assert deleted.exit_code == 0, deleted.output
         assert not (Path(root) / "knowledges" / "cooling.md").exists()
 
+    def test_rename_move_and_delete_are_history_commits(self, tmp_path: Path) -> None:
+        import subprocess
+
+        from molab.workspace import Workspace
+        from molab.workspace.history import GitHistory
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        project = ws.add_project("alpha")
+        root = str(ws.root)
+        assert GitHistory(root).init()
+        runner = CliRunner()
+        assert runner.invoke(knowledge_app, ["write", "idea", "x", "--path", root]).exit_code == 0
+        steps = [
+            ["rename", "knowledges/idea.md", "cooling"],
+            ["move", "knowledges/cooling.md", "--on", f"molab:project/{project.id}"],
+            ["delete", "projects/alpha/knowledges/cooling.md"],
+        ]
+        for step in steps:
+            result = runner.invoke(knowledge_app, [*step, "--path", root])
+            assert result.exit_code == 0, result.output
+
+        def committed(*args: str) -> str:
+            return subprocess.run(
+                ["git", "-C", root, *args], capture_output=True, text=True, check=True
+            ).stdout
+
+        assert committed("log", "--format=%s").splitlines()[:3] == [
+            "knowledge.deleted: delete cooling",
+            "knowledge.moved: move cooling",
+            "knowledge.moved: rename idea to cooling",
+        ]
+        assert committed("ls-files", "knowledges", "projects/alpha/knowledges") == ""
+        assert committed("status", "--porcelain", "--", "knowledges", "projects") == ""
+
     @pytest.mark.parametrize("level", ["project", "experiment"])
     @pytest.mark.parametrize("container", ["", "/knowledges", "/knowledges/"])
     def test_write_on_a_relative_host_directory(

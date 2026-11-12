@@ -107,7 +107,7 @@ class TestWriteKnowledge:
 
         item = _write(experiment, cite=[(experiment, "derived_from")])
 
-        assert calls == [experiment.resolve()]
+        assert calls == [str(item.path)]
         from molab.workspace.refs import ref_of
 
         assert [(edge.target, edge.role) for edge in item.links()] == [

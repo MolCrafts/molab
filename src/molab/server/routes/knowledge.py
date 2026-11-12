@@ -40,7 +40,6 @@ from ..deps.served import active_served_key, assert_workspace_writable
 from ..schemas import MessageResponse
 
 if TYPE_CHECKING:
-    from molab.fs import PathArg
     from molab.knowledge.concept import Concept
     from molab.workspace.domain import Asset
     from molab.workspace.folder import Folder
@@ -701,38 +700,6 @@ def _open_doc(workspace: Workspace, path: str) -> Concept:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found") from exc
 
 
-def _record_history(
-    workspace: Workspace,
-    doc: Concept,
-    event: str,
-    summary: str,
-    *,
-    paths: tuple[PathArg, ...] = (),
-) -> None:
-    """Commit a knowledge change to the workspace history (best effort).
-
-    A served node is not the history root; the enclosing workspace is. A
-    history failure never fails the request — the file is already written.
-    """
-    from contextlib import suppress
-
-    with suppress(Exception):
-        from molab.knowledge.location import enclosing_workspace_root
-        from molab.workspace.history import EntityRef, GitHistory
-
-        history_root = enclosing_workspace_root(doc.path, fs=workspace.fs)
-        if history_root is None:
-            return
-        root = _StdPath(str(history_root))
-        rel = _StdPath(str(doc.path)).relative_to(root).as_posix()
-        GitHistory(str(root)).record(
-            event,
-            subject=EntityRef(id=rel, type=type(doc).__name__),
-            summary=summary,
-            paths=paths or (doc.path,),
-        )
-
-
 def _reject_tex(path: str) -> None:
     """Refuse a knowledge write verb on a TeX file.
 
@@ -1182,7 +1149,6 @@ def embed_doc(
     target = _resolve_embed_entity(workspace, body.target_kind, body.target)
     role = body.role if body.role is not None else default_role_for(target)
     append_link(doc, resolve_embed_target(target), role=role)
-    _record_history(workspace, doc, "knowledge.linked", f"@{role} {body.target} from {doc.name}")
     return EmbedResponse(srcPath=path, target=body.target, role=role)
 
 
@@ -1202,7 +1168,6 @@ def edit_doc(
     _reject_tex(path)
     doc = _open_doc(workspace, path)
     doc.write(payload.body)
-    _record_history(workspace, doc, "knowledge.edited", f"edit {doc.name}")
     return _note_detail(workspace, doc, path)
 
 
@@ -1221,7 +1186,6 @@ def move_doc(
     """Rename and/or move a document onto another host."""
     _reject_tex(path)
     doc = _open_doc(workspace, path)
-    before = doc.path
     try:
         if payload.name is not None:
             doc.rename(payload.name, within=workspace.root)
@@ -1229,7 +1193,6 @@ def move_doc(
             doc.move_to(_resolve_host(workspace, payload.hostPath), within=workspace.root)
     except FileExistsError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-    _record_history(workspace, doc, "knowledge.moved", f"move {doc.name}", paths=(before, doc.path))
     return _note_summary(workspace, doc)
 
 
@@ -1250,12 +1213,6 @@ def update_doc_meta(
     doc = _open_doc(workspace, path)
     if payload.tags is not None or payload.status is not None:
         doc.write(tags=payload.tags, status=payload.status)
-        _record_history(
-            workspace,
-            doc,
-            "knowledge.meta_changed",
-            f"{doc.name}: status {payload.status}" if payload.status else f"{doc.name}: tags",
-        )
     return _note_summary(workspace, doc)
 
 
@@ -1330,9 +1287,6 @@ def update_doc_relation(
     workspace: Workspace = Depends(get_workspace),
 ) -> DocRelationsResponse:
     """Edit the original markdown link; reject stale authoring with 409."""
-    import hashlib
-
-    from molab.atomicio import file_lock
     from molab.knowledge.record import RecordConflictError
     from molab.knowledge.relations import mutate_relation
     from molab.workspace.refs import is_ref, parse_ref
@@ -1340,9 +1294,6 @@ def update_doc_relation(
     _relation_path(workspace, path)
     _reject_tex(path)
     doc = _open_doc(workspace, path)
-    lock_name = hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
-    lock_path = _StdPath(str(workspace.root)) / ".molab" / "locks" / f"knowledge-{lock_name}.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         target = payload.target
         if payload.action == "add" and target:
@@ -1352,28 +1303,20 @@ def update_doc_relation(
                 target = _relation_path(workspace, target)
                 if not workspace.fs.exists(target):
                     raise ValueError("relation target does not exist")
-        with file_lock(lock_path):
-            mutate_relation(
-                doc,
-                action=payload.action,
-                if_match=payload.ifMatch,
-                occurrence=payload.id,
-                target=target,
-                role=payload.role,
-                text=payload.text,
-            )
-            result = _doc_relations(workspace, path, doc)
+        mutate_relation(
+            doc,
+            action=payload.action,
+            if_match=payload.ifMatch,
+            occurrence=payload.id,
+            target=target,
+            role=payload.role,
+            text=payload.text,
+        )
     except RecordConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-    _record_history(
-        workspace,
-        doc,
-        "knowledge.relation_changed",
-        f"{payload.action} relation of {doc.name}",
-    )
-    return result
+    return _doc_relations(workspace, path, doc)
 
 
 @router.get("/doc/record", response_model=DocRecordResponse)
@@ -1406,26 +1349,16 @@ def replace_doc_record(
     Only classes that own a record (Hypothesis) accept it (422 otherwise, and for a record the class rejects). The change is
     recorded in the workspace history as ``knowledge.record_replaced``.
     """
-    import hashlib
-
-    from molab.atomicio import file_lock
     from molab.knowledge.record import RecordConflictError, record_of, replace_record
 
     _reject_tex(path)
     doc = _open_doc(workspace, path)
-    lock_name = hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
-    lock_path = _StdPath(str(workspace.root)) / ".molab" / "locks" / f"knowledge-{lock_name}.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with file_lock(lock_path):
-            digest = replace_record(
-                doc, payload.record, if_match=payload.ifMatch, body=payload.body
-            )
+        digest = replace_record(doc, payload.record, if_match=payload.ifMatch, body=payload.body)
     except RecordConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-    _record_history(workspace, doc, "knowledge.record_replaced", f"replace record of {doc.name}")
     return DocRecordResponse(
         relPath=path, cls=type(doc).__name__, record=record_of(doc), digest=digest
     )
@@ -1446,7 +1379,6 @@ def delete_doc(
     _reject_tex(path)
     doc = _open_doc(workspace, path)
     doc.delete()
-    _record_history(workspace, doc, "knowledge.deleted", f"delete {doc.name}")
     return MessageResponse(message=f"note {path!r} deleted")
 
 

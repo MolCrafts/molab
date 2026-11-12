@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .concept import Knowledge, append_link
@@ -54,8 +53,10 @@ def write_knowledge(
     or ``knowledge.rewritten``) that also carries the deletion of each
     *replaces* document, so a superseded document leaves the tree instead of
     piling up beside its successor. A new document is stamped ``created_at``
-    (ISO-8601 UTC, seconds) unless *record* already carries one. A history failure never fails the write. The host's ``index.knowledges`` section (in its
-    ``index.md``) is rebuilt after the write.
+    (ISO-8601 UTC, seconds) unless *record* already carries one. The host's ``index.knowledges`` section (in its ``index.md``) is
+    rebuilt after the write. The write runs under the document's lock, and a
+    history failure never fails it: it is logged by the history
+    (:func:`~molab.knowledge.mutation.mutation`).
 
     Args:
         host: Where the document lands.
@@ -83,10 +84,9 @@ def write_knowledge(
             *replaces* entry is not a knowledge document or is the written one,
             or the name already exists in the other *format*.
     """
-    from contextlib import suppress
-
     from .index_section import refresh_section
-    from .location import _host_fs, _lookup_path, enclosing_workspace_root, host_of
+    from .location import _host_fs
+    from .mutation import mutation
 
     disk = fs if fs is not None else _host_fs(host)
     from .concept import _record_as_dict
@@ -119,35 +119,19 @@ def write_knowledge(
     created = not item.exists()
     retired = _replaced_paths(replaces, item.path, disk)
     payload = _merged_record(record, created_by=created_by, name=name, created=created)
-    if item.exists() and text == "":
-        item.write(None, payload)
-    else:
-        item.write(text, payload)
-    root = enclosing_workspace_root(_lookup_path(host), fs=disk)
-    _apply_cites(item, cite)
-    relinked: list[str] = []
-    for old in retired:
-        from .concepts import _open_document
+    event = "knowledge.created" if created else "knowledge.rewritten"
+    with mutation(item, event, title or name) as change:
+        if item.exists() and text == "":
+            item.write(None, payload)
+        else:
+            item.write(text, payload)
+        _apply_cites(item, cite)
+        for old in retired:
+            from .concepts import _open_document
 
-        relinked.extend(_open_document(old, fs=disk).supersede_with(item, within=root))
-    refresh_section(item.path, fs=disk, root=root, known_root=True)
-    if root is not None:
-        with suppress(Exception):
-            from molab.workspace.entity_record import INDEX_FILENAME
-            from molab.workspace.history import EntityRef, GitHistory
-
-            rel = Path(str(item.path)).relative_to(Path(str(root))).as_posix()
-            touched = [item.path, *retired, *relinked]
-            for path in (item.path, *retired):
-                host_index = disk.join(str(host_of(path)), INDEX_FILENAME)
-                if disk.is_file(host_index) and host_index not in touched:
-                    touched.append(host_index)
-            GitHistory(str(root)).record(
-                "knowledge.created" if created else "knowledge.rewritten",
-                subject=EntityRef(id=rel, type=type(item).__name__),
-                summary=title or name,
-                paths=tuple(touched),
-            )
+            relinked = _open_document(old, fs=disk).supersede_with(item, within=change.root)
+            change.touched.extend([old, *relinked])
+        refresh_section(item.path, fs=disk, root=change.root, known_root=True)
     return item
 
 

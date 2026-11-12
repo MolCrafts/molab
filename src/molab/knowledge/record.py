@@ -83,24 +83,32 @@ def replace_record(
         FileNotFoundError: The document does not exist.
         RecordConflictError: *if_match* differs from the current digest.
         ValueError: The class rejects the record.
+
+    The digest check and the write run under the document's lock, and the
+    change is one ``knowledge.record_replaced`` history commit
+    (:func:`~molab.knowledge.mutation.mutation`).
     """
     from .frontmatter import dump_frontmatter
+    from .mutation import mutation
 
     klass = type(doc)
     if not has_record(doc):
         raise TypeError(f"{klass.__name__} has no structured record to replace")
     if not doc.exists():
         raise FileNotFoundError(str(doc.path))
-    if if_match is not None and digest_of(doc) != if_match:
-        raise RecordConflictError(f"{doc.path} changed since it was read")
-    clean = {str(key): value for key, value in record.items() if key not in COMMON_KEYS}
-    check_record = getattr(klass, "check_record", None)
-    if check_record is not None:
-        check_record(clean, existing={})
-    common = {key: value for key, value in doc.frontmatter().items() if key in COMMON_KEYS}
-    narrative = doc.read() if body is None else body
-    doc.write(
-        dump_frontmatter({**common, **clean, "class": klass.__name__}, narrative, path=doc.path),
-        replace=True,
-    )
-    return digest_of(doc)
+    with mutation(doc, "knowledge.record_replaced", f"replace record of {doc.name}"):
+        if if_match is not None and digest_of(doc) != if_match:
+            raise RecordConflictError(f"{doc.path} changed since it was read")
+        clean = {str(key): value for key, value in record.items() if key not in COMMON_KEYS}
+        check_record = getattr(klass, "check_record", None)
+        if check_record is not None:
+            check_record(clean, existing={})
+        common = {key: value for key, value in doc.frontmatter().items() if key in COMMON_KEYS}
+        narrative = doc.read() if body is None else body
+        doc.write(
+            dump_frontmatter(
+                {**common, **clean, "class": klass.__name__}, narrative, path=doc.path
+            ),
+            replace=True,
+        )
+        return digest_of(doc)

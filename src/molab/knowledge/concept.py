@@ -476,8 +476,12 @@ class Concept:
         Raises:
             FileExistsError: If the destination already exists.
             ValueError: If *within* is omitted and cannot be derived.
+
+        Runs under the document's lock and records one ``knowledge.moved``
+        history commit (:func:`~molab.knowledge.mutation.mutation`).
         """
         from .location import document_slug
+        from .mutation import mutation
 
         self._require_document("rename")
         slug = document_slug(new_name)
@@ -486,14 +490,18 @@ class Concept:
         dst = self._fs.join(self._fs.dirname(self._path), slug)
         if self._norm(dst) == self._norm(self._path):
             return
-        if self._fs.exists(dst):
-            raise FileExistsError(f"cannot rename {self._path!r} to {dst!r}: destination exists")
-        inbound = self.backlinks(within=within)
-        old = self._path
-        self._fs.mv(old, dst)
-        self._path = dst
-        _rewrite_inbound(inbound, old, dst)
-        _refresh_sections(self._fs, dst)
+        with mutation(self, "knowledge.moved", f"rename {self.name} to {new_name}") as change:
+            if self._fs.exists(dst):
+                raise FileExistsError(
+                    f"cannot rename {self._path!r} to {dst!r}: destination exists"
+                )
+            inbound = self.backlinks(within=within)
+            old = self._path
+            self._fs.mv(old, dst)
+            self._path = dst
+            _rewrite_inbound(inbound, old, dst)
+            _refresh_sections(self._fs, dst)
+            change.touched.extend(str(link.source.path) for link in inbound)
 
     def move_to(
         self,
@@ -522,10 +530,14 @@ class Concept:
             TypeError: If *host* is a document instance.
             ValueError: If *stem* is empty, contains ``/``, or is ``.`` / ``..``,
                 or *within* is omitted and cannot be derived.
+
+        Runs under the document's lock and records one ``knowledge.moved``
+        history commit (:func:`~molab.knowledge.mutation.mutation`).
         """
         if stem is not None and (stem == "" or "/" in stem or stem in {".", ".."}):
             raise ValueError(f"stem {stem!r} is not a single path segment")
         from .location import _folder
+        from .mutation import mutation
         from .naming import document_format
 
         fmt = document_format(self._path)
@@ -534,31 +546,38 @@ class Concept:
         dst = planned if stem is None else self._fs.join(self._fs.dirname(planned), stem + suffix)
         if self._norm(dst) == self._norm(self._path):
             return
-        if self._fs.exists(dst):
-            raise FileExistsError(f"cannot move {self._path!r} to {dst!r}: destination exists")
-        old = self._path
-        inbound = None
-        old_dir = ""
-        if relink:
-            inbound = self.backlinks(within=within)
-            old_dir = _link_base(self)
-        self._fs.mkdir(self._fs.dirname(dst), parents=True, exist_ok=True)
-        self._fs.mv(old, dst)
-        self._path = dst
-        if relink and inbound is not None:
-            new_dir = _link_base(self)
-            _retarget_links(self, lambda target: _rehome_link(target, old_dir, new_dir))
-            _rewrite_inbound(inbound, old, dst)
-        _refresh_sections(self._fs, old, dst)
+        with mutation(self, "knowledge.moved", f"move {self.name}") as change:
+            if self._fs.exists(dst):
+                raise FileExistsError(f"cannot move {self._path!r} to {dst!r}: destination exists")
+            old = self._path
+            inbound = None
+            old_dir = ""
+            if relink:
+                inbound = self.backlinks(within=within)
+                old_dir = _link_base(self)
+            self._fs.mkdir(self._fs.dirname(dst), parents=True, exist_ok=True)
+            self._fs.mv(old, dst)
+            self._path = dst
+            if relink and inbound is not None:
+                new_dir = _link_base(self)
+                _retarget_links(self, lambda target: _rehome_link(target, old_dir, new_dir))
+                _rewrite_inbound(inbound, old, dst)
+                change.touched.extend(str(link.source.path) for link in inbound)
+            _refresh_sections(self._fs, old, dst)
 
     def delete(self) -> None:
         """Remove this document. Inbound links are left dangling.
 
-        The host's ``index.knowledges`` section is rebuilt afterwards.
+        The host's ``index.knowledges`` section is rebuilt afterwards. Runs
+        under the document's lock and records one ``knowledge.deleted`` history
+        commit (:func:`~molab.knowledge.mutation.mutation`).
         """
+        from .mutation import mutation
+
         self._require_document("delete")
-        self._fs.rm(self._path)
-        _refresh_sections(self._fs, self._path)
+        with mutation(self, "knowledge.deleted", f"delete {self.name}"):
+            self._fs.rm(self._path)
+            _refresh_sections(self._fs, self._path)
 
     def supersede_with(
         self, successor: Concept, *, within: Concept | PathArg | None = None
@@ -676,72 +695,84 @@ class Concept:
             status: Frontmatter status. ``None`` leaves stored status alone.
             replace: Persist *text* as the whole file.
 
+        Runs under the document's lock and records one history commit,
+        ``knowledge.meta_changed`` for a tags/status-only call and
+        ``knowledge.edited`` otherwise
+        (:func:`~molab.knowledge.mutation.mutation`).
+
         Raises:
             TypeError: ``replace=True`` and *text* is not a ``str``.
             ValueError: ``replace=True`` and the frontmatter ``class`` is not
                 this document's class.
         """
         from .frontmatter import dump_frontmatter, split_frontmatter
+        from .mutation import mutation
         from .naming import as_knowledge_file
 
         self._require_document("write")
-        if replace:
-            if not isinstance(text, str):
-                raise TypeError(
-                    f"replace=True requires the whole document as str, got {type(text).__name__}"
-                )
-            meta, _body = split_frontmatter(text, path=self._path)
-            declared = meta.get("class")
-            if declared != type(self).__name__:
-                raise ValueError(
-                    f"frontmatter class {declared!r} does not match {type(self).__name__}"
-                )
-            if self._fs.is_file(self._path) and self._fs.read_text(self._path) == text:
-                return
-            self._accept_written_record(meta, creating=not self._fs.is_file(self._path))
-            self._fs.mkdir(self._fs.dirname(self._path), parents=True, exist_ok=True)
-            self._fs.atomic_write_text(self._path, text)
-            return
-
-        if self.__class__.FILE_DOCUMENT:
-            self._path = as_knowledge_file(self._path)
-        record = data
-        narrative: str | None
-        incoming_fm: dict[str, object] = {}
-        if text is None:
-            narrative = None
-        elif isinstance(text, str):
-            incoming_fm, body = split_frontmatter(text, path=self._path)
-            if incoming_fm:
-                narrative = body
-            else:
-                narrative = text
+        if text is None and data is None and not replace:
+            event = "knowledge.meta_changed"
+            summary = f"{self.name}: status {status}" if status else f"{self.name}: tags"
         else:
-            record = text if record is None else record
-            narrative = None
-        extra: dict[str, object] = dict(incoming_fm)
-        if tags is not None:
-            extra["tags"] = list(tags)
-        if status is not None:
-            extra["status"] = status
-        if record is not None:
-            dumped = _record_as_dict(record)
-            extra = {**dumped, **extra}
-        extra["class"] = type(self).__name__
-        extra.pop("type", None)
-        extra.pop("id", None)
-        sources = list(getattr(self, "_sources", None) or [])
-        existing_fm = self.frontmatter()
-        merged = {**existing_fm, **extra}
-        self._accept_written_record(merged, creating=not self.exists())
-        if narrative is None:
-            narrative = self.read()
-        parent = str(PurePosixPath(self._path).parent)
-        self._fs.mkdir(parent, parents=True, exist_ok=True)
-        body, _appended = append_source_links(
-            narrative or "", sources, base_dir=parent, path=self._path
-        )
-        self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body, path=self._path))
+            event, summary = "knowledge.edited", f"edit {self.name}"
+        with mutation(self, event, summary):
+            if replace:
+                if not isinstance(text, str):
+                    raise TypeError(
+                        f"replace=True requires the whole document as str, got {type(text).__name__}"
+                    )
+                meta, _body = split_frontmatter(text, path=self._path)
+                declared = meta.get("class")
+                if declared != type(self).__name__:
+                    raise ValueError(
+                        f"frontmatter class {declared!r} does not match {type(self).__name__}"
+                    )
+                if self._fs.is_file(self._path) and self._fs.read_text(self._path) == text:
+                    return
+                self._accept_written_record(meta, creating=not self._fs.is_file(self._path))
+                self._fs.mkdir(self._fs.dirname(self._path), parents=True, exist_ok=True)
+                self._fs.atomic_write_text(self._path, text)
+                return
+
+            if self.__class__.FILE_DOCUMENT:
+                self._path = as_knowledge_file(self._path)
+            record = data
+            narrative: str | None
+            incoming_fm: dict[str, object] = {}
+            if text is None:
+                narrative = None
+            elif isinstance(text, str):
+                incoming_fm, body = split_frontmatter(text, path=self._path)
+                if incoming_fm:
+                    narrative = body
+                else:
+                    narrative = text
+            else:
+                record = text if record is None else record
+                narrative = None
+            extra: dict[str, object] = dict(incoming_fm)
+            if tags is not None:
+                extra["tags"] = list(tags)
+            if status is not None:
+                extra["status"] = status
+            if record is not None:
+                dumped = _record_as_dict(record)
+                extra = {**dumped, **extra}
+            extra["class"] = type(self).__name__
+            extra.pop("type", None)
+            extra.pop("id", None)
+            sources = list(getattr(self, "_sources", None) or [])
+            existing_fm = self.frontmatter()
+            merged = {**existing_fm, **extra}
+            self._accept_written_record(merged, creating=not self.exists())
+            if narrative is None:
+                narrative = self.read()
+            parent = str(PurePosixPath(self._path).parent)
+            self._fs.mkdir(parent, parents=True, exist_ok=True)
+            body, _appended = append_source_links(
+                narrative or "", sources, base_dir=parent, path=self._path
+            )
+            self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body, path=self._path))
 
     def _accept_written_record(self, merged: Mapping[str, object], *, creating: bool) -> None:
         """Refuse a record ``write_knowledge`` would refuse. Nothing is written yet."""
@@ -1205,6 +1236,9 @@ def append_link(
         text: Optional link label; defaults to *dst*'s directory name.
         role: The declared :class:`~molab.knowledge.edges.EdgeRole`.
 
+    Runs under *src*'s lock and records one ``knowledge.linked`` history
+    commit (:func:`~molab.knowledge.mutation.mutation`).
+
     Raises:
         ValueError: If *role* is not a known ``EdgeRole`` — validated before any
             write, so an invalid role leaves the document body untouched.
@@ -1213,10 +1247,13 @@ def append_link(
     validate_role(role)
     from molab.workspace.refs import MolabRef, is_ref
 
+    from .mutation import mutation
+
     if isinstance(dst, MolabRef) or (isinstance(dst, str) and is_ref(dst)):
         target = str(dst)
         label = text if text is not None else target.rstrip("/").rsplit("/", 1)[-1]
-        _append_line(src, link_line(encode_label(role, label), target))
+        with mutation(src, "knowledge.linked", f"@{role} {target} from {src.name}"):
+            _append_line(src, link_line(encode_label(role, label), target))
         return
     if isinstance(dst, Concept):
         dst_path = str(dst.path)
@@ -1235,7 +1272,8 @@ def append_link(
     rel = os.path.relpath(dst_path, src_base)
     rel_posix = PurePosixPath(rel).as_posix()
     label = text if text is not None else PurePosixPath(dst_path).name
-    _append_line(src, link_line(encode_label(role, label), rel_posix))
+    with mutation(src, "knowledge.linked", f"@{role} {rel_posix} from {src.name}"):
+        _append_line(src, link_line(encode_label(role, label), rel_posix))
 
 
 def _append_line(src: Concept, line: str) -> None:
