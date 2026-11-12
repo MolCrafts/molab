@@ -101,13 +101,8 @@ def wiki(tmp_path: Path) -> Path:
 
 
 def _workspace_hits(root: Path, query: str):
-    """The workspace searched through the seam a host with its own scan passes."""
-    return KnowledgeSourceStore(root).search(
-        query,
-        workspace_root=root,
-        include_workspace=True,
-        workspace_searcher=lambda: Knowledge(root).search(query),
-    )
+    """The workspace searched as the unnamed source."""
+    return KnowledgeSourceStore(root).search(query, workspace_root=root, include_workspace=True)
 
 
 class TestPublicImports:
