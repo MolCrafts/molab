@@ -7,7 +7,7 @@ import re
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import ClassVar, get_args
+from typing import ClassVar
 
 import pytest
 from fastapi import HTTPException
@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 import molab as me
 from molab.knowledge import Report
 from molab.server.routes import run as run_routes
-from molab.server.schemas.requests import RunHarvestRequest
 from molab.workflow import Workflow
 from molab.workspace import Experiment, Run, Workspace
 from molab.workspace.domain import Asset, ExecutionMode, ExecutionStatus
@@ -136,13 +135,6 @@ def submit_recorder(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[_SubmitRec
 
 
 class TestHarvestRunRoute:
-    def test_cls_matches_harvest_targets(self) -> None:
-        from molab.knowledge.concepts import HARVEST_TARGETS
-
-        field = RunHarvestRequest.model_fields["cls"]
-        assert set(get_args(field.annotation)) == set(HARVEST_TARGETS)
-        assert "kind" not in RunHarvestRequest.model_fields
-
     def test_plan_is_not_a_harvest_target(
         self, served: ServedFactory, terminal_run: RunFixture
     ) -> None:

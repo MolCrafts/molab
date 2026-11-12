@@ -274,7 +274,7 @@ def render_page(
     title = (
         re.sub(r"<[^>]+>", "", heading.group(1)) if heading else str(meta.get("name") or doc.stem)
     )
-    cls = str(meta.get("class") or type(concept).__name__)
+    cls = type(concept).__name__
     tags = " ".join(f'<span class="tag">#{html.escape(str(t))}</span>' for t in concept.tags())
     byline = " · ".join(
         html.escape(str(v)) for v in (meta.get("created_by"), meta.get("created_at")) if v

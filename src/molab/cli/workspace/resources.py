@@ -838,19 +838,18 @@ def run_harvest(
     narrative: Annotated[str, typer.Argument(help="Interpretation of the run outcome")],
     of: Annotated[
         str,
-        typer.Option("--of", help="Finding, Observation, or Report"),
+        typer.Option("--of", help="The class to harvest into; an unknown name lists them."),
     ] = "Finding",
     created_by: Annotated[str, typer.Option("--created-by")] = "cli",
     target_spec: TargetOption = ".",
 ) -> None:
-    """Harvest a terminal run into Finding, Observation, or Report."""
+    """Harvest a terminal run into a sourced knowledge document (Finding by default)."""
     ws = _open_ws(target_spec)
     from molab.knowledge.concepts import HARVEST_TARGETS
     from molab.workspace import ExperimentNotFoundError as _ExpNotFound
     from molab.workspace import ProjectNotFoundError as _ProjNotFound
     from molab.workspace import RunNotFoundError as _RunNotFound
 
-    harvest_targets = HARVEST_TARGETS
     try:
         project = ws.get_project(project_id)
         experiment = project.get_experiment(experiment_id)
@@ -858,10 +857,11 @@ def run_harvest(
     except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
-    cls = harvest_targets.get(of)
+    cls = HARVEST_TARGETS.get(of)
     if cls is None:
         rprint(
-            f"[red]Error:[/red] harvest --of must be Finding, Observation, or Report (got {of!r})."
+            f"[red]Error:[/red] harvest --of must be one of {', '.join(HARVEST_TARGETS)} "
+            f"(got {of!r})."
         )
         raise typer.Exit(1)
     try:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -33,12 +32,6 @@ def _failed_run(tmp_path: Path):
 
 
 class TestRunHarvest:
-    def test_of_gate_is_finding_observation_report(self) -> None:
-        src = inspect.getsource(resources.run_harvest)
-        assert "HARVEST_TARGETS" in src
-        assert "--of" in src
-        assert "Finding, Observation, or Report" in src
-
     def test_note_exits_with_the_harvest_gate(self, tmp_path: Path) -> None:
         ws, exp, run = _failed_run(tmp_path)
         result = CliRunner().invoke(
@@ -56,7 +49,7 @@ class TestRunHarvest:
             ],
         )
         assert result.exit_code == 1, result.output
-        assert "harvest --of must be Finding, Observation, or Report" in result.stdout
+        assert "harvest --of must be one of Finding, Observation, Report" in result.stdout
 
     def test_rejected_kinds_exit_1(self, tmp_path: Path) -> None:
         ws, exp, run = _failed_run(tmp_path)

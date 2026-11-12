@@ -43,7 +43,6 @@ __all__ = [
     "RULE_HINTS",
     "classify_document",
     "duplicate_documents",
-    "known_classes",
     "validate_knowledge",
 ]
 
@@ -51,8 +50,7 @@ __all__ = [
 RULE_HINTS: dict[str, str] = {
     "knowledge.class": (
         "A knowledge document names its class in frontmatter. Write it with "
-        "`molab knowledge write NAME TEXT --on HOST --class CLASS` "
-        "(Note, Literature, Report, Finding, Plan, Observation, or Hypothesis)."
+        "`molab knowledge write NAME TEXT --on HOST --class CLASS`."
     ),
     "knowledge.stray": (
         "knowledges/ holds documents (<slug>.md or <slug>.html) and figs/ only. Keep data "
@@ -68,13 +66,6 @@ RULE_HINTS: dict[str, str] = {
     ),
     **CONTENT_RULE_HINTS,
 }
-
-
-def known_classes() -> frozenset[str]:
-    """The document class names a frontmatter ``class:`` may spell."""
-    from .concepts import _PRODUCTS
-
-    return frozenset(_PRODUCTS)
 
 
 def classify_document(name: str, is_dir: bool) -> str | None:
@@ -119,17 +110,12 @@ def _issue(root: str, path: str, rule: str, detail: str, severity: str) -> dict[
 
 def class_problem(text: str, *, path: object = None) -> str | None:
     """Why *text* (the document at *path*) is not of a known class, or ``None``."""
+    from . import concepts
     from .frontmatter import split_frontmatter
-    from .naming import is_html_document
 
     meta, _body = split_frontmatter(text, path=path)
-    head = "record" if path is not None and is_html_document(path) else "frontmatter"
-    declared = meta.get("class")
-    if not isinstance(declared, str) or not declared:
-        return f"{head} has no class:"
-    if declared not in known_classes():
-        return f"{head} class {declared!r} is not one of {sorted(known_classes())}"
-    return None
+    problem = concepts.class_problem(meta)
+    return None if problem is None else f"frontmatter {problem}"
 
 
 def _check_section(

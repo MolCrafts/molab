@@ -857,17 +857,11 @@ def harvest_run_route(
     """Harvest a terminal run into sourced Knowledge under its experiment."""
     from molab.knowledge.concepts import HARVEST_TARGETS
 
-    harvest_ok = HARVEST_TARGETS
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    if body.cls not in harvest_ok:
-        raise HTTPException(
-            status_code=422,
-            detail=f"{body.cls} is not a harvest target",
-        )
     try:
-        item = harvest_ok[body.cls].harvest(
+        item = HARVEST_TARGETS[body.cls].harvest(
             run,
             narrative=body.narrative,
             created_by=body.created_by,

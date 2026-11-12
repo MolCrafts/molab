@@ -93,6 +93,9 @@ author. Every class lands one file; the `class:` frontmatter names which one:
 A `Report` is defined by its purpose (telling readers), not by its length: a
 result written up at length is still a `Finding`.
 
+A file whose `class:` is absent or names no class is not a document: it is not
+listed, searched or opened, and `molab validate` reports it (`knowledge.class`).
+
 Beside its fields, every document's frontmatter carries the same keys:
 `class`, `name`, `created_by`, `created_at`, `tags`. A key the class does not
 declare, or a value its fields refuse (a `verdict` outside its vocabulary), is

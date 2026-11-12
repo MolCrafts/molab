@@ -16,28 +16,9 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from molab.knowledge import (
-    Finding,
-    Hypothesis,
-    Knowledge,
-    Literature,
-    Note,
-    Observation,
-    Plan,
-    Report,
-)
+from molab.knowledge import Knowledge
 from molab.knowledge.search import extract_title
 from molab.workspace import ContextFocus, WorkspaceContext
-
-_CONTEXT_CLASSES = (
-    Note,
-    Literature,
-    Report,
-    Finding,
-    Plan,
-    Observation,
-    Hypothesis,
-)
 
 if TYPE_CHECKING:
     from molab.workspace import Workspace
@@ -56,7 +37,6 @@ class KnowledgeRef(BaseModel, frozen=True):
     path: str
     cls: str
     title: str
-    id: str | None = None
 
 
 class KnowledgeContext(WorkspaceContext, frozen=True):
@@ -78,19 +58,14 @@ def project_knowledge(workspace: Workspace) -> list[KnowledgeRef]:
     Returns:
         One :class:`KnowledgeRef` per knowledge document.
     """
-    rows: list[KnowledgeRef] = []
-    for concept in Knowledge(workspace.root, fs=workspace.fs).walk():
-        if isinstance(concept, _CONTEXT_CLASSES):
-            name = concept.name
-            rows.append(
-                KnowledgeRef(
-                    path=Path(concept.path).relative_to(workspace.root).as_posix(),
-                    cls=type(concept).__name__,
-                    title=extract_title(concept.read()) or name,
-                    id=str(name) if name is not None else None,
-                )
-            )
-    return rows
+    return [
+        KnowledgeRef(
+            path=Path(concept.path).relative_to(workspace.root).as_posix(),
+            cls=type(concept).__name__,
+            title=extract_title(concept.read()) or concept.name,
+        )
+        for concept in Knowledge(workspace.root, fs=workspace.fs).walk()
+    ]
 
 
 def context_with_knowledge(

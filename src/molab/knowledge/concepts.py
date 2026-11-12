@@ -21,6 +21,8 @@ from .concept import Concept
 from .knowledge_item import SourceRef
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from molab._typing import JSONValue
     from molab.workspace.run import Run
 
@@ -354,17 +356,37 @@ def _product(name: str) -> type[Concept]:
     )
 
 
+def class_of(meta: Mapping[str, object]) -> type[Concept] | None:
+    """The knowledge class a document's frontmatter ``class:`` names, or ``None``.
+
+    A file whose ``class:`` is absent or names no class is not a document:
+    nothing is guessed for it.
+    """
+    declared = meta.get("class")
+    return _PRODUCTS.get(declared) if isinstance(declared, str) else None
+
+
+def class_problem(meta: Mapping[str, object]) -> str | None:
+    """Why *meta* names no knowledge class, or ``None`` when :func:`class_of` finds one."""
+    if class_of(meta) is not None:
+        return None
+    declared = meta.get("class")
+    if not isinstance(declared, str) or not declared:
+        return "has no class:"
+    return f"class {declared!r} is not one of {sorted(_PRODUCTS)}"
+
+
 def _open_document(path: PathArg, *, fs: FileSystem | None = None) -> Concept:
-    """Open the document file at *path* as the class named in its record.
+    """Open the document file at *path* as the class its frontmatter names.
 
     A ``.md`` / ``.mdx`` / ``.html`` path is opened as written. A suffix-less
     path is the same file with ``.md`` appended, or with ``.html`` when only
-    that exists. A directory is not a document. An unknown
-    ``class`` opens as :class:`Note`. This function lives beside the classes.
-    :class:`~molab.knowledge.concept.Concept` does not construct them.
+    that exists. A directory is not a document. This function lives beside the
+    classes. :class:`~molab.knowledge.concept.Concept` does not construct them.
 
     Raises:
         KnowledgeNotFoundError: The file is absent.
+        ValueError: The frontmatter names no knowledge class (:func:`class_of`).
     """
     from .concept import read_text_or_none
     from .errors import KnowledgeNotFoundError
@@ -389,13 +411,10 @@ def _open_document(path: PathArg, *, fs: FileSystem | None = None) -> Concept:
     if text is None:
         raise KnowledgeNotFoundError(raw)
     meta, _body = split_frontmatter(text, path=raw)
-    raw_class = meta.get("class")
-    class_name = raw_class if isinstance(raw_class, str) and raw_class else "Note"
-    if class_name not in _PRODUCTS:
-        raise ValueError(
-            f"frontmatter class {class_name!r} is not one of {', '.join(sorted(_PRODUCTS))}"
-        )
-    return _PRODUCTS[class_name](raw, fs=disk)
+    klass = class_of(meta)
+    if klass is None:
+        raise ValueError(f"frontmatter {class_problem(meta)}")
+    return klass(raw, fs=disk)
 
 
 HARVEST_TARGETS: MappingProxyType[str, type[_SourcedKnowledge]] = MappingProxyType(
@@ -405,7 +424,7 @@ HARVEST_TARGETS: MappingProxyType[str, type[_SourcedKnowledge]] = MappingProxyTy
         "Report": Report,
     }
 )
-"""Finding, Observation and Report — the classes a run can be harvested into."""
+"""The classes a run can be harvested into."""
 
 
 __all__ = [

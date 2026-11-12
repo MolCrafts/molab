@@ -6,6 +6,5 @@ export type KnowledgeRefResponse = {
     path: string;
     cls: string;
     title: string;
-    id?: (string | null);
 };
 

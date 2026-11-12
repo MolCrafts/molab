@@ -269,8 +269,8 @@ class Concept:
         walk stays on the path the caller named.
 
         Yields:
-            One opened document per markdown file. A file that cannot be
-            opened is skipped.
+            One opened document per document file. A file whose frontmatter
+            names no knowledge class is not a document and is skipped.
         """
         from .concepts import _open_document
         from .errors import KnowledgeNotFoundError
@@ -279,8 +279,8 @@ class Concept:
             try:
                 yield _open_document(path, fs=self._fs)
             except (KnowledgeNotFoundError, ValueError):
-                # Unknown class, or a path that is not a document. One bad
-                # file does not hide the rest of the tree.
+                # No class, or a path that is not a document. One bad file
+                # does not hide the rest of the tree.
                 continue
 
     def search(
@@ -311,7 +311,7 @@ class Concept:
             class name. An HTML document is titled by its frontmatter ``name`` (or
             ``title``) and ranked on its text without tags.
         """
-        from .concepts import _PRODUCTS
+        from .concepts import class_of
         from .frontmatter import document_text, split_frontmatter
         from .naming import is_html_document
         from .search import ConceptIndexEntry, extract_title, search_index
@@ -323,11 +323,9 @@ class Concept:
             if raw is None:
                 continue
             meta, body = split_frontmatter(raw, path=path)
-            raw_class = meta.get("class")
-            class_name = raw_class if isinstance(raw_class, str) and raw_class else "Note"
-            if class_name not in _PRODUCTS:
+            klass = class_of(meta)
+            if klass is None:
                 continue
-            klass = _PRODUCTS[class_name]
             if isinstance(of, type) and not issubclass(klass, of):
                 continue
             tags_raw = meta.get("tags")

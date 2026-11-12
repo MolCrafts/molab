@@ -13,7 +13,7 @@ from molab.server.dependencies import set_workspace_path_override
 from molab.server.routes import workspace as workspace_routes
 from molab.workspace import Workspace
 
-_IDEA_GOLDEN = {"path": "knowledges/idea.md", "cls": "Note", "title": "Idea", "id": "idea"}
+_IDEA_GOLDEN = {"path": "knowledges/idea.md", "cls": "Note", "title": "Idea"}
 
 
 def _client(tmp_path: Path, *, with_note: bool = False) -> TestClient:

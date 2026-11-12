@@ -38,6 +38,7 @@ from molab.workspace import Workspace
 
 from ..deps.served import active_served_key, assert_workspace_writable
 from ..schemas import MessageResponse
+from ..schemas._wire import KnowledgeClassName
 
 if TYPE_CHECKING:
     from molab.knowledge.concept import Concept
@@ -159,15 +160,7 @@ class DocCreateRequest(BaseModel):
         default="md",
         description="`md` lands `<slug>.md`; `html` lands `<slug>.html` (body stored verbatim).",
     )
-    cls: Literal[
-        "Note",
-        "Literature",
-        "Report",
-        "Finding",
-        "Plan",
-        "Observation",
-        "Hypothesis",
-    ] = "Note"
+    cls: KnowledgeClassName = "Note"
     sources: list[DocSource] = []
     fields: dict[str, Any] = Field(
         default_factory=dict,
@@ -670,7 +663,7 @@ def _resolve_embed_entity(
 
 
 def _open_doc(workspace: Workspace, path: str) -> Concept:
-    """Open any of the six Knowledge classes at *path* (404 on miss)."""
+    """Open the Knowledge document at *path*: 404 on a miss, 422 when it names no class."""
     from molab.knowledge import KnowledgeNotFoundError
     from molab.knowledge.concepts import _open_document
 
@@ -678,6 +671,10 @@ def _open_doc(workspace: Workspace, path: str) -> Concept:
         return _open_document(workspace.fs.join(str(workspace.root), path), fs=workspace.fs)
     except (KnowledgeNotFoundError, FileNotFoundError, OSError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found") from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"{path!r} is not a knowledge document: {exc}"
+        ) from exc
 
 
 def _reject_tex(path: str) -> None:
@@ -853,7 +850,9 @@ class KnowledgeSearchResponse(BaseModel):
 @router.get("/search", response_model=KnowledgeSearchResponse)
 def search_knowledge(
     q: Annotated[str, Query(description="Case-insensitive needle (path/title/tags/body).")],
-    cls: Annotated[str | None, Query(description="Exact Knowledge class name.")] = None,
+    cls: Annotated[
+        KnowledgeClassName | None, Query(description="Only documents of this class or a subclass.")
+    ] = None,
     tag: Annotated[str | None, Query(description="Only documents carrying this tag.")] = None,
     workspace: Workspace = Depends(get_workspace),
 ) -> KnowledgeSearchResponse:

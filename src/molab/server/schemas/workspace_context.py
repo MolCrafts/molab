@@ -130,11 +130,10 @@ class KnowledgeRefResponse(ApiModel):
     path: str
     cls: str
     title: str
-    id: str | None = None
 
     @classmethod
     def from_ref(cls, ref: KnowledgeRef) -> KnowledgeRefResponse:
-        return cls(path=ref.path, cls=ref.cls, title=ref.title, id=ref.id)
+        return cls(path=ref.path, cls=ref.cls, title=ref.title)
 
 
 class HealthFlagResponse(ApiModel):

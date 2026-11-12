@@ -25,7 +25,6 @@ _COOLING_RATE_ROW = (
     "projects/p/experiments/e/knowledges/cooling-rate.md",
     "Note",
     "Cooling rate",
-    "cooling-rate",
 )
 
 
@@ -57,7 +56,7 @@ def _record(monkeypatch: pytest.MonkeyPatch) -> list[WorkspaceContext]:
 
 
 def _rows(recorded: WorkspaceContext) -> list[tuple[str, str, str, str | None]]:
-    return [(ref.path, ref.cls, ref.title, ref.id) for ref in recorded.knowledge]
+    return [(ref.path, ref.cls, ref.title) for ref in recorded.knowledge]
 
 
 class TestContextConsumesProjection:
@@ -118,7 +117,6 @@ class TestContextRendersKnowledgeRows:
             (
                 "projects/p/experiments/e/knowledges/no-heading.md",
                 "Note",
-                "no-heading",
                 "no-heading",
             )
         ]

@@ -7,7 +7,7 @@
  */
 export type RunHarvestRequest = {
     /**
-     * Finding, Observation, or Report.
+     * The class to harvest into.
      */
     cls?: RunHarvestRequest.cls;
     /**
@@ -29,7 +29,7 @@ export type RunHarvestRequest = {
 };
 export namespace RunHarvestRequest {
     /**
-     * Finding, Observation, or Report.
+     * The class to harvest into.
      */
     export enum cls {
         FINDING = 'Finding',

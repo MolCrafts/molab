@@ -390,11 +390,13 @@ class TestSourcesAdd:
         # Click wraps the note when the path is wider than the terminal.
         assert "holds no knowledge documents yet" in " ".join(result.stdout.split())
 
-    def test_a_markdown_file_is_a_document(self, tmp_path: Path, monkeypatch) -> None:
+    def test_a_markdown_file_naming_its_class_is_a_document(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         monkeypatch.setattr("molab.knowledge.sources.USER_DIR", tmp_path / "user")
         root = tmp_path / "wiki"
         root.mkdir()
-        (root / "a.md").write_text("# A\n", encoding="utf-8")
+        (root / "a.md").write_text("---\nclass: Note\n---\n# A\n", encoding="utf-8")
 
         result = CliRunner().invoke(knowledge_app, ["sources", "add", "lab-wiki", str(root)])
 

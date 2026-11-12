@@ -195,6 +195,15 @@ class TestSearchKnowledge:
         hits = response.json()["hits"]
         assert hits
 
+    def test_an_unknown_class_filter_is_422(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            known = client.get("/api/knowledge/search", params={"q": "cooling", "cls": "Note"})
+            unknown = client.get("/api/knowledge/search", params={"q": "cooling", "cls": "Bogus"})
+        assert known.status_code == 200, known.text
+        assert unknown.status_code == 422, unknown.text
+        assert "Bogus" in unknown.text
+
     def test_search_reads_the_workspace_disk(self, served: ServedFactory, lab: RunFixture) -> None:
         from molab.fs import LocalFS
         from molab.server.deps.resolution import get_workspace
@@ -1308,6 +1317,18 @@ class TestDocFieldsRoutes:
             )
         assert response.status_code == 422, response.text
 
+    def test_a_file_without_a_class_is_not_a_document(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, _run = lab
+        (Path(str(ws.root)) / "knowledges" / "bare.md").write_text("# Bare\n", encoding="utf-8")
+        with served(ws) as client:
+            opened = client.get("/api/knowledge/note", params={"path": "knowledges/bare.md"})
+            listed = _listed_names(client)
+        assert opened.status_code == 422, opened.text
+        assert "no class" in opened.text
+        assert "Bare" not in listed and "bare" not in listed
+
 
 class TestHtmlDocumentsAndTimes:
     """An HTML document over the wire, and the ``format`` / ``createdAt`` / ``updatedAt`` fields."""
@@ -1471,12 +1492,6 @@ class TestHypothesis:
         if fields is not None:
             payload["fields"] = fields
         return client.post("/api/knowledge/doc", json=payload)
-
-    def test_the_create_request_accepts_every_class(self) -> None:
-        names = get_args(knowledge_routes.DocCreateRequest.model_fields["cls"].annotation)
-        from molab.knowledge.concepts import _PRODUCTS
-
-        assert set(names) == set(_PRODUCTS)
 
     def test_a_source_is_required(self, served: ServedFactory, lab: RunFixture) -> None:
         ws, _exp, _run = lab

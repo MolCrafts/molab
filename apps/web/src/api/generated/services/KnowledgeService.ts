@@ -80,7 +80,7 @@ export class KnowledgeService {
      * disk. Registered sources are fused by :meth:`KnowledgeSourceStore.search`,
      * which is the same function the CLI calls.
      * @param q Case-insensitive needle (path/title/tags/body).
-     * @param cls Exact Knowledge class name.
+     * @param cls Only documents of this class or a subclass.
      * @param tag Only documents carrying this tag.
      * @param molabSession
      * @returns KnowledgeSearchResponse Successful Response
@@ -88,7 +88,7 @@ export class KnowledgeService {
      */
     public static searchKnowledge(
         q: string,
-        cls?: (string | null),
+        cls?: ('Note' | 'Literature' | 'Report' | 'Finding' | 'Plan' | 'Observation' | 'Hypothesis' | null),
         tag?: (string | null),
         molabSession?: (string | null),
     ): CancelablePromise<KnowledgeSearchResponse> {

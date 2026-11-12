@@ -45,7 +45,7 @@ class TestProjectKnowledge:
         ws = _workspace(tmp_path)
         Note.mount(ws, "Idea", body="# Idea\n")
         assert project_knowledge(ws) == [
-            KnowledgeRef(path="knowledges/idea.md", cls="Note", title="Idea", id="idea")
+            KnowledgeRef(path="knowledges/idea.md", cls="Note", title="Idea")
         ]
 
     def test_empty_workspace_projects_nothing(self, tmp_path: Path) -> None:
@@ -59,7 +59,6 @@ class TestProjectKnowledge:
                 path="knowledges/no-heading.md",
                 cls="Note",
                 title="no-heading",
-                id="no-heading",
             )
         ]
 
@@ -119,9 +118,7 @@ class TestContextWithKnowledge:
 
         got = context_with_knowledge(ws, focus=focus)
         assert isinstance(got, KnowledgeContext)
-        assert got.knowledge == [
-            KnowledgeRef(path="knowledges/idea.md", cls="Note", title="Idea", id="idea")
-        ]
+        assert got.knowledge == [KnowledgeRef(path="knowledges/idea.md", cls="Note", title="Idea")]
         assert "open_questions" not in KnowledgeContext.model_fields
         assert got.focus == focus
         plain = assemble_workspace_context(ws, focus=focus)
@@ -169,7 +166,6 @@ class TestKnowledgeRef:
             "path": "knowledges/idea.md",
             "cls": "Note",
             "title": "Idea",
-            "id": None,
         }
         with pytest.raises(pydantic.ValidationError):
             ref.title = "other"  # type: ignore[misc]

@@ -56,6 +56,25 @@ class TestConceptRegistry:
         assert isinstance(_open_document(note.path), Note)
         assert isinstance(_open_document(ref.path), Literature)
 
+    def test_a_file_without_a_class_is_not_a_document(self, tmp_path: Path) -> None:
+        from molab.fs import LocalFS
+        from molab.knowledge import Knowledge
+        from molab.knowledge.concepts import _open_document
+        from molab.knowledge.index_section import section_rows
+
+        container = tmp_path / "knowledges"
+        container.mkdir()
+        (container / "bare.md").write_text("---\nname: Bare\n---\n# Bare glass\n")
+        _mount(Note, container, "kept").write("# Kept glass\n")
+
+        with pytest.raises(ValueError, match="no class"):
+            _open_document(container / "bare.md")
+        tree = Knowledge(container)
+        assert [Path(doc.path).name for doc in tree.walk()] == ["kept.md"]
+        assert [hit.entry.path for hit in tree.search("glass").hits] == ["kept.md"]
+        rows = section_rows(str(tmp_path), fs=LocalFS())
+        assert [row["path"] for row in rows] == ["knowledges/kept.md"]
+
     def test_a_concept_needs_no_workspace(self, tmp_path: Path) -> None:
         # The whole point of the OKF library: a plain file is a Concept.
         note = _mount(Note, tmp_path, "idea")

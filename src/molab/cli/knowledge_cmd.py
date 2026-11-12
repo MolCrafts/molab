@@ -421,6 +421,9 @@ def knowledge_read(
         rprint(f"[red]Error:[/red] no knowledge concept at {ref!r}.")
         rprint("Find valid refs with [bold]molab knowledge search[/bold].")
         raise typer.Exit(1) from None
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {ref!r} is not a knowledge document: {exc}")
+        raise typer.Exit(1) from None
 
     rprint(f"[bold]{ref}[/bold]  [dim]{type(concept).__name__}[/dim]")
     if tags := concept.tags():
@@ -573,6 +576,9 @@ def _document(workspace: Workspace, ref: str) -> object:
     except (KnowledgeNotFoundError, FileNotFoundError):
         rprint(f"[red]Error:[/red] no knowledge document at {ref!r}.")
         raise typer.Exit(1) from None
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {ref!r} is not a knowledge document: {exc}")
+        raise typer.Exit(1) from None
 
 
 def _rel_to_workspace(workspace: Workspace, doc_path: object) -> str:
@@ -610,7 +616,7 @@ def knowledge_write(
         str,
         typer.Option(
             "--class",
-            help="Note, Literature, Report, Finding, Plan, Observation, or Hypothesis.",
+            help="The knowledge class; an unknown name lists them.",
         ),
     ] = "Note",
     path: Annotated[

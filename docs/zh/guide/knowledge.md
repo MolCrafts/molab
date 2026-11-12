@@ -88,6 +88,9 @@ frontmatter 标出是哪一个：
 
 `Report` 由它的目的（告诉读者）界定，而不是由篇幅界定：一个结果写得再长，也仍然是 `Finding`。
 
+`class:` 缺失或不是任何类名的文件不是文档：它不会被列出、检索或打开，`molab validate` 会报告它
+（`knowledge.class`）。
+
 除各类自己的字段外，每份文档的 frontmatter 都带同一组键：`class`、`name`、`created_by`、
 `created_at`、`tags`。类没有声明的键，或被字段拒绝的取值（超出词表的 `verdict`），写入时会被
 拒绝，`molab validate` 也会报告（`knowledge.fields`）；它绝不会被默认值悄悄替换。类的字段是一个

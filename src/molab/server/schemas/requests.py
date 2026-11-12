@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Discriminator, Field, Tag, model_validator
 
-from ._wire import ApiModel
+from ._wire import ApiModel, HarvestClassName
 
 # ── Workspace ───────────────────────────────────────────────────────────────
 
@@ -125,10 +125,7 @@ class RunHarvestRequest(ApiModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    cls: Literal["Finding", "Observation", "Report"] = Field(
-        default="Finding",
-        description="Finding, Observation, or Report.",
-    )
+    cls: HarvestClassName = Field(default="Finding", description="The class to harvest into.")
     narrative: str = Field(..., description="Non-empty interpretation")
     created_by: str = Field(default="ui", description="Author string")
     name: str | None = Field(default=None, description="Optional knowledge document name")
