@@ -57,63 +57,16 @@ Side effects worth remembering:
 
 **Status:** stable
 
-## workspace-read-model-memory | 2026-09-16 | impl
+## local-toolchain-gotchas | 2026-11-12 | impl
 
-The server now keeps state resident that used to be re-read per request: the
-`Workspace` instance keeps recently read `Run` entities in memory
-(`Experiment.list_runs` reuses them), and `services.workspace_read_model`
-holds the `RunsSnapshot` / `AssetScanSnapshot` / `KnowledgeSnapshot` plus the
-BM25F corpus. Cost is roughly **50–100 MB at 10 000 runs**, in exchange for
-warm list requests doing zero filesystem I/O.
+Environment facts that cost time if rediscovered:
 
-No eviction policy exists. Above ~100 k runs, add one (LRU over
-that in-memory map, or drop snapshot rows outside the active project) rather
-than reverting the cache — the alternative is ~5 file reads per run per
-request, which is what made the UI unusable on NFS.
-
-**Status:** evolving
-
-## perf-syscall-budgets | 2026-09-16 | impl
-
-`tests/test_perf/` locks filesystem-call counts against a synthetic workspace
-built directly on disk (not via `add_run`, whose index rewrite is O(N²)).
-`tests/test_perf/BASELINE.md` holds the before/after tables measured against
-pristine `HEAD e0ebdec7`.
-
-```bash
-python -m pytest tests/test_perf -m perf          # small: 5x4x10 = 200 runs (default)
-MOLAB_PERF_SCALE=full python -m pytest tests/test_perf -m perf   # 50x20x10 = 10 000 runs
-MOLAB_PERF=1 python -m pytest tests/test_perf    # adds the informational wall-clock locks
-```
-
-Keep CI on `small`: the full fixture takes ~134 s to build on NFS (I/O bound;
-the 25 k single-row sqlite event appends dominate). Budgets are asserted with
-`tests/support/counting_fs.py::CountingFileSystem`, which proxies `__class__`
-to the wrapped type so `isinstance(fs, LocalFileSystem)` still holds — without
-that, `Workspace` treats a counted workspace as remote and the event spine
-short-circuits.
-
-**Status:** stable
-
-## local-toolchain-gotchas | 2026-09-16 | impl
-
-Four environment facts that cost time if rediscovered:
-
-- **`ty` needs an explicit interpreter.** `[tool.ty.environment] python = "./.venv"`
-  in `pyproject.toml` points at a directory that does not exist in this
-  checkout, so bare `ty check` fails before analysing anything. Use
-  `ty check --python $(python -c 'import sys;print(sys.prefix)')`.
-- **`ui/` is an npm workspace member.** `node_modules` and the binaries
-  (`rstest`, `tsc`, `biome`, `rsbuild`) hoist to the **repo root**, not
-  `ui/node_modules`. `npm install` / `npm test` still run from `ui/`.
-- **The sibling `@molcrafts/molplot` must be built** or `npm run typecheck`
-  fails with 15 `TS2307` "cannot find module" errors:
-  `cd ../molplot/core && npm install && npm run build`. `package.json`
-  resolves it by `file:` path, and the repo ships no `dist/`.
-- **Two molq test modules fail on a pre-existing config issue** unrelated to
-  any of this: `tests/test_plugins/test_submit_molq/test_dashboard.py` and
-  `tests/test_server/test_molq_routes.py` (molq rejects the `config.toml`).
-  Deselect them when measuring a suite run.
+- **`ty` resolves against `./.venv`** (`[tool.ty.environment] python`), so a
+  checkout without that venv fails before analysing anything. Run
+  `ty check --python .venv src/` from the repo root.
+- **The npm workspace is `apps/*`.** `node_modules` and the binaries
+  (`rstest`, `tsc`, `biome`, `rsbuild`) hoist to the **repo root**;
+  `npm run typecheck` / `npm test` run from `apps/web`.
 
 **Status:** evolving
 
@@ -132,7 +85,5 @@ a scripted 5x4x10 tree (200 runs):
 - Sidecar for a 1000-record walk: **2 writes / 0.2 MB**, down from
   1000 writes / 103 MB — the per-record rewrite was O(N^2) in bytes.
 
-The CLI shares this now (`target_to_filesystem(cached=True)` is the default,
-mirror under `~/.molab/remote_cache/`), so a CLI verb against a remote target
-no longer pays raw per-call SSH. `revalidate_before` makes each invocation
-revalidate what it touches once, then pin.
+The CLI shares this cache (mirror under `~/.molab/remote_cache/`), so a CLI
+verb against a remote target no longer pays raw per-call SSH.
