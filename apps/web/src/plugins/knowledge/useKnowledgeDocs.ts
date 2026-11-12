@@ -3,7 +3,6 @@ import { useCallback, useMemo } from "react";
 import { knowledgeApi } from "@/api";
 import { isSoftRemoteWait } from "@/api/errors";
 import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
-import type { DocSource } from "@/api/generated/models/DocSource";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
 import {
   type KnowledgeListFilters,
@@ -34,7 +33,7 @@ export interface UseKnowledgeDocs {
       format?: "md" | "html";
       body?: string;
       cls?: DocCreateRequest.cls;
-      sources?: DocSource[];
+      sources?: string[];
       fields?: Record<string, unknown>;
     },
   ) => Promise<string>;

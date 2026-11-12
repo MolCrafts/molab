@@ -630,7 +630,8 @@ def knowledge_write(
         list[str] | None,
         typer.Option(
             "--source",
-            help="File path or DOI (10.… or DOI:…). Repeat once per source.",
+            help="An entity ref, URL or DOI, or a file path. Repeat once per source; "
+            "a sourced class given none names its host.",
         ),
     ] = None,
     fields: Annotated[
@@ -679,11 +680,7 @@ def knowledge_write(
     except ValueError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
-    sources = (
-        normalize_sources(source, default_host=host)
-        if source or getattr(cls, "REQUIRES_SOURCES", False)
-        else ()
-    )
+    sources = normalize_sources(source or [], default_host=host, of=cls)
     try:
         payload = _load_fields(fields)
     except (OSError, json.JSONDecodeError, ValueError) as exc:

@@ -367,17 +367,6 @@ class TestCreateDoc:
         assert response.json()["hostPath"] == ""
         assert (Path(str(ws.root)) / "knowledges" / "root-note.md").is_file()
 
-    def test_finding_without_a_source_is_422(self, served: ServedFactory, lab: RunFixture) -> None:
-        ws, exp, _run = lab
-        host = _experiment_host(ws, exp)
-        with served(ws) as client:
-            response = client.post(
-                "/api/knowledge/doc",
-                json={"name": "Tg", "cls": "Finding", "hostPath": host, "body": "# Tg\n"},
-            )
-        assert response.status_code == 422, response.text
-        assert not (Path(str(exp.resolve())) / "knowledges" / "tg.md").exists()
-
     def test_finding_records_the_run_source(self, served: ServedFactory, lab: RunFixture) -> None:
         from molab.workspace.refs import ref_of
 
@@ -392,7 +381,7 @@ class TestCreateDoc:
                     "cls": "Finding",
                     "hostPath": host,
                     "body": "# Tg rose\n",
-                    "sources": [{"kind": "run", "ref": target}],
+                    "sources": [target],
                 },
             )
         assert response.status_code == 201, response.text
@@ -443,7 +432,7 @@ class TestCreateDoc:
                     "name": "Overview",
                     "cls": "Plan",
                     "body": "# Overview\n",
-                    "sources": [{"kind": "run", "ref": str(ref_of(run))}],
+                    "sources": [str(ref_of(run))],
                 },
             )
             assert plan.status_code == 201, plan.text
@@ -458,7 +447,7 @@ class TestCreateDoc:
                     "name": "Claim",
                     "cls": "Hypothesis",
                     "body": "Fragments pack.\n",
-                    "sources": [{"kind": "file", "ref": plan_path}],
+                    "sources": [plan_path],
                     "fields": {"verdict": "supported"},
                 },
             )
@@ -482,7 +471,7 @@ class TestCreateDoc:
                 json={
                     "name": "Stages",
                     "cls": "Finding",
-                    "sources": [{"kind": "file", "ref": "../secret.md"}],
+                    "sources": ["../secret.md"],
                 },
             )
             missing = client.post(
@@ -490,7 +479,7 @@ class TestCreateDoc:
                 json={
                     "name": "Stages",
                     "cls": "Finding",
-                    "sources": [{"kind": "file", "ref": "knowledges/missing.md"}],
+                    "sources": ["knowledges/missing.md"],
                 },
             )
         assert escaped.status_code == 422, escaped.text
@@ -1247,6 +1236,8 @@ class TestDocFieldsRoutes:
 
     @staticmethod
     def _create(client: TestClient, exp: Experiment, host: str) -> dict[str, object]:
+        from molab.workspace.refs import ref_of
+
         response = client.post(
             "/api/knowledge/doc",
             json={
@@ -1254,7 +1245,7 @@ class TestDocFieldsRoutes:
                 "cls": "Hypothesis",
                 "hostPath": host,
                 "createdBy": "scientist",
-                "sources": [{"kind": "experiment", "ref": exp.id}],
+                "sources": [str(ref_of(exp))],
                 "fields": {"verdict": "open"},
             },
         )
@@ -1487,17 +1478,37 @@ class TestHypothesis:
             "name": name,
             "cls": cls,
             "body": f"# {name}\n",
-            "sources": [{"kind": "run", "ref": str(ref_of(run))}],
+            "sources": [str(ref_of(run))],
         }
         if fields is not None:
             payload["fields"] = fields
         return client.post("/api/knowledge/doc", json=payload)
 
-    def test_a_source_is_required(self, served: ServedFactory, lab: RunFixture) -> None:
+    def test_no_source_names_the_host(self, served: ServedFactory, lab: RunFixture) -> None:
+        from molab.workspace.refs import ref_of
+
+        ws, exp, _run = lab
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc",
+                json={"name": "x", "cls": "Hypothesis", "hostPath": _experiment_host(ws, exp)},
+            )
+        assert response.status_code == 201, response.text
+        text = (Path(str(ws.root)) / response.json()["relPath"]).read_text(encoding="utf-8")
+        assert str(ref_of(exp)) in text
+
+    def test_a_ref_that_does_not_resolve_is_422(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
         ws, _exp, _run = lab
         with served(ws) as client:
-            response = client.post("/api/knowledge/doc", json={"name": "x", "cls": "Hypothesis"})
+            response = client.post(
+                "/api/knowledge/doc",
+                json={"name": "x", "cls": "Finding", "sources": ["molab:experiment/nope"]},
+            )
+            names = _listed_names(client)
         assert response.status_code == 422, response.text
+        assert "x" not in names
 
     def test_the_default_verdict_is_open(self, served: ServedFactory, lab: RunFixture) -> None:
         from molab.knowledge import Hypothesis

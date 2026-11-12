@@ -97,7 +97,9 @@ frontmatter 标出是哪一个：
 pydantic 模型，子类扩展父类的模型。
 
 除 `Note` 与 `Literature` 之外，每个类在构造时都至少需要一个 `SourceRef` —— 它们是有出处
-的文档。
+的文档。来源是 `molab:` 引用（保留实体的种类）、http(s) URL 或 DOI（`reference`），或文件路径。
+`molab knowledge write --source` 与 `POST /api/knowledge/doc` 的 `sources` 都接受纯字符串；
+一个都不给时，有出处的类以其宿主为来源。
 
 `Plan` 是唯一的计划文档。它的工作项写在叙事正文里；它要检验的断言是 `Hypothesis` 文档。
 

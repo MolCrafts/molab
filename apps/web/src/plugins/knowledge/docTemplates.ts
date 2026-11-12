@@ -94,6 +94,9 @@ export const DOC_SKELETON: Record<KnowledgeClass, string> = {
   ].join("\n"),
 };
 
+/** A bare run line a template leaves for the form to fill. */
+const RUN_LINE = /^::molab-(run-ref|log)\s*$/m;
+
 export interface SkeletonFacts {
   /** The run a sourced document cites (`molab:` ref). */
   sourceRef?: string | null;
@@ -106,7 +109,7 @@ export const fillSkeleton = (body: string, facts: SkeletonFacts): string =>
   body
     .split("\n")
     .map((line) => {
-      if (facts.sourceRef && /^::molab-(run-ref|log)\s*$/.test(line)) {
+      if (facts.sourceRef && RUN_LINE.test(line)) {
         const name = line.trim().slice(2);
         return formatComponent(
           name,
@@ -125,16 +128,8 @@ export const fillSkeleton = (body: string, facts: SkeletonFacts): string =>
     })
     .join("\n");
 
-const SOURCED: ReadonlySet<KnowledgeClass> = new Set([
-  "Report",
-  "Finding",
-  "Plan",
-  "Observation",
-  "Hypothesis",
-]);
-
-/** A class that names a source run when it is created. */
-export const isSourcedClass = (cls: KnowledgeClass): boolean => SOURCED.has(cls);
+/** A class whose template names a source run (a bare run line the form fills in). */
+export const namesSourceRun = (cls: KnowledgeClass): boolean => RUN_LINE.test(DOC_SKELETON[cls]);
 
 export interface HostRun {
   id: string;

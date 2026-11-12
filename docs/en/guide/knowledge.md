@@ -104,7 +104,10 @@ never replaced by the default. A class's fields are a pydantic model, so a
 subclass extends its parent's.
 
 Every class but `Note` and `Literature` requires at least one `SourceRef` at
-construction — they are sourced documents.
+construction — they are sourced documents. A source is a `molab:` ref (it keeps
+the entity's kind), an http(s) URL or a DOI (a `reference`), or a file path.
+`molab knowledge write --source` and `sources` on `POST /api/knowledge/doc`
+take these as plain strings; given none, a sourced class names its host.
 
 A `Plan` is the one planning document. Its work items live in its narrative
 body; the claims it sets out to test are `Hypothesis` documents.

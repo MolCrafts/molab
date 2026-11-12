@@ -202,25 +202,33 @@ class TestNormalizeSources:
             ("project", str(ref_of(project))),
         ]
 
-    def test_strings_are_classified_by_shape(self, experiment: Any) -> None:
+    def test_strings_are_classified_by_shape(self, run: Any) -> None:
+        from molab.workspace.refs import ref_of
+
+        run_ref = str(ref_of(run))
         got = SourceRef.normalize(
-            ["DOI:10.1234/xyz", "10.4321/q", "dataset:ab12", "plugin:foo", "notes/raw.txt"],
-            default_host=experiment,
+            [
+                "DOI:10.1234/xyz",
+                "10.4321/q",
+                "https://example.org/paper",
+                run_ref,
+                "molab:asset/deadbeef",
+                "notes/raw.txt",
+            ],
+            default_host=run,
         )
 
         assert [(s.kind, s.ref) for s in got] == [
             ("reference", "https://doi.org/10.1234/xyz"),
             ("reference", "https://doi.org/10.4321/q"),
-            ("file", "dataset:ab12"),
-            ("file", "plugin:foo"),
+            ("reference", "https://example.org/paper"),
+            ("run", run_ref),
+            ("asset", "molab:asset/deadbeef"),
             ("file", "notes/raw.txt"),
         ]
 
-    def test_an_empty_request_defaults_to_the_host(self, experiment: Any, run: Any) -> None:
-        from molab.knowledge.write import normalize_sources
-
+    def test_an_empty_request_defaults_to_the_host(self, experiment: Any) -> None:
         assert SourceRef.normalize(None, default_host=experiment) == [SourceRef.of(experiment)]
-        assert normalize_sources([], default_host=run) == [SourceRef.of(run)]
 
     def test_a_literature_class_writes_through_the_same_path(self, experiment: Any) -> None:
         lit = Literature.create(

@@ -145,13 +145,6 @@ class EmbedResponse(BaseModel):
     role: EdgeRole
 
 
-class DocSource(BaseModel):
-    """One source a sourced document is derived from."""
-
-    kind: Literal["run", "experiment", "asset", "project", "reference", "file"]
-    ref: str
-
-
 class DocCreateRequest(BaseModel):
     name: str
     body: str = ""
@@ -161,7 +154,11 @@ class DocCreateRequest(BaseModel):
         description="`md` lands `<slug>.md`; `html` lands `<slug>.html` (body stored verbatim).",
     )
     cls: KnowledgeClassName = "Note"
-    sources: list[DocSource] = []
+    sources: list[str] = Field(
+        default_factory=list,
+        description="What the document rests on: entity refs, http(s) URLs or DOIs, and "
+        "workspace-relative files. A sourced class given none names its host.",
+    )
     fields: dict[str, Any] = Field(
         default_factory=dict,
         description="The fields the class declares (a Hypothesis `verdict`, a Literature's "
@@ -371,33 +368,26 @@ def _file_source(workspace: Workspace, ref: str) -> object:
     return SourceRef(kind="file", ref=str(absolute))
 
 
-def _source_from_request(workspace: Workspace, source: DocSource) -> object:
-    """Turn one create-request source into a :class:`SourceRef`."""
-    from molab.knowledge.knowledge_item import SourceRef
-    from molab.workspace.refs import MolabRef, is_ref, parse_ref
+def _source_from_request(workspace: Workspace, text: str) -> object:
+    """One create-request source as a :class:`SourceRef` that names something here.
 
-    if source.kind == "file":
-        return _file_source(workspace, source.ref)
-    if source.kind == "reference":
-        text = source.ref.strip()
-        if text.upper().startswith("DOI:"):
-            text = "https://doi.org/" + text.split(":", 1)[1].strip()
-        elif text.startswith("10."):
-            text = "https://doi.org/" + text
-        if not text.startswith(("http://", "https://")):
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT,
-                f"reference {source.ref!r} is not an http(s) URL or a DOI",
-            )
-        return SourceRef(kind="reference", ref=text)
-    if source.kind == "project":
-        ref = (
-            parse_ref(source.ref, kind="project")
-            if is_ref(source.ref)
-            else MolabRef(project_id=source.ref)
-        )
-        return SourceRef.of(workspace.find(ref))
-    return SourceRef.of(_resolve_embed_entity(workspace, source.kind, source.ref))
+    :meth:`SourceRef.parse` classifies it; a file must lie inside the
+    workspace and an entity ref must resolve in it (422 otherwise).
+    """
+    from molab.knowledge.knowledge_item import SourceRef
+    from molab.workspace.refs import parse_ref
+
+    try:
+        source = SourceRef.parse(text.strip())
+        if source.kind == "file":
+            return _file_source(workspace, source.ref)
+        if source.kind != "reference":
+            workspace.find(parse_ref(source.ref))
+    except (LookupError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"source {text!r} names nothing here: {exc}"
+        ) from exc
+    return source
 
 
 _IMAGE_LINK = re.compile(r"!\[[^\]]*\]\((<)?([^)\s>]+)(>)?\)")
@@ -1051,14 +1041,18 @@ def create_doc(
 ) -> NoteSummary:
     """Create one knowledge class under *hostPath* (the workspace root when omitted)."""
     from molab.knowledge.concepts import _product
-    from molab.knowledge.write import write_knowledge
+    from molab.knowledge.write import normalize_sources, write_knowledge
 
     klass = _product(body.cls)
-    host = _resolve_host(workspace, body.hostPath)
-    sources = [_source_from_request(workspace, item) for item in body.sources]
+    host = _host_folder(workspace, body.hostPath)
+    sources = normalize_sources(
+        [_source_from_request(workspace, item) for item in body.sources],
+        default_host=host,
+        of=klass,
+    )
     try:
         note = write_knowledge(
-            host,
+            str(host.resolve()),
             name=body.name,
             of=klass,
             sources=sources,

@@ -3,7 +3,7 @@ import { parseDocBlocks } from "./doc/blocks";
 import {
   DOC_SKELETON,
   fillSkeleton,
-  isSourcedClass,
+  namesSourceRun,
   runsForHost,
   toHtmlBody,
 } from "./docTemplates";
@@ -14,10 +14,9 @@ describe("DOC_SKELETON", () => {
     expect(DOC_SKELETON.Finding).toContain('!!! success "Claim"');
     expect(DOC_SKELETON.Plan).toContain("## Work items");
     expect(DOC_SKELETON.Hypothesis).toContain('!!! question "Claim"');
-    expect(isSourcedClass("Hypothesis")).toBe(true);
     expect(Object.values(DOC_SKELETON).some((body) => /^# /m.test(body))).toBe(false);
-    expect(isSourcedClass("Finding")).toBe(true);
-    expect(isSourcedClass("Note")).toBe(false);
+    expect(namesSourceRun("Finding")).toBe(true);
+    expect(namesSourceRun("Note")).toBe(false);
   });
 });
 

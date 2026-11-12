@@ -396,7 +396,7 @@ class TestScopedFind:
                     json={
                         "name": f"From {kind}",
                         "cls": "Report",
-                        "sources": [{"kind": kind, "ref": ref}],
+                        "sources": [ref],
                     },
                 )
                 assert response.status_code == 201, response.text
@@ -490,7 +490,7 @@ class TestScopedRecordHistory:
                 json={
                     "name": "Study",
                     "cls": "Hypothesis",
-                    "sources": [{"kind": "project", "ref": f"molab:project/{alpha.id}"}],
+                    "sources": [f"molab:project/{alpha.id}"],
                     "fields": {"verdict": "open"},
                 },
             )

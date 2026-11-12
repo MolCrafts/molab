@@ -28,18 +28,21 @@ def _relative_posix(path: str, base: str) -> str:
     return PurePosixPath(*ups, *dest[common:]).as_posix()
 
 
-SourceKind = Literal[
-    "run",
-    "experiment",
-    "project",
-    "execution",
-    "asset",
-    "file",
-    "decision",
-    "agent_action",
-    "reference",
-]
-"""The kind of canonical object a :class:`SourceRef` points at."""
+SourceKind = Literal["project", "experiment", "run", "execution", "asset", "file", "reference"]
+"""What a :class:`SourceRef` points at: a ``molab:`` entity (the kinds of
+:data:`molab.workspace.refs.RefKind`, which knowledge may not import at module
+level), a workspace file, or literature."""
+
+
+def _reference_url(text: str) -> str | None:
+    """*text* as a literature URL: an http(s) URL as is, a DOI as its https form; else ``None``."""
+    if text.startswith(("http://", "https://")):
+        return text
+    if text.upper().startswith("DOI:"):
+        return "https://doi.org/" + text.split(":", 1)[1].strip()
+    if text.startswith("10."):
+        return "https://doi.org/" + text
+    return None
 
 
 class SourceRef(BaseModel, frozen=True):
@@ -114,15 +117,10 @@ class SourceRef(BaseModel, frozen=True):
                 )
             target = self.ref
         elif self.kind == "reference":
-            text = self.ref
-            if text.startswith(("http://", "https://")):
-                target = text
-            elif text.upper().startswith("DOI:"):
-                target = "https://doi.org/" + text.split(":", 1)[1]
-            elif text.startswith("10."):
-                target = "https://doi.org/" + text
-            else:
-                raise ValueError(f"reference {text!r} is not an http(s) URL or a DOI")
+            url = _reference_url(self.ref)
+            if url is None:
+                raise ValueError(f"reference {self.ref!r} is not an http(s) URL or a DOI")
+            target = url
         else:
             if Path(self.ref).is_absolute():
                 target = _relative_posix(self.ref, base_dir)
@@ -142,24 +140,29 @@ class SourceRef(BaseModel, frozen=True):
         return link_line(encode_label(role, leaf), target)
 
     @classmethod
-    def from_edge(cls, edge: Edge) -> SourceRef:
-        """The source a typed edge writes back as.
+    def parse(cls, text: str, *, span: str | None = None) -> SourceRef:
+        """The source one string names.
 
-        A ``molab:`` target keeps its parsed kind. An https target is a
-        reference. Anything else is a file at the absolute path. A ``#fragment``
-        becomes *span*. A malformed ref raises :class:`InvalidRefError`.
+        A ``molab:`` ref keeps its parsed kind. An http(s) URL or a DOI is a
+        ``reference`` (a DOI in its https form). Anything else is a ``file``.
+
+        Raises:
+            InvalidRefError: *text* is a malformed ``molab:`` ref.
         """
         from molab.workspace.refs import is_ref, parse_ref
 
-        raw = edge.target
-        target, sep, fragment = raw.partition("#")
-        span = fragment if sep else None
-        if is_ref(target):
-            parsed = parse_ref(target)
-            return cls(kind=parsed.kind, ref=target, span=span)
-        if target.startswith(("http://", "https://")):
-            return cls(kind="reference", ref=target, span=span)
-        return cls(kind="file", ref=target, span=span)
+        if is_ref(text):
+            return cls(kind=parse_ref(text).kind, ref=text, span=span)
+        url = _reference_url(text)
+        if url is not None:
+            return cls(kind="reference", ref=url, span=span)
+        return cls(kind="file", ref=text, span=span)
+
+    @classmethod
+    def from_edge(cls, edge: Edge) -> SourceRef:
+        """The source a typed edge writes back as: :meth:`parse`, with a ``#fragment`` as *span*."""
+        target, sep, fragment = edge.target.partition("#")
+        return cls.parse(target, span=fragment if sep else None)
 
     @classmethod
     def normalize(
@@ -170,9 +173,8 @@ class SourceRef(BaseModel, frozen=True):
     ) -> list[SourceRef]:
         """Normalize a free-form source list into typed :class:`SourceRef`\\ s.
 
-        A ``Folder`` becomes :meth:`of`. An empty request is
-        ``[SourceRef.of(default_host)]``. A DOI string becomes an https DOI
-        reference. Any other string is a ``file`` source.
+        A ``Folder`` becomes :meth:`of`; a string is :meth:`parse`\\ d. An
+        empty request is ``[SourceRef.of(default_host)]``.
         """
         from molab.workspace.folder import Folder
 
@@ -185,14 +187,7 @@ class SourceRef(BaseModel, frozen=True):
             elif isinstance(item, Folder):
                 out.append(cls.of(item))
             else:
-                text = str(item)
-                if text.upper().startswith("DOI:"):
-                    doi = "https://doi.org/" + text.split(":", 1)[1]
-                    out.append(cls(kind="reference", ref=doi))
-                elif text.startswith("10."):
-                    out.append(cls(kind="reference", ref="https://doi.org/" + text))
-                else:
-                    out.append(cls(kind="file", ref=text))
+                out.append(cls.parse(str(item)))
         return out
 
 

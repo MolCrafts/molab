@@ -10,14 +10,13 @@ import {
 } from "@molcrafts/ui";
 import { type JSX, useEffect, useRef, useState } from "react";
 import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
-import { DocSource } from "@/api/generated/models/DocSource";
 import { ChoiceToggle } from "@/app/components/entity";
 import { AppDialog } from "@/components/dialog/AppDialog";
 import {
   DOC_SKELETON,
   fillSkeleton,
   type HostRun,
-  isSourcedClass,
+  namesSourceRun,
   toHtmlBody,
 } from "./docTemplates";
 import { KNOWLEDGE_CLASSES, type KnowledgeClass } from "./knowledgeClass";
@@ -30,13 +29,14 @@ export interface CreateDocInput {
   format: DocFormat;
   cls: DocCreateRequest.cls;
   body: string;
-  sources?: { kind: DocSource.kind; ref: string }[];
+  /** `molab:` refs the document rests on; a sourced class given none names its host. */
+  sources?: string[];
   /** The fields the class declares (a Literature's bibliography). */
   fields?: Record<string, unknown>;
 }
 
 /** The field a validation message belongs under. */
-type ErrorField = "name" | "source" | "year";
+type ErrorField = "name" | "year";
 
 interface FieldErrorState {
   field: ErrorField;
@@ -103,16 +103,12 @@ export const CreateDocDialog = ({
     setLocalError(null);
   }, [open]);
 
-  const runSourced = isSourcedClass(cls);
+  const runSourced = namesSourceRun(cls);
 
   const submit = async (): Promise<void> => {
     const trimmed = name.trim();
     if (!trimmed) {
       setLocalError({ field: "name", message: "Name required." });
-      return;
-    }
-    if (runSourced && !sourceRef) {
-      setLocalError({ field: "source", message: "Choose a run this document records." });
       return;
     }
     const yearNumber = year.trim() ? Number(year) : undefined;
@@ -144,7 +140,7 @@ export const CreateDocDialog = ({
       cls: cls as DocCreateRequest.cls,
       format,
       body: format === "html" ? toHtmlBody(filled) : filled,
-      ...(runSourced ? { sources: [{ kind: DocSource.kind.RUN, ref: sourceRef }] } : {}),
+      ...(runSourced && sourceRef ? { sources: [sourceRef] } : {}),
       ...(cls === "Literature"
         ? {
             fields: {
@@ -171,7 +167,6 @@ export const CreateDocDialog = ({
       primaryLabel="Create document"
       busyLabel="Creating…"
       busy={busy}
-      primaryDisabled={runSourced && runs.length === 0}
       onPrimary={submit}
       error={error}
     >
@@ -241,7 +236,6 @@ export const CreateDocDialog = ({
                 </SelectContent>
               </Select>
             )}
-            <FieldError error={localError} field="source" />
           </div>
         )}
         {cls === "Literature" && (

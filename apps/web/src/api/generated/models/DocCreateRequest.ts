@@ -2,7 +2,6 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { DocSource } from './DocSource';
 export type DocCreateRequest = {
     name: string;
     body?: string;
@@ -12,7 +11,10 @@ export type DocCreateRequest = {
      */
     format?: DocCreateRequest.format;
     cls?: DocCreateRequest.cls;
-    sources?: Array<DocSource>;
+    /**
+     * What the document rests on: entity refs, http(s) URLs or DOIs, and workspace-relative files. A sourced class given none names its host.
+     */
+    sources?: Array<string>;
     /**
      * The fields the class declares (a Hypothesis `verdict`, a Literature's bibliography, a Note `status`); any other key is refused with 422.
      */

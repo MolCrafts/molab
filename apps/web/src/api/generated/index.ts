@@ -39,7 +39,6 @@ export type { DocPageResponse } from './models/DocPageResponse';
 export { DocRelation } from './models/DocRelation';
 export type { DocRelationsResponse } from './models/DocRelationsResponse';
 export { DocRelationUpdate } from './models/DocRelationUpdate';
-export { DocSource } from './models/DocSource';
 export type { DocumentHistory } from './models/DocumentHistory';
 export { EmbedRequest } from './models/EmbedRequest';
 export { EmbedResponse } from './models/EmbedResponse';

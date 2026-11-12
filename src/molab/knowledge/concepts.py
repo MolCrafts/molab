@@ -135,7 +135,6 @@ class _SourcedKnowledge(Concept):
     """
 
     FILE_DOCUMENT: ClassVar[bool] = True
-    REQUIRES_SOURCES: ClassVar[bool] = True
 
     def __init__(
         self,

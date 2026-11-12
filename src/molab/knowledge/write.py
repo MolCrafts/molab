@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .concept import Concept
     from .concepts import _SourcedKnowledge
     from .edges import EdgeRole
+    from .knowledge_item import SourceRef
     from .naming import KnowledgeFormat
 
 _LOG = logging.getLogger(__name__)
@@ -203,18 +204,21 @@ def _sourced_class(of: type[Concept]) -> type[_SourcedKnowledge] | None:
 
 
 def normalize_sources(
-    sources: Sequence[object] | None,
+    sources: Sequence[object],
     *,
     default_host: object,
-) -> list[object]:
-    """Turn a free-form source list into :class:`SourceRef` rows.
+    of: type[Concept],
+) -> list[SourceRef]:
+    """*sources* as :class:`SourceRef` rows; a sourced class given none names its host.
 
-    A folder becomes :meth:`SourceRef.of`. An empty request is the host
-    itself. A DOI string becomes an https DOI reference.
+    A folder becomes :meth:`SourceRef.of` and a string :meth:`SourceRef.parse`.
+    ``Note`` and ``Literature`` given none get none.
     """
     from .knowledge_item import SourceRef
 
-    return SourceRef.normalize(list(sources) if sources else None, default_host=default_host)  # ty: ignore[invalid-return-type]
+    if not sources and _sourced_class(of) is None:
+        return []
+    return SourceRef.normalize(list(sources) or None, default_host=default_host)
 
 
 def mount_note(host: Folder | Concept | PathArg, name: str, *, body: str = "") -> Concept:

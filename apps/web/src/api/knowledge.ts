@@ -1,7 +1,6 @@
 import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
 import type { DocFieldsUpdate } from "@/api/generated/models/DocFieldsUpdate";
 import type { DocRelationUpdate as ApiDocRelationUpdate } from "@/api/generated/models/DocRelationUpdate";
-import type { DocSource } from "@/api/generated/models/DocSource";
 import { EmbedRequest } from "@/api/generated/models/EmbedRequest";
 import type { EntityCard } from "@/api/generated/models/EntityCard";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
@@ -89,7 +88,8 @@ export const knowledgeApi = {
       format?: "md" | "html";
       body?: string;
       cls?: DocCreateRequest.cls;
-      sources?: DocSource[];
+      /** Entity refs, URLs or DOIs, workspace files; a sourced class given none names its host. */
+      sources?: string[];
       fields?: Record<string, unknown>;
     } = {},
   ): Promise<NoteSummary> =>
