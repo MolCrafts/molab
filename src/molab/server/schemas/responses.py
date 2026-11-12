@@ -509,7 +509,6 @@ class MessageResponse(ApiModel):
 class HealthResponse(ApiModel):
     status: str
     workspace_available: bool
-    capabilities: dict[str, bool] = Field(default_factory=dict)
     auth_required: bool = Field(
         default=False,
         description="True when the server process has auth enabled (UI should gate on login).",

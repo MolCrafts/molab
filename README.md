@@ -93,7 +93,7 @@ uv tool install --editable /path/to/molab
 
 Workspace metadata uses `.molab/`; user configuration is stored under `~/.molab/`.
 
-Requires Python >= 3.12. Core depends on `pydantic`, `pyyaml`, `typer`, `rich`, `fastapi`, `uvicorn`, `zarr`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molcrafts-molab[gh]` the GitHub capability (httpx); `molcrafts-molab[molvis]` molvis snapshots, headless included; `molcrafts-molab[all]` bundles the optional extras, and `molcrafts-molab[dev]` pulls everything for development.
+Requires Python >= 3.12. Core depends on `pydantic`, `pyyaml`, `typer`, `rich`, `fastapi`, `uvicorn`, `zarr`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molcrafts-molab[molvis]` molvis snapshots, headless included; `molcrafts-molab[all]` bundles the optional extras, and `molcrafts-molab[dev]` pulls everything for development.
 
 Default `uv pip` / `pip` **does not** compile the React UI (no Node required). A published wheel already ships `src/molab/dist/`.
 

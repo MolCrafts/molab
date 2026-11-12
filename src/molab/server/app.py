@@ -264,13 +264,11 @@ def create_app(
     # 4. System Routes (Health Check) — always public (auth gate does not wrap app-level routes)
     @app.get("/api/health", response_model=HealthResponse, tags=["system"])
     def health_check() -> HealthResponse:
-        from molab.plugins import Capability, registry
         from molab.services.auth import is_auth_enabled
 
         return HealthResponse(
             status="healthy",
             workspace_available=True,
-            capabilities={cap.value: registry.is_available(cap) for cap in Capability},
             auth_required=is_auth_enabled(),
         )
 

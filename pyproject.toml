@@ -40,11 +40,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# molab.plugins.gh (the optional GitHub capability) imports httpx.
-gh = ["httpx>=0.24"]
 # molab.plugins.molvis renders snapshots; headless renders without a display.
 molvis = ["molcrafts-molvis[headless]>=0.4.0"]
-all = ["molcrafts-molab[gh,molvis]"]
+all = ["molcrafts-molab[molvis]"]
 dev = [
     "molcrafts-molab[all]",
     "pytest>=7.0",
@@ -53,6 +51,9 @@ dev = [
     "pytest-mock>=3.10",
     # starlette's TestClient drives requests through httpx2.
     "httpx2",
+    # tests/test_server/_live_server.py talks to a live server; httpx used to
+    # arrive through the removed gh extra.
+    "httpx>=0.24",
     "psutil>=5.9.0",
     # tests/test_workflow/test_codec.py validates the link schema; it used to
     # arrive only transitively, through the removed agent extra.
