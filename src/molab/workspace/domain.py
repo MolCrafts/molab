@@ -209,9 +209,10 @@ class Execution(BaseModel):
         """Read ``workflow_digest`` from an older ``execution.json``.
 
         Product lists, checkpoint ids, and observed-input ids from the
-        removed artifact record are dropped. They are not assets, and their
-        ids are not reused. ``molab init`` mints a new asset id per file
-        when the bytes should be kept.
+        removed artifact record, and the removed ``sealed_commit``, are
+        dropped on read. A sealed record is never rewritten to remove them.
+        The product ids were never asset ids; the bytes stay in the attempt
+        directory until someone imports them as an asset.
         """
         if not isinstance(data, dict):
             return data
@@ -219,7 +220,7 @@ class Execution(BaseModel):
         if "workflow_digest" in migrated:
             migrated.setdefault("workflow_hash", migrated.pop("workflow_digest"))
         migrated.pop("workflow_digest", None)
-        for key in ("artifacts", "checkpoint_artifact_id", "observed_input_ids"):
+        for key in ("artifacts", "checkpoint_artifact_id", "observed_input_ids", "sealed_commit"):
             migrated.pop(key, None)
         return migrated
 

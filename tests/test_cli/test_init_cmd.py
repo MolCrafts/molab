@@ -190,3 +190,71 @@ def test_init_replaces_an_unreadable_meta_file(tmp_path, app):
     assert read_record(target)["type"] == "workspace.root"
     assert read_record(target)["name"] == "lab"
     assert frontmatter.split((target / "index.md").read_text(encoding="utf-8"))[1] == "kept\n"
+
+
+def test_init_migrates_a_versioned_asset_and_keeps_its_id(tmp_path, app):
+    from pathlib import Path
+
+    target = tmp_path / "lab"
+    ws = Workspace(target, name="lab")
+    source = tmp_path / "hello.txt"
+    source.write_bytes(b"hello\n")
+    asset = ws.assets.import_asset("greeting", source)
+    record = Path(ws.assets.payload_path(asset.id)).parent
+    current = json.loads((record / "asset.json").read_text(encoding="utf-8"))
+    (record / "versions").mkdir()
+    (record / "versions" / "v001.json").write_text(
+        json.dumps(
+            {
+                "asset_id": asset.id,
+                "content": current["content"],
+                "origin": {"kind": "import", "uri": current["origin"]["uri"]},
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (record / "asset.json").write_text(
+        json.dumps(
+            {
+                "id": asset.id,
+                "title": current["title"],
+                "created_at": current["created_at"],
+                "created_by": current["created_by"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["init", str(target)])
+
+    assert result.exit_code == 0, result.output
+    assert not (record / "versions").exists()
+    loaded = Workspace.load(target).assets.get(asset.id)
+    assert loaded.content.digest == current["content"]["digest"]
+    assert loaded.origin.uri == current["origin"]["uri"]
+
+
+def test_init_never_rewrites_a_sealed_attempt_and_its_legacy_keys_still_read(tmp_path, app):
+    from pathlib import Path
+
+    from molab.workspace.domain import ExecutionStatus
+
+    target = tmp_path / "lab"
+    ws = Workspace(target, name="lab")
+    run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
+    execution = run.create_execution()
+    run.cancel(execution.id)
+    record_path = Path(str(run.path)) / "executions" / execution.id / "execution.json"
+    raw = json.loads(record_path.read_text(encoding="utf-8"))
+    raw["sealed_commit"] = "0" * 40
+    raw["artifacts"] = [{"id": "old-artifact", "name": "note.txt", "path": "artifacts/note.txt"}]
+    record_path.write_text(json.dumps(raw), encoding="utf-8")
+    before = record_path.read_bytes()
+
+    result = CliRunner().invoke(app, ["init", str(target)])
+
+    assert result.exit_code == 0, result.output
+    assert record_path.read_bytes() == before
+    reread = Workspace.load(target).get_project("p").get_experiment("e").get_run(run.id)
+    assert [item.status for item in reread.executions] == [ExecutionStatus.CANCELLED]
