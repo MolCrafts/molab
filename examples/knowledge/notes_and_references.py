@@ -40,7 +40,7 @@ def main() -> None:
     )
     print(f"Literature: {lit.path}")
 
-    note.cite(lit)
+    note.ref(lit)
     print(f"after citation:\n{note.read()}")
     print("outgoing edges:")
     for edge in note.links():

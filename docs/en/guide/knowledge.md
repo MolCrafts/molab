@@ -154,8 +154,8 @@ note.ref(finding.path)  # …or by path — the same edge either way
 
 `.ref` **never** takes a project / experiment / run coordinate: not a `Folder`,
 not a run id, not params. Those are not knowledge, and `.ref` rejects them with
-`TypeError`. To point at a run or an experiment, first find the document that
-records it, then `.ref` that document:
+`TypeError`. To point at the document that records a run, `.ref` that
+document:
 
 ```python
 run_record = Note(experiment.resolve() / "knowledges" / "run-0001.md")
@@ -170,8 +170,13 @@ for edge in note.links():
     print(edge.role, edge.target)  # e.g. references …/knowledges/tg-result.md
 ```
 
-`.cite` is the looser sibling: it delegates a Knowledge target to `.ref`, and
-otherwise links the path it is handed as given.
+`append_link(doc, target, role=…)` is the one edge writer underneath `.ref`.
+It also takes a live entity: a project, experiment, run or asset is linked by
+its `molab:` ref, a bare path as given. `cite=[(target, role)]` on
+`write_knowledge` and `cites` on `POST /api/knowledge/doc` (a list of
+`{target, role}`, the target a workspace-relative document path or a `molab:`
+ref, the role `cites` when omitted) both go through it. A cite that names
+nothing refuses the write (422 over HTTP) and nothing lands.
 
 ## Writing into a workspace
 

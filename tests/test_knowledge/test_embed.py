@@ -1,10 +1,7 @@
-"""``molab.knowledge.embed`` — the document-embed adapter.
+"""The document-embed verb: ``append_link`` to a live entity, and its read side.
 
-Covers the three read/write halves of the embed verb:
-
-- ``resolve_embed_target`` — a ``Concept`` / ``Folder`` target is its own
-  directory, an ``Asset`` is resolved to its in-tree record dir
-  ``<scope_dir>/assets/<asset_id>/`` (pointed at, never copied);
+- ``link_target`` — a document is its path, a project / experiment / run /
+  asset is its ``molab:`` reference;
 - ``default_role_for`` — the per-kind default from the frozen vocabulary;
 - ``summarize_entity`` — a pure read projection, with all three ``title``
   branches plus the ``Asset`` branch, each pinned by its own test.
@@ -21,13 +18,8 @@ from typing import Any
 import pytest
 
 from molab.knowledge import Literature, Note
-from molab.knowledge.embed import (
-    EntitySummary,
-    default_role_for,
-    embed,
-    resolve_embed_target,
-    summarize_entity,
-)
+from molab.knowledge.concept import append_link, link_target
+from molab.knowledge.embed import EntitySummary, default_role_for, summarize_entity
 from molab.workspace.domain import Asset
 from molab.workspace.refs import ref_of
 
@@ -45,19 +37,19 @@ def note(experiment: Any) -> Note:
     return Note.mount(experiment, "My Note", body="# My Note\n\nbody")
 
 
-class TestResolveEmbedTarget:
+class TestLinkTarget:
     def test_a_concept_resolves_to_its_own_path(self, note: Note) -> None:
-        assert resolve_embed_target(note) == str(note.path)
+        assert link_target(note) == str(note.path)
 
     def test_a_folder_resolves_to_its_ref(self, experiment: Any) -> None:
-        assert resolve_embed_target(experiment) == str(ref_of(experiment))
+        assert link_target(experiment) == str(ref_of(experiment))
 
     def test_an_asset_resolves_to_its_ref(self, asset: Asset) -> None:
-        assert resolve_embed_target(asset) == str(ref_of(asset))
+        assert link_target(asset) == str(ref_of(asset))
 
     def test_a_foreign_target_is_rejected(self) -> None:
         with pytest.raises(TypeError):
-            resolve_embed_target("not-an-entity")  # ty: ignore[invalid-argument-type]
+            link_target(object())  # ty: ignore[invalid-argument-type]
 
 
 class TestDefaultRoleFor:
@@ -146,30 +138,18 @@ class TestSummarizeEntity:
             summarize_entity(object())  # ty: ignore[invalid-argument-type]
 
 
-class TestEmbedModule:
-    def test_asset_record_dir_is_gone(self) -> None:
-        import molab.knowledge.embed as embed_mod
-
-        assert hasattr(embed_mod, "asset_record_dir") is False
-
-
 class TestEmbed:
-    def test_one_relative_typed_edge_uses_the_per_kind_default(self, note: Note, run: Any) -> None:
-        embed(note, run)
-
-        assert [(e.target, e.role) for e in note.links()] == [(str(ref_of(run)), "records")]
-        assert f"]({ref_of(run)})" in note.path.read_text()
-
-    def test_an_explicit_role_overrides_the_default(self, note: Note, run: Any) -> None:
-        embed(note, run, role="derived_from")
+    def test_a_run_is_linked_by_its_ref_with_the_given_role(self, note: Note, run: Any) -> None:
+        append_link(note, run, role="derived_from")
 
         assert [(e.target, e.role) for e in note.links()] == [(str(ref_of(run)), "derived_from")]
+        assert f"]({ref_of(run)})" in note.path.read_text()
 
     def test_a_concept_target_round_trips_through_its_own_path(
         self, note: Note, experiment: Any
     ) -> None:
         other = Note.mount(experiment, "Background")
 
-        embed(note, other, role="cites")
+        append_link(note, other, role="cites")
 
         assert [(Path(e.target).name, e.role) for e in note.links()] == [("background.md", "cites")]

@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { DocCite } from './DocCite';
 export type DocCreateRequest = {
     name: string;
     body?: string;
@@ -19,6 +20,10 @@ export type DocCreateRequest = {
      * The fields the class declares (a Hypothesis `verdict`, a Literature's bibliography, a Note `status`); any other key is refused with 422.
      */
     fields?: Record<string, any>;
+    /**
+     * Typed edges to write with the document. A target that names nothing here is refused with 422 and nothing lands.
+     */
+    cites?: Array<DocCite>;
     createdBy?: string;
 };
 export namespace DocCreateRequest {

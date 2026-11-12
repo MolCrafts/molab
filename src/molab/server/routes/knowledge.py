@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from molab.knowledge.concept import Concept
     from molab.workspace.domain import Asset
     from molab.workspace.folder import Folder
+    from molab.workspace.refs import MolabRef
 
 __all__ = ["router"]
 
@@ -145,6 +146,15 @@ class EmbedResponse(BaseModel):
     role: EdgeRole
 
 
+class DocCite(BaseModel):
+    """One edge a new document carries from the moment it lands."""
+
+    target: str = Field(
+        description="A workspace-relative knowledge document path or an entity ref."
+    )
+    role: EdgeRole = "cites"
+
+
 class DocCreateRequest(BaseModel):
     name: str
     body: str = ""
@@ -163,6 +173,11 @@ class DocCreateRequest(BaseModel):
         default_factory=dict,
         description="The fields the class declares (a Hypothesis `verdict`, a Literature's "
         "bibliography, a Note `status`); any other key is refused with 422.",
+    )
+    cites: list[DocCite] = Field(
+        default_factory=list,
+        description="Typed edges to write with the document. A target that names nothing "
+        "here is refused with 422 and nothing lands.",
     )
     createdBy: str = "ui"
 
@@ -388,6 +403,31 @@ def _source_from_request(workspace: Workspace, text: str) -> object:
             status.HTTP_422_UNPROCESSABLE_CONTENT, f"source {text!r} names nothing here: {exc}"
         ) from exc
     return source
+
+
+def _cite_from_request(workspace: Workspace, cite: DocCite) -> tuple[Concept | MolabRef, EdgeRole]:
+    """One create-request cite as the document or entity ref it names (422 otherwise)."""
+    from molab.knowledge.concepts import _open_document
+    from molab.workspace.refs import is_ref, parse_ref
+
+    text = cite.target.strip()
+    pure = PurePosixPath(text)
+    if not is_ref(text) and (not text or pure.is_absolute() or ".." in pure.parts):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"cite {cite.target!r} must be an entity ref or a document path inside this workspace",
+        )
+    try:
+        if is_ref(text):
+            ref = parse_ref(text)
+            workspace.find(ref)
+            return ref, cite.role
+        path = workspace.fs.join(str(workspace.root), text)
+        return _open_document(path, fs=workspace.fs), cite.role
+    except (LookupError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"cite {cite.target!r} names nothing here: {exc}"
+        ) from exc
 
 
 _IMAGE_LINK = re.compile(r"!\[[^\]]*\]\((<)?([^)\s>]+)(>)?\)")
@@ -1041,6 +1081,7 @@ def create_doc(
         default_host=host,
         of=klass,
     )
+    cites = [_cite_from_request(workspace, cite) for cite in body.cites]
     try:
         note = write_knowledge(
             str(host.resolve()),
@@ -1049,6 +1090,7 @@ def create_doc(
             sources=sources,
             created_by=body.createdBy or "ui",
             text=body.body,
+            cite=cites,
             fields=body.fields,
             fs=workspace.fs,
             format=body.format,
@@ -1074,17 +1116,16 @@ def embed_doc(
 
     Resolves the source document (404 on miss) and the target entity
     (``run`` / ``experiment`` / ``asset`` / ``reference``; 404 on miss), then
-    writes ONE typed provenance edge at the target resolved by
-    :func:`~molab.knowledge.embed.resolve_embed_target`.
+    writes ONE typed provenance edge to it.
     """
     _reject_tex(path)
     from molab.knowledge.concept import append_link
-    from molab.knowledge.embed import default_role_for, resolve_embed_target
+    from molab.knowledge.embed import default_role_for
 
     doc = _open_doc(workspace, path)
     target = _resolve_embed_entity(workspace, body.target_kind, body.target)
     role = body.role if body.role is not None else default_role_for(target)
-    append_link(doc, resolve_embed_target(target), role=role)
+    append_link(doc, target, role=role)
     return EmbedResponse(srcPath=path, target=body.target, role=role)
 
 

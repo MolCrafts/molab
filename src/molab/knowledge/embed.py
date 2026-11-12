@@ -1,14 +1,11 @@
-"""Document-embed target resolution + entity summaries.
+"""Embed defaults + entity summaries.
 
 The support for the "Notion-style document" embed verb: a Knowledge document
 embeds a live workspace entity — a ``Run`` / ``Experiment`` / ``Literature``
-(all :class:`~molab.workspace.folder.Folder` subclasses) or an
-:class:`~molab.workspace.domain.Asset` — as a typed provenance edge. This
-module owns both halves of that verb:
+or an :class:`~molab.workspace.domain.Asset` — as a typed provenance edge
+written by :func:`~molab.knowledge.concept.append_link`. This module holds
+what that edge writer does not:
 
-- :func:`resolve_embed_target` — turn a ``Concept`` / ``Folder`` / ``Asset``
-  target into the edge target. A project, experiment, run, or asset is its
-  reference. A document is its path. Any other folder is its directory.
 - :func:`default_role_for` — the per-kind default :class:`EdgeRole` (all drawn
   from the frozen vocabulary; no new roles): a run or experiment ->
   ``records``, a :class:`Literature` -> ``cites``, everything else (including
@@ -16,7 +13,6 @@ module owns both halves of that verb:
 - :func:`summarize_entity` / :class:`EntitySummary` — a pure read projection of
   an entity's ``id`` / ``kind`` / ``title`` for a UI card. No new state. A
   document's kind is its class name.
-- :func:`embed` — write one typed edge from a document to a live entity.
 
 A target that is none of those kinds raises ``TypeError``.
 
@@ -32,7 +28,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from .concept import Concept, append_link
+from .concept import Concept
 from .concepts import Literature
 from .edges import DEFAULT_EDGE_ROLE, EdgeRole
 from .search import extract_title
@@ -44,8 +40,6 @@ if TYPE_CHECKING:
 __all__ = [
     "EntitySummary",
     "default_role_for",
-    "embed",
-    "resolve_embed_target",
     "summarize_entity",
 ]
 
@@ -99,31 +93,6 @@ def default_role_for(target: Concept | Folder | Asset) -> EdgeRole:
     raise TypeError(f"embed target must be a Concept, Folder or Asset, got {type(target).__name__}")
 
 
-def resolve_embed_target(target: Concept | Folder | Asset) -> str:
-    """The edge target for *target*.
-
-    A project, experiment, run, or asset is its ``molab:`` reference. A
-    knowledge document is its path. Any other folder is its absolute directory.
-
-    Raises:
-        TypeError: If *target* is none of those.
-    """
-    from molab.workspace.domain import Asset
-    from molab.workspace.experiment import Experiment
-    from molab.workspace.folder import Folder
-    from molab.workspace.project import Project
-    from molab.workspace.refs import ref_of
-    from molab.workspace.run import Run
-
-    if isinstance(target, (Project, Experiment, Run, Asset)):
-        return str(ref_of(target))
-    if isinstance(target, Concept):
-        return str(target.path)
-    if isinstance(target, Folder):
-        return str(target.resolve())
-    raise TypeError(f"embed target must be a Concept, Folder or Asset, got {type(target).__name__}")
-
-
 def summarize_entity(target: Concept | Folder | Asset) -> EntitySummary:
     """Project *target* to an :class:`EntitySummary` (a pure read; writes nothing).
 
@@ -163,33 +132,3 @@ def summarize_entity(target: Concept | Folder | Asset) -> EntitySummary:
     raise TypeError(
         f"summary target must be a Concept, Folder or Asset, got {type(target).__name__}"
     )
-
-
-def embed(
-    note: Concept,
-    target: Concept | Folder | Asset,
-    *,
-    role: EdgeRole | None = None,
-) -> None:
-    """Embed a live workspace entity into document *note* as one typed edge.
-
-    Any Concept can carry an edge (a ``Note`` narrating a run, a ``Literature``
-    citing its source), so *note* is typed at the family, not at ``Note``.
-
-    Writes a single typed markdown link through the sole edge-writer
-    :func:`~molab.knowledge.concept.append_link` — never a hand-built markdown
-    string. *target* is a ``Concept``, a workspace ``Folder`` (a ``Run`` or
-    ``Experiment``), or an :class:`Asset`. A folder or asset is linked by the
-    reference :func:`resolve_embed_target` returns. With *role* ``None`` the
-    per-kind default is used (:func:`default_role_for`).
-
-    Args:
-        note: The document the edge originates from.
-        target: The live entity to embed.
-        role: An explicit edge role; defaults to the per-kind default.
-
-    Raises:
-        TypeError: If *target* is none of the three.
-    """
-    dst = resolve_embed_target(target)
-    append_link(note, dst, role=role if role is not None else default_role_for(target))

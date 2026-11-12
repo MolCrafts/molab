@@ -1,4 +1,4 @@
-"""Cite edges for :meth:`molab.knowledge.concept.Concept.create`.
+"""The one knowledge create path, :func:`write_knowledge`.
 
 The workspace ``Folder`` family is the host, and it is imported lazily.
 ``molab/__init__.py`` eagerly loads ``molab.workspace``, so a module-level
@@ -9,24 +9,24 @@ cycle. Every such import therefore sits in a function body (or an
 
 from __future__ import annotations
 
-import logging
+import os
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from .concept import Knowledge, append_link
-from .embed import resolve_embed_target
+from .concept import Knowledge, append_link, link_target
+from .edges import validate_role
 
 if TYPE_CHECKING:
     from molab.fs import FileSystem, PathArg
+    from molab.workspace.domain import Asset
     from molab.workspace.folder import Folder
+    from molab.workspace.refs import MolabRef
 
     from .concept import Concept
     from .concepts import _SourcedKnowledge
     from .edges import EdgeRole
     from .knowledge_item import SourceRef
     from .naming import KnowledgeFormat
-
-_LOG = logging.getLogger(__name__)
 
 
 def write_knowledge(
@@ -37,7 +37,7 @@ def write_knowledge(
     sources: Sequence[object] = (),
     created_by: str,
     text: str,
-    cite: Sequence[tuple[Folder | Concept | PathArg, EdgeRole]] = (),
+    cite: Sequence[tuple[Concept | Folder | Asset | MolabRef | PathArg, EdgeRole]] = (),
     title: str = "",
     fields: Mapping[str, object] | None = None,
     fs: FileSystem | None = None,
@@ -66,7 +66,10 @@ def write_knowledge(
         sources: Source list. Required for Finding, Report, Plan, Observation.
         created_by: Author (a person or tool identifier).
         text: Narrative. ``""`` on an existing document leaves the body.
-        cite: Optional ``(target, role)`` pairs.
+        cite: ``(target, role)`` pairs, each written as one edge through
+            :func:`~molab.knowledge.concept.append_link` unless the document
+            already carries that edge (a source link, say). Every target and
+            role is checked before anything is written.
         title: History summary. Falls back to *name*.
         fields: The fields *of* declares (:attr:`~molab.knowledge.concept.Concept.FIELDS`),
             merged over a rewritten document's. A key *of* does not declare
@@ -82,8 +85,9 @@ def write_knowledge(
         The written document.
 
     Raises:
-        TypeError: If *host* is not a recognised host.
-        ValueError: If *of* requires sources and *sources* is empty, *fields*
+        TypeError: If *host* is not a recognised host, or a *cite* target
+            names nothing :func:`~molab.knowledge.concept.link_target` accepts.
+        ValueError: If a *cite* role is not an ``EdgeRole``, *of* requires sources and *sources* is empty, *fields*
             break *of*'s fields, a *replaces* entry is not a knowledge document
             or is the written one, or the name already exists in the other
             *format*.
@@ -95,6 +99,7 @@ def write_knowledge(
 
     disk = fs if fs is not None else _host_fs(host)
     check_fields(of, fields or {})
+    edges = [(link_target(target), validate_role(role)) for target, role in cite]
     path = _landed_path(host, name, of, format, disk)
     sourced = _sourced_class(of)
     if sourced is not None:
@@ -126,7 +131,7 @@ def write_knowledge(
     event = "knowledge.created" if created else "knowledge.rewritten"
     with mutation(item, event, title or name) as change:
         item.write(None if not created and text == "" else text, head)
-        _apply_cites(item, cite)
+        _append_new_edges(item, edges)
         for old in retired:
             from .concepts import _open_document
 
@@ -231,72 +236,14 @@ def mount_note(host: Folder | Concept | PathArg, name: str, *, body: str = "") -
     return write_knowledge(host, name=name, of=Note, created_by="", text=body)
 
 
-def _cite_target(_item: Knowledge, source: Folder | Concept | PathArg) -> str:
-    """The string ``append_link`` would write for *source*."""
-    from molab.workspace.domain import Asset
-    from molab.workspace.folder import Folder
+def _append_new_edges(item: Knowledge, edges: Sequence[tuple[str, EdgeRole]]) -> None:
+    """Append each ``(target, role)`` edge *item* does not already carry."""
+    from molab.workspace.refs import is_ref
 
-    if isinstance(source, (Folder, Asset)):
-        return resolve_embed_target(source)
-    if isinstance(source, Knowledge) and type(source) is not Knowledge:
-        return str(source.path)
-    return str(source)
-
-
-def _apply_cites(
-    item: Knowledge,
-    cite: Sequence[tuple[Folder | Concept | PathArg, EdgeRole]],
-) -> None:
-    """Write each cite as a typed edge — best-effort, one try per target.
-
-    A cite whose target and role are already on the document is skipped, so a
-    source link and a cite of the same entity are not written twice. The
-    document is already durable when an edge fails.
-    """
-    if not cite:
-        return
-    existing = {(edge.target, edge.role) for edge in item.links()}
-    for source, role in cite:
-        try:
-            target = _cite_target(item, source)
-            if (target, role) in existing:
-                continue
-            _cite(item, source, role=role)
-            existing.add((target, role))
-        except Exception:
-            _LOG.warning(
-                "cite failed for %s role=%s",
-                getattr(source, "name", source),
-                role,
-                exc_info=True,
-            )
-
-
-def _cite(
-    item: Knowledge,
-    source: Folder | Concept | PathArg,
-    *,
-    role: EdgeRole,
-) -> None:
-    """Append one typed edge for *source*, in the branch its family demands.
-
-    Three branches, and none of them silently drops an edge:
-
-    - a ``Folder`` / ``Asset`` goes through
-      :func:`~molab.knowledge.embed.resolve_embed_target` (the only resolver for
-      those two families) and links the reference it returns;
-    - a Knowledge document goes through :meth:`~molab.knowledge.concept.Concept.ref`;
-    - anything else is taken as a bare path and linked verbatim — never handed
-      to ``resolve_embed_target``, which would ``TypeError`` on it and lose the
-      edge.
-    """
-    from molab.workspace.domain import Asset
-    from molab.workspace.folder import Folder
-
-    if isinstance(source, (Folder, Asset)):
-        append_link(item, resolve_embed_target(source), role=role)
-        return
-    if isinstance(source, Knowledge) and type(source) is not Knowledge:
-        item.ref(source, role=role)
-        return
-    append_link(item, source, role=role)
+    have = {(edge.target, edge.role) for edge in item.links()}
+    for target, role in edges:
+        key = target if is_ref(target) else os.path.normpath(target)
+        if (key, role) in have:
+            continue
+        append_link(item, target, role=role)
+        have.add((key, role))

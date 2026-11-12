@@ -985,3 +985,34 @@ class TestKnowledgeRootHandle:
 
         for name in ("read_meta", "write_meta", "read_index", "write_index", "_persist"):
             assert not hasattr(Concept, name)
+
+
+class TestAppendLinkTargets:
+    """``append_link`` is the one writer; its target may be any linkable thing."""
+
+    def test_a_live_entity_links_by_its_ref(self, tmp_path: Path) -> None:
+        from molab.knowledge.concept import append_link
+        from molab.workspace import Workspace
+        from molab.workspace.refs import ref_of
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        experiment = ws.add_project("p").add_experiment("e")
+        note = Note(Path(str(ws.root)) / "knowledges" / "idea")
+        note.write("# Idea\n")
+
+        append_link(note, experiment, role="derived_from")
+
+        assert [(e.target, e.role) for e in note.links()] == [
+            (str(ref_of(experiment)), "derived_from")
+        ]
+
+    def test_an_object_that_names_nothing_is_refused(self, tmp_path: Path) -> None:
+        from molab.knowledge.concept import append_link
+
+        note = Note(tmp_path / "idea")
+        note.write("# Idea\n")
+
+        with pytest.raises(TypeError):
+            append_link(note, object())  # ty: ignore[invalid-argument-type]
+        assert note.links() == []

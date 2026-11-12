@@ -306,8 +306,7 @@ export class KnowledgeService {
      *
      * Resolves the source document (404 on miss) and the target entity
      * (``run`` / ``experiment`` / ``asset`` / ``reference``; 404 on miss), then
-     * writes ONE typed provenance edge at the target resolved by
-     * :func:`~molab.knowledge.embed.resolve_embed_target`.
+     * writes ONE typed provenance edge to it.
      * @param path The source note Concept's workspace-relative document path.
      * @param requestBody
      * @param molabSession

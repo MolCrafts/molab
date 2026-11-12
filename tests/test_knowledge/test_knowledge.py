@@ -105,7 +105,7 @@ class TestCite:
             sources=[SourceRef(kind="run", ref="molab:experiment/e1/run/r1")],
         )
         finding.write("# TF32\n")
-        finding.cite(lit)
+        finding.ref(lit)
         assert any(Path(edge.target) == lit.path for edge in finding.links())
 
 

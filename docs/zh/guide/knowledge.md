@@ -140,8 +140,8 @@ note.ref(finding.path)  # ……或用路径 —— 两种写法写出同一条�
 ```
 
 `.ref` **绝不**接受 project / experiment / run 的坐标：不是 `Folder`、不是 run id、
-不是 params。那些都不是知识，`.ref` 一律以 `TypeError` 拒绝。要指向某个 run 或
-experiment，先找到记录它的那份文档，再 `.ref` 那份文档：
+不是 params。那些都不是知识，`.ref` 一律以 `TypeError` 拒绝。要指向记录某个 run
+的那份文档，就 `.ref` 那份文档：
 
 ```python
 run_record = Note(experiment.resolve() / "knowledges" / "run-0001.md")
@@ -155,7 +155,11 @@ for edge in note.links():
     print(edge.role, edge.target)  # 例如 references …/knowledges/tg-result.md
 ```
 
-`.cite` 是更松的兄弟：知识目标交给 `.ref`；否则按原样把给出的路径链上。
+`append_link(doc, target, role=…)` 是 `.ref` 底下唯一的写边函数。它也接受活的实体：
+project、experiment、run 或资产按其 `molab:` 引用链接，裸路径按原样链接。
+`write_knowledge` 的 `cite=[(target, role)]` 与 `POST /api/knowledge/doc` 的 `cites`
+（`{target, role}` 列表，target 是 workspace 相对的文档路径或 `molab:` 引用，role 省略时为
+`cites`）都经由它。一个什么也指不到的引用会拒绝整个写入（HTTP 上为 422），什么都不落盘。
 
 ## 写进工作区
 

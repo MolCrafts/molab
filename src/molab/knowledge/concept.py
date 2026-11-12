@@ -42,6 +42,10 @@ from .edges import (
 )
 
 if TYPE_CHECKING:
+    from molab.workspace.domain import Asset
+    from molab.workspace.folder import Folder
+    from molab.workspace.refs import MolabRef
+
     from .concepts import Literature
     from .edges import Backlink
     from .search import SearchResult
@@ -415,7 +419,7 @@ class Concept:
         text: str | None = None,
         role: EdgeRole = DEFAULT_EDGE_ROLE,
     ) -> None:
-        """Cross-reference another Knowledge document — the strict spelling of :meth:`cite`.
+        """Cross-reference another Knowledge document.
 
         *ref* must denote a Knowledge: a :class:`Concept` subclass instance
         other than the bare base class, or a path whose markdown file names one.
@@ -436,27 +440,6 @@ class Concept:
         """
         target = _knowledge_target(ref, fs=self._fs)
         append_link(self, target, text=text, role=role)
-
-    def cite(
-        self,
-        ref: Concept | PathArg,
-        *,
-        text: str | None = None,
-        role: EdgeRole = DEFAULT_EDGE_ROLE,
-    ) -> None:
-        """Cite *ref* — append a typed markdown link.
-
-        The loose spelling of :meth:`ref`: a Knowledge target is delegated to
-        it, while a bare directory (a run, an experiment) is still linked as
-        given, so knowledge never imports the workspace layer. Every
-        knowledge class shares this verb.
-        """
-        try:
-            target = _knowledge_target(ref, fs=self._fs)
-        except TypeError:
-            append_link(self, ref, text=text, role=role)
-            return
-        self.ref(target, text=text, role=role)
 
     def backlinks(self, *, within: Concept | PathArg | None = None) -> list[Backlink]:
         """Documents under *within* whose links point at this one.
@@ -914,8 +897,7 @@ class Concept:
 def _knowledge_target(ref: object, *, fs: FileSystem) -> Concept:
     """The Knowledge *ref* denotes, or ``TypeError`` — the one strictness rule.
 
-    Shared by :meth:`Concept.ref` (which propagates the error) and
-    :meth:`Concept.cite` (which falls back to its loose path branch): an object
+    Used by :meth:`Concept.ref`: an object
     denotes a Knowledge when its class is a :class:`Concept` subclass other than
     the bare base class, and a path denotes one when the markdown file there
     names a subclass. A run / project / experiment directory fails both — it
@@ -1158,31 +1140,60 @@ def backlinks_to(
     return found
 
 
+def link_target(dst: Concept | Folder | Asset | MolabRef | PathArg) -> str:
+    """The target an edge to *dst* names, before it is made relative.
+
+    The one resolver for every link writer. A workspace project, experiment,
+    run or asset is its ``molab:`` reference. A reference, or a string that is
+    one, is itself. A document is its path, any other workspace folder its
+    directory, and a path is itself.
+
+    Raises:
+        TypeError: *dst* is none of those. An arbitrary object is never
+            ``str()``-ed into a link: its repr would be a silently broken edge.
+    """
+    from molab.workspace.domain import Asset
+    from molab.workspace.experiment import Experiment
+    from molab.workspace.folder import Folder
+    from molab.workspace.project import Project
+    from molab.workspace.refs import MolabRef, ref_of
+    from molab.workspace.run import Run
+
+    if isinstance(dst, (Project, Experiment, Run, Asset)):
+        return str(ref_of(dst))
+    if isinstance(dst, Concept):
+        return str(dst.path)
+    if isinstance(dst, Folder):
+        return str(dst.resolve())
+    if isinstance(dst, (MolabRef, str, os.PathLike)):
+        return str(dst)
+    raise TypeError(
+        f"edge target must be a document, a workspace entity, a molab reference or a "
+        f"path, got {type(dst).__name__}"
+    )
+
+
 def append_link(
     src: Concept,
-    dst: Concept | PathArg,
+    dst: Concept | Folder | Asset | MolabRef | PathArg,
     *,
     text: str | None = None,
     role: EdgeRole = DEFAULT_EDGE_ROLE,
 ) -> None:
-    """Append a typed relative markdown link ``src → dst`` to ``src``'s body.
+    """Append a typed markdown link ``src → dst`` to ``src``'s body.
 
-    The single markdown-edge writer, and the sole role-writing chokepoint:
-    ``Note.cite`` delegates here,
-    so the on-disk edge format cannot drift. The graph lives in the markdown
-    body. The default role encodes to the bare label, so pre-role
-    output stays byte-identical. Appends unconditionally; link dedup remains a
-    future enhancement.
+    The single markdown-edge writer, and the sole role-writing chokepoint, so
+    the on-disk edge format cannot drift. The graph lives in the markdown
+    body. The default role encodes to the bare label. Appends
+    unconditionally.
 
-    **A link target is a path, not a class.** *dst* may be a ``Concept`` or a
-    bare directory path, so a Concept can cite something outside its own family
-    — a workspace ``Run``, an asset record dir — without ``molab.knowledge``
-    importing the layer that owns it.
+    *dst* resolves through :func:`link_target`: a ``molab:`` reference is
+    written verbatim, and a path is written relative to *src*.
 
     Args:
         src: The Concept the edge originates from.
-        dst: The Concept, or directory path, the edge points to.
-        text: Optional link label; defaults to *dst*'s directory name.
+        dst: What the edge points to (see :func:`link_target`).
+        text: Optional link label; defaults to the target's last segment.
         role: The declared :class:`~molab.knowledge.edges.EdgeRole`.
 
     Runs under *src*'s lock and records one ``knowledge.linked`` history
@@ -1191,36 +1202,22 @@ def append_link(
     Raises:
         ValueError: If *role* is not a known ``EdgeRole`` — validated before any
             write, so an invalid role leaves the document body untouched.
-        TypeError: If *dst* is neither a ``Concept`` nor a path.
+        TypeError: If *dst* names nothing :func:`link_target` accepts.
     """
     validate_role(role)
-    from molab.workspace.refs import MolabRef, is_ref
+    from molab.workspace.refs import is_ref
 
     from .mutation import mutation
 
-    if isinstance(dst, MolabRef) or (isinstance(dst, str) and is_ref(dst)):
-        target = str(dst)
+    target = link_target(dst)
+    if is_ref(target):
         label = text if text is not None else target.rstrip("/").rsplit("/", 1)[-1]
         with mutation(src, "knowledge.linked", f"@{role} {target} from {src.name}"):
             _append_line(src, link_line(encode_label(role, label), target))
         return
-    if isinstance(dst, Concept):
-        dst_path = str(dst.path)
-    elif isinstance(dst, (str, os.PathLike)):
-        dst_path = str(dst)
-    else:
-        # Never ``str()`` an arbitrary object into a link: that would write a
-        # repr as the target and produce a silently broken edge. A caller
-        # holding a foreign-family object (a workspace ``Folder``) passes its
-        # directory.
-        raise TypeError(
-            f"edge target must be a Concept or a path, got {type(dst).__name__}; "
-            "pass its directory (e.g. folder.resolve())"
-        )
     src_base = str(Path(src.path).parent) if type(src).FILE_DOCUMENT else str(src.path)
-    rel = os.path.relpath(dst_path, src_base)
-    rel_posix = PurePosixPath(rel).as_posix()
-    label = text if text is not None else PurePosixPath(dst_path).name
+    rel_posix = PurePosixPath(os.path.relpath(target, src_base)).as_posix()
+    label = text if text is not None else PurePosixPath(target).name
     with mutation(src, "knowledge.linked", f"@{role} {rel_posix} from {src.name}"):
         _append_line(src, link_line(encode_label(role, label), rel_posix))
 
@@ -1254,6 +1251,7 @@ __all__ = [
     "LinkScan",
     "append_link",
     "append_source_links",
+    "link_target",
     "read_text_or_none",
     "retarget_links",
 ]

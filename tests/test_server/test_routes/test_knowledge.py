@@ -72,7 +72,7 @@ class TestKnowledgeRouteRedirect:
     def test_knowledge_symbols_import(self) -> None:
         from molab.knowledge.concepts import Note, _product
         from molab.knowledge.edges import EdgeRole
-        from molab.knowledge.embed import default_role_for, resolve_embed_target, summarize_entity
+        from molab.knowledge.embed import default_role_for, summarize_entity
         from molab.knowledge.errors import KnowledgeNotFoundError
         from molab.knowledge.search import extract_title
 
@@ -82,7 +82,6 @@ class TestKnowledgeRouteRedirect:
                 extract_title,
                 _product,
                 default_role_for,
-                resolve_embed_target,
                 summarize_entity,
             )
         )
@@ -107,14 +106,6 @@ class TestKnowledgeRouteRedirect:
         assert "_product" in src
         assert "Knowledge.parse" not in src
         assert "molab.workspace.knowledge" not in src
-
-    def test_embeddoc_delegates_knowledge_edge_writer(self) -> None:
-        src = inspect.getsource(knowledge_routes.embed_doc)
-        assert "molab.knowledge.embed" in src
-        assert "resolve_embed_target" in src
-        assert "append_link(" in src
-        assert ".link(" not in src
-        assert "bundle.embed(" not in src
 
     def test_missing_note_is_404(self, served: ServedFactory, lab: RunFixture) -> None:
         ws, _exp, _run = lab
@@ -359,6 +350,73 @@ class TestCreateDoc:
         assert response.json()["hostPath"] == ""
         assert (Path(str(ws.root)) / "knowledges" / "root-note.md").is_file()
 
+    def test_cites_link_documents_and_entities_with_their_roles(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        from molab.knowledge import Note
+        from molab.workspace.refs import ref_of
+
+        ws, _exp, run = lab
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Cites",
+                    "cls": "Note",
+                    "body": "# Cites\n",
+                    "cites": [
+                        {"target": "knowledges/idea.md"},
+                        {"target": str(ref_of(run)), "role": "supports"},
+                    ],
+                },
+            )
+        assert response.status_code == 201, response.text
+        doc = Note(Path(str(ws.root)) / response.json()["relPath"])
+        edges = {(Path(e.target).name, e.role) for e in doc.links() if not e.is_ref}
+        refs = {(e.target, e.role) for e in doc.links() if e.is_ref}
+        assert edges == {("idea.md", "cites")}
+        assert refs == {(str(ref_of(run)), "supports")}
+
+    def test_a_cite_of_an_execution_lands_its_ref(
+        self, served: ServedFactory, terminal_run: RunFixture
+    ) -> None:
+        ws, _exp, run = terminal_run
+        execution = str(
+            MolabRef(
+                experiment_id=run.experiment.id,
+                run_id=run.id,
+                execution_id=run.executions[0].id,
+            )
+        )
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc",
+                json={"name": "Attempt", "cls": "Note", "cites": [{"target": execution}]},
+            )
+        assert response.status_code == 201, response.text
+        doc = Note(Path(str(ws.root)) / response.json()["relPath"])
+        assert [(e.target, e.role) for e in doc.links()] == [(execution, "cites")]
+
+    @pytest.mark.parametrize(
+        "cite",
+        [
+            {"target": "knowledges/missing.md"},
+            {"target": "molab:experiment/nope"},
+            {"target": "knowledges/idea.md", "role": "bogus"},
+        ],
+    )
+    def test_a_cite_that_names_nothing_is_422_and_nothing_lands(
+        self, served: ServedFactory, lab: RunFixture, cite: dict[str, str]
+    ) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc",
+                json={"name": "Loose", "cls": "Note", "cites": [cite]},
+            )
+        assert response.status_code == 422, response.text
+        assert not (Path(str(ws.root)) / "knowledges" / "loose.md").exists()
+
     def test_finding_records_the_run_source(self, served: ServedFactory, lab: RunFixture) -> None:
         from molab.workspace.refs import ref_of
 
@@ -591,7 +649,7 @@ class TestGetBacklinks:
         a.write("# A\n")
         b = Note(root / "knowledges" / "b")
         b.write("# B\n")
-        a.cite(b)
+        a.ref(b)
         with served(ws) as client:
             response = client.get("/api/knowledge/backlinks", params={"path": "knowledges/b.md"})
         assert response.status_code == 200, response.text
@@ -1126,14 +1184,14 @@ class TestAssetEmbedResolution:
     def test_note_card_for_an_embedded_asset(
         self, served: ServedFactory, lab: RunFixture, tmp_path: Path
     ) -> None:
-        from molab.knowledge.embed import embed
+        from molab.knowledge.concept import append_link
 
         ws, _exp, _run = lab
         source = tmp_path / "mydata.txt"
         source.write_text("payload")
         asset = ws.assets.import_asset("mydata", source)
         note = Note(Path(str(ws.root)) / "knowledges" / "idea")
-        embed(note, asset)
+        append_link(note, asset, role="references")
         with served(ws) as client:
             response = client.get("/api/knowledge/note", params={"path": "knowledges/idea.md"})
         assert response.status_code == 200, response.text

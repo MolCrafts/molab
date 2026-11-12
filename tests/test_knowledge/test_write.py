@@ -4,10 +4,9 @@ Three behaviors are load-bearing here and each has its own guard below:
 
 - the destination comes from ``Observation(host, name).path`` and the
   bytes land through ``Concept.write`` (one derivation, one persistence path);
-- the **cite channel keeps all three branches** — a Knowledge document through
-  ``.ref``, a ``Folder``/``Asset`` through the embed resolver, and a bare path
-  straight to ``append_link``. The third branch must never be routed through the
-  resolver: it would raise, and the edge would be silently dropped;
+- every cite resolves through the one link writer — a document by its path, a
+  project / experiment / run / asset by its ref, a bare path as given — and a
+  cite that names nothing refuses the whole write before anything lands;
 - ``Note.mount`` materializes a document even with an empty body, and a repeat
   call (including ``body=""``) never truncates an existing body.
 """
@@ -120,15 +119,19 @@ class TestWriteKnowledge:
 
         item = _write(experiment, cite=[(str(outside), "references")])
 
-        # The third branch must not be routed through the embed resolver: that
-        # would raise on a non-Folder/Asset target and drop the edge silently.
         assert (str(outside), "references") in [(e.target, e.role) for e in item.links()]
 
-    def test_a_failing_cite_never_fails_the_write(self, experiment: Any) -> None:
-        item = _write(experiment, cite=[(object(), "references")])
+    @pytest.mark.parametrize(
+        ("target", "role", "error"),
+        [(object(), "references", TypeError), ("knowledges/x.md", "bogus", ValueError)],
+    )
+    def test_an_unresolvable_cite_refuses_the_write(
+        self, experiment: Any, target: object, role: str, error: type[Exception]
+    ) -> None:
+        with pytest.raises(error):
+            _write(experiment, cite=[(target, role)])
 
-        assert item.exists()
-        assert item.read().startswith("# Observation")
+        assert not list(Path(str(experiment.resolve())).glob("knowledges/observation-demo.*"))
 
     def test_a_domain_asset_cite_writes_exactly_one_edge(
         self, experiment: Any, tmp_path: Path

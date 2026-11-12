@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from molab.knowledge.concept import Concept
+from molab.knowledge.concept import Concept, append_link
 from molab.knowledge.concepts import Literature, LiteratureFields, Note
 
 
@@ -86,42 +86,23 @@ class TestConceptRegistry:
 class TestNote:
     """``Note`` body + citation edges."""
 
-    def test_cite_threads_role_into_typed_edge(self, tmp_path: Path) -> None:
+    def test_ref_threads_role_into_typed_edge(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
         ref = _mount(Literature, tmp_path, "smith2024")
 
-        note.cite(ref, role="derived_from")
+        note.ref(ref, role="derived_from")
 
         typed = note.links()
         assert len(typed) == 1
         assert typed[0].role == "derived_from"
         assert Path(typed[0].target) == ref.path
 
-    def test_cite_delegates_to_ref_for_a_knowledge_target(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # A Knowledge target takes the canonical verb; a bare directory does not.
-        note = _mount(Note, tmp_path, "idea")
-        ref = _mount(Literature, tmp_path, "smith2024")
-        delegations: list[tuple[object, dict[str, object]]] = []
-
-        def spy(_self: Concept, target: object, **kwargs: object) -> None:
-            delegations.append((target, kwargs))
-
-        monkeypatch.setattr(Note, "ref", spy)
-
-        note.cite(ref, role="derived_from")
-        note.cite(tmp_path / "runs" / "run-abc123", role="records")
-
-        assert delegations == [(ref, {"text": None, "role": "derived_from"})]
-
-    def test_cite_accepts_a_bare_directory(self, tmp_path: Path) -> None:
-        # A note cites something outside the OKF family (a workspace Run) by path.
+    def test_a_link_to_a_bare_directory_keeps_its_path(self, tmp_path: Path) -> None:
         run_dir = tmp_path / "runs" / "run-abc123"
         run_dir.mkdir(parents=True)
         note = _mount(Note, tmp_path, "idea")
-        note.cite(run_dir, role="records")
-        assert note.links() == [(str(run_dir), "records")]
+        append_link(note, run_dir, role="references")
+        assert note.links() == [(str(run_dir), "references")]
 
     def test_tags_and_status_round_trip(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")

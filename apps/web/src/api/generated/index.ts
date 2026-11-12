@@ -29,6 +29,7 @@ export type { DestinationsResponse } from './models/DestinationsResponse';
 export type { DestinationSummary } from './models/DestinationSummary';
 export type { DirectoryCreateRequest } from './models/DirectoryCreateRequest';
 export type { DocBodyUpdate } from './models/DocBodyUpdate';
+export { DocCite } from './models/DocCite';
 export { DocCreateRequest } from './models/DocCreateRequest';
 export type { DocFieldsResponse } from './models/DocFieldsResponse';
 export type { DocFieldsUpdate } from './models/DocFieldsUpdate';
