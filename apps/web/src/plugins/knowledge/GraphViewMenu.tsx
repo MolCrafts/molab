@@ -9,7 +9,7 @@ import {
   RELATION_ROLES,
 } from "./graph-view";
 import type { ResearchMap } from "./research-map";
-import { reasoningLabel, stageLabels } from "./research-ui";
+import { reasoningLabel } from "./research-ui";
 
 /** One compact popover, two levels. Each page edits only its own dimension. */
 export function GraphViewMenu({
@@ -32,9 +32,9 @@ export function GraphViewMenu({
   const focus = view.focus;
   const anchor = map.nodes.find((node) => node.id === focus?.anchor);
   const stateful = classes.flatMap((cls) => {
-    const nodes = map.nodes.filter((node) => node.cls === cls && (node.state || node.status));
+    const nodes = map.nodes.filter((node) => node.cls === cls && node.state);
     return nodes.length
-      ? [{ cls, states: [...new Set(nodes.map((node) => node.state ?? node.status ?? ""))] }]
+      ? [{ cls, states: [...new Set(nodes.map((node) => node.state ?? ""))] }]
       : [];
   });
   const hiddenByNode = [...projection.hidden.values()].filter((reasons) =>
@@ -191,7 +191,7 @@ export function GraphViewMenu({
                           <legend>{cls}</legend>
                           {states.map((state) => {
                             const node = map.nodes.find(
-                              (node) => node.cls === cls && (node.state ?? node.status) === state,
+                              (node) => node.cls === cls && node.state === state,
                             );
                             return (
                               <label key={state} className="tw-view-check">
@@ -212,11 +212,7 @@ export function GraphViewMenu({
                                     })
                                   }
                                 />
-                                <span>
-                                  {node
-                                    ? (reasoningLabel(node) ?? stageLabels[state] ?? state)
-                                    : state}
-                                </span>
+                                <span>{node ? (reasoningLabel(node) ?? state) : state}</span>
                               </label>
                             );
                           })}

@@ -9,13 +9,8 @@ describe("knowledge search inventory", () => {
       "Report",
       "Finding",
       "Plan",
-      "Roadmap",
-      "Todo",
-      "Milestone",
       "Observation",
       "Hypothesis",
-      "Decision",
-      "Delegation",
     ]);
   });
 });

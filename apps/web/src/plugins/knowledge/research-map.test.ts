@@ -1,7 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { KnowledgeGraphResponse as KnowledgeGraph } from "@/api/generated/models/KnowledgeGraphResponse";
 import { foldedReferences, layoutKnowledgeMap } from "./map-layout";
-import type { Campaign } from "./research-map";
 import { buildResearchMap } from "./research-map";
 
 const node = (relPath: string, cls: string, name: string, excerpt = "", title = "") => ({
@@ -20,31 +19,30 @@ const link = (source: string, target: string, role = "derived_from", kind = "doc
 });
 
 const PLAN = "knowledges/plan.md";
-const ROADMAP = "knowledges/roadmap.md";
-const TODO = "knowledges/todo.md";
-const MILESTONE = "knowledges/stage-1.md";
+const HYP = "knowledges/hypothesis.md";
+const OBS = "knowledges/observation.md";
+const REPORT = "knowledges/stage-1.md";
 const FFV = "projects/p/experiments/porosity/knowledges/ffv.md";
 const WATER = "projects/p/experiments/water-network/knowledges/water.md";
 const REVISED = "knowledges/plan-rev2.md";
 
-/** The shape of ~/work/pbix-aem: planning documents derived from the Plan, findings filed under experiments. */
+/** The shape of ~/work/pbix-aem: documents derived from the Plan, findings filed under experiments. */
 const graph: KnowledgeGraph = {
   nodes: [
     node(PLAN, "Plan", "PBIX AEM modeling plan", "How do crosslinks change free volume?"),
-    node(ROADMAP, "Roadmap", "roadmap"),
-    node(TODO, "Todo", "todo"),
-    node(MILESTONE, "Milestone", "Stage 1 equilibrated"),
+    node(HYP, "Hypothesis", "hypothesis"),
+    node(OBS, "Observation", "observation"),
+    node(REPORT, "Report", "Stage 1 equilibrated"),
     node(FFV, "Finding", "ffv-psd-dry-wet", "Dry FFV rises with crosslinking"),
     node(WATER, "Finding", "water-network-80c"),
     node(REVISED, "Plan", "Plan, revision 2"),
-    node("knowledges/delegation.md", "Delegation", "delegation"),
     node("knowledges/brief.md", "Note", "brief"),
   ],
   edges: [
-    link(ROADMAP, PLAN),
-    link(TODO, PLAN),
-    link(MILESTONE, PLAN),
-    link(MILESTONE, FFV),
+    link(HYP, PLAN),
+    link(OBS, PLAN),
+    link(REPORT, PLAN),
+    link(REPORT, FFV),
     link(REVISED, PLAN, "supersedes"),
     link(REVISED, FFV),
     link(FFV, "molab:asset/01a", "derived_from", "ref"),
@@ -52,48 +50,11 @@ const graph: KnowledgeGraph = {
     link(FFV, "knowledges/gone.md", "references", "missing"),
     link("knowledges/brief.md", PLAN),
     link(FFV, FFV, "references"),
-    link(MILESTONE, PLAN),
+    link(REPORT, PLAN),
   ],
 };
-const campaign: Campaign = {
-  plans: [{ path: PLAN, excerpt: "How do crosslinks change free volume?" }],
-  roadmaps: [
-    {
-      path: ROADMAP,
-      stages: [
-        { id: "network", title: "Build networks", experiment: "crosslink-network", depends_on: [] },
-        {
-          id: "stage1",
-          title: "Equilibrate",
-          experiment: "crosslink-network",
-          depends_on: ["network", "network", "missing"],
-        },
-        { id: "stage2", title: "FFV and pores", experiment: "porosity", depends_on: ["stage1"] },
-      ],
-    },
-    {
-      path: "knowledges/other-roadmap.md",
-      stages: [{ id: "network", title: "Repeated", depends_on: [] }],
-    },
-  ],
-  todos: [
-    {
-      path: TODO,
-      items: [
-        { id: "build", title: "Build three networks", status: "done", stage: "network" },
-        { id: "equilibrate", title: "Equilibrate legal cells", status: "blocked", stage: "stage1" },
-        { id: "ffv", title: "Compute FFV", status: "done", stage: "stage2" },
-      ],
-    },
-  ],
-  milestones: [
-    { path: MILESTONE, stage: "stage1", criterion: "Cells equilibrated", status: "open" },
-  ],
-  unreadable: [{ path: "knowledges/bad.md", error: "no id" }],
-};
-
 describe("research map", () => {
-  const map = buildResearchMap(graph, campaign);
+  const map = buildResearchMap(graph);
   const at = (id: string) => map.nodes.find((entry) => entry.id === id)!;
   const has = (from: string, to: string, role: string) =>
     map.edges.some((edge) => edge.from === from && edge.to === to && edge.role === role);
@@ -101,9 +62,9 @@ describe("research map", () => {
   it("makes every research document a node, and nothing that is not a knowledge document", () => {
     expect(map.nodes.map((entry) => entry.id)).toEqual([
       PLAN,
-      ROADMAP,
-      TODO,
-      MILESTONE,
+      HYP,
+      OBS,
+      REPORT,
       FFV,
       WATER,
       REVISED,
@@ -118,16 +79,13 @@ describe("research map", () => {
   });
 
   it("shows a document's display title, and its name only when it has none", () => {
-    const titled = buildResearchMap(
-      {
-        nodes: [
-          node("a.md", "Hypothesis", "h-dry-ffv", "", "交联降低干态自由体积"),
-          node("b.md", "Finding", "ffv-psd"),
-        ],
-        edges: [],
-      },
-      { plans: [], roadmaps: [], todos: [], milestones: [], unreadable: [] },
-    );
+    const titled = buildResearchMap({
+      nodes: [
+        node("a.md", "Hypothesis", "h-dry-ffv", "", "交联降低干态自由体积"),
+        node("b.md", "Finding", "ffv-psd"),
+      ],
+      edges: [],
+    });
     expect(titled.nodes.map((entry) => entry.title)).toEqual(["交联降低干态自由体积", "ffv-psd"]);
   });
 
@@ -135,43 +93,40 @@ describe("research map", () => {
     const many = [...Array(9).keys()].map((index) =>
       node(`h${index}.md`, "Hypothesis", `h${index}`),
     );
-    const decisions = [...Array(5).keys()].map((index) =>
-      node(`d${index}.md`, "Decision", `d${index}`),
+    const observations = [...Array(5).keys()].map((index) =>
+      node(`o${index}.md`, "Observation", `o${index}`),
     );
-    const wide = buildResearchMap(
-      {
-        nodes: [
-          node("plan.md", "Plan", "plan"),
-          ...decisions,
-          ...many,
-          node("finding.md", "Finding", "finding"),
-        ],
-        edges: [...many, ...decisions]
-          .map((doc) => link(doc.relPath, "plan.md"))
-          .concat([link("finding.md", "h0.md", "supports"), link("finding.md", "d0.md")]),
-      },
-      { plans: [], roadmaps: [], todos: [], milestones: [], unreadable: [] },
-    );
+    const wide = buildResearchMap({
+      nodes: [
+        node("plan.md", "Plan", "plan"),
+        ...observations,
+        ...many,
+        node("finding.md", "Finding", "finding"),
+      ],
+      edges: [...many, ...observations]
+        .map((doc) => link(doc.relPath, "plan.md"))
+        .concat([link("finding.md", "h0.md", "supports"), link("finding.md", "o0.md")]),
+    });
     const laid = layoutKnowledgeMap(wide);
     const x = (id: string) => laid.find((entry) => entry.id === id)!.x;
     const perColumn = new Map<number, number>();
     for (const entry of laid) perColumn.set(entry.x, (perColumn.get(entry.x) ?? 0) + 1);
     expect(Math.max(...perColumn.values())).toBeLessThanOrEqual(6);
-    // Hypotheses come before decisions, and a class does not share a column with another unless both fit.
+    // Hypotheses come before observations, and a class does not share a column with another unless both fit.
     expect(Math.max(...many.map((doc) => x(doc.relPath)))).toBeLessThan(
-      Math.min(...decisions.map((doc) => x(doc.relPath))),
+      Math.min(...observations.map((doc) => x(doc.relPath))),
     );
     for (const edge of wide.edges) expect(x(edge.to)).toBeLessThan(x(edge.from));
   });
 
   it("draws an arrow for every link between two nodes, in the direction of the reference, with the link's role", () => {
-    expect(has(ROADMAP, PLAN, "derived_from")).toBe(true);
-    expect(has(MILESTONE, FFV, "derived_from")).toBe(true);
+    expect(has(HYP, PLAN, "derived_from")).toBe(true);
+    expect(has(REPORT, FFV, "derived_from")).toBe(true);
     expect(has(REVISED, PLAN, "supersedes")).toBe(true);
-    expect(has(PLAN, ROADMAP, "derived_from")).toBe(false);
+    expect(has(PLAN, HYP, "derived_from")).toBe(false);
     // Links from hidden documents, self-links and links that leave the map are not arrows; the same link twice is one arrow.
     expect(map.edges).toHaveLength(6);
-    expect(map.edges.filter((edge) => edge.from === MILESTONE && edge.to === PLAN)).toHaveLength(1);
+    expect(map.edges.filter((edge) => edge.from === REPORT && edge.to === PLAN)).toHaveLength(1);
   });
 
   it("keeps a document's references that leave the map, for its preview", () => {
@@ -183,83 +138,52 @@ describe("research map", () => {
     expect(at(PLAN).refs).toEqual([]);
   });
 
-  it("reads status from the records, never from the graph", () => {
-    expect(at(ROADMAP)).toMatchObject({ status: "blocked", note: "2 of 3 stages done" });
-    expect(at(TODO)).toMatchObject({ status: "blocked", note: "2 of 3 items done" });
-    expect(at(MILESTONE)).toMatchObject({ status: "open", note: "Closes Equilibrate" });
-    expect(at(FFV)).toMatchObject({ status: null, note: "Filed under porosity" });
-    expect(
-      map.stages.map((stage) => [stage.id, stage.title, stage.status, stage.dependsOn]),
-    ).toEqual([
-      ["network", "Build networks", "done", []],
-      ["stage1", "Equilibrate", "blocked", ["network"]],
-      ["stage2", "FFV and pores", "done", ["stage1"]],
-    ]);
-    expect(map.attention).toEqual([
-      { id: "equilibrate", title: "Equilibrate legal cells", stage: "stage1", node: ROADMAP },
-    ]);
-    expect(map.milestones).toEqual({ met: 0, total: 1 });
-    expect(map.unreadable).toEqual(campaign.unreadable);
+  it("notes the experiment a document is filed under", () => {
+    expect(at(FFV).note).toBe("Filed under porosity");
+    expect(at(PLAN).note).toBe("");
   });
 
-  it("reads a hypothesis's verdict and a decision's status from their records, and asks a person for every open decision", () => {
+  it("reads a hypothesis's verdict from its record, and the class default when the record does not say", () => {
     const H = "knowledges/h-dry-ffv.md";
-    const D_OPEN = "knowledges/d-mass-ratio.md";
-    const D_MADE = "knowledges/d-water-model.md";
+    const H_BARE = "knowledges/h-water-model.md";
     const reasoned = buildResearchMap(
       {
         nodes: [
           node(PLAN, "Plan", "plan"),
           node(H, "Hypothesis", "Crosslinking lowers dry FFV"),
           node(FFV, "Finding", "ffv"),
-          node(D_OPEN, "Decision", "Matched water ratio"),
-          node(D_MADE, "Decision", "Flexible TIP3P"),
+          node(H_BARE, "Hypothesis", "Flexible TIP3P suffices"),
         ],
-        edges: [link(H, PLAN), link(FFV, H, "contradicts"), link(D_OPEN, FFV), link(FFV, D_MADE)],
+        edges: [link(H, PLAN), link(FFV, H, "contradicts"), link(H_BARE, PLAN)],
       },
-      { plans: [], roadmaps: [], todos: [], milestones: [], unreadable: [] },
-      { [H]: { verdict: "refuted" }, [D_OPEN]: { status: "open" }, [D_MADE]: {} },
+      { [H]: { verdict: "refuted" }, [H_BARE]: {} },
     );
     const state = (id: string) => reasoned.nodes.find((entry) => entry.id === id)!.state;
     expect(state(H)).toBe("refuted");
-    expect(state(D_OPEN)).toBe("open");
     // A record that does not say is the class's default, as Molab reads it.
-    expect(state(D_MADE)).toBe("made");
+    expect(state(H_BARE)).toBe("open");
     expect(state(FFV)).toBeNull();
     expect(reasoned.edges).toContainEqual({ from: FFV, to: H, role: "contradicts" });
-    expect(reasoned.attention).toEqual([
-      { id: D_OPEN, title: "Matched water ratio", stage: null, node: D_OPEN },
-    ]);
-    // Evidence sits to the right of the claim it judges; an open decision to the right of what prompted it.
+    // Evidence sits to the right of the claim it judges.
     const laid = layoutKnowledgeMap(reasoned);
     const x = (id: string) => laid.find((entry) => entry.id === id)!.x;
     expect(x(PLAN)).toBeLessThan(x(H));
     expect(x(H)).toBeLessThan(x(FFV));
-    expect(x(FFV)).toBeLessThan(x(D_OPEN));
-    expect(foldedReferences(reasoned)).toEqual([false, false, false, false]);
+    expect(foldedReferences(reasoned)).toEqual([false, false, false]);
   });
 
   it("does not mutate its input and is empty, not broken, for an empty workspace", () => {
-    const before = JSON.stringify([graph, campaign]);
-    buildResearchMap(graph, campaign);
-    expect(JSON.stringify([graph, campaign])).toBe(before);
-    const empty = buildResearchMap(
-      { nodes: [], edges: [] },
-      { plans: [], roadmaps: [], todos: [], milestones: [], unreadable: [] },
-    );
-    expect(empty).toMatchObject({
-      nodes: [],
-      edges: [],
-      stages: [],
-      attention: [],
-      milestones: { met: 0, total: 0 },
-    });
+    const before = JSON.stringify(graph);
+    buildResearchMap(graph);
+    expect(JSON.stringify(graph)).toBe(before);
+    const empty = buildResearchMap({ nodes: [], edges: [] });
+    expect(empty).toEqual({ nodes: [], edges: [] });
     expect(layoutKnowledgeMap(empty)).toEqual([]);
   });
 });
 
 describe("research map layout", () => {
-  const map = buildResearchMap(graph, campaign);
+  const map = buildResearchMap(graph);
   const placed = layoutKnowledgeMap(map);
   const at = (id: string) => placed.find((entry) => entry.id === id)!;
 
@@ -276,21 +200,18 @@ describe("research map layout", () => {
   });
 
   it("does not let a mention move a document: the plan stays leftmost though it cites literature", () => {
-    const cited = buildResearchMap(
-      {
-        nodes: [
-          node("plan.md", "Plan", "plan"),
-          node("paper.md", "Literature", "paper"),
-          node("finding.md", "Finding", "finding"),
-        ],
-        edges: [
-          link("plan.md", "paper.md", "cites"),
-          link("finding.md", "plan.md"),
-          link("finding.md", "paper.md", "cites"),
-        ],
-      },
-      { plans: [], roadmaps: [], todos: [], milestones: [], unreadable: [] },
-    );
+    const cited = buildResearchMap({
+      nodes: [
+        node("plan.md", "Plan", "plan"),
+        node("paper.md", "Literature", "paper"),
+        node("finding.md", "Finding", "finding"),
+      ],
+      edges: [
+        link("plan.md", "paper.md", "cites"),
+        link("finding.md", "plan.md"),
+        link("finding.md", "paper.md", "cites"),
+      ],
+    });
     const laid = layoutKnowledgeMap(cited);
     const x = (id: string) => laid.find((entry) => entry.id === id)!.x;
     expect(x("plan.md")).toBe(0);
@@ -314,7 +235,7 @@ describe("research map layout", () => {
 
   it("gives each class of document its own shape", () => {
     expect(at(PLAN).shape).toBe("question");
-    expect(at(ROADMAP).shape).toBe("card");
+    expect(at(HYP).shape).toBe("card");
     expect(at(FFV).shape).toBe("pill");
   });
 
@@ -322,28 +243,25 @@ describe("research map layout", () => {
     const folded = foldedReferences(map);
     const state = (from: string, to: string) =>
       folded[map.edges.findIndex((edge) => edge.from === from && edge.to === to)];
-    // The milestone rests on the finding and on the plan directly: both are its only route to each, so both stay.
-    expect(state(MILESTONE, FFV)).toBe(false);
-    expect(state(ROADMAP, PLAN)).toBe(false);
+    // The report rests on the finding and on the plan directly: both are its only route to each, so both stay.
+    expect(state(REPORT, FFV)).toBe(false);
+    expect(state(HYP, PLAN)).toBe(false);
     expect(state(REVISED, PLAN)).toBe(false);
-    const chain = buildResearchMap(
-      {
-        nodes: [
-          node("plan.md", "Plan", "plan"),
-          node("finding.md", "Finding", "finding"),
-          node("report.md", "Report", "report"),
-          node("paper.md", "Literature", "paper"),
-        ],
-        edges: [
-          link("finding.md", "plan.md"),
-          link("report.md", "finding.md"),
-          link("report.md", "plan.md"),
-          link("finding.md", "paper.md", "cites"),
-          link("report.md", "paper.md", "references"),
-        ],
-      },
-      { plans: [], roadmaps: [], todos: [], milestones: [], unreadable: [] },
-    );
+    const chain = buildResearchMap({
+      nodes: [
+        node("plan.md", "Plan", "plan"),
+        node("finding.md", "Finding", "finding"),
+        node("report.md", "Report", "report"),
+        node("paper.md", "Literature", "paper"),
+      ],
+      edges: [
+        link("finding.md", "plan.md"),
+        link("report.md", "finding.md"),
+        link("report.md", "plan.md"),
+        link("finding.md", "paper.md", "cites"),
+        link("report.md", "paper.md", "references"),
+      ],
+    });
     expect(
       chain.edges.map((edge, index) => [edge.from, edge.to, foldedReferences(chain)[index]]),
     ).toEqual([
@@ -359,50 +277,38 @@ describe("research map layout", () => {
     const hypotheses = [...Array(5).keys()].map((index) =>
       node(`h${index}.md`, "Hypothesis", `h${index}`),
     );
-    const decisions = [...Array(4).keys()].map((index) =>
-      node(`d${index}.md`, "Decision", `d${index}`),
+    const observations = [...Array(4).keys()].map((index) =>
+      node(`o${index}.md`, "Observation", `o${index}`),
     );
-    const hub = buildResearchMap(
-      {
-        nodes: [node("plan.md", "Plan", "plan"), ...hypotheses, ...decisions],
-        edges: [...hypotheses, ...decisions].map((doc) => link(doc.relPath, "plan.md")),
-      },
-      { plans: [], roadmaps: [], todos: [], milestones: [], unreadable: [] },
-    );
+    const hub = buildResearchMap({
+      nodes: [node("plan.md", "Plan", "plan"), ...hypotheses, ...observations],
+      edges: [...hypotheses, ...observations].map((doc) => link(doc.relPath, "plan.md")),
+    });
     const folded = foldedReferences(hub);
     expect(hub.edges.filter((_edge, index) => !folded[index]).map((edge) => edge.from)).toEqual(
       hypotheses.map((doc) => doc.relPath),
     );
     // Six or fewer is not a crowd: every arrow stays.
-    const few = buildResearchMap(
-      {
-        nodes: [node("plan.md", "Plan", "plan"), ...hypotheses],
-        edges: hypotheses.map((doc) => link(doc.relPath, "plan.md")),
-      },
-      { plans: [], roadmaps: [], todos: [], milestones: [], unreadable: [] },
-    );
+    const few = buildResearchMap({
+      nodes: [node("plan.md", "Plan", "plan"), ...hypotheses],
+      edges: hypotheses.map((doc) => link(doc.relPath, "plan.md")),
+    });
     expect(foldedReferences(few)).toEqual(hypotheses.map(() => false));
   });
 
   it("does not fold both halves of a circle", () => {
-    const circular = buildResearchMap(
-      {
-        nodes: [node("a.md", "Finding", "a"), node("b.md", "Finding", "b")],
-        edges: [link("a.md", "b.md"), link("b.md", "a.md")],
-      },
-      { plans: [], roadmaps: [], todos: [], milestones: [], unreadable: [] },
-    );
+    const circular = buildResearchMap({
+      nodes: [node("a.md", "Finding", "a"), node("b.md", "Finding", "b")],
+      edges: [link("a.md", "b.md"), link("b.md", "a.md")],
+    });
     expect(foldedReferences(circular)).toEqual([false, false]);
   });
 
   it("terminates when documents refer to each other in a circle", () => {
-    const circular = buildResearchMap(
-      {
-        nodes: [node("a.md", "Finding", "a"), node("b.md", "Finding", "b")],
-        edges: [link("a.md", "b.md"), link("b.md", "a.md")],
-      },
-      { plans: [], roadmaps: [], todos: [], milestones: [], unreadable: [] },
-    );
+    const circular = buildResearchMap({
+      nodes: [node("a.md", "Finding", "a"), node("b.md", "Finding", "b")],
+      edges: [link("a.md", "b.md"), link("b.md", "a.md")],
+    });
     const laid = layoutKnowledgeMap(circular);
     expect(laid.map((entry) => entry.id).sort()).toEqual(["a.md", "b.md"]);
     expect(new Set(laid.map((entry) => entry.x)).size).toBe(2);

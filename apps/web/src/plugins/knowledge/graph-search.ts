@@ -4,16 +4,7 @@ import type { MapNode } from "./research-map";
 export function searchResearchNodes(nodes: readonly MapNode[], query: string): MapNode[] {
   const words = query.normalize("NFKC").toLowerCase().trim().split(/\s+/u).filter(Boolean);
   return nodes.filter((node) => {
-    const text = [
-      node.title,
-      node.cls,
-      node.state,
-      node.status,
-      node.excerpt,
-      node.note,
-      node.host,
-      node.id,
-    ]
+    const text = [node.title, node.cls, node.state, node.excerpt, node.note, node.host, node.id]
       .join(" ")
       .normalize("NFKC")
       .toLowerCase();

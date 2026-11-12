@@ -71,7 +71,7 @@ const parseExperimentView = (raw: string | undefined): ExperimentView | undefine
 };
 
 const parseProjectView = (raw: string | undefined): ProjectView | undefined => {
-  if (raw === "experiments" || raw === "plan" || raw === "assets") return raw;
+  if (raw === "experiments" || raw === "assets") return raw;
   // attention / timeline / settings left the project in L02: their links open the Overview.
   return undefined;
 };
@@ -198,7 +198,7 @@ export const buildSelectionFromLocation = (
   }
 
   const projectViewMatch = pathname.match(
-    /^\/projects\/([^/]+)\/(experiments|assets|plan|attention|timeline|settings)$/,
+    /^\/projects\/([^/]+)\/(experiments|assets|attention|timeline|settings)$/,
   );
   if (projectViewMatch) {
     return {

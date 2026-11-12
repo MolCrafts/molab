@@ -164,10 +164,10 @@ describe("experiment navigation", () => {
 describe("project navigation", () => {
   it("builds and parses route-backed project tabs", () => {
     expect(projectPath("p 1", "assets")).toBe("/projects/p%201/assets");
-    expect(buildSelectionFromLocation("/projects/p%201/plan", new URLSearchParams())).toEqual({
+    expect(buildSelectionFromLocation("/projects/p%201/assets", new URLSearchParams())).toEqual({
       objectType: "project",
       objectId: "p 1",
-      projectView: "plan",
+      projectView: "assets",
     });
   });
 

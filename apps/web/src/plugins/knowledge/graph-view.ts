@@ -89,8 +89,7 @@ export function projectGraphView(map: Pick<ResearchMap, "nodes" | "edges">, view
     const reasons: HiddenReason[] = [];
     if (node.id !== focus?.anchor) {
       if (view.hiddenClasses.includes(node.cls)) reasons.push("type");
-      const state = node.state ?? node.status;
-      if (state && view.hiddenStates[node.cls]?.includes(state)) reasons.push("state");
+      if (node.state && view.hiddenStates[node.cls]?.includes(node.state)) reasons.push("state");
       if (view.hiddenNodes.includes(node.id)) reasons.push("manual");
       if (!scope.has(node.id)) reasons.push("scope");
     }
@@ -112,7 +111,7 @@ export function revealGraphNode(
 ): GraphViewState {
   const reasons = projectGraphView(map, view).hidden.get(node.id) ?? [];
   if (!reasons.length) return view;
-  const state = node.state ?? node.status;
+  const state = node.state;
   return {
     ...view,
     hiddenClasses: view.hiddenClasses.filter((cls) => cls !== node.cls),

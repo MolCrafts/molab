@@ -5,37 +5,25 @@
  * this page" sits on the right and folds under the title on a narrow page.
  */
 
-import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, CircleX, X } from "lucide-react";
 import { type JSX, useMemo, useRef } from "react";
 import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
-import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
 import { EditorActions } from "@/app/shell/editorActions";
 import { useUnsavedEdits } from "@/app/shell/useUnsavedEdits";
 import type { RendererSnapshot } from "@/app/types";
 import { WorkbenchIconAction } from "@/components/workbench";
 import { buildMolabRefIndex } from "@/lib/entity-linkify";
 import { type KnowledgeClass, knowledgeClassOf } from "../knowledgeClass";
-import { knowledgeKeys } from "../queries";
 import { useHostExpansion, useRefExpansion } from "../useKnowledgeEntities";
 import { docHeadings, parseDocBlocks } from "./blocks";
 import { LinksSections } from "./components/Links";
 import { DocContextProvider, type DocContextValue } from "./context";
 import { DocActions } from "./DocActions";
-import { ComponentBlockView } from "./DocBlocks";
 import { DocBody } from "./DocBody";
 import { DocHeader } from "./DocHeader";
 import { DocToc, DocTocDisclosure } from "./DocToc";
 import { useDocDraft } from "./useDocDraft";
-
-/** The component that draws a class's record; drawn first when the body does not place it. */
-const RECORD_COMPONENT: Partial<Record<KnowledgeClass, string>> = {
-  Todo: "molab-todo-list",
-  Roadmap: "molab-stage-track",
-  Milestone: "molab-milestone",
-  Delegation: "molab-approval",
-};
 
 /** The body's leading `# Title` line (it becomes the page title), or null. */
 export const leadingTitle = (body: string): { line: number; text: string } | null => {
@@ -120,7 +108,6 @@ export interface DocPageProps {
 }
 
 export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps): JSX.Element => {
-  const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
   const draft = useDocDraft(note);
   const cls: KnowledgeClass = knowledgeClassOf(summary ?? { cls: "Note" });
@@ -135,7 +122,6 @@ export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps
   );
   const { prev, next } = siblings(notes, note.relPath, hostPath);
   const writable = true;
-  const recordComponent = RECORD_COMPONENT[cls];
 
   const leave = useUnsavedEdits({
     dirty: draft.dirty,
@@ -149,19 +135,11 @@ export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps
     relPath: note.relPath,
     cls,
     hostPath,
-    record: note.record ?? {},
     cards: note.cards ?? [],
     snapshot,
     refIndex,
     writable,
     changeBody: draft.update,
-    saveRecord: async (record) => {
-      const response = await KnowledgeService.replaceDocRecord(note.relPath, { record });
-      queryClient.setQueryData<NoteDetailResponse>(knowledgeKeys.note(note.relPath), (current) =>
-        current ? { ...current, record: response.record ?? record } : current,
-      );
-      void queryClient.invalidateQueries({ queryKey: knowledgeKeys.notes() });
-    },
   };
 
   return (
@@ -215,19 +193,6 @@ export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps
               <div className="@5xl:hidden">
                 <DocTocDisclosure headings={headings} />
               </div>
-              {recordComponent && !draft.body.includes(recordComponent) ? (
-                <ComponentBlockView
-                  block={{
-                    kind: "component",
-                    name: recordComponent,
-                    attrs: {},
-                    syntax: "directive",
-                    start: -1,
-                    end: -1,
-                    source: "",
-                  }}
-                />
-              ) : null}
               <DocBody
                 relPath={note.relPath}
                 body={draft.body}

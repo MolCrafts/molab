@@ -248,11 +248,9 @@
     --knowledge-finding: #2e7d4f;
     --knowledge-observation: #1f7a8c;
     --knowledge-plan: #2f62b5;
-    --knowledge-roadmap: #5a4fb0;
-    --knowledge-todo: #9a7413;
-    --knowledge-milestone: #93408f;
-    --knowledge-delegation: #4b5563;
     --knowledge-tint-share: 5%;
+    --admonition-question: #5a4fb0;
+    --admonition-example: #93408f;
 
     /* Asset kinds (L08). No kind is red. */
     --asset-structure: #0f766e;
@@ -346,11 +344,9 @@
     --knowledge-finding: #7cc79b;
     --knowledge-observation: #6cc3d3;
     --knowledge-plan: #8fb0ec;
-    --knowledge-roadmap: #ada4ee;
-    --knowledge-todo: #e0c06a;
-    --knowledge-milestone: #d99ad5;
-    --knowledge-delegation: #a3acb9;
     --knowledge-tint-share: 7%;
+    --admonition-question: #ada4ee;
+    --admonition-example: #d99ad5;
     --asset-structure: #5cc4b8;
     --asset-table: #7cc77f;
     --asset-model: #b49cf2;
@@ -915,10 +911,6 @@
 .knowledge-doc[data-class="finding"] { --doc-accent: var(--knowledge-finding); }
 .knowledge-doc[data-class="observation"] { --doc-accent: var(--knowledge-observation); }
 .knowledge-doc[data-class="plan"] { --doc-accent: var(--knowledge-plan); }
-.knowledge-doc[data-class="roadmap"] { --doc-accent: var(--knowledge-roadmap); }
-.knowledge-doc[data-class="todo"] { --doc-accent: var(--knowledge-todo); }
-.knowledge-doc[data-class="milestone"] { --doc-accent: var(--knowledge-milestone); }
-.knowledge-doc[data-class="delegation"] { --doc-accent: var(--knowledge-delegation); }
 
 /* Admonition: the type's colour is the icon and the title wash, inside a hairline frame. */
 .doc-admonition {
@@ -936,7 +928,7 @@
 .doc-admonition[data-type="success"],
 .doc-admonition[data-type="check"],
 .doc-admonition[data-type="done"] { --adm: var(--status-completed); }
-.doc-admonition[data-type="question"] { --adm: var(--knowledge-roadmap); }
+.doc-admonition[data-type="question"] { --adm: var(--admonition-question); }
 .doc-admonition[data-type="warning"],
 .doc-admonition[data-type="caution"],
 .doc-admonition[data-type="attention"] { --adm: var(--status-warning); }
@@ -945,7 +937,7 @@
 .doc-admonition[data-type="danger"],
 .doc-admonition[data-type="error"],
 .doc-admonition[data-type="bug"] { --adm: var(--status-failed); }
-.doc-admonition[data-type="example"] { --adm: var(--knowledge-milestone); }
+.doc-admonition[data-type="example"] { --adm: var(--admonition-example); }
 .doc-admonition[data-type="quote"],
 .doc-admonition[data-type="cite"] { --adm: var(--molab-muted-foreground); }
 

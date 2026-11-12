@@ -34,3 +34,4 @@ export namespace KnowledgeGraphEdge {
         MISSING = 'missing',
     }
 }
+

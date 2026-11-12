@@ -131,85 +131,6 @@ for (const [cls, name, excerpt, hostPath] of [
   notes.set(relPath, note);
 }
 
-const thermostat =
-  "projects/nve-drift/experiments/thermostat-validation/knowledges/thermostat-validation.md";
-for (const note of [
-  {
-    cls: "Roadmap",
-    name: "Thermostat roadmap",
-    excerpt: "Bind the workflow, then compare relaxation times.",
-    record: {
-      stages: [
-        { id: "bind", title: "Bind the workflow", experiment: "thermostat-validation" },
-        {
-          id: "compare",
-          title: "Compare relaxation times",
-          experiment: "thermostat-validation",
-          depends_on: ["bind"],
-        },
-      ],
-    },
-  },
-  {
-    cls: "Todo",
-    name: "Thermostat todo",
-    excerpt: "The comparison stays blocked until the workflow is bound.",
-    record: {
-      items: [
-        { id: "bind-workflow", title: "Bind a workflow", status: "open", stage: "bind" },
-        {
-          id: "compare-times",
-          title: "Compare relaxation times",
-          status: "blocked",
-          stage: "compare",
-        },
-      ],
-    },
-  },
-  {
-    cls: "Milestone",
-    name: "Relaxation times compared",
-    excerpt: "The thermostat examples have been compared.",
-    record: {
-      stage: "compare",
-      criterion: "Relaxation times are compared for the thermostat examples.",
-      status: "open",
-    },
-  },
-  {
-    cls: "Delegation",
-    name: "Thermostat check",
-    excerpt: "Check that the thermostat examples stay near 300 K.",
-    record: {
-      goal: "Check that the thermostat examples stay near 300 K.",
-      scope: "projects/nve-drift",
-      state: "open",
-    },
-  },
-] satisfies Array<{
-  cls: string;
-  name: string;
-  excerpt: string;
-  record: Record<string, unknown>;
-}>) {
-  const relPath = documentRelPath(
-    "projects/nve-drift/experiments/thermostat-validation",
-    note.name,
-  );
-  notes.set(relPath, {
-    cls: note.cls,
-    name: note.name,
-    relPath,
-    hostPath: "projects/nve-drift/experiments/thermostat-validation",
-    excerpt: note.excerpt,
-    status: "active",
-    tags: ["example", note.cls.toLowerCase()],
-    body: `# ${note.name}\n\n${note.excerpt}\n\nCites [${thermostat}](${thermostat}).\n`,
-    links: [thermostat],
-    record: note.record,
-  });
-}
-
 // L10: one document stored as HTML — prose in <molab-markdown>, components as elements.
 notes.set("knowledges/integrator-glossary.html", {
   cls: "Note",
@@ -316,11 +237,7 @@ const TEMPLATE_BODIES: Record<string, string> = {
     '!!! abstract "Goal"',
     "    Pick the largest timestep that keeps NVE energy drift below 1·10⁻⁴ eV/atom/ps.",
     "",
-    "## Roadmap",
-    "",
-    "::molab-stage-track",
-    "",
-    "## Next",
+    "## Work items",
     "",
     "- [x] Baseline at 0.5 fs",
     "- [ ] Sweep 0.5 / 1 / 2 fs × two drivers",
@@ -342,53 +259,10 @@ const TEMPLATE_BODIES: Record<string, string> = {
     '!!! quote "§4.2"',
     "    For water with flexible O–H bonds the stable limit is near 1 fs.",
   ].join("\n"),
-  "Thermostat roadmap": [
-    "::molab-stage-track",
-    "",
-    "## Stages",
-    "",
-    "### Bind the workflow",
-    "",
-    "Bind a code workflow and run one smoke test.",
-    "",
-    "### Compare relaxation times",
-    "",
-    '!!! warning "Blocked"',
-    "    Waits for **Bind the workflow**.",
-  ].join("\n"),
-  "Thermostat todo": [
-    "::molab-todo-list",
-    "",
-    "## Notes",
-    "",
-    "Use the same seeds as the integrator benchmark.",
-  ].join("\n"),
-  "Relaxation times compared": [
-    `::molab-milestone{evidence="molab:experiment/exp-nve/run/md-002 molab:experiment/exp-nve/run/md-011"}`,
-    "",
-    "## On the roadmap",
-    "",
-    "Stage 2 of 2 of the thermostat roadmap.",
-  ].join("\n"),
-  "Thermostat check": [
-    '!!! note "Brief"',
-    "    Check that the thermostat examples stay near 300 K at 1 and 2 fs; report any run that drifts more than 5 K.",
-    "",
-    "## Asks",
-    "",
-    "::molab-approval{gate=plan}",
-    "",
-    "## Scope",
-    "",
-    '::molab-params{experiment="Thermostat Validation" may_run_on=hpc-slurm budget="4 GPU-hours"}',
-  ].join("\n"),
 };
 for (const note of notes.values()) {
   const body = TEMPLATE_BODIES[note.name];
   if (body) note.body = body;
-  if (note.cls === "Delegation" && note.record) {
-    note.record = { ...note.record, state: "blocked", questions: ["Run 4 jobs on hpc-slurm?"] };
-  }
 }
 
 const manuscript = getFile("manuscript/main.tex");

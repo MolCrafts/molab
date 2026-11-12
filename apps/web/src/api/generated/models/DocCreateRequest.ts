@@ -36,13 +36,8 @@ export namespace DocCreateRequest {
         REPORT = 'Report',
         FINDING = 'Finding',
         PLAN = 'Plan',
-        ROADMAP = 'Roadmap',
-        TODO = 'Todo',
-        MILESTONE = 'Milestone',
         OBSERVATION = 'Observation',
         HYPOTHESIS = 'Hypothesis',
-        DECISION = 'Decision',
-        DELEGATION = 'Delegation',
     }
 }
 

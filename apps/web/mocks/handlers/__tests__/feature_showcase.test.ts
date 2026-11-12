@@ -112,8 +112,8 @@ describe("feature showcase mock", () => {
       ]),
     );
     expect(graph.edges).toContainEqual({
-      source: lineagePaths.decision,
-      target: lineagePaths.oldDecision,
+      source: lineagePaths.policy,
+      target: lineagePaths.oldPolicy,
       role: "supersedes",
       kind: "document",
     });
@@ -122,16 +122,16 @@ describe("feature showcase mock", () => {
     const detail = await getJson<{
       body: string;
       cards: { relPath?: string; ref?: string; missing?: boolean }[];
-    }>(`/api/knowledge/note?path=${encodeURIComponent(lineagePaths.decision)}`);
+    }>(`/api/knowledge/note?path=${encodeURIComponent(lineagePaths.policy)}`);
     expect(detail.body).toContain("[@supersedes Initial timestep policy]");
     expect(detail.cards.map((card) => card.relPath)).toEqual([
       lineagePaths.finding,
       lineagePaths.counterexample,
-      lineagePaths.oldDecision,
+      lineagePaths.oldPolicy,
     ]);
     expect(detail.cards.some((card) => card.ref?.includes("exp-001"))).toBe(false);
     const backlinks = await getJson<{ backlinks: { relPath: string }[] }>(
-      `/api/knowledge/backlinks?path=${encodeURIComponent(lineagePaths.decision)}`,
+      `/api/knowledge/backlinks?path=${encodeURIComponent(lineagePaths.policy)}`,
     );
     expect(backlinks.backlinks.map((note) => note.relPath)).toEqual([lineagePaths.report]);
     const asset = await getJson<{ backlinks: { path: string; role: string }[] }>(

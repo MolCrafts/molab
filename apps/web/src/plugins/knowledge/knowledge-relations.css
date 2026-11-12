@@ -76,8 +76,6 @@
 }
 .tw-card h2 { font-size: 17px; line-height: 1.3; }
 .tw-now { left: 24px; bottom: 24px; width: 384px; max-height: calc(100% - 140px); overflow: auto; }
-.tw-workspace .tw-now-headline { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; text-align: left; color: var(--tw-ink); }
-.tw-now-headline > span { color: var(--tw-muted); }
 
 .tw-panel { right: 24px; top: 76px; width: 352px; gap: 14px; max-height: calc(100% - 100px); overflow: auto; }
 .tw-panel h2 { font-size: 22px; line-height: 1.25; }
@@ -121,15 +119,11 @@
 .tw-map-question small { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .tw-map-card { width: 224px; height: 104px; border-radius: 18px; }
 .tw-map-card .tw-map-content { padding: 12px 16px; }
-.tw-map-card.is-active { border-color: var(--tw-blue); }
-.tw-map-card.is-blocked { border-color: var(--tw-amber); }
-.tw-map-card.is-open { border-style: dashed; }
-/* The state of the reasoning: a hypothesis under test, settled either way, or left open; a decision made or waiting. */
+/* The state of the reasoning: a hypothesis under test, settled either way, or left open. */
 .tw-map-card.is-hypothesis-open { border-color: var(--tw-blue); }
 .tw-map-card.is-hypothesis-supported { border-color: var(--tw-green); }
 .tw-map-card.is-hypothesis-refuted { border-color: var(--tw-red); }
 .tw-map-card.is-hypothesis-unsettled { border-style: dashed; }
-.tw-map-card.is-decision-open { border-color: var(--tw-amber); }
 .tw-map-node.is-current { border-color: var(--tw-blue); }
 .tw-map-pill { width: 264px; height: 46px; border-radius: 23px; background: var(--tw-bg); }
 .tw-map-pill .tw-map-content { padding: 0 16px 0 14px; }
@@ -141,8 +135,6 @@
 .tw-role-contradicts svg path { stroke: var(--tw-red) !important; }
 .tw-role-supersedes svg path { stroke: var(--tw-amber) !important; stroke-dasharray: 6 5; }
 .tw-role-cites svg path, .tw-role-references svg path, .tw-role-records svg path { stroke: var(--tw-faint) !important; stroke-dasharray: 3 5; }
-.tw-stage-row { align-self: stretch; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; padding: 6px 0; border-top: 1px solid var(--tw-soft); }
-.tw-stage-row > .tw-kv { align-self: stretch; }
 
 /* No conversation composer occupies the bottom edge in Molab. */
 @media (max-width: 900px) {

@@ -1,7 +1,6 @@
 import { runLabel } from "@/app/runs/runTitle";
 import { formatComponent, parseAttrs } from "./doc/blocks";
 import type { KnowledgeClass } from "./knowledgeClass";
-import { isPlanningClass } from "./planningModel";
 
 /**
  * The starting body of each class (L10 v3 templates): the MkDocs blocks and
@@ -78,59 +77,26 @@ export const DOC_SKELETON: Record<KnowledgeClass, string> = {
     "## Builds on",
     "",
   ].join("\n"),
-  Decision: [
-    '!!! note "Decision"',
-    "    What was chosen, as one sentence.",
-    "",
-    "## Decided by",
-    "",
-    "## Why",
-    "",
-    "## Alternatives considered",
-    "",
-  ].join("\n"),
   Plan: [
-    '!!! abstract "Goal"',
-    "    What this plan decides, in one sentence.",
+    '!!! abstract "Question"',
+    "    What this plan asks, in one sentence.",
     "",
-    "## Roadmap",
+    "## Scope",
     "",
-    "::molab-stage-track",
+    "## Constraints",
     "",
-    "## Next",
+    "## Work items",
     "",
     "- [ ] ",
     "",
     "## Builds on",
     "",
   ].join("\n"),
-  Roadmap: ["::molab-stage-track", "", "## Stages", "", "## Cites", ""].join("\n"),
-  Todo: ["::molab-todo-list", "", "## Notes", ""].join("\n"),
-  Milestone: ["::molab-milestone", "", "## Evidence so far", "", "## On the roadmap", ""].join(
-    "\n",
-  ),
-  Delegation: [
-    '!!! note "Brief"',
-    "    What the agent should do, and what it should report.",
-    "",
-    "## Asks",
-    "",
-    "::molab-approval",
-    "",
-    "## Scope",
-    "",
-    "## Activity",
-    "",
-  ].join("\n"),
 };
 
-/**
- * The record a class starts with: a new Hypothesis has no verdict yet, and a
- * Decision written down is one already made.
- */
+/** The record a class starts with: a new Hypothesis has no verdict yet. */
 export const DOC_RECORD: Partial<Record<KnowledgeClass, Record<string, unknown>>> = {
   Hypothesis: { verdict: "open" },
-  Decision: { status: "made" },
 };
 
 export interface SkeletonFacts {
@@ -168,20 +134,12 @@ const SOURCED: ReadonlySet<KnowledgeClass> = new Set([
   "Report",
   "Finding",
   "Plan",
-  "Roadmap",
-  "Todo",
-  "Milestone",
   "Observation",
   "Hypothesis",
-  "Decision",
-  "Delegation",
 ]);
 
+/** A class that names a source run when it is created. */
 export const isSourcedClass = (cls: KnowledgeClass): boolean => SOURCED.has(cls);
-
-/** A sourced class whose source is a run. Planning documents cite a Plan instead. */
-export const citesRun = (cls: KnowledgeClass): boolean =>
-  isSourcedClass(cls) && !isPlanningClass(cls);
 
 export interface HostRun {
   id: string;

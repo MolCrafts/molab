@@ -169,7 +169,7 @@ describe("knowledge change impact", () => {
         doc("reader"),
         doc("leaf"),
         doc("claim", "Hypothesis"),
-        doc("decision", "Decision"),
+        doc("observation", "Observation"),
         doc("unrelated"),
       ],
       edges: [
@@ -177,17 +177,17 @@ describe("knowledge change impact", () => {
         edge("leaf", "report"),
         edge("leaf", "source"),
         edge("reader", "source", Edge.role.CITES),
-        edge("decision", "reader"),
+        edge("observation", "reader"),
         edge("source", "claim", Edge.role.SUPPORTS),
-        edge("decision", "claim"),
+        edge("observation", "claim"),
         edge("source", "leaf"), // cycle cannot return the changed source as its own impact
       ],
     };
     const impact = knowledgeChangeImpact(graph, "source");
     expect(impact.map((entry) => entry.id).sort()).toEqual([
       "claim",
-      "decision",
       "leaf",
+      "observation",
       "reader",
       "report",
     ]);
@@ -204,7 +204,7 @@ describe("knowledge change impact", () => {
       depth: 1,
       reasons: ["citation"],
     });
-    expect(impact.find((entry) => entry.id === "decision")).toMatchObject({
+    expect(impact.find((entry) => entry.id === "observation")).toMatchObject({
       depth: 2,
       reasons: ["citation", "claim"],
     });

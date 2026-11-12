@@ -26,3 +26,4 @@ export namespace DocRelationUpdate {
         REFERENCES = 'references',
     }
 }
+

@@ -451,9 +451,7 @@ export class KnowledgeService {
      * Replace Doc Record
      * Replace a document's structured record whole — 409 when ``ifMatch`` is stale.
      *
-     * Only classes that own a record (Delegation, Roadmap, Todo, Milestone,
-     * Hypothesis, Decision) accept
-     * it (422 otherwise, and for a record the class rejects). The change is
+     * Only classes that own a record (Hypothesis) accept it (422 otherwise, and for a record the class rejects). The change is
      * recorded in the workspace history as ``knowledge.record_replaced``.
      * @param path The document's workspace-relative path (its identity).
      * @param requestBody

@@ -1,4 +1,4 @@
-/** Tack research UI primitives and floating panels, preserved for the Molab map. */
+/** Research map UI primitives and floating panels. */
 import { type ButtonHTMLAttributes, type ReactNode, useMemo, useState } from "react";
 import type { EntityCard } from "@/api/generated/models/EntityCard";
 import type { KnowledgeGraphResponse } from "@/api/generated/models/KnowledgeGraphResponse";
@@ -13,21 +13,9 @@ import { knowledgeChangeImpact } from "./knowledge-audit";
 import type { knowledgeLineage } from "./knowledge-map";
 import { useKnowledgeNoteQuery } from "./queries";
 import workflowIcon from "./research-assets/workflow.svg";
-import type { MapNode, MapStage, ResearchMap } from "./research-map";
+import type { MapNode, ResearchMap } from "./research-map";
 import { useHostExpansion, useRefExpansion } from "./useKnowledgeEntities";
 
-export const stageLabels: Record<string, string> = {
-  done: "Done",
-  blocked: "Needs you",
-  active: "In progress",
-  open: "Not started",
-};
-export const stageTones: Record<string, string> = {
-  done: "green",
-  blocked: "amber",
-  active: "blue",
-  open: "muted",
-};
 const reasoningLabels: Record<string, Record<string, string>> = {
   Hypothesis: {
     open: "Being tested",
@@ -35,11 +23,9 @@ const reasoningLabels: Record<string, Record<string, string>> = {
     refuted: "Refuted",
     unsettled: "Unsettled",
   },
-  Decision: { open: "Needs you", made: "Decided" },
 };
 const reasoningTones: Record<string, Record<string, string>> = {
   Hypothesis: { open: "blue", supported: "green", refuted: "red", unsettled: "muted" },
-  Decision: { open: "amber", made: "ink" },
 };
 export const reasoningLabel = (node: MapNode) =>
   reasoningLabels[node.cls]?.[node.state ?? ""] ?? node.state;
@@ -118,64 +104,6 @@ const Link = ({ children, onClick }: { children: ReactNode; onClick: () => void 
     {children}
   </button>
 );
-
-/** The original status card, without conversation-bound controls. */
-export const NowCard = ({
-  map,
-  onSelect,
-}: {
-  map: ResearchMap;
-  onSelect: (id: string) => void;
-}) => {
-  const [open, setOpen] = useState(false);
-  const done = map.stages.filter((stage) => stage.status === "done").length;
-  const waiting = map.attention.length;
-  return (
-    <Card className="tw-now" label="Current status">
-      <div className="tw-row">
-        <span className="tw-eyebrow">Now</span>
-        <span className="tw-grow" />
-        {map.milestones.total > 0 && (
-          <span className="tw-mono tw-muted">
-            Milestones {map.milestones.met} / {map.milestones.total}
-          </span>
-        )}
-      </div>
-      <button
-        type="button"
-        className="tw-now-headline"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <h2 className="tw-serif">
-          {done} of {map.stages.length} stages done ·{" "}
-          {waiting === 0 ? "nothing waiting" : `${waiting} waiting for you`}
-        </h2>
-        <span aria-hidden="true">{open ? "▾" : "▸"}</span>
-      </button>
-      {open && (
-        <>
-          {map.attention.map((item) => (
-            <div className="tw-kv" key={item.id}>
-              <span className="tw-row">
-                <Dot tone="amber" />
-                {item.title}
-              </span>
-              {item.node && <Link onClick={() => onSelect(item.node ?? "")}>Open ›</Link>}
-            </div>
-          ))}
-          {map.unreadable.length > 0 && (
-            <p className="tw-hint">
-              {map.unreadable.length} planning document{map.unreadable.length === 1 ? "" : "s"}{" "}
-              could not be read and {map.unreadable.length === 1 ? "is" : "are"} missing from this
-              map.
-            </p>
-          )}
-        </>
-      )}
-    </Card>
-  );
-};
 
 const roleLabels: Record<string, string> = {
   derived_from: "Derived from",
@@ -311,36 +239,6 @@ function Links({
   );
 }
 
-function Stages({ stages }: { stages: MapStage[] }) {
-  return (
-    <Section title={`Stages · ${stages.length}`}>
-      {stages.map((stage) => (
-        <div className="tw-stage-row" key={stage.id}>
-          <div className="tw-kv">
-            <span className="tw-row">
-              <Dot tone={stageTones[stage.status]} />
-              <span className="tw-ink">{stage.title || stage.id}</span>
-            </span>
-            <span className={`tw-${stageTones[stage.status]}`}>
-              {stageLabels[stage.status]}
-              {stage.todo.total > 0 && ` · ${stage.todo.done}/${stage.todo.total}`}
-            </span>
-          </div>
-          {stage.dependsOn.length > 0 && (
-            <p className="tw-hint">
-              After{" "}
-              {stage.dependsOn
-                .map((id) => stages.find((entry) => entry.id === id)?.title || id)
-                .join(", ")}
-            </p>
-          )}
-          {stage.experiment && <p className="tw-hint">Runs in experiment {stage.experiment}</p>}
-        </div>
-      ))}
-    </Section>
-  );
-}
-
 /** A preview of one knowledge document: what its record says, the references it makes and receives, and its text. */
 export function DocumentPanel({
   node,
@@ -378,20 +276,11 @@ export function DocumentPanel({
     snapshot,
   );
   const impact = useMemo(() => knowledgeChangeImpact(graph, node.id), [graph, node.id]);
-  const itemTones: Record<string, string> = { done: "green", blocked: "amber", open: "muted" };
-  const stages =
-    node.cls === "Roadmap" ? map.stages.filter((stage) => stage.roadmap === node.id) : [];
-  const closes =
-    node.cls === "Milestone"
-      ? map.stages.find((stage) => stage.milestone?.path === node.id)
-      : undefined;
-  const items =
-    node.cls === "Todo" ? map.stages.flatMap((stage) => stage.items) : (closes?.items ?? []);
   return (
     <Card className="tw-panel tw-panel-wide" label={node.cls}>
       <Head
         tag={node.cls}
-        tone={node.state ? reasoningTone(node) : (stageTones[node.status ?? ""] ?? "ink")}
+        tone={node.state ? reasoningTone(node) : "ink"}
         title={node.title}
         onClose={onClose}
       />
@@ -407,32 +296,7 @@ export function DocumentPanel({
           Hide node
         </Button>
       </div>
-      {node.status && (
-        <p className={`tw-${stageTones[node.status ?? ""]}`}>
-          {stageLabels[node.status]}
-          {node.note && ` · ${node.note}`}
-        </p>
-      )}
       {node.state && <p className={`tw-${reasoningTone(node)}`}>{reasoningLabel(node)}</p>}
-      {closes?.milestone && (
-        <Section title="Closes when">
-          <p>{closes.milestone.criterion}</p>
-        </Section>
-      )}
-      {stages.length > 0 && <Stages stages={stages} />}
-      {items.length > 0 && (
-        <Section title={`Work items · ${items.length}`}>
-          {items.map((item) => (
-            <div className="tw-kv" key={item.id}>
-              <span className="tw-row">
-                <Dot tone={itemTones[item.status] ?? "muted"} />
-                {item.title}
-              </span>
-              <span className={`tw-${itemTones[item.status] ?? "muted"}`}>{item.status}</span>
-            </div>
-          ))}
-        </Section>
-      )}
       {[
         { title: "Origins", entries: lineage.ancestors },
         { title: "Used by", entries: lineage.descendants },

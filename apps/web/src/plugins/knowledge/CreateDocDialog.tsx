@@ -8,28 +8,20 @@ import {
   SelectValue,
   Textarea,
 } from "@molcrafts/ui";
-import { type JSX, useEffect, useMemo, useRef, useState } from "react";
+import { type JSX, useEffect, useRef, useState } from "react";
 import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
 import { DocSource } from "@/api/generated/models/DocSource";
 import { ChoiceToggle } from "@/app/components/entity";
 import { AppDialog } from "@/components/dialog/AppDialog";
 import {
-  citesRun,
   DOC_RECORD,
   DOC_SKELETON,
   fillSkeleton,
   type HostRun,
+  isSourcedClass,
   toHtmlBody,
 } from "./docTemplates";
-import { KNOWLEDGE_CLASSES, type KnowledgeClass, knowledgeClassOf } from "./knowledgeClass";
-import { PlanningFields } from "./PlanningFields";
-import {
-  buildPlanningRecord,
-  emptyPlanningDraft,
-  isPlanningClass,
-  type PlanningDraft,
-} from "./planningModel";
-import { useKnowledgeListQuery } from "./queries";
+import { KNOWLEDGE_CLASSES, type KnowledgeClass } from "./knowledgeClass";
 
 export type DocFormat = "md" | "html";
 
@@ -50,7 +42,7 @@ export interface CreateDocInput {
 }
 
 /** The field a validation message belongs under. */
-type ErrorField = "name" | "source" | "plan" | "delegation" | "year";
+type ErrorField = "name" | "source" | "year";
 
 interface FieldErrorState {
   field: ErrorField;
@@ -85,20 +77,11 @@ export const CreateDocDialog = ({
   onOpenChange: (open: boolean) => void;
   onSubmit: (input: CreateDocInput) => Promise<void>;
 }): JSX.Element => {
-  const listQuery = useKnowledgeListQuery();
-  const plans = useMemo(
-    () => (listQuery.data?.notes ?? []).filter((note) => knowledgeClassOf(note) === "Plan"),
-    [listQuery.data],
-  );
   const [cls, setCls] = useState<KnowledgeClass>("Note");
   const [name, setName] = useState("");
   const [format, setFormat] = useState<DocFormat>("md");
   const [body, setBody] = useState("");
   const [sourceRef, setSourceRef] = useState("");
-  const [planRef, setPlanRef] = useState("");
-  const [draft, setDraft] = useState<PlanningDraft>(emptyPlanningDraft);
-  const [goal, setGoal] = useState("");
-  const [scope, setScope] = useState("");
   const [title, setTitle] = useState("");
   const [authors, setAuthors] = useState("");
   const [year, setYear] = useState("");
@@ -117,10 +100,6 @@ export const CreateDocDialog = ({
     setName("");
     setBody("");
     setSourceRef(list[0]?.ref ?? "");
-    setPlanRef("");
-    setDraft(emptyPlanningDraft());
-    setGoal("");
-    setScope("");
     setTitle("");
     setAuthors("");
     setYear("");
@@ -130,15 +109,7 @@ export const CreateDocDialog = ({
     setLocalError(null);
   }, [open]);
 
-  useEffect(() => {
-    if (!open || planRef || plans.length === 0) return;
-    setPlanRef(plans[0]?.relPath ?? "");
-  }, [open, planRef, plans]);
-
-  const runSourced = citesRun(cls);
-  const planning = isPlanningClass(cls);
-  const plansLoading = planning && listQuery.isPending;
-  const planMissing = planning && !plansLoading && plans.length === 0;
+  const runSourced = isSourcedClass(cls);
 
   const submit = async (): Promise<void> => {
     const trimmed = name.trim();
@@ -150,28 +121,7 @@ export const CreateDocDialog = ({
       setLocalError({ field: "source", message: "Choose a run this document records." });
       return;
     }
-    if (planning && !planRef) {
-      setLocalError({ field: "plan", message: "Choose the Plan this document cites." });
-      return;
-    }
-    let record: Record<string, unknown> | undefined = DOC_RECORD[cls];
-    if (planning) {
-      const built = buildPlanningRecord(cls, draft);
-      if (!built.ok) {
-        setLocalError({ field: "plan", message: built.message });
-        return;
-      }
-      record = built.record;
-    }
-    if (cls === "Delegation") {
-      const goalText = goal.trim();
-      const scopeText = scope.trim();
-      if (!goalText || !scopeText) {
-        setLocalError({ field: "delegation", message: "A delegation needs a goal and a scope." });
-        return;
-      }
-      record = { goal: goalText, scope: scopeText };
-    }
+    const record = DOC_RECORD[cls];
     const yearNumber = year.trim() ? Number(year) : undefined;
     if (year.trim() && !Number.isInteger(yearNumber)) {
       setLocalError({ field: "year", message: "Year must be a whole number." });
@@ -202,7 +152,6 @@ export const CreateDocDialog = ({
       format,
       body: format === "html" ? toHtmlBody(filled) : filled,
       ...(runSourced ? { sources: [{ kind: DocSource.kind.RUN, ref: sourceRef }] } : {}),
-      ...(planning ? { sources: [{ kind: DocSource.kind.FILE, ref: planRef }] } : {}),
       ...(record ? { record } : {}),
       ...(cls === "Literature"
         ? {
@@ -228,7 +177,7 @@ export const CreateDocDialog = ({
       primaryLabel="Create document"
       busyLabel="Creating…"
       busy={busy}
-      primaryDisabled={(runSourced && runs.length === 0) || planMissing}
+      primaryDisabled={runSourced && runs.length === 0}
       onPrimary={submit}
       error={error}
     >
@@ -299,52 +248,6 @@ export const CreateDocDialog = ({
               </Select>
             )}
             <FieldError error={localError} field="source" />
-          </div>
-        )}
-        {isPlanningClass(cls) && (
-          <div className="grid gap-2">
-            <Label htmlFor="doc-plan">Plan</Label>
-            {plansLoading ? (
-              <p className="text-label text-muted-foreground">Loading plans…</p>
-            ) : planMissing ? (
-              <p className="text-label text-muted-foreground">
-                Write a Plan first. A roadmap, todo, or milestone cites one.
-              </p>
-            ) : (
-              <Select value={planRef} onValueChange={setPlanRef}>
-                <SelectTrigger id="doc-plan">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {plans.map((plan) => (
-                    <SelectItem key={plan.relPath} value={plan.relPath}>
-                      {plan.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            <PlanningFields cls={cls} draft={draft} disabled={busy} onChange={setDraft} />
-            <FieldError error={localError} field="plan" />
-          </div>
-        )}
-        {cls === "Delegation" && (
-          <div className="grid gap-2">
-            <Label htmlFor="doc-goal">Goal</Label>
-            <Input
-              id="doc-goal"
-              value={goal}
-              disabled={busy}
-              onChange={(event) => setGoal(event.target.value)}
-            />
-            <Label htmlFor="doc-scope">Scope</Label>
-            <Input
-              id="doc-scope"
-              value={scope}
-              disabled={busy}
-              onChange={(event) => setScope(event.target.value)}
-            />
-            <FieldError error={localError} field="delegation" />
           </div>
         )}
         {cls === "Literature" && (

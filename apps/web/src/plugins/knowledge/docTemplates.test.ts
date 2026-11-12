@@ -13,14 +13,10 @@ describe("DOC_SKELETON", () => {
   it("starts each class from its v3 template and leaves Note empty", () => {
     expect(DOC_SKELETON.Note).toBe("");
     expect(DOC_SKELETON.Finding).toContain('!!! success "Claim"');
-    expect(DOC_SKELETON.Todo).toContain("::molab-todo-list");
-    expect(DOC_SKELETON.Delegation).toContain("::molab-approval");
+    expect(DOC_SKELETON.Plan).toContain("## Work items");
     expect(DOC_SKELETON.Hypothesis).toContain('!!! question "Claim"');
-    expect(DOC_SKELETON.Decision).toContain("## Decided by");
     expect(DOC_RECORD.Hypothesis).toEqual({ verdict: "open" });
-    expect(DOC_RECORD.Decision).toEqual({ status: "made" });
     expect(isSourcedClass("Hypothesis")).toBe(true);
-    expect(isSourcedClass("Decision")).toBe(true);
     expect(Object.values(DOC_SKELETON).some((body) => /^# /m.test(body))).toBe(false);
     expect(isSourcedClass("Finding")).toBe(true);
     expect(isSourcedClass("Note")).toBe(false);

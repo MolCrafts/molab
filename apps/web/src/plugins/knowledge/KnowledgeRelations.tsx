@@ -1,4 +1,4 @@
-/** Tack's research map, hosted in a Molab project editor tab without its conversation. */
+/** The research map of a project, hosted in a Molab project editor tab. */
 import {
   EditorRenderer,
   FreeLayoutEditorProvider,
@@ -57,11 +57,8 @@ import {
   DocumentPanel,
   Dot,
   Empty,
-  NowCard,
   reasoningLabel,
   reasoningTone,
-  stageLabels,
-  stageTones,
   Tag,
 } from "./research-ui";
 import "./research-fonts.css";
@@ -122,18 +119,10 @@ const Body = ({ shape, data }: { shape: string; data: MapNode }) => {
     return (
       <>
         <div className="tw-row">
-          <Tag tone={stageTones[data.status ?? ""] ?? "muted"}>{data.cls}</Tag>
+          <Tag tone="muted">{data.cls}</Tag>
         </div>
         <strong>{data.title}</strong>
-        <small>
-          {data.status && (
-            <span className={`tw-${stageTones[data.status]}`}>
-              {stageLabels[data.status]}
-              {data.note && " · "}
-            </span>
-          )}
-          {data.note}
-        </small>
+        <small>{data.note}</small>
       </>
     );
   return (
@@ -153,7 +142,7 @@ const RelationNode = ({ node }: WorkflowNodeProps) => {
     <ContextMenu>
       <WorkflowNodeRenderer
         node={node}
-        className={`tw-map-node tw-map-${shape} ${data.status ? `is-${data.status}` : ""} ${data.state ? `is-${data.cls.toLowerCase()}-${data.state}` : ""} ${selected === node.id ? "is-selected" : ""} ${visible(node.id) ? "" : "is-hidden"}`}
+        className={`tw-map-node tw-map-${shape} ${data.state ? `is-${data.cls.toLowerCase()}-${data.state}` : ""} ${selected === node.id ? "is-selected" : ""} ${visible(node.id) ? "" : "is-hidden"}`}
         portClassName="tw-map-port"
       >
         <ContextMenuTrigger asChild>
@@ -275,14 +264,10 @@ const MapView = ({
     );
     return auditGraph.nodes.filter((node) => {
       const cls = knowledgeClassOf(node);
-      return (
-        ["Finding", "Roadmap", "Todo", "Milestone"].includes(cls) ||
-        cls in STATEFUL ||
-        entitySources.has(node.relPath)
-      );
+      return cls === "Finding" || cls in STATEFUL || entitySources.has(node.relPath);
     });
   }, [auditGraph]);
-  // Reuse cached planning records, and resolve Finding/entity source cards only on audit demand.
+  // Reuse cached records, and resolve Finding/entity source cards only on audit demand.
   const auditDetails = useQueries({
     queries: auditNodes.map((node) => ({
       ...knowledgeNoteQueryOptions(node.relPath),
@@ -335,13 +320,7 @@ const MapView = ({
   const editor = useRef<FreeLayoutPluginContext | null>(null);
   const built = useMemo(() => toResearchGraph(map), [map]);
   const shape = JSON.stringify([
-    built.graph.nodes.map((node) => [
-      node.id,
-      node.type,
-      node.meta.position,
-      node.data.status,
-      node.data.state,
-    ]),
+    built.graph.nodes.map((node) => [node.id, node.type, node.meta.position, node.data.state]),
     built.graph.edges,
     [...built.roles],
   ]);
@@ -477,9 +456,6 @@ const MapView = ({
             onClose={() => setAuditOpen(false)}
           />
         )}
-        {!auditOpen && !node && !view.focus && projection.visible.size > 0 && (
-          <NowCard map={map} onSelect={select} />
-        )}
         {!auditOpen && node && (
           <DocumentPanel
             key={node.id}
@@ -560,13 +536,7 @@ export const KnowledgeRelations = ({ selection: target, snapshot }: RendererProp
     () => projectKnowledgeMap(graph.data ?? { nodes: [], edges: [] }, project?.path ?? ""),
     [graph.data, project?.path],
   );
-  const heads = useMemo(
-    () =>
-      scoped.nodes.filter(
-        (node) => ["Roadmap", "Todo", "Milestone"].includes(node.cls) || node.cls in STATEFUL,
-      ),
-    [scoped],
-  );
+  const heads = useMemo(() => scoped.nodes.filter((node) => node.cls in STATEFUL), [scoped]);
   const details = useQueries({ queries: heads.map((node) => knowledgeNoteQueryOptions(node.id)) });
   const records = Object.fromEntries(
     heads.flatMap((node, index) =>
@@ -587,14 +557,10 @@ export const KnowledgeRelations = ({ selection: target, snapshot }: RendererProp
       ),
     };
   }, [scoped, graph.data]);
-  const unreadable = heads.flatMap((node, index) =>
-    details[index]?.error ? [{ path: node.id, error: String(details[index].error) }] : [],
-  );
   const map = projectResearchMap(
     graph.data ?? { nodes: [], edges: [] },
     project?.path ?? "",
     records,
-    unreadable,
   );
   const pending = graph.isPending || details.some((detail) => detail.isPending);
   return (
@@ -612,7 +578,7 @@ export const KnowledgeRelations = ({ selection: target, snapshot }: RendererProp
             </Empty>
           ) : map.nodes.length === 0 ? (
             <Empty title="No research map yet">
-              This project has no Plan, Roadmap, Finding or other research document.
+              This project has no Plan, Finding or other research document.
             </Empty>
           ) : (
             <MapView

@@ -7,7 +7,6 @@ export { CancelablePromise, CancelError } from './core/CancelablePromise';
 export { OpenAPI } from './core/OpenAPI';
 export type { OpenAPIConfig } from './core/OpenAPI';
 
-export { AgentRef } from './models/AgentRef';
 export type { AssetImportRequest } from './models/AssetImportRequest';
 export type { AssetRefResponse } from './models/AssetRefResponse';
 export type { AuthStatusResponse } from './models/AuthStatusResponse';
@@ -91,8 +90,6 @@ export type { ProjectCreateRequest } from './models/ProjectCreateRequest';
 export type { ProjectRefResponse } from './models/ProjectRefResponse';
 export type { ProjectResponse } from './models/ProjectResponse';
 export type { ReferenceSummary } from './models/ReferenceSummary';
-export { ReplayEvent } from './models/ReplayEvent';
-export type { ReplayPage } from './models/ReplayPage';
 export type { RunCreateRequest } from './models/RunCreateRequest';
 export type { RunExecutionResponse } from './models/RunExecutionResponse';
 export type { RunFileNode } from './models/RunFileNode';

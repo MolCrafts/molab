@@ -1,8 +1,7 @@
 import type { KnowledgeGraphResponse } from "@/api/generated/models/KnowledgeGraphResponse";
 import { knowledgeClassOf } from "./knowledgeClass";
 import { foldedReferences, layoutKnowledgeMap } from "./map-layout";
-import { planningView } from "./planningModel";
-import { buildResearchMap, type Campaign, type ResearchMap } from "./research-map";
+import { buildResearchMap, type ResearchMap } from "./research-map";
 
 /** A project's context includes its own documents and the connected workspace
  * knowledge they rely on (in either direction). Never cross into another
@@ -62,49 +61,23 @@ export const projectKnowledgeMap = (graph: KnowledgeGraphResponse, projectPath: 
   return { nodes, edges };
 };
 
-/** Adapt Molab's cached planning records to the original Tack map model.
+/** The research map of one project, with the records of its stateful documents.
  * References leaving this project stay with their document, never disappear. */
 export const projectResearchMap = (
   graph: KnowledgeGraphResponse,
   projectPath: string,
   records: Readonly<Record<string, Record<string, unknown>>>,
-  unreadable: Campaign["unreadable"] = [],
 ): ResearchMap => {
   const scope = projectKnowledgeMap(graph, projectPath);
   const ids = new Set(scope.nodes.map((node) => node.id));
-  const campaign: Campaign = {
-    plans: [],
-    roadmaps: [],
-    todos: [],
-    milestones: [],
-    unreadable: [...unreadable],
-  };
-  for (const node of scope.nodes) {
-    if (node.cls === "Plan") campaign.plans.push({ path: node.id, excerpt: node.excerpt });
-    const view = planningView(node.cls, records[node.id]);
-    if (view?.kind === "roadmap")
-      campaign.roadmaps.push({
-        path: node.id,
-        stages: view.stages.map((stage) => ({ ...stage, depends_on: stage.dependsOn })),
-      });
-    if (view?.kind === "todo") campaign.todos.push({ path: node.id, items: view.items });
-    if (view?.kind === "milestone")
-      campaign.milestones.push({
-        path: node.id,
-        stage: view.stage,
-        status: view.status,
-        criterion: view.criterion,
-      });
-  }
   return buildResearchMap(
     { nodes: scope.nodes, edges: graph.edges.filter((edge) => ids.has(edge.source)) },
-    campaign,
     records,
     new Set(scope.nodes.map((node) => node.cls)),
   );
 };
 
-/** Tack's graph conversion retains roles and neighbours. A single FlowGram
+/** The graph conversion retains roles and neighbours. A single FlowGram
  * line per pair carries all the pair's roles; no reference is dropped. */
 export const toResearchGraph = (map: ResearchMap) => {
   const placed = new Map(layoutKnowledgeMap(map).map((node) => [node.id, node]));

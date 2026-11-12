@@ -11,12 +11,9 @@ export const lineagePaths = {
   literature: `${project}/knowledges/integrator-reference.md`,
   hypothesis: `${benchmark}/knowledges/timestep-hypothesis.md`,
   counterexample: `${benchmark}/knowledges/coarse-timestep-drift.md`,
-  oldDecision: `${project}/knowledges/initial-timestep-policy.md`,
-  decision: `${project}/knowledges/revised-timestep-policy.md`,
+  oldPolicy: `${project}/knowledges/initial-timestep-policy.md`,
+  policy: `${project}/knowledges/revised-timestep-policy.md`,
   report: `${project}/knowledges/timestep-review.md`,
-  roadmap: `${thermostat}/knowledges/thermostat-roadmap.md`,
-  todo: `${thermostat}/knowledges/thermostat-todo.md`,
-  milestone: `${thermostat}/knowledges/relaxation-times-compared.md`,
 };
 export const lineageNotes = [
   {
@@ -46,21 +43,21 @@ export const lineageNotes = [
     record: {},
   },
   {
-    cls: "Decision",
+    cls: "Plan",
     name: "Initial timestep policy",
-    relPath: lineagePaths.oldDecision,
+    relPath: lineagePaths.oldPolicy,
     hostPath: project,
     excerpt: "Initial example policy: use 2 fs pending validation. Kept for revision history.",
-    record: { status: "made" },
+    record: {},
   },
   {
-    cls: "Decision",
+    cls: "Plan",
     name: "Revised timestep policy",
-    relPath: lineagePaths.decision,
+    relPath: lineagePaths.policy,
     hostPath: project,
     excerpt:
       "Use 0.5 fs in the example benchmark; replaces the initial policy after reviewing both findings.",
-    record: { status: "made" },
+    record: {},
   },
   {
     cls: "Report",
@@ -103,16 +100,16 @@ export const lineageLinks: Record<string, { target: string; role: EmbedRole; lab
     { target: lineagePaths.observation, role: "derived_from", label: "Temperature observation" },
     { target: lineagePaths.hypothesis, role: "contradicts", label: "Coarse-step counterexample" },
   ],
-  [lineagePaths.oldDecision]: [
+  [lineagePaths.oldPolicy]: [
     { target: lineagePaths.hypothesis, role: "derived_from", label: "Initial assumption" },
   ],
-  [lineagePaths.decision]: [
+  [lineagePaths.policy]: [
     { target: lineagePaths.finding, role: "derived_from", label: "Low-step finding" },
     { target: lineagePaths.counterexample, role: "derived_from", label: "Coarse-step finding" },
-    { target: lineagePaths.oldDecision, role: "supersedes", label: "Initial timestep policy" },
+    { target: lineagePaths.oldPolicy, role: "supersedes", label: "Initial timestep policy" },
   ],
   [lineagePaths.report]: [
-    { target: lineagePaths.decision, role: "derived_from", label: "Revised policy" },
+    { target: lineagePaths.policy, role: "derived_from", label: "Revised policy" },
     { target: lineagePaths.literature, role: "cites", label: "Integrator reference" },
     {
       target: "knowledges/molecular-simulation-methods.md",
@@ -124,12 +121,5 @@ export const lineageLinks: Record<string, { target: string; role: EmbedRole; lab
       role: "references",
       label: "Missing calibration note",
     },
-  ],
-  [lineagePaths.roadmap]: [
-    { target: lineagePaths.plan, role: "derived_from", label: "Validation plan" },
-  ],
-  [lineagePaths.todo]: [{ target: lineagePaths.roadmap, role: "derived_from", label: "Roadmap" }],
-  [lineagePaths.milestone]: [
-    { target: lineagePaths.report, role: "derived_from", label: "Review evidence" },
   ],
 };
