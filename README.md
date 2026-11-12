@@ -27,7 +27,7 @@ molab turns a Python script of typed tasks into a tracked, reproducible experime
 In the web UI, knowledge files are browsed under **Workspace → Project →
 Experiment**. Select a project in the explorer to open its Relations editor tab;
 **Relations** previews that project's documents plus their connected workspace
-knowledge (plans, decisions, hypotheses and references), while retaining
+knowledge (plans, hypotheses and references), while retaining
 the file browser. The Files explorer also offers **Open Relations**, and a
 project page has a **Relations** action. Select a document in the relation map
 for its excerpt and references; open the document to return to its page.
@@ -40,7 +40,7 @@ with shortest-path step counts; only `derived_from` and `supersedes` imply
 provenance, while evidence and citations retain their separate roles. The
 **Show lineage** action on a project research document opens its Relations tab
 with that document selected. The offline NVE showcase includes a synthetic
-plan → observation → findings → revised decision → report chain, conflicting
+plan → observation → findings → report chain, conflicting
 evidence, an external citation, an asset/run source and a missing reference. Tack's execution controls and its
 existing research entry point remain in Tack.
 

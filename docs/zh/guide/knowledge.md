@@ -78,29 +78,23 @@ frontmatter 标出是哪一个：
 
 | 类 | 它回答的唯一问题 | 记录（frontmatter） | 绝不包含 |
 |---|---|---|---|
-| `Plan` | 我们在问什么，范围多大，受哪些约束？ | 无 | 阶段、工作项、判据、待检验的断言（那些是 Hypothesis） |
+| `Plan` | 我们在问什么，范围多大，受哪些约束？ | 无；工作项写在正文里 | 待检验的断言（那些是 Hypothesis） |
 | `Hypothesis` | 我们断言什么会成立？ | `verdict`：`open` \| `supported` \| `refuted` \| `unsettled`（默认 `open`） | 证据本身（那是 Finding） |
-| `Roadmap` | 工作按什么顺序做？ | `stages` | 工作项、判据、状态 |
-| `Todo` | 还剩哪些工作？ | `items` | 阶段、判据 |
-| `Milestone` | 一个阶段何时算关闭？ | `stage`、`criterion`、`status`（`open` \| `met` \| `missed`） | 阶段、工作项 |
-| `Observation` | 在做任何解释之前，观察到了什么、给定了什么？ | 无 | 选择（Decision）、结论（Finding） |
-| `Decision` | 选了什么，谁选的，为什么？ | `status`：`open` \| `made`（默认 `made`） | 观察到的事实、结果 |
+| `Observation` | 在做任何解释之前，观察到了什么、给定了什么？ | 无 | 结论（Finding） |
 | `Finding` | 证据确立了什么？ | 无 | 选择、计划 |
 | `Report` | 我们要告诉读者什么？它只做汇编，不提出新的断言。 | 无 | 别处没有陈述过的结果 |
 | `Literature` | 一份已发表的文献说了什么？ | 书目字段；PDF 只记路径，从不拷贝 | |
-| `Delegation` | 哪项受监督的工作正在进行？（操作性的） | 委托记录：作用域、目标、授权动作、预算与消耗、验收与停止条件、等待、worker 尝试 | |
 | `Note` | 以上都不是：对推理不作任何断言的自由文本。 | 无 | |
 
-长期有效的选择是 `Decision`，不是 `Observation`。`Report` 由它的目的（告诉读者）界定，
-而不是由篇幅界定：一个结果写得再长，也仍然是 `Finding`。
+`Report` 由它的目的（告诉读者）界定，而不是由篇幅界定：一个结果写得再长，也仍然是 `Finding`。
 
-`verdict` 或 `status` 的取值超出词表时，写入会被拒绝，`molab validate` 也会报告
+`verdict` 的取值超出词表时，写入会被拒绝，`molab validate` 也会报告
 （`knowledge.record`）；它绝不会被默认值悄悄替换。
 
 除 `Note` 与 `Literature` 之外，每个类在构造时都至少需要一个 `SourceRef` —— 它们是有出处
 的文档。
 
-Plan、Roadmap、Todo、Milestone 是一次战役的四份文档，各自只做一件事。Plan 不列阶段。Roadmap 不列工作项。Todo 不定义阶段顺序。Milestone 不列具体工作。后三份引用 Plan。`campaign_of(plan)` 读回这一组；`check_campaign` 检查每条 todo 和 milestone 点名的阶段确实在路线图上。
+`Plan` 是唯一的计划文档。它的工作项写在叙事正文里；它要检验的断言是 `Hypothesis` 文档。
 
 ### 控制流在链接和记录里
 
@@ -112,7 +106,6 @@ Plan、Roadmap、Todo、Milestone 是一次战役的四份文档，各自只做�
 | 支持或反对的证据 | 从 `Finding` 指向 `Hypothesis`、角色为 `supports` 或 `contradicts` 的链接 |
 | 通过 / 无法判断 | `verdict: unsettled` |
 | 迭代 | 一份新文档，用 `supersedes` 取代它所修订的那份 |
-| 决策点 | 一份 `Decision`；`status: open` 表示它在等人来定 |
 | 依赖 | `derived_from` |
 | 提及 | `cites`（文献来源）、`references`（其他任何对象）、`records` |
 

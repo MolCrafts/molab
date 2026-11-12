@@ -82,35 +82,26 @@ author. Every class lands one file; the `class:` frontmatter names which one:
 
 | Class | The one question it answers | Record (frontmatter) | Never contains |
 |---|---|---|---|
-| `Plan` | What are we asking, in what scope, under what constraints? | none | stages, work items, criteria, the claims to test (those are Hypotheses) |
+| `Plan` | What are we asking, in what scope, under what constraints? | none; its work items live in its body | the claims to test (those are Hypotheses) |
 | `Hypothesis` | What do we claim will turn out to be true? | `verdict`: `open` \| `supported` \| `refuted` \| `unsettled` (default `open`) | the evidence itself (that is a Finding) |
-| `Roadmap` | In what order is the work done? | `stages` | items, criteria, status |
-| `Todo` | What work remains? | `items` | stages, criteria |
-| `Milestone` | When is a stage closed? | `stage`, `criterion`, `status` (`open` \| `met` \| `missed`) | stages, items |
-| `Observation` | What was observed or given, before any interpretation? | none | a choice (Decision), a conclusion (Finding) |
-| `Decision` | What was chosen, by whom, and why? | `status`: `open` \| `made` (default `made`) | an observed fact, a result |
+| `Observation` | What was observed or given, before any interpretation? | none | a conclusion (Finding) |
 | `Finding` | What does the evidence establish? | none | a choice, a plan |
 | `Report` | What do we tell readers? It compiles; it claims nothing new. | none | a result stated nowhere else |
 | `Literature` | What does a published source say? | bibliographic fields; PDFs pointed at, never copied | |
-| `Delegation` | What supervised work is under way? (operational) | the delegation record: scope, goal, authorized actions, budget and spend, acceptance and stop conditions, waits, worker attempts | |
 | `Note` | None of the above: free text with no claim on the reasoning. | none | |
 
-A standing choice is a `Decision`, not an `Observation`. A `Report` is defined
-by its purpose (telling readers), not by its length: a result written up at
-length is still a `Finding`.
+A `Report` is defined by its purpose (telling readers), not by its length: a
+result written up at length is still a `Finding`.
 
-A `verdict` or `status` outside its vocabulary is refused on write and
+A `verdict` outside its vocabulary is refused on write and
 reported by `molab validate` (`knowledge.record`); it is never replaced by the
 default.
 
 Every class but `Note` and `Literature` requires at least one `SourceRef` at
 construction — they are sourced documents.
 
-Plan, Roadmap, Todo, and Milestone are one campaign and four jobs. A Plan does
-not list stages. A Roadmap does not list work items. A Todo does not define the
-stage order. A Milestone does not list the work. Roadmap, Todo, and Milestone
-cite the Plan. `campaign_of(plan)` reads that set; `check_campaign` checks that
-every todo and milestone names a stage the roadmap has.
+A `Plan` is the one planning document. Its work items live in its narrative
+body; the claims it sets out to test are `Hypothesis` documents.
 
 ### Control flow lives in the links and the records
 
@@ -123,7 +114,6 @@ links and the record fields:
 | evidence for or against | a link with role `supports` or `contradicts`, from a `Finding` to a `Hypothesis` |
 | pass / cannot tell | `verdict: unsettled` |
 | iteration | a new document that `supersedes` the one it revises |
-| decision point | a `Decision`; `status: open` means it waits for a person |
 | dependency | `derived_from` |
 | mention | `cites` (a source), `references` (anything else), `records` |
 
@@ -287,23 +277,12 @@ A knowledge document is `<host>/knowledges/<slug>.md`. Old directory layouts and
 - For the concrete Python API around records and assets, see [Workspace API](workspace-api.md).
 - For reusable data and provenance, see [Assets and Reproducibility](../concept/assets-and-reproducibility.md).
 
-## Delegations and structured records
+## Structured records
 
-A `Delegation` is the record a supervising agent (for example Tack) keeps for one
-piece of work. Its frontmatter is validated by
-`molab.knowledge.delegation.DelegationRecord`: `kind`, `goal`, `scope` (a
-`molab:` ref), `actions` (a closed set: `read`, `create_experiment`,
-`create_run`, `start_execution`, `cancel_execution`, `write_knowledge`,
-`delegate_worker`), `budget` / `spent`, `acceptance`, `stop_conditions`,
-`state` (`open` / `waiting` / `blocked` / `paused` / `done` / `stopped`),
-`waits`, `attempts`, `supervisor`, `current_plan`, `questions`, `amendments`,
-`writes`, `last_decision`, `answers` and `approvals` (what a person approved
-at each human gate — `parameters`, `plan`, `dry_run` or `results` — and the
-knowledge path, experiment path or `molab:` ref it is about). Its source is
-the scope it is bound to.
-
-A document whose class owns a record (Delegation, Roadmap, Todo, Milestone,
-Hypothesis, Decision) can have that record replaced whole over HTTP:
+A `Hypothesis` is the one class whose structured record, its `verdict`, is
+validated on write (`molab knowledge write --record` and the route below). A
+`Literature` record holds its bibliographic fields. A Hypothesis record can be
+replaced whole over HTTP:
 
 - `GET /api/knowledge/doc/record?path=…` returns `{record, digest}`.
 - `PATCH /api/knowledge/doc/record?path=…` with `{record, ifMatch, body?}`
