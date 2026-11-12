@@ -328,7 +328,6 @@ def knowledge_search(
     from rich import print as _rich_print
     from rich.table import Table
 
-    from molab.knowledge import Knowledge
     from molab.knowledge.concepts import _product
     from molab.knowledge.sources import KnowledgeSourceStore
 
@@ -346,11 +345,6 @@ def knowledge_search(
         limit=limit,
         of=cls,
         tag=tag,
-        workspace_searcher=(
-            (lambda: Knowledge(ws_root).search(query, of=cls, tag=tag, limit=limit))
-            if ws_root is not None
-            else None
-        ),
     )
     if not hits:
         rprint(f"[dim]No knowledge matches for {query!r}.[/dim]")

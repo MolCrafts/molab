@@ -847,27 +847,18 @@ def search_knowledge(
     disk. Registered sources are fused by :meth:`KnowledgeSourceStore.search`,
     which is the same function the CLI calls.
     """
-    from molab.knowledge import Knowledge
     from molab.knowledge.concepts import _product
     from molab.knowledge.sources import KnowledgeSourceStore
 
-    of = _product(cls) if cls else None
-    truncated = False
-
-    def workspace_searcher():  # noqa: ANN202
-        nonlocal truncated
-        result = Knowledge(workspace.root, fs=workspace.fs).search(q, of=of, tag=tag)
-        truncated = result.truncated
-        return result
-
+    limit = 50
     hits = KnowledgeSourceStore(workspace.root).search(
         q,
         workspace_root=workspace.root,
         include_workspace=True,
         tag=tag,
-        of=of,
-        limit=50,
-        workspace_searcher=workspace_searcher,
+        of=_product(cls) if cls else None,
+        limit=limit,
+        fs=workspace.fs,
     )
     return KnowledgeSearchResponse(
         hits=[
@@ -881,7 +872,7 @@ def search_knowledge(
             )
             for hit in hits
         ],
-        truncated=truncated or len(hits) >= 50,
+        truncated=len(hits) >= limit,
     )
 
 

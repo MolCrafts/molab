@@ -179,14 +179,6 @@ class TestListKnowledge:
 
 
 class TestSearchKnowledge:
-    def test_search_calls_knowledge_search(self) -> None:
-        src = inspect.getsource(knowledge_routes.search_knowledge)
-        assert "Knowledge(" in src
-        assert ".search(" in src
-        assert "KnowledgeSourceStore" in src
-        assert ("Bun" + "dle") + ".search" not in src
-        assert "_bundle(workspace).search" not in src
-
     def test_search_finds_note(self, served: ServedFactory, lab: RunFixture) -> None:
         ws, _exp, _run = lab
         with served(ws) as client:
