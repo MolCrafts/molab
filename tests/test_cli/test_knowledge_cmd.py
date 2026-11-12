@@ -173,8 +173,8 @@ class TestKnowledgeWrite:
         assert "https://doi.org/10.1021/jp409664d" in text
         assert "class: Plan" in text
 
-    def test_write_roadmap_record_cites_the_plan(self, tmp_path: Path) -> None:
-        from molab.knowledge import Plan, campaign_of, check_campaign
+    def test_write_record_file_cites_the_plan(self, tmp_path: Path) -> None:
+        from molab.knowledge import Hypothesis
         from molab.workspace import Workspace
 
         ws = Workspace(tmp_path / "lab", name="lab")
@@ -198,19 +198,16 @@ class TestKnowledgeWrite:
         )
         assert plan.exit_code == 0, plan.output
         plan_path = Path(root) / "knowledges" / "pbix-plan.md"
-        record = tmp_path / "roadmap.json"
-        record.write_text(
-            '{"stages": [{"id": "monomers", "title": "Fragments", "experiment": "monomers"}]}',
-            encoding="utf-8",
-        )
-        roadmap = CliRunner().invoke(
+        record = tmp_path / "claim.json"
+        record.write_text('{"verdict": "supported"}', encoding="utf-8")
+        claim = CliRunner().invoke(
             knowledge_app,
             [
                 "write",
-                "PBIX roadmap",
-                "The order.",
+                "PBIX claim",
+                "Fragments pack.",
                 "--class",
-                "Roadmap",
+                "Hypothesis",
                 "--source",
                 str(plan_path),
                 "--record",
@@ -219,13 +216,10 @@ class TestKnowledgeWrite:
                 root,
             ],
         )
-        assert roadmap.exit_code == 0, roadmap.output
-        text = (Path(root) / "knowledges" / "pbix-roadmap.md").read_text(encoding="utf-8")
-        assert "class: Roadmap" in text
-        assert "monomers" in text
-        campaign = campaign_of(Plan(plan_path))
-        check_campaign(campaign)
-        assert campaign.roadmaps[0].stages()[0].id == "monomers"
+        assert claim.exit_code == 0, claim.output
+        doc = Hypothesis(Path(root) / "knowledges" / "pbix-claim.md")
+        assert doc.verdict() == "supported"
+        assert [Path(edge.target).resolve() for edge in doc.links()] == [plan_path.resolve()]
 
     def test_list_rename_and_delete(self, tmp_path: Path) -> None:
         from molab.workspace import Workspace
@@ -291,11 +285,9 @@ class TestKnowledgeWrite:
         [
             ("Hypothesis", None, "verdict", "open"),
             ("Hypothesis", '{"verdict": "supported"}', "verdict", "supported"),
-            ("Decision", None, "status", "made"),
-            ("Decision", '{"status": "open"}', "status", "open"),
         ],
     )
-    def test_write_a_hypothesis_and_a_decision(
+    def test_write_a_hypothesis(
         self, tmp_path: Path, doc_class: str, record: str | None, field: str, stored: str
     ) -> None:
         from molab.knowledge.concepts import _open_document
@@ -323,9 +315,9 @@ class TestKnowledgeWrite:
 
     @pytest.mark.parametrize(
         ("doc_class", "record"),
-        [("Hypothesis", '{"verdict": "maybe"}'), ("Decision", '{"status": "pending"}')],
+        [("Hypothesis", '{"verdict": "maybe"}')],
     )
-    def test_write_refuses_an_unknown_verdict_or_status(
+    def test_write_refuses_an_unknown_verdict(
         self, tmp_path: Path, doc_class: str, record: str
     ) -> None:
         from molab.workspace import Workspace

@@ -1,4 +1,4 @@
-"""Class names map to the six document classes, beside those classes.
+"""Class names map to the seven document classes, beside those classes.
 
 The names are the vocabulary a config, a CLI flag or an agent-tool payload
 already spells. The mapping is not a method of the base class, and an unknown
@@ -12,17 +12,13 @@ from pathlib import Path
 import pytest
 
 from molab.knowledge import (
-    Decision,
     Finding,
     Hypothesis,
     Literature,
-    Milestone,
     Note,
     Observation,
     Plan,
     Report,
-    Roadmap,
-    Todo,
 )
 from molab.knowledge.concepts import _product
 
@@ -32,12 +28,8 @@ _EXPECTED: tuple[tuple[str, type], ...] = (
     ("Report", Report),
     ("Finding", Finding),
     ("Plan", Plan),
-    ("Roadmap", Roadmap),
-    ("Todo", Todo),
-    ("Milestone", Milestone),
     ("Observation", Observation),
     ("Hypothesis", Hypothesis),
-    ("Decision", Decision),
 )
 
 
@@ -52,9 +44,7 @@ class TestParseKnowledgeClass:
 
         message = str(excinfo.value)
         assert "unknown knowledge class 'Chart'" in message
-        assert "Decision, Delegation, Finding" in message
-        assert "Finding, Hypothesis, Literature, Milestone, Note, Observation, Plan" in message
-        assert "Plan, Report, Roadmap, Todo" in message
+        assert "Finding, Hypothesis, Literature, Note, Observation, Plan, Report" in message
 
 
 class TestSourcedKnowledgeSources:

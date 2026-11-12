@@ -17,19 +17,14 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from molab.knowledge import (
-    Decision,
-    Delegation,
     Finding,
     Hypothesis,
     Knowledge,
     Literature,
-    Milestone,
     Note,
     Observation,
     Plan,
     Report,
-    Roadmap,
-    Todo,
 )
 from molab.knowledge.search import extract_title
 from molab.workspace import ContextFocus, WorkspaceContext
@@ -40,13 +35,8 @@ _CONTEXT_CLASSES = (
     Report,
     Finding,
     Plan,
-    Roadmap,
-    Todo,
-    Milestone,
     Observation,
     Hypothesis,
-    Decision,
-    Delegation,
 )
 
 if TYPE_CHECKING:

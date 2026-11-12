@@ -12,8 +12,8 @@ experiment and run):
 * ``knowledge.duplicate`` (error) — two documents with one stem (``a.md``
   beside ``a.html``): one name, one file.
 * the content rules of :mod:`molab.knowledge.content_rules` — malformed
-  records, campaign gaps, uncited planning documents, missing experiments,
-  links that leave the workspace, Literature without bibliographic fields.
+  records, links that leave the workspace, Literature without bibliographic
+  fields, ephemeral links, versioned names, unanchored Reports.
 * ``knowledge.section_drift`` (warning) — the host's ``index.knowledges``
   section differs from a rebuild from the files. Like the derived ``index:``
   keys it is navigation sugar: a legal direct write of a document leaves it
@@ -52,8 +52,7 @@ RULE_HINTS: dict[str, str] = {
     "knowledge.class": (
         "A knowledge document names its class in frontmatter. Write it with "
         "`molab knowledge write NAME TEXT --on HOST --class CLASS` "
-        "(Note, Literature, Report, Finding, Plan, Roadmap, Todo, Milestone, Observation, "
-        "Hypothesis, Decision, or Delegation)."
+        "(Note, Literature, Report, Finding, Plan, Observation, or Hypothesis)."
     ),
     "knowledge.stray": (
         "knowledges/ holds documents (<slug>.md or <slug>.html) and figs/ only. Keep data "

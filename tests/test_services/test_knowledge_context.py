@@ -70,8 +70,8 @@ class TestProjectKnowledge:
         project_knowledge(ws)
         assert _tree(ws) == before
 
-    def test_projects_a_roadmap_beside_its_plan(self, tmp_path: Path) -> None:
-        from molab.knowledge import Plan, Roadmap, SourceRef
+    def test_projects_a_hypothesis_beside_its_plan(self, tmp_path: Path) -> None:
+        from molab.knowledge import Hypothesis, Plan, SourceRef
         from molab.knowledge.write import write_knowledge
 
         ws = _workspace(tmp_path)
@@ -87,16 +87,16 @@ class TestProjectKnowledge:
         )
         write_knowledge(
             ws,
-            name="Stages",
-            of=Roadmap,
+            name="Claim",
+            of=Hypothesis,
             sources=[SourceRef.of(plan)],
             created_by="test",
-            text="Order of the work.\n",
-            record={"stages": [{"id": "monomers", "title": "Fragments"}]},
+            text="The fragments pack.\n",
+            record={"verdict": "open"},
         )
         rows = {row.type: row.path for row in project_knowledge(ws)}
         assert rows["Plan"] == "knowledges/overview.md"
-        assert rows["Roadmap"] == "knowledges/stages.md"
+        assert rows["Hypothesis"] == "knowledges/claim.md"
 
     def test_bulk_trees_are_not_projected(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)

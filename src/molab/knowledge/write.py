@@ -90,8 +90,6 @@ def write_knowledge(
 
     disk = fs if fs is not None else _host_fs(host)
     from .concept import _record_as_dict
-    from .planning import check_planning_record
-    from .worker_report import check_worker_record
 
     preview = _record_as_dict(record) if record is not None else None
     path = _landed_path(host, name, of, format, disk)
@@ -112,8 +110,6 @@ def write_knowledge(
                 f"{name!r} collides with existing document {previous_name!r} at {path}; "
                 "choose a distinct name or explicitly replace the old document"
             )
-    check_planning_record(of, preview, creating=existing is None)
-    check_worker_record(of, preview, existing=existing)
     check_record = getattr(of, "check_record", None)
     if check_record is not None:
         check_record(preview, existing=existing)

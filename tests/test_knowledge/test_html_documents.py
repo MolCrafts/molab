@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from molab import htmldoc
-from molab.knowledge import Knowledge, Note, Roadmap, SourceRef
+from molab.knowledge import Finding, Hypothesis, Knowledge, Note, SourceRef
 from molab.knowledge.concepts import _open_document
 from molab.knowledge.record import record_of, replace_record
 from molab.knowledge.write import write_knowledge
@@ -89,11 +89,10 @@ class TestWrite:
         doc = write_knowledge(
             experiment,
             name="finding",
-            of=Roadmap,
+            of=Finding,
             sources=[SourceRef.of(experiment)],
             created_by="t",
             text="<p>plan</p>\n",
-            record={"stages": [{"id": "s1", "title": "One"}]},
             format="html",
         )
         assert Path(doc.path).suffix == ".html"
@@ -103,18 +102,18 @@ class TestWrite:
     def test_replace_record_keeps_the_html_form(self, experiment: Any) -> None:
         doc = write_knowledge(
             experiment,
-            name="road",
-            of=Roadmap,
+            name="claim",
+            of=Hypothesis,
             sources=[SourceRef.of(experiment)],
             created_by="t",
             text="<p>plan</p>\n",
-            record={"stages": [{"id": "s1", "title": "One"}]},
+            record={"verdict": "open"},
             format="html",
         )
-        replace_record(doc, {"stages": [{"id": "s2", "title": "Two"}]})
+        replace_record(doc, {"verdict": "supported"})
 
         assert Path(doc.path).read_text(encoding="utf-8").startswith("<!doctype html>")
-        assert record_of(doc)["stages"] == [{"id": "s2", "title": "Two"}]
+        assert record_of(doc)["verdict"] == "supported"
         assert "created_at" not in record_of(doc)
         assert doc.read().startswith("<p>plan</p>\n")
 

@@ -613,10 +613,7 @@ def knowledge_write(
         str,
         typer.Option(
             "--class",
-            help=(
-                "Note, Literature, Report, Finding, Plan, Roadmap, Todo, "
-                "Milestone, Observation, Hypothesis, Decision, or Delegation."
-            ),
+            help="Note, Literature, Report, Finding, Plan, Observation, or Hypothesis.",
         ),
     ] = "Note",
     path: Annotated[

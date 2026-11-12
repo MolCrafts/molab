@@ -30,55 +30,23 @@ def _issues(lab: Any) -> list[tuple[str, str, str]]:
     ]
 
 
-def _roadmap(experiment: str = "e") -> str:
+def _hypothesis(verdict: str) -> str:
     return (
-        "---\nclass: Roadmap\nname: Roadmap\nstages:\n"
-        f"  - id: s1\n    title: one\n    experiment: {experiment}\n"
+        f"---\nclass: Hypothesis\nname: Claim\nverdict: {verdict}\n"
         "---\n- [@derived_from plan.md](plan.md)\n"
     )
 
 
 class TestContentRules:
-    def test_a_consistent_campaign_is_clean(self, lab: Any) -> None:
+    def test_a_plan_and_its_hypothesis_are_clean(self, lab: Any) -> None:
         _doc(lab, "plan", PLAN)
-        _doc(lab, "roadmap", _roadmap())
-        _doc(
-            lab,
-            "todo",
-            "---\nclass: Todo\nname: Todo\nitems:\n  - id: t1\n    title: do\n    stage: s1\n"
-            "---\n- [@derived_from plan.md](plan.md)\n",
-        )
+        _doc(lab, "claim", _hypothesis("open"))
         assert _issues(lab) == []
 
     def test_a_malformed_record_is_an_error(self, lab: Any) -> None:
         _doc(lab, "plan", PLAN)
-        _doc(lab, "todo", "---\nclass: Todo\nname: Todo\n---\n- [@derived_from plan.md](plan.md)\n")
-        assert ("knowledge.record", "knowledges/todo.md", "error") in _issues(lab)
-
-    def test_an_invalid_delegation_is_an_error(self, lab: Any) -> None:
-        _doc(lab, "work", "---\nclass: Delegation\nname: Work\ngoal: g\n---\n")
-        assert ("knowledge.record", "knowledges/work.md", "error") in _issues(lab)
-
-    def test_a_todo_naming_an_unknown_stage_breaks_the_campaign(self, lab: Any) -> None:
-        _doc(lab, "plan", PLAN)
-        _doc(lab, "roadmap", _roadmap())
-        _doc(
-            lab,
-            "todo",
-            "---\nclass: Todo\nname: Todo\nitems:\n  - id: t1\n    title: do\n    stage: nope\n"
-            "---\n- [@derived_from plan.md](plan.md)\n",
-        )
-        assert ("knowledge.campaign", "knowledges/plan.md", "error") in _issues(lab)
-
-    def test_planning_without_a_plan_link_is_uncited(self, lab: Any) -> None:
-        _doc(lab, "plan", PLAN)
-        _doc(lab, "roadmap", _roadmap().replace("- [@derived_from plan.md](plan.md)\n", ""))
-        assert ("knowledge.uncited_planning", "knowledges/roadmap.md", "warning") in _issues(lab)
-
-    def test_a_stage_naming_a_missing_experiment_warns(self, lab: Any) -> None:
-        _doc(lab, "plan", PLAN)
-        _doc(lab, "roadmap", _roadmap("ghost"))
-        assert ("knowledge.stage_experiment", "knowledges/roadmap.md", "warning") in _issues(lab)
+        _doc(lab, "claim", _hypothesis("likely"))
+        assert ("knowledge.record", "knowledges/claim.md", "error") in _issues(lab)
 
     def test_a_link_outside_the_workspace_or_missing_warns(self, lab: Any) -> None:
         _doc(
@@ -106,31 +74,18 @@ class TestContentRules:
 
     def test_errors_only_skips_warnings(self, lab: Any) -> None:
         _doc(lab, "paper", "---\nclass: Literature\nname: Paper\n---\n")
-        _doc(lab, "work", "---\nclass: Delegation\nname: Work\n---\n")
+        _doc(lab, "plan", PLAN)
+        _doc(lab, "claim", _hypothesis("likely"))
         rules = {i["rule"] for i in validate_knowledge(lab, errors_only=True)}
         assert rules == {"knowledge.record"}
 
     def test_every_content_rule_has_a_hint(self) -> None:
         for rule in (
             "knowledge.record",
-            "knowledge.campaign",
-            "knowledge.uncited_planning",
-            "knowledge.stage_experiment",
             "knowledge.local_source",
             "knowledge.literature_metadata",
         ):
             assert rule in RULE_HINTS
-
-
-class TestCampaignPaths:
-    def test_a_relative_plan_path_finds_its_campaign(self, lab: Any, monkeypatch: Any) -> None:
-        from molab.knowledge import Plan, campaign_of
-
-        _doc(lab, "plan", PLAN)
-        _doc(lab, "roadmap", _roadmap())
-        monkeypatch.chdir(str(lab.root))
-        assert len(campaign_of(Plan("knowledges/plan.md")).roadmaps) == 1
-        assert len(campaign_of(Plan(str(Path(str(lab.root)) / "knowledges/plan.md"))).roadmaps) == 1
 
 
 class TestLinksInCode:

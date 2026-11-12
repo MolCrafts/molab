@@ -1,11 +1,9 @@
-"""Records of the two reasoning documents.
+"""The record of a reasoning document.
 
-* :class:`~molab.knowledge.concepts.Hypothesis` stores ``verdict``: where the
-  claim stands against the evidence.
-* :class:`~molab.knowledge.concepts.Decision` stores ``status``: whether the
-  choice is made or still waits for a person.
+:class:`~molab.knowledge.concepts.Hypothesis` stores ``verdict``: where the
+claim stands against the evidence.
 
-Each vocabulary is closed. A value outside it is refused on write and
+The vocabulary is closed. A value outside it is refused on write and
 reported by ``molab validate``; it is never replaced by the default.
 """
 
@@ -17,7 +15,6 @@ from typing import Literal, get_args
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 HypothesisVerdict = Literal["open", "supported", "refuted", "unsettled"]
-DecisionStatus = Literal["open", "made"]
 
 
 class HypothesisRecord(BaseModel):
@@ -26,14 +23,6 @@ class HypothesisRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     verdict: HypothesisVerdict = "open"
-
-
-class DecisionRecord(BaseModel):
-    """The status a Decision document stores. ``open`` waits for a person."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    status: DecisionStatus = "made"
 
 
 def parse_hypothesis(raw: Mapping[str, object] | None) -> HypothesisRecord:
@@ -53,28 +42,8 @@ def parse_hypothesis(raw: Mapping[str, object] | None) -> HypothesisRecord:
         ) from exc
 
 
-def parse_decision(raw: Mapping[str, object] | None) -> DecisionRecord:
-    """Validate the one field a Decision owns. An absent ``status`` is ``made``.
-
-    Raises:
-        ValueError: ``status`` is present and outside the vocabulary.
-    """
-    if raw is None or "status" not in raw:
-        return DecisionRecord()
-    try:
-        return DecisionRecord.model_validate({"status": raw["status"]})
-    except ValidationError as exc:
-        raise ValueError(
-            f"a Decision status is one of {', '.join(get_args(DecisionStatus))}; "
-            f"got {raw['status']!r}"
-        ) from exc
-
-
 __all__ = [
-    "DecisionRecord",
-    "DecisionStatus",
     "HypothesisRecord",
     "HypothesisVerdict",
-    "parse_decision",
     "parse_hypothesis",
 ]

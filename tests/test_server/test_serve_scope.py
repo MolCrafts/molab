@@ -489,9 +489,9 @@ class TestScopedRecordHistory:
                 "/api/knowledge/doc",
                 json={
                     "name": "Study",
-                    "cls": "Delegation",
+                    "cls": "Hypothesis",
                     "sources": [{"kind": "project", "ref": f"molab:project/{alpha.id}"}],
-                    "record": {"goal": "g", "scope": f"molab:project/{alpha.id}"},
+                    "record": {"verdict": "open"},
                 },
             )
             assert created.status_code == 201, created.text
@@ -500,7 +500,10 @@ class TestScopedRecordHistory:
             replaced = client.patch(
                 "/api/knowledge/doc/record",
                 params={"path": path},
-                json={"record": {**got["record"], "state": "waiting"}, "ifMatch": got["digest"]},
+                json={
+                    "record": {**got["record"], "verdict": "supported"},
+                    "ifMatch": got["digest"],
+                },
             )
             assert replaced.status_code == 200, replaced.text
         log = subprocess.run(

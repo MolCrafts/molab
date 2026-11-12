@@ -1,4 +1,4 @@
-"""Hypothesis and Decision: one record field each, a closed vocabulary."""
+"""Hypothesis: one record field, a closed vocabulary."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from molab.knowledge import Decision, Finding, Hypothesis, SourceRef
+from molab.knowledge import Finding, Hypothesis, SourceRef
 from molab.knowledge.record import has_record, record_of, replace_record
 from molab.knowledge.validate import validate_knowledge
 from molab.knowledge.write import write_knowledge
@@ -83,48 +83,6 @@ class TestHypothesis:
         assert "likely" in issues[0][1]
         with pytest.raises(ValueError, match="verdict"):
             Hypothesis(Path(str(lab.root)) / "knowledges" / "bad.md").verdict()
-
-
-class TestDecision:
-    def test_a_new_decision_is_made(self, lab: Any) -> None:
-        doc = _write(lab, Decision, "Use OPLS")
-        assert type(doc) is Decision
-        assert doc.frontmatter()["class"] == "Decision"
-        assert doc.status() == "made"
-
-    @pytest.mark.parametrize("status", ["open", "made"])
-    def test_an_explicit_status_round_trips(self, lab: Any, status: str) -> None:
-        doc = _write(lab, Decision, "Use OPLS", {"status": status})
-        assert Decision(doc.path).status() == status
-        assert record_of(doc)["status"] == status
-
-    def test_an_unknown_status_is_refused_and_nothing_lands(self, lab: Any) -> None:
-        with pytest.raises(ValueError, match="status"):
-            _write(lab, Decision, "Use OPLS", {"status": "pending"})
-        assert not (Path(str(lab.get_project("p").resolve())) / "knowledges").exists()
-
-    def test_a_rewrite_cannot_store_an_unknown_status(self, lab: Any) -> None:
-        doc = _write(lab, Decision, "Use OPLS", {"status": "open"})
-        with pytest.raises(ValueError, match="status"):
-            doc.write(None, status="active")
-        assert doc.status() == "open"
-
-    def test_the_record_is_replaceable_and_validated(self, lab: Any) -> None:
-        doc = _write(lab, Decision, "Use OPLS", {"status": "open"})
-        assert has_record(doc)
-        replace_record(doc, {"status": "made"})
-        assert doc.status() == "made"
-        with pytest.raises(ValueError, match="status"):
-            replace_record(doc, {"status": "met"})
-        assert doc.status() == "made"
-
-    def test_validate_flags_a_hand_written_status(self, lab: Any) -> None:
-        _by_hand(lab, "good", "---\nclass: Decision\nname: Good\nstatus: open\n---\n# G\n")
-        _by_hand(lab, "bare", "---\nclass: Decision\nname: Bare\n---\n# B\n")
-        _by_hand(lab, "bad", "---\nclass: Decision\nname: Bad\nstatus: active\n---\n# B\n")
-        issues = _record_issues(lab)
-        assert [path for path, _detail in issues] == ["knowledges/bad.md"]
-        assert "active" in issues[0][1]
 
 
 class TestEvidenceRoles:

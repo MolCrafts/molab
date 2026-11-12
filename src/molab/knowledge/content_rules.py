@@ -1,18 +1,11 @@
 """Content rules for knowledge documents a person or another tool wrote by hand.
 
-``write_knowledge`` refuses a malformed planning record or Delegation at write
-time, but a document written straight to disk never passed that gate. These
-rules read what is on disk and report, for :mod:`molab.knowledge.validate`:
+``write_knowledge`` refuses a malformed structured record at write time, but a
+document written straight to disk never passed that gate. These rules read what
+is on disk and report, for :mod:`molab.knowledge.validate`:
 
-* ``knowledge.record`` (error) — a Roadmap / Todo / Milestone / Delegation /
-  Hypothesis / Decision whose structured record its class rejects, or a Report / Note whose
-  ``worker_report`` / ``brief`` record is invalid or on the wrong class.
-* ``knowledge.campaign`` (error) — a Plan's campaign names a stage its roadmap
-  does not have (:func:`~molab.knowledge.planning.check_campaign`).
-* ``knowledge.uncited_planning`` (warning) — a Roadmap, Todo or Milestone that
-  cites no Plan, so no campaign reads it.
-* ``knowledge.stage_experiment`` (warning) — a roadmap stage names an
-  experiment directory that does not exist.
+* ``knowledge.record`` (error) — a document whose structured record its class
+  rejects (a Hypothesis ``verdict`` outside the vocabulary).
 * ``knowledge.local_source`` (warning) — a link to a local file outside the
   workspace, or to one that does not exist: the record is not portable.
 * ``knowledge.literature_metadata`` (warning) — a Literature record with no DOI
@@ -49,18 +42,6 @@ CONTENT_RULE_HINTS: dict[str, str] = {
         "The document's structured fields do not validate for its class. Rewrite them "
         "with `molab knowledge write NAME --class CLASS --record '{...}'`."
     ),
-    "knowledge.campaign": (
-        "A Todo item or Milestone names a stage the Plan's Roadmap does not have. Add "
-        "the stage to the Roadmap or correct the stage id."
-    ),
-    "knowledge.uncited_planning": (
-        "Roadmap, Todo and Milestone documents belong to a campaign through a "
-        "`[@derived_from …](plan.md)` link to its Plan. Add the link."
-    ),
-    "knowledge.stage_experiment": (
-        "A roadmap stage's `experiment` is an experiment directory name. Create it "
-        "with `molab experiment create`, or correct the name."
-    ),
     "knowledge.local_source": (
         "Link a source inside the workspace: import data with `molab asset import`, "
         "cite papers by DOI or a Literature document. A path outside the workspace "
@@ -90,8 +71,6 @@ _EPHEMERAL_RE = re.compile(
 _VERSIONED_RE = re.compile(r"[-_ ]v\d+$", re.I)
 _ANCHOR_RE = re.compile(r"molab:(?:asset/[0-9a-f-]+|experiment/[0-9a-z-]+/run/[0-9a-z-]+)")
 
-_PLANNING_RECORD_ROLES = frozenset({"roadmap", "todo", "milestone"})
-
 
 @dataclass(frozen=True)
 class ContentIssue:
@@ -108,36 +87,12 @@ def _record(doc: Concept) -> dict[str, object]:
 
 
 def _record_issue(doc: Concept) -> ContentIssue | None:
-    """``knowledge.record`` for a document whose class, or whose ``kind``, owns a record."""
-    from .planning import check_planning_record
-    from .worker_report import WORKER_RECORD_CLASSES, check_worker_record
-
-    klass = type(doc)
-    role = getattr(klass, "PLANNING_ROLE", None)
-    check_record = getattr(klass, "check_record", None)
-    payload = _record(doc)
-    kind = payload.get("kind")
-    if kind in ("research", "capability") and klass.__name__ != "Delegation":
-        return ContentIssue(
-            str(doc.path),
-            "knowledge.record",
-            f"a {kind} record belongs on a Delegation, not a {klass.__name__}",
-            "error",
-        )
-    worker = isinstance(kind, str) and kind in WORKER_RECORD_CLASSES
-    if role not in _PLANNING_RECORD_ROLES and check_record is None and not worker:
+    """``knowledge.record`` for a document whose class owns a record."""
+    check_record = getattr(type(doc), "check_record", None)
+    if check_record is None:
         return None
-    if role == "milestone":
-        # A milestone's lifecycle status is its record's status.
-        payload["status"] = doc.frontmatter().get("status", "open")
-    elif getattr(klass, "STATUS_IN_RECORD", False) and "status" in doc.frontmatter():
-        # So is a Decision's. An absent one stays absent; the class defaults it.
-        payload["status"] = doc.frontmatter()["status"]
     try:
-        if check_record is not None:
-            check_record(payload, existing=None)
-        check_planning_record(klass, payload, creating=True)
-        check_worker_record(klass, payload, existing=None)
+        check_record(_record(doc), existing=None)
     except (ValueError, TypeError) as exc:
         return ContentIssue(str(doc.path), "knowledge.record", str(exc), "error")
     return None
@@ -230,72 +185,6 @@ def _anchor_issue(doc: Concept) -> ContentIssue | None:
     )
 
 
-def _experiment_names(root: str, fs: FileSystem) -> frozenset[str]:
-    from molab.workspace import Workspace
-    from molab.workspace.naming import EXPERIMENT_CONTAINER
-
-    names = set()
-    for host in Workspace.list_hosts(root, fs=fs):
-        parent, name = posixpath.split(str(host))
-        if posixpath.basename(parent) == EXPERIMENT_CONTAINER:
-            names.add(name)
-    if (
-        Workspace.is_node_dir(root, fs=fs)
-        and posixpath.basename(posixpath.dirname(root)) == EXPERIMENT_CONTAINER
-    ):
-        names.add(posixpath.basename(root))
-    return frozenset(names)
-
-
-def _campaign_issues(docs: list[Concept], root: str, fs: FileSystem) -> Iterator[ContentIssue]:
-    """``knowledge.campaign``, ``knowledge.uncited_planning``, ``knowledge.stage_experiment``."""
-    from .concepts import Plan, Roadmap
-    from .planning import campaign_of, check_campaign
-
-    members: set[str] = set()
-    experiments: frozenset[str] | None = None
-    for plan in (doc for doc in docs if type(doc) is Plan):
-        try:
-            campaign = campaign_of(plan)
-        except (OSError, ValueError) as exc:
-            yield ContentIssue(str(plan.path), "knowledge.campaign", str(exc), "error")
-            continue
-        members.update(
-            str(getattr(item, "path", ""))
-            for item in (*campaign.roadmaps, *campaign.todos, *campaign.milestones)
-        )
-        try:
-            check_campaign(campaign)
-        except ValueError as exc:
-            yield ContentIssue(str(plan.path), "knowledge.campaign", str(exc), "error")
-        for roadmap in (item for item in campaign.roadmaps if isinstance(item, Roadmap)):
-            experiments = experiments if experiments is not None else _experiment_names(root, fs)
-            try:
-                stages = roadmap.stages()
-            except ValueError:
-                continue  # knowledge.record reports it
-            for stage in stages:
-                name = getattr(stage, "experiment", None)
-                if name and name not in experiments:
-                    yield ContentIssue(
-                        str(roadmap.path),
-                        "knowledge.stage_experiment",
-                        f"stage {getattr(stage, 'id', '?')!r} names experiment {name!r}, which does not exist",
-                        "warning",
-                    )
-    for doc in docs:
-        if (
-            getattr(type(doc), "PLANNING_ROLE", None) in _PLANNING_RECORD_ROLES
-            and str(doc.path) not in members
-        ):
-            yield ContentIssue(
-                str(doc.path),
-                "knowledge.uncited_planning",
-                f"this {type(doc).__name__} cites no Plan, so no campaign reads it",
-                "warning",
-            )
-
-
 def content_issues(
     paths: Iterable[str],
     *,
@@ -326,11 +215,6 @@ def content_issues(
             issue = check(doc)
             if issue is not None:
                 found.append(issue)
-    found.extend(
-        issue
-        for issue in _campaign_issues(docs, root, fs)
-        if not (errors_only and issue.severity == "warning")
-    )
     if errors_only:
         return found
     for doc in docs:

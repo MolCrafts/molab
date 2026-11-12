@@ -1,10 +1,9 @@
 """Read and replace a document's structured record as one unit.
 
 The record of a document is its frontmatter minus the keys every document
-carries (:data:`COMMON_KEYS`). Classes that own a structured record — a
-:class:`~molab.knowledge.concepts.Delegation`, a Hypothesis, a Decision, or a
-planning document whose role stores fields (Roadmap / Todo / Milestone) — can
-have it replaced whole.
+carries (:data:`COMMON_KEYS`). A class that owns a structured record (one
+that defines ``check_record``, such as
+:class:`~molab.knowledge.concepts.Hypothesis`) can have it replaced whole.
 The caller passes the digest it read; a changed file is a conflict, not a
 silent overwrite.
 """
@@ -32,8 +31,6 @@ COMMON_KEYS: frozenset[str] = frozenset(
     {"class", "name", "created_by", "created_at", "tags", "status"}
 )
 
-_RECORD_ROLES = frozenset({"roadmap", "todo", "milestone"})
-
 
 class RecordConflictError(Exception):
     """The document changed since the digest the caller read."""
@@ -41,10 +38,7 @@ class RecordConflictError(Exception):
 
 def has_record(doc: Concept) -> bool:
     """Whether *doc*'s class owns a replaceable structured record."""
-    klass = type(doc)
-    return callable(getattr(klass, "check_record", None)) or (
-        getattr(klass, "PLANNING_ROLE", None) in _RECORD_ROLES
-    )
+    return callable(getattr(type(doc), "check_record", None))
 
 
 def digest_of(doc: Concept) -> str:
@@ -57,22 +51,9 @@ def digest_of(doc: Concept) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _common_keys(klass: type) -> frozenset[str]:
-    """The common keys this class does not own.
-
-    A Milestone's ``status`` is its record's, and so is a Decision's.
-    """
-    if getattr(klass, "PLANNING_ROLE", None) == "milestone" or getattr(
-        klass, "STATUS_IN_RECORD", False
-    ):
-        return COMMON_KEYS - {"status"}
-    return COMMON_KEYS
-
-
 def record_of(doc: Concept) -> dict[str, object]:
-    """*doc*'s structured record: its frontmatter without the common keys it does not own."""
-    common = _common_keys(type(doc))
-    return {key: value for key, value in doc.frontmatter().items() if key not in common}
+    """*doc*'s structured record: its frontmatter without the common keys."""
+    return {key: value for key, value in doc.frontmatter().items() if key not in COMMON_KEYS}
 
 
 def replace_record(
@@ -104,8 +85,6 @@ def replace_record(
         ValueError: The class rejects the record.
     """
     from .frontmatter import dump_frontmatter
-    from .planning import check_planning_record
-    from .worker_report import check_worker_record
 
     klass = type(doc)
     if not has_record(doc):
@@ -114,14 +93,11 @@ def replace_record(
         raise FileNotFoundError(str(doc.path))
     if if_match is not None and digest_of(doc) != if_match:
         raise RecordConflictError(f"{doc.path} changed since it was read")
-    owned_common = _common_keys(klass)
-    clean = {str(key): value for key, value in record.items() if key not in owned_common}
+    clean = {str(key): value for key, value in record.items() if key not in COMMON_KEYS}
     check_record = getattr(klass, "check_record", None)
     if check_record is not None:
         check_record(clean, existing={})
-    check_planning_record(klass, clean, creating=True)
-    check_worker_record(klass, clean, existing=None)
-    common = {key: value for key, value in doc.frontmatter().items() if key in owned_common}
+    common = {key: value for key, value in doc.frontmatter().items() if key in COMMON_KEYS}
     narrative = doc.read() if body is None else body
     doc.write(
         dump_frontmatter({**common, **clean, "class": klass.__name__}, narrative, path=doc.path),

@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from molab.knowledge.concepts import Decision, Delegation, Hypothesis, Note
+from molab.knowledge.concepts import Hypothesis, Note
 from molab.knowledge.edges import EdgeRole
 from molab.server.dependencies import get_workspace
 from molab.workspace import Workspace
@@ -167,13 +167,8 @@ class DocCreateRequest(BaseModel):
         "Report",
         "Finding",
         "Plan",
-        "Roadmap",
-        "Todo",
-        "Milestone",
         "Observation",
         "Hypothesis",
-        "Decision",
-        "Delegation",
     ] = "Note"
     sources: list[DocSource] = []
     record: dict[str, Any] | None = None
@@ -510,41 +505,17 @@ def _note_summary(workspace: Workspace, note: Concept) -> NoteSummary:
     )
 
 
-def _json_ready(value: object) -> object:
-    """JSON-safe copy of a planning field. Models and tuples become plain values."""
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, tuple | list):
-        return [_json_ready(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _json_ready(item) for key, item in value.items()}
-    return value
-
-
 def _document_record(note: Concept) -> dict[str, Any]:
     """Role fields the viewer shows. A document with none is ``{}``.
 
     A corrupt record does not fail the read; the narrative still opens.
     """
-    try:
-        if isinstance(note, Hypothesis):
-            return {"verdict": note.verdict()}
-        if isinstance(note, Decision):
-            return {"status": note.status()}
-        fields = getattr(note, "planning_fields", None)
-        if callable(fields):
-            raw = fields()
-            if isinstance(raw, dict) and raw:
-                ready = _json_ready(raw)
-                if isinstance(ready, dict):
-                    return ready
-        if isinstance(note, Delegation):
-            ready = _json_ready(note.record())
-            if isinstance(ready, dict):
-                return ready
-    except (TypeError, ValueError):
+    if not isinstance(note, Hypothesis):
         return {}
-    return {}
+    try:
+        return {"verdict": note.verdict()}
+    except ValueError:
+        return {}
 
 
 def _note_detail(workspace: Workspace, note: Concept, path: str) -> NoteDetailResponse:
@@ -1432,9 +1403,7 @@ def replace_doc_record(
 ) -> DocRecordResponse:
     """Replace a document's structured record whole — 409 when ``ifMatch`` is stale.
 
-    Only classes that own a record (Delegation, Roadmap, Todo, Milestone,
-    Hypothesis, Decision) accept
-    it (422 otherwise, and for a record the class rejects). The change is
+    Only classes that own a record (Hypothesis) accept it (422 otherwise, and for a record the class rejects). The change is
     recorded in the workspace history as ``knowledge.record_replaced``.
     """
     import hashlib

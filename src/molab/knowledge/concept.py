@@ -745,11 +745,6 @@ class Concept:
 
     def _accept_written_record(self, merged: Mapping[str, object], *, creating: bool) -> None:
         """Refuse a record ``write_knowledge`` would refuse. Nothing is written yet."""
-        from pydantic import ValidationError
-
-        from .planning import check_planning_record
-        from .worker_report import check_worker_record
-
         klass = type(self)
         existing = None if creating else self.frontmatter()
         if existing and existing.get("class") != klass.__name__:
@@ -759,11 +754,6 @@ class Concept:
         check_record = getattr(klass, "check_record", None)
         if callable(check_record):
             check_record(dict(merged), existing=existing)
-        try:
-            check_planning_record(klass, merged, creating=creating)
-        except ValidationError as exc:
-            raise ValueError(f"invalid {klass.__name__} record: {exc}") from exc
-        check_worker_record(klass, merged, existing=existing)
 
     def links(self) -> list[Edge]:
         """The documents this one cites — typed markdown links in the narrative."""
@@ -951,8 +941,7 @@ def _record_as_dict(record: object) -> dict[str, object]:
     """Flatten a write() record into frontmatter keys.
 
     ``type`` and ``id`` are a concept's identity, never a record's, and are
-    dropped. ``kind`` is a record field — a Delegation's ``research`` /
-    ``capability``, a worker record's ``worker_report`` / ``brief`` — and is
+    dropped. Every other key, ``kind`` included, is a record field and is
     kept.
     """
     from .concept_meta import ConceptMeta
