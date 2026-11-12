@@ -122,10 +122,6 @@ class Literature(Concept):
         """This literature item's bibliographic fields, from its frontmatter."""
         return self._fields_of(type(self).FIELDS)
 
-    def citation(self) -> str:
-        """The human-readable citation text."""
-        return self.read()
-
 
 class _SourcedKnowledge(Concept):
     """Every class but Note and Literature: a document that names its sources.

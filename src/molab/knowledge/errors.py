@@ -2,7 +2,7 @@
 
 ``KnowledgeNotFoundError`` subclasses :class:`LookupError`, matching the workspace
 ``*NotFoundError`` family so the server's "a LookupError is a 404" mapping keeps
-working. ``ConceptNotFoundError`` is the same class, defined here.
+working.
 """
 
 from __future__ import annotations
@@ -22,6 +22,4 @@ class KnowledgeNotFoundError(LookupError):
         self.entity_id = entity_id
 
 
-ConceptNotFoundError = KnowledgeNotFoundError
-
-__all__ = ["ConceptNotFoundError", "KnowledgeNotFoundError"]
+__all__ = ["KnowledgeNotFoundError"]

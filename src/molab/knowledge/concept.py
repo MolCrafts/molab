@@ -448,8 +448,8 @@ class Concept:
 
         The loose spelling of :meth:`ref`: a Knowledge target is delegated to
         it, while a bare directory (a run, an experiment) is still linked as
-        given, so knowledge never imports the workspace layer. All six
-        knowledge classes share this verb.
+        given, so knowledge never imports the workspace layer. Every
+        knowledge class shares this verb.
         """
         try:
             target = _knowledge_target(ref, fs=self._fs)
@@ -1115,45 +1115,6 @@ def append_source_links(
     return append_markdown(body, "\n".join(lines) + "\n", path=path), len(lines)
 
 
-def remove_legacy_files(
-    directory: PathArg,
-    names: Sequence[str],
-    *,
-    fs: FileSystem,
-) -> list[str]:
-    """Delete named plain files in *directory*, then remove it when empty.
-
-    Never recursive, and never touches an entry that was not named. A name
-    that is a subdirectory is left in place and reported.
-
-    Args:
-        directory: Directory holding the legacy files.
-        names: Plain file names to delete when they are files.
-        fs: Filesystem the directory lives on.
-
-    Returns:
-        Sorted names that remain after the named files are gone. Empty when
-        the directory itself was removed.
-
-    Raises:
-        ValueError: A name contains ``/`` or is ``.`` / ``..``.
-    """
-    for name in names:
-        if "/" in name or name in {".", ".."}:
-            raise ValueError(f"legacy name {name!r} is not a single file name")
-    if not fs.is_dir(directory):
-        return []
-    for name in names:
-        path = fs.join(directory, name)
-        if fs.is_file(path):
-            fs.rm(path)
-    remaining = fs.ls(directory, A=True)
-    if not remaining:
-        Path(os.fspath(directory)).rmdir()
-        return []
-    return sorted(remaining)
-
-
 def backlinks_to(
     targets: Iterable[str],
     *,
@@ -1289,6 +1250,5 @@ __all__ = [
     "append_link",
     "append_source_links",
     "read_text_or_none",
-    "remove_legacy_files",
     "retarget_links",
 ]

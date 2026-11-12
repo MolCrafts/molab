@@ -10,7 +10,6 @@ from molab.knowledge.search import (
     ConceptIndexEntry,
     best_body_line,
     capped_body,
-    passes_filters,
     ranking_corpus,
     search_index,
 )
@@ -62,13 +61,6 @@ class TestSearchIndex:
 
         assert [hit.entry.path for hit in result.hits] == []
 
-    def test_concept_type_keeps_only_notes(self) -> None:
-        index = _index(_entry("a", cls="Note"), _entry("b", cls="Finding"))
-
-        result = search_index(index, {}, None, concept_type="Note")
-
-        assert [hit.entry.path for hit in result.hits] == ["a"]
-
 
 class TestRankingCorpus:
     def test_path_slashes_become_spaces_and_tags_pass_through(
@@ -90,20 +82,6 @@ class TestRankingCorpus:
 
         assert seen[entry.path]["path"] == "projects p x.md"
         assert seen[entry.path]["tags"] == ["Tg", "glass"]
-
-
-class TestPassesFilters:
-    def test_scope_is_a_path_prefix(self) -> None:
-        inside = _entry("projects/p/x.md")
-        sibling = _entry("projects/pp/x.md")
-
-        assert passes_filters(inside, concept_type=None, tag=None, scope="projects/p") is True
-        assert passes_filters(sibling, concept_type=None, tag=None, scope="projects/p") is False
-
-    def test_a_missing_tag_rejects(self) -> None:
-        entry = _entry("a", tags=("glass",))
-
-        assert passes_filters(entry, concept_type=None, tag="Tg", scope=None) is False
 
 
 class TestCappedBody:

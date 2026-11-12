@@ -13,7 +13,7 @@ from pathlib import Path
 
 from molab.fs import LocalFS
 from molab.knowledge import Knowledge, Note
-from molab.knowledge.retrieval import bm25f_rank, tokenize
+from molab.knowledge.retrieval import Bm25fCorpus, tokenize
 from tests.support.counting_fs import CountingFileSystem
 
 
@@ -56,7 +56,7 @@ class TestBm25fRank:
             "a": {"body": "alpha beta gamma"},
             "b": {"body": "alpha delta"},
         }
-        ranked = bm25f_rank("alpha beta", docs)
+        ranked = Bm25fCorpus(docs).rank("alpha beta")
         assert next(d.key for d in ranked) == "a"
 
     def test_title_boost_outranks_body(self) -> None:
@@ -64,16 +64,16 @@ class TestBm25fRank:
             "in-title": {"title": "diffusion", "body": "unrelated prose"},
             "in-body": {"title": "unrelated", "body": "diffusion mentioned once"},
         }
-        ranked = bm25f_rank("diffusion", docs)
+        ranked = Bm25fCorpus(docs).rank("diffusion")
         assert [d.key for d in ranked] == ["in-title", "in-body"]
 
     def test_documents_with_no_query_term_are_omitted(self) -> None:
         docs = {"a": {"body": "alpha"}, "b": {"body": "zeta"}}
-        assert [d.key for d in bm25f_rank("alpha", docs)] == ["a"]
+        assert [d.key for d in Bm25fCorpus(docs).rank("alpha")] == ["a"]
 
     def test_matched_fields_report_where_the_terms_were(self) -> None:
         docs = {"a": {"title": "alpha", "body": "beta", "tags": ["gamma"]}}
-        ranked = bm25f_rank("alpha gamma", docs)
+        ranked = Bm25fCorpus(docs).rank("alpha gamma")
         assert ranked[0].matched_fields == ("tags", "title")
 
     def test_a_term_in_every_document_cannot_demote(self) -> None:
@@ -81,26 +81,26 @@ class TestBm25fRank:
         # subtract — a negative weight would rank a document *below* one that
         # lacks the term it matched on.
         docs = {"a": {"body": "common alpha"}, "b": {"body": "common"}}
-        ranked = bm25f_rank("common alpha", docs)
+        ranked = Bm25fCorpus(docs).rank("common alpha")
         assert next(d.key for d in ranked) == "a"
         assert all(d.score >= 0.0 for d in ranked)
 
     def test_ties_break_deterministically_by_key(self) -> None:
         docs = {"b": {"body": "alpha"}, "a": {"body": "alpha"}}
-        assert [d.key for d in bm25f_rank("alpha", docs)] == ["a", "b"]
+        assert [d.key for d in Bm25fCorpus(docs).rank("alpha")] == ["a", "b"]
 
     def test_tags_are_tokenized_not_taken_whole(self) -> None:
         # A CJK tag must match a query naming only part of it.
         docs = {"a": {"tags": ["玻璃化转变"]}, "b": {"tags": ["其他"]}}
-        assert [d.key for d in bm25f_rank("玻璃化", docs)] == ["a"]
+        assert [d.key for d in Bm25fCorpus(docs).rank("玻璃化")] == ["a"]
 
     def test_empty_query_or_corpus_ranks_nothing(self) -> None:
-        assert bm25f_rank("", {"a": {"body": "alpha"}}) == []
-        assert bm25f_rank("alpha", {}) == []
+        assert Bm25fCorpus({"a": {"body": "alpha"}}).rank("") == []
+        assert Bm25fCorpus({}).rank("alpha") == []
 
     def test_limit_caps_the_result(self) -> None:
         docs = {k: {"body": "alpha"} for k in ("a", "b", "c")}
-        assert len(bm25f_rank("alpha", docs, limit=2)) == 2
+        assert len(Bm25fCorpus(docs).rank("alpha", limit=2)) == 2
 
 
 class TestChineseGoldenCase:

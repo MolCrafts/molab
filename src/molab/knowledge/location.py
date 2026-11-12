@@ -184,27 +184,6 @@ def _container_of(host: PathArg | Folder | Concept) -> Path:
     raise _bad_host(host)
 
 
-def _host_dir(host: PathArg | Folder) -> Path:
-    """The directory *host* denotes, without touching disk.
-
-    Args:
-        host: A path, or a workspace Folder.
-
-    Returns:
-        A path host verbatim; a Folder's resolved directory.
-
-    Raises:
-        TypeError: If *host* is neither.
-    """
-    if isinstance(host, (str, os.PathLike)):
-        return Path(str(host))
-    from molab.workspace import Folder
-
-    if isinstance(host, Folder):
-        return Path(str(host.resolve()))
-    raise _bad_host(host)
-
-
 def _host_fs(host: PathArg | Folder | Concept) -> FileSystem:
     """The filesystem *host* lives on.
 
@@ -227,21 +206,6 @@ def _host_fs(host: PathArg | Folder | Concept) -> FileSystem:
 
     if type(host) is Concept:
         return host.fs
-    raise _bad_host(host)
-
-
-def _lookup_path(host: PathArg | Folder | Concept) -> PathArg:
-    """The path passed to the workspace-root accessor for *host*."""
-    if isinstance(host, (str, os.PathLike)):
-        return os.fspath(host)
-    from molab.workspace import Folder
-
-    if isinstance(host, Folder):
-        return host.resolve()
-    from .concept import Concept
-
-    if type(host) is Concept:
-        return host.path
     raise _bad_host(host)
 
 

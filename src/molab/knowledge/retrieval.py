@@ -44,7 +44,6 @@ __all__ = [
     "FIELD_BOOSTS",
     "Bm25fCorpus",
     "ScoredDoc",
-    "bm25f_rank",
     "tokenize",
 ]
 
@@ -250,35 +249,6 @@ class Bm25fCorpus:
 
         results.sort(key=lambda d: (-d.score, d.key))
         return results if limit is None else results[:limit]
-
-
-def bm25f_rank(
-    query: str,
-    documents: Mapping[str, Mapping[str, str | Sequence[str]]],
-    *,
-    limit: int | None = None,
-    boosts: Mapping[str, float] | None = None,
-) -> list[ScoredDoc]:
-    """Rank *documents* against *query* with BM25F, best first.
-
-    The one-shot form of :class:`Bm25fCorpus` — tokenizes *documents* and
-    ranks once. Identical results to ``Bm25fCorpus(documents).rank(query)``.
-
-    Args:
-        query: The raw query text; tokenized with :func:`tokenize`.
-        documents: ``{key: {field: text-or-terms}}``. A field value may be a
-            string (tokenized) or an already-split sequence of terms (tags).
-            Unknown fields are scored with weight 1.0 rather than dropped.
-        limit: Keep at most this many hits; ``None`` keeps all.
-        boosts: Per-field weights; defaults to :data:`FIELD_BOOSTS`.
-
-    Returns:
-        The documents that matched at least one query term, ordered by score
-        descending and then by key ascending, so ties are deterministic.
-    """
-    if not documents:
-        return []
-    return Bm25fCorpus(documents).rank(query, limit=limit, boosts=boosts)
 
 
 def _field_terms(value: str | Sequence[str] | Iterable[str]) -> list[str]:

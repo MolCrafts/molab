@@ -73,7 +73,7 @@ class TestKnowledgeRouteRedirect:
         from molab.knowledge.concepts import Note, _product
         from molab.knowledge.edges import EdgeRole
         from molab.knowledge.embed import default_role_for, resolve_embed_target, summarize_entity
-        from molab.knowledge.errors import ConceptNotFoundError
+        from molab.knowledge.errors import KnowledgeNotFoundError
         from molab.knowledge.search import extract_title
 
         assert all(
@@ -87,7 +87,7 @@ class TestKnowledgeRouteRedirect:
             )
         )
         assert _product("Note") is Note
-        assert issubclass(ConceptNotFoundError, LookupError)
+        assert issubclass(KnowledgeNotFoundError, LookupError)
         assert set(get_args(EdgeRole)) == {
             "derived_from",
             "cites",

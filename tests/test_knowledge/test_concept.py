@@ -189,17 +189,12 @@ class TestConceptRef:
 
 
 class TestKnowledgeAlias:
-    """``Concept`` is ``Knowledge``; the not-found error is the same object."""
+    """``Concept`` is ``Knowledge``."""
 
     def test_concept_is_knowledge(self) -> None:
         from molab.knowledge.concept import Knowledge
 
         assert Concept is Knowledge
-
-    def test_concept_not_found_error_is_knowledge_not_found_error(self) -> None:
-        from molab.knowledge.errors import ConceptNotFoundError, KnowledgeNotFoundError
-
-        assert ConceptNotFoundError is KnowledgeNotFoundError
 
 
 class TestHostConstruction:
@@ -869,7 +864,7 @@ class TestAppendSourceLinks:
         from molab.knowledge import concept as concept_mod
 
         assert "link_line" in inspect.getsource(concept_mod.append_source_links)
-        for name in ("retarget_links", "append_source_links", "remove_legacy_files"):
+        for name in ("retarget_links", "append_source_links"):
             assert name in concept_mod.__all__
             assert name not in knowledge.__all__
         offenders: list[str] = []
@@ -930,68 +925,6 @@ class TestConceptWriteReplace:
         finding.write(text, replace=True)
 
         assert path.stat().st_mtime_ns == before
-
-
-class TestRemoveLegacyFiles:
-    def test_named_files_go_and_an_attachment_stays(self, tmp_path: Path) -> None:
-        from molab.knowledge.concept import remove_legacy_files
-
-        directory = tmp_path / "obs-1"
-        directory.mkdir()
-        (directory / "observation.json").write_text("{}\n")
-        (directory / "index.md").write_text("# i\n")
-        (directory / "fig.png").write_bytes(b"PNG")
-
-        left = remove_legacy_files(
-            directory,
-            ["observation.json", "index.md"],
-            fs=LocalFS(),
-        )
-
-        assert left == ["fig.png"]
-        assert directory.is_dir()
-        assert (directory / "fig.png").read_bytes() == b"PNG"
-        assert not (directory / "index.md").exists()
-
-    def test_an_empty_directory_is_removed(self, tmp_path: Path) -> None:
-        from molab.knowledge.concept import remove_legacy_files
-
-        directory = tmp_path / "obs-1"
-        directory.mkdir()
-        (directory / "index.md").write_text("x")
-
-        assert remove_legacy_files(directory, ["index.md"], fs=LocalFS()) == []
-        assert not directory.exists()
-
-    def test_absent_names_are_ignored(self, tmp_path: Path) -> None:
-        from molab.knowledge.concept import remove_legacy_files
-
-        directory = tmp_path / "d"
-        directory.mkdir()
-        (directory / "a.txt").write_text("a")
-
-        assert remove_legacy_files(directory, ["missing.txt"], fs=LocalFS()) == ["a.txt"]
-
-    def test_a_slash_in_the_name_is_refused(self, tmp_path: Path) -> None:
-        from molab.knowledge.concept import remove_legacy_files
-
-        directory = tmp_path / "d"
-        directory.mkdir()
-
-        with pytest.raises(ValueError):
-            remove_legacy_files(directory, ["a/b"], fs=LocalFS())
-
-    def test_a_subdirectory_is_kept(self, tmp_path: Path) -> None:
-        from molab.knowledge.concept import remove_legacy_files
-
-        directory = tmp_path / "d"
-        (directory / "nested").mkdir(parents=True)
-        (directory / "nested" / "x").write_text("x")
-
-        left = remove_legacy_files(directory, ["nested"], fs=LocalFS())
-
-        assert left == ["nested"]
-        assert (directory / "nested" / "x").is_file()
 
 
 class TestConceptOpen:
