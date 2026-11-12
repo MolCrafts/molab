@@ -308,13 +308,13 @@ class Concept:
         Returns:
             The ranked hits. Each entry path is relative to this handle and
             keeps its ``.md`` / ``.html`` suffix. ``cls`` is the Knowledge
-            class name. An HTML document is titled by its frontmatter ``name`` (or
-            ``title``) and ranked on its text without tags.
+            class name; the title is :meth:`title`'s rule. An HTML document is
+            ranked on its text without tags.
         """
         from .concepts import class_of
         from .frontmatter import document_text, split_frontmatter
-        from .naming import is_html_document
-        from .search import ConceptIndexEntry, extract_title, search_index
+        from .index_section import document_title
+        from .search import ConceptIndexEntry, search_index
 
         entries: list[ConceptIndexEntry] = []
         bodies: dict[str, str] = {}
@@ -326,6 +326,7 @@ class Concept:
             klass = class_of(meta)
             if klass is None:
                 continue
+            title = document_title(meta, body, PurePosixPath(path).stem)
             if isinstance(of, type) and not issubclass(klass, of):
                 continue
             tags_raw = meta.get("tags")
@@ -333,8 +334,6 @@ class Concept:
             if tag is not None and tag not in tags:
                 continue
             body = document_text(body, path=path)
-            named = _meta_text(meta, "name", "title") if is_html_document(path) else None
-            title = named or extract_title(body) or PurePosixPath(path).stem
             rel = PurePosixPath(os.path.relpath(path, self._path)).as_posix()
             bodies[rel] = body if include_text else ""
             entries.append(
@@ -383,6 +382,20 @@ class Concept:
         """*model* built from this document's frontmatter keys that it declares."""
         meta = self.frontmatter()
         return model.model_validate({key: meta[key] for key in model.model_fields if key in meta})
+
+    def title(self) -> str:
+        """The display title: frontmatter ``title``, else the first H1, else ``name``, else the stem.
+
+        The one rule, :func:`~molab.knowledge.index_section.document_title`.
+        """
+        from .frontmatter import split_frontmatter
+        from .index_section import document_title
+
+        self._require_document("title")
+        meta, body = split_frontmatter(
+            read_text_or_none(self._path, fs=self._fs) or "", path=self._path
+        )
+        return document_title(meta, body, self.name)
 
     def read(self) -> str:
         """This document's narrative: the markdown body, or the HTML ``<body>`` content."""
@@ -1251,15 +1264,6 @@ def _append_line(src: Concept, line: str) -> None:
     from .frontmatter import append_markdown
 
     src.write(append_markdown(src.read(), line + "\n", path=src.path))
-
-
-def _meta_text(meta: Mapping[str, object], *keys: str) -> str | None:
-    """The first non-blank string among *keys* of *meta*."""
-    for key in keys:
-        value = meta.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
 
 
 def read_text_or_none(path: PathArg, *, fs: FileSystem) -> str | None:

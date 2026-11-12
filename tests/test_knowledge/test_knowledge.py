@@ -131,3 +131,46 @@ class TestSourcedHostConstruction:
         assert "# Tg rises with the cooling rate\n" in text
         assert "sources:" not in text
         assert finding.sources == [source]
+
+
+class TestTitle:
+    """One title rule: frontmatter ``title``, else the first H1, else ``name``, else the stem."""
+
+    @pytest.mark.parametrize(
+        ("text", "title"),
+        [
+            ("---\nclass: Note\nname: Glass Notes\n---\nplain prose, glass\n", "Glass Notes"),
+            ("---\nclass: Note\ntitle: Tg study\n---\n# Heading\n\nglass\n", "Tg study"),
+            ("---\nclass: Note\nname: Glass Notes\n---\n# Heading\n\nglass\n", "Heading"),
+        ],
+    )
+    def test_every_reader_agrees(self, tmp_path: Path, text: str, title: str) -> None:
+        from molab.fs import LocalFS
+        from molab.knowledge import Knowledge
+        from molab.knowledge.embed import summarize_entity
+        from molab.knowledge.index_section import section_rows
+
+        container = tmp_path / "knowledges"
+        container.mkdir()
+        (container / "glass.md").write_text(text, encoding="utf-8")
+        note = Note(container / "glass.md")
+
+        assert note.title() == title
+        assert Knowledge(container).search("glass").hits[0].entry.title == title
+        assert section_rows(str(tmp_path), fs=LocalFS())[0]["title"] == title
+        assert summarize_entity(note).title == title
+
+    def test_an_html_page_title_follows_the_same_rule(self, tmp_path: Path) -> None:
+        from molab.knowledge.write import write_knowledge
+
+        page = write_knowledge(
+            tmp_path,
+            name="Glass",
+            of=Note,
+            created_by="t",
+            text="<molab-markdown>\n# Cooling\n</molab-markdown>\n",
+            format="html",
+        )
+
+        assert page.title() == "Cooling"
+        assert "<title>Cooling</title>" in Path(page.path).read_text(encoding="utf-8")

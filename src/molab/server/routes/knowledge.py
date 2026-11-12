@@ -473,14 +473,13 @@ def _created_at(note: Concept) -> str | None:
 def _note_summary(workspace: Workspace, note: Concept) -> NoteSummary:
     """Build a :class:`NoteSummary` for *note* (identity + host + excerpt + times)."""
     from molab.knowledge.frontmatter import document_text
-    from molab.knowledge.index_section import document_title
     from molab.knowledge.naming import document_format
 
     body = document_text(note.read() or "", path=note.path)
     status_val = note.status() if isinstance(note, Note) else None
     return NoteSummary(
         name=note.name,
-        title=document_title(dict(note.frontmatter()), body, note.name),
+        title=note.title(),
         relPath=_rel(workspace, note.path),
         hostPath=_host_rel(workspace, note.path),
         excerpt=body[:_EXCERPT_CHARS],
@@ -813,20 +812,16 @@ def entity_backlinks(
 def _citing_rows(workspace: Workspace, ref: str) -> list[EntityBacklinkRow]:
     """Knowledge documents whose links cite *ref*, one row each."""
     from molab.knowledge.concept import backlinks_to
-    from molab.knowledge.search import extract_title
 
-    rows: list[EntityBacklinkRow] = []
-    for link in backlinks_to([ref], within=workspace.root, fs=workspace.fs):
-        narrative = link.source.read() or ""
-        rows.append(
-            EntityBacklinkRow(
-                path=_rel(workspace, link.source),
-                title=extract_title(narrative) or link.source.name,
-                cls=type(link.source).__name__,
-                role=str(link.role),
-            )
+    return [
+        EntityBacklinkRow(
+            path=_rel(workspace, link.source),
+            title=link.source.title(),
+            cls=type(link.source).__name__,
+            role=str(link.role),
         )
-    return rows
+        for link in backlinks_to([ref], within=workspace.root, fs=workspace.fs)
+    ]
 
 
 class KnowledgeSearchRow(BaseModel):

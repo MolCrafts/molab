@@ -5,7 +5,7 @@ rows. :func:`context_with_knowledge` is the only producer: the server and the
 CLI both call it instead of walking the tree twice.
 
 Enumeration is a workspace-scope handle (``Knowledge(workspace.root, fs=workspace.fs)``).
-The title comes from :func:`molab.knowledge.search.extract_title`. Both
+The title is :meth:`molab.knowledge.Knowledge.title`. Both
 functions are pure reads: no write, no cache, no global state.
 """
 
@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from molab.knowledge import Knowledge
-from molab.knowledge.search import extract_title
 from molab.workspace import ContextFocus, WorkspaceContext
 
 if TYPE_CHECKING:
@@ -62,7 +61,7 @@ def project_knowledge(workspace: Workspace) -> list[KnowledgeRef]:
         KnowledgeRef(
             path=Path(concept.path).relative_to(workspace.root).as_posix(),
             cls=type(concept).__name__,
-            title=extract_title(concept.read()) or concept.name,
+            title=concept.title(),
         )
         for concept in Knowledge(workspace.root, fs=workspace.fs).walk()
     ]

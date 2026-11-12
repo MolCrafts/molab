@@ -58,7 +58,7 @@ class TestProjectKnowledge:
             KnowledgeRef(
                 path="knowledges/no-heading.md",
                 cls="Note",
-                title="no-heading",
+                title="No Heading",
             )
         ]
 

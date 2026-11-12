@@ -270,10 +270,7 @@ def render_page(
     linker = _Linker(doc, workspace_root, asset_url, doc_url)
     content = _body_html(body, linker)
     footer = _sources_html(sources, linker)
-    heading = re.search(r"<h1>(.*?)</h1>", content, re.S)
-    title = (
-        re.sub(r"<[^>]+>", "", heading.group(1)) if heading else str(meta.get("name") or doc.stem)
-    )
+    title = concept.title()
     cls = type(concept).__name__
     tags = " ".join(f'<span class="tag">#{html.escape(str(t))}</span>' for t in concept.tags())
     byline = " · ".join(

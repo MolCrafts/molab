@@ -40,7 +40,7 @@ class TestWrite:
         assert Path(doc.path).name == "tg-page.html"
         text = Path(doc.path).read_text(encoding="utf-8")
         assert text.startswith("<!doctype html>\n")
-        assert "<title>Tg page</title>" in text
+        assert "<title>Glass transition</title>" in text
         meta, body = htmldoc.split(text)
         assert body == BODY
         assert meta["class"] == "Note"
@@ -135,7 +135,7 @@ class TestRead:
 
         hits = root.search("cooling").hits
         assert [hit.entry.path for hit in hits] == ["knowledges/tg-page.html"]
-        assert hits[0].entry.title == "Tg page"
+        assert hits[0].entry.title == "Glass transition"
         assert not root.search("molab").hits
         assert not root.search("densityseries").hits
 

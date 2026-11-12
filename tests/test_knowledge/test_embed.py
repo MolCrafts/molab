@@ -124,12 +124,12 @@ class TestSummarizeEntity:
             "Smith 2024",
         )
 
-    def test_a_document_title_falls_back_to_its_h1_then_its_name(self, experiment: Any) -> None:
+    def test_a_document_title_is_its_h1_else_its_name(self, experiment: Any) -> None:
         titled = Note.mount(experiment, "Titled", body="# A Real Title\n")
         untitled = Note.mount(experiment, "Untitled")
 
         assert summarize_entity(titled).title == "A Real Title"
-        assert summarize_entity(untitled).title == "untitled"
+        assert summarize_entity(untitled).title == "Untitled"
 
     def test_a_folder_title_prefers_its_index_h1(self, run: Any) -> None:
         run.write_index("# Nice Run Title\n\nnotes")

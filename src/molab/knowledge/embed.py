@@ -132,8 +132,7 @@ def summarize_entity(target: Concept | Folder | Asset) -> EntitySummary:
       ``kind`` is its head ``type`` (falling back to the folder's kind), and
       ``title`` is the ``index.md`` H1, else the directory name.
     - A ``Concept``: ``id`` is the document path, because that path is the
-      document; ``kind`` is its class name; ``title`` is a ``Literature``'s
-      bibliographic title, else the narrative's H1, else its name.
+      document; ``kind`` is its class name; ``title`` is :meth:`Concept.title`.
     - An ``Asset``: ``id`` is the asset id, ``kind`` is ``"asset"``, and
       ``title`` is the asset title.
 
@@ -152,10 +151,8 @@ def summarize_entity(target: Concept | Folder | Asset) -> EntitySummary:
     if isinstance(target, Asset):
         return EntitySummary(id=target.id, kind="asset", title=target.title)
     if isinstance(target, Concept):
-        bib_title = target.fields().title if isinstance(target, Literature) else None
-        title = bib_title or extract_title(target.read()) or target.name
         # A document's identity is its path.
-        return EntitySummary(id=str(target.path), kind=type(target).__name__, title=title)
+        return EntitySummary(id=str(target.path), kind=type(target).__name__, title=target.title())
     if isinstance(target, Folder):
         raw_type = target.read_meta().get("type")
         kind = str(raw_type) if raw_type is not None else target.kind

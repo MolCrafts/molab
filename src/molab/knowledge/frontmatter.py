@@ -38,8 +38,10 @@ def dump_frontmatter(meta: dict[str, object], body: str, *, path: object = None)
     """Render *meta* + *body* as the document file *path* names."""
     cleaned = {k: v for k, v in meta.items() if v is not None and v != "" and v != []}
     if path is not None and is_html_document(path):
-        title = cleaned.get("name") or cleaned.get("title") or PurePosixPath(str(path)).stem
-        return dump_html(cleaned, body, title=str(title))
+        from .index_section import document_title
+
+        title = document_title(cleaned, body, PurePosixPath(str(path)).stem)
+        return dump_html(cleaned, body, title=title)
     if body and not body.endswith("\n"):
         body = body + "\n"
     return dump(cleaned, body)
