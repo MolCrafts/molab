@@ -113,6 +113,18 @@ A `Report` or a `Finding` rests on registered bytes: it must link at least one
 `molab:` asset, run or execution. A write that does not is refused (422 over
 HTTP), and `molab validate` reports a hand-written one (`knowledge.unanchored`).
 
+That is one instance of a general rule: a write is refused exactly when
+`molab validate` would report an error for the document it leaves. Besides an
+unanchored `Report` or `Finding`, that is a frontmatter its class refuses
+(`knowledge.fields`), a `localhost` or loopback link (`knowledge.ephemeral_link`),
+a numbered name such as `notes-v2` (`knowledge.versioned_name`), and page
+markup — `<!doctype`, `<html>`, `<head>`, `<body>`, `<iframe>`, `<script>` or
+`<style>` outside code — in a markdown document (`knowledge.html_page`; an
+`.html` document is the one meant to be a page). Nothing is written; over HTTP
+the write is 422 and the message names each rule and the offending text.
+Moving or renaming a document still relinks the documents that point at it,
+even one that already breaks a rule.
+
 A `Plan` is the one planning document. Its work items live in its narrative
 body; the claims it sets out to test are `Hypothesis` documents.
 

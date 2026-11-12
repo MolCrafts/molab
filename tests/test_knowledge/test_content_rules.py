@@ -6,6 +6,7 @@ tool would, so it never passed ``write_knowledge``'s gate.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -173,3 +174,131 @@ class TestHygieneRules:
         )
         rules = {rule for rule, _path, _sev in _issues(lab)}
         assert "knowledge.unanchored" not in rules
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "<!doctype html>\n<p>x</p>\n",
+            "<html lang='en'><p>x</p></html>\n",
+            "<HEAD><title>x</title></HEAD>\n",
+            "<body>x</body>\n",
+            "<iframe src='https://example.org/x'></iframe>\n",
+            "< script>run()</script>\n",
+            "<style>p { color: red }</style>\n",
+        ],
+    )
+    def test_an_html_page_in_a_markdown_document_is_an_error(self, lab: Any, body: str) -> None:
+        _doc(lab, "page", f"---\nclass: Note\nname: Page\n---\n# Page\n\n{body}")
+        assert ("knowledge.html_page", "knowledges/page.md", "error") in _issues(lab)
+
+    def test_page_markup_in_code_or_a_header_tag_is_not_a_page(self, lab: Any) -> None:
+        _doc(
+            lab,
+            "embedding",
+            "---\nclass: Note\nname: Embedding\n---\nEmbed with `<iframe>`, not a\n"
+            "<header>.\n\n```html\n<script>run()</script>\n```\n",
+        )
+        assert "knowledge.html_page" not in {rule for rule, _path, _sev in _issues(lab)}
+
+
+#: ``(name, class, body)`` written once by hand and once through ``write_knowledge``.
+_WRITES: dict[str, tuple[str, str, str]] = {
+    "clean": ("Clean", "Note", "# Clean\n"),
+    "ephemeral": ("Seen", "Note", "[view](http://localhost:8771/x.html)\n"),
+    "versioned": ("Fragments v3", "Note", "# Fragments\n"),
+    "html_page": ("Page", "Note", "<!doctype html>\n<html><body>x</body></html>\n"),
+    "markup_in_code": ("Code", "Note", "Embed with `<iframe>`.\n"),
+    "unanchored": ("Boxes", "Report", "files in out/\n"),
+    "anchored": ("Boxes", "Report", "![b](molab:asset/01a1ac09-072e-7f27-9d1e-3c964b52c345)\n"),
+    "bad_fields": ("Claim", "Hypothesis", "# Claim\n"),
+}
+
+
+class TestTheWriteGate:
+    """A write is refused exactly when validate reports an error for what it would leave."""
+
+    @pytest.mark.parametrize("case", sorted(_WRITES))
+    def test_a_write_is_refused_exactly_when_validate_reports_an_error(
+        self, lab: Any, case: str
+    ) -> None:
+        from molab.ids import slugify
+        from molab.knowledge.concepts import _product
+        from molab.knowledge.write import normalize_sources, write_knowledge
+
+        name, cls, body = _WRITES[case]
+        fields = {"verdict": "likely"} if case == "bad_fields" else {}
+        head = "".join(f"{key}: {value}\n" for key, value in fields.items())
+        slug = slugify(name)
+        _doc(lab, slug, f"---\nclass: {cls}\nname: {name}\n{head}---\n{body}")
+        errors = {
+            issue["rule"]
+            for issue in validate_knowledge(lab, errors_only=True)
+            if issue["path"] == f"knowledges/{slug}.md"
+        }
+
+        host = lab.get_project("p")
+        klass = _product(cls)
+        sources = normalize_sources([], default_host=host, of=klass)
+        try:
+            write_knowledge(
+                host,
+                name=name,
+                of=klass,
+                sources=sources,
+                created_by="t",
+                text=body,
+                fields=fields,
+            )
+        except ValueError as exc:
+            refusal: str | None = str(exc)
+        else:
+            refusal = None
+
+        assert (refusal is not None) == bool(errors), (errors, refusal)
+        for rule in errors:
+            assert rule in (refusal or "")
+        landed = list(Path(str(host.resolve())).glob(f"knowledges/{slug}.*"))
+        assert bool(landed) == (refusal is None)
+
+    @pytest.mark.parametrize(
+        ("body", "offending"),
+        [
+            ("[view](http://localhost:8771/x.html)\n", "http://localhost:8771"),
+            ("<iframe src='https://example.org/x'></iframe>\n", "<iframe"),
+        ],
+    )
+    def test_the_refusal_names_the_offending_text(
+        self, lab: Any, body: str, offending: str
+    ) -> None:
+        from molab.knowledge import Note
+        from molab.knowledge.write import write_knowledge
+
+        with pytest.raises(ValueError, match=re.escape(offending)):
+            write_knowledge(lab, name="Seen", of=Note, created_by="t", text=body)
+
+    def test_an_html_document_may_be_a_page(self, lab: Any) -> None:
+        from molab.knowledge import Note
+        from molab.knowledge.write import write_knowledge
+
+        page = "<!doctype html>\n<html><head><style>p{}</style></head><body>x</body></html>\n"
+        doc = write_knowledge(lab, name="Page", of=Note, created_by="t", text=page, format="html")
+
+        assert doc.exists()
+        assert "knowledge.html_page" not in {rule for rule, _path, _sev in _issues(lab)}
+
+    def test_relinking_a_document_that_breaks_a_rule_does_not_block_a_rename(
+        self, lab: Any
+    ) -> None:
+        from molab.knowledge import Note
+
+        target = Note(Path(str(lab.root)) / "knowledges" / "target")
+        target.write("# Target\n")
+        old = _doc(
+            lab,
+            "notes-v2",
+            "---\nclass: Note\nname: Notes v2\n---\n- [@cites target](target.md)\n",
+        )
+
+        target.rename("Moved")
+
+        assert "(moved.md)" in old.read_text(encoding="utf-8")

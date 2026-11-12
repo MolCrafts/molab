@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from molq import MolqError
 
+from molab.knowledge.content_rules import ContentRuleError
 from molab.workflow.types import WorkflowError
 from molab.workspace.errors import (
     AmbiguousRefError,
@@ -120,6 +121,20 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.to_dict(),
+        )
+
+    @app.exception_handler(ContentRuleError)
+    async def content_rule_handler(request: Request, exc: ContentRuleError) -> JSONResponse:  # noqa: ARG001
+        """A write that would leave a document breaking a content rule is 422."""
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "CONTENT_RULE",
+                    "message": str(exc),
+                    "details": {"rules": [issue.rule for issue in exc.issues]},
+                }
+            },
         )
 
     @app.exception_handler(ValueError)

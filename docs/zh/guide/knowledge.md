@@ -104,6 +104,14 @@ pydantic 模型，子类扩展父类的模型。
 `Report` 与 `Finding` 必须落在已登记的字节上：至少链接一个 `molab:` 资产、run 或 execution。
 不满足的写入会被拒绝（HTTP 上为 422），手写的则由 `molab validate` 报告（`knowledge.unanchored`）。
 
+这是一条通则的一例：一次写入被拒绝，当且仅当 `molab validate` 会对它留下的文档报错。除了没有锚点的
+`Report` 或 `Finding`，还有类不接受的 frontmatter（`knowledge.fields`）、指向 `localhost` 或回环
+地址的链接（`knowledge.ephemeral_link`）、带编号的名字如 `notes-v2`（`knowledge.versioned_name`），
+以及 markdown 文档里代码之外的页面标记 —— `<!doctype`、`<html>`、`<head>`、`<body>`、`<iframe>`、
+`<script>` 或 `<style>`（`knowledge.html_page`；要做成页面的是 `.html` 文档）。什么都不会写入；
+HTTP 上为 422，消息写明每条规则和出问题的文本。移动或重命名文档时，指向它的文档照样会被改链，
+即使那份文档本身已经违反某条规则。
+
 `Plan` 是唯一的计划文档。它的工作项写在叙事正文里；它要检验的断言是 `Hypothesis` 文档。
 
 ### 控制流在链接和字段里

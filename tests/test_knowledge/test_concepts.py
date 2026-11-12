@@ -123,21 +123,14 @@ class TestSourcedKnowledgeSources:
 
         assert opened.sources == [SourceRef(kind="run", ref="molab:experiment/E1/run/R1")]
 
-    def test_writing_tags_keeps_the_frontmatter_sources_value(self, tmp_path: Path) -> None:
-
+    def test_a_frontmatter_sources_value_is_not_read_as_sources(self, tmp_path: Path) -> None:
         path = tmp_path / "fa.md"
         path.write_text(
             "---\nclass: Observation\nsources:\n- kind: file\n  ref: legacy.txt\n---\n\n# A\n",
             encoding="utf-8",
         )
-        opened = Observation(path)
-        stored = opened.frontmatter()["sources"]
 
-        opened.write(tags=["t"])
-
-        assert opened.frontmatter()["sources"] == stored
-        assert opened.sources == []
-        assert opened.tags() == ["t"]
+        assert Observation(path).sources == []
 
 
 class TestHarvestTargets:

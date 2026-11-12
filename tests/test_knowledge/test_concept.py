@@ -670,16 +670,25 @@ class TestConceptWrite:
         assert body.startswith("# G\n")
         assert body.count("- [@derived_from R1](molab:experiment/E1/run/R1)") == 1
 
-    def test_a_legacy_disk_file_keeps_its_sources_key(self, tmp_path: Path) -> None:
-        path = tmp_path / "old.md"
-        path.write_text("---\nclass: Observation\nsources:\n- kind: run\n  ref: R1\n---\n\n# Old\n")
-
+    def test_a_legacy_sources_key_refuses_a_write_until_the_fields_are_replaced(
+        self, tmp_path: Path
+    ) -> None:
         from molab.knowledge.concepts import Observation
+        from molab.knowledge.fields import replace_fields
 
+        path = tmp_path / "old.md"
+        legacy = "---\nclass: Observation\nsources:\n- kind: run\n  ref: R1\n---\n\n# Old\n"
+        path.write_text(legacy)
         opened = Observation(path)
-        opened.write(tags=["t"])
 
-        assert "sources:" in path.read_text()
+        with pytest.raises(ValueError, match=r"knowledge\.fields.*sources"):
+            opened.write(tags=["t"])
+        assert path.read_text() == legacy
+
+        replace_fields(opened, {})
+        opened.write(tags=["t"])
+        assert "sources" not in opened.frontmatter()
+        assert opened.tags() == ["t"]
 
 
 class TestBacklinksTo:
@@ -892,7 +901,7 @@ class TestConceptWriteReplace:
         path = tmp_path / "f.md"
         path.write_text("---\nclass: Finding\nsources:\n- kind: run\n  ref: R1\n---\n\n# F\n")
         finding = Finding(path)
-        text = "---\nclass: Finding\n---\n\n# F\n"
+        text = "---\nclass: Finding\n---\n\n# F\n\n- [r](molab:experiment/e1/run/r1)\n"
 
         finding.write(text, replace=True)
 

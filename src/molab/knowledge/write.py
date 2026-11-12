@@ -92,13 +92,11 @@ def write_knowledge(
             or is the written one, or the name already exists in the other
             *format*.
     """
-    from .fields import check_fields
     from .index_section import refresh_section
     from .location import _host_fs
     from .mutation import mutation
 
     disk = fs if fs is not None else _host_fs(host)
-    check_fields(of, fields or {})
     edges = [(link_target(target), validate_role(role)) for target, role in cite]
     path = _landed_path(host, name, of, format, disk)
     sourced = _sourced_class(of)

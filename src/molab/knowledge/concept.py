@@ -702,10 +702,13 @@ class Concept:
         Raises:
             TypeError: ``replace=True`` and *text* is not a ``str``.
             ValueError: The frontmatter ``class`` is not this document's
-                class, or the class's fields refuse what the write leaves
-                (:func:`~molab.knowledge.fields.check_fields`): checked when
-                the call creates the file, replaces it, or writes a field.
+                class.
+            ContentRuleError: The document the write would leave breaks an
+                error-level content rule, its class's fields among them
+                (:func:`~molab.knowledge.content_rules.error_issues`). Nothing
+                is written.
         """
+        from .content_rules import refuse_errors
         from .frontmatter import dump_frontmatter, split_frontmatter
         from .mutation import mutation
         from .naming import as_knowledge_file
@@ -722,7 +725,7 @@ class Concept:
                     raise TypeError(
                         f"replace=True requires the whole document as str, got {type(text).__name__}"
                     )
-                meta, _body = split_frontmatter(text, path=self._path)
+                meta, body = split_frontmatter(text, path=self._path)
                 declared = meta.get("class")
                 if declared != type(self).__name__:
                     raise ValueError(
@@ -730,7 +733,8 @@ class Concept:
                     )
                 if self._fs.is_file(self._path) and self._fs.read_text(self._path) == text:
                     return
-                self._accept_head(meta, written=meta, whole=True)
+                self._refuse_other_class()
+                refuse_errors(type(self), str(self._path), meta, body)
                 self._fs.mkdir(self._fs.dirname(self._path), parents=True, exist_ok=True)
                 self._fs.atomic_write_text(self._path, text)
                 return
@@ -751,41 +755,39 @@ class Concept:
             head["class"] = type(self).__name__
             sources = list(getattr(self, "_sources", None) or [])
             merged = {**self.frontmatter(), **head}
-            self._accept_head(merged, written=head, whole=not self.exists())
+            self._refuse_other_class()
             if narrative is None:
                 narrative = self.read()
             parent = str(PurePosixPath(self._path).parent)
             body, _appended = append_source_links(
                 narrative or "", sources, base_dir=parent, path=self._path
             )
-            from .content_rules import unanchored
-
-            problem = unanchored(type(self), body)
-            if problem is not None:
-                raise ValueError(problem)
+            refuse_errors(type(self), str(self._path), merged, body)
             self._fs.mkdir(parent, parents=True, exist_ok=True)
             self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body, path=self._path))
 
-    def _accept_head(
-        self, merged: Mapping[str, object], *, written: Mapping[str, object], whole: bool
-    ) -> None:
-        """Refuse a frontmatter the class would not hold. Nothing is written yet.
-
-        The class's fields are checked over everything the file will carry
-        when the call writes the whole head (a new file, a replace) or writes
-        one of the class's fields; a call that leaves them alone does not
-        answer for them.
-        """
-        from .fields import check_fields, own_fields
-
-        klass = type(self)
+    def _refuse_other_class(self) -> None:
+        """Refuse to write over a file that holds another class. Nothing is written yet."""
         stored = self.frontmatter() if self.exists() else {}
-        if stored and stored.get("class") != klass.__name__:
+        if stored and stored.get("class") != type(self).__name__:
             raise ValueError(
-                f"{self.path} already holds a {stored.get('class')}, not a {klass.__name__}"
+                f"{self.path} already holds a {stored.get('class')}, not a {type(self).__name__}"
             )
-        if whole or own_fields(written):
-            check_fields(klass, own_fields(merged))
+
+    def _store_relinked(self, body: str) -> None:
+        """Store *body*, in which only link targets changed, under the stored frontmatter.
+
+        Moving a document rewrites the links that point at it. Relinking
+        changes no content rule's verdict, so it skips :meth:`write`'s gate: a
+        document that already breaks a rule does not block the move.
+        """
+        from .frontmatter import dump_frontmatter
+        from .mutation import mutation
+
+        with mutation(self, "knowledge.edited", f"relink {self.name}"):
+            self._fs.atomic_write_text(
+                self._path, dump_frontmatter(self.frontmatter(), body, path=self._path)
+            )
 
     def links(self) -> list[Edge]:
         """The documents this one cites — typed markdown links in the narrative."""
@@ -1049,7 +1051,7 @@ def _retarget_links(doc: Concept, rewrite: Callable[[str], str | None]) -> bool:
     """
     new, count = retarget_links(doc.read(), lambda target, _image: rewrite(target))
     if count > 0:
-        doc.write(new)
+        doc._store_relinked(new)
     return count > 0
 
 

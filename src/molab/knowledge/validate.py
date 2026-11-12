@@ -13,7 +13,8 @@ experiment and run):
   beside ``a.html``): one name, one file.
 * the content rules of :mod:`molab.knowledge.content_rules` — fields the
   class does not declare or refuses, links that leave the workspace, Literature without bibliographic
-  fields, ephemeral links, versioned names, unanchored Reports.
+  fields, ephemeral links, versioned names, HTML pages in markdown, unanchored
+  Reports. Each error among them also refuses the write that would leave it.
 * ``knowledge.section_drift`` (warning) — the host's ``index.knowledges``
   section differs from a rebuild from the files. Like the derived ``index:``
   keys it is navigation sugar: a legal direct write of a document leaves it

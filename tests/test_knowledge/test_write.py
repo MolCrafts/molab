@@ -325,7 +325,10 @@ class TestWriteKnowledgePath:
     def test_replaces_deletes_the_old_document_and_relinks_its_readers(self, lab: Any) -> None:
         from molab.knowledge.write import write_knowledge
 
-        old = write_knowledge(lab, name="Fragments v3", of=Note, created_by="t", text="# v3\n")
+        # A numbered copy is written by hand: the write path refuses that name.
+        old = Path(str(lab.root)) / "knowledges" / "fragments-v3.md"
+        old.parent.mkdir(parents=True, exist_ok=True)
+        old.write_text("---\nclass: Note\nname: Fragments v3\n---\n# v3\n", encoding="utf-8")
         reader = write_knowledge(
             lab,
             name="Reader",
@@ -339,9 +342,9 @@ class TestWriteKnowledgePath:
             of=Note,
             created_by="t",
             text="# current\n",
-            replaces=[old.path],
+            replaces=[old],
         )
-        assert not Path(str(old.path)).exists()
+        assert not old.exists()
         assert Path(str(new.path)).exists()
         assert "(fragments.md)" in Path(str(reader.path)).read_text(encoding="utf-8")
 

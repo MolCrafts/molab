@@ -110,7 +110,11 @@ class TestReplacingTheFields:
         folder = _container(lab)
         folder.mkdir(parents=True)
         path = folder / "legacy.md"
-        path.write_text("---\nclass: Finding\nname: Legacy\nkind: x\n---\n# L\n", encoding="utf-8")
+        path.write_text(
+            "---\nclass: Finding\nname: Legacy\nkind: x\n---\n# L\n\n"
+            "- [@derived_from r](molab:experiment/e1/run/r1)\n",
+            encoding="utf-8",
+        )
         doc = Finding(path)
         replace_fields(doc, {})
         assert "kind" not in Finding(path).frontmatter()

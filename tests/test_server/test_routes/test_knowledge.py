@@ -803,8 +803,11 @@ class TestDocPage:
         self, served: ServedFactory, lab: RunFixture
     ) -> None:
         ws, _exp, _run = lab
-        Note(Path(str(ws.root)) / "knowledges" / "claim").write(
-            "# A plateau appears\n\n**Above 0.2** it flattens.\n\n<script>steal()</script>\n"
+        # Written by hand: the write path refuses page markup in a markdown body.
+        (Path(str(ws.root)) / "knowledges" / "claim.md").write_text(
+            "---\nclass: Note\nname: claim\n---\n# A plateau appears\n\n"
+            "**Above 0.2** it flattens.\n\n<script>steal()</script>\n",
+            encoding="utf-8",
         )
         with served(ws) as client:
             response = client.get("/api/knowledge/doc/page", params={"path": "knowledges/claim.md"})
@@ -1677,3 +1680,38 @@ class TestHypothesis:
                 json={"target_kind": "run", "target": str(ref_of(run)), "role": "proves"},
             )
         assert response.status_code == 422, response.text
+
+
+class TestContentRulesOverHttp:
+    """A write that would leave an error-level content finding is 422, naming rule and text."""
+
+    def test_creating_a_document_with_a_localhost_link_is_422(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, _run = lab
+        with served(ws, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/knowledge/doc",
+                json={"name": "Seen", "cls": "Note", "body": "[v](http://localhost:8771/x)\n"},
+            )
+        assert response.status_code == 422, response.text
+        assert "knowledge.ephemeral_link" in response.text
+        assert "http://localhost:8771" in response.text
+        assert not (Path(str(ws.root)) / "knowledges" / "seen.md").exists()
+
+    def test_rewriting_a_body_into_an_html_page_is_422(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, _run = lab
+        doc = Path(str(ws.root)) / "knowledges" / "idea.md"
+        before = doc.read_text(encoding="utf-8")
+        with served(ws, raise_server_exceptions=False) as client:
+            response = client.put(
+                "/api/knowledge/doc",
+                params={"path": "knowledges/idea.md"},
+                json={"body": "<script>alert(1)</script>\n"},
+            )
+        assert response.status_code == 422, response.text
+        assert "knowledge.html_page" in response.text
+        assert "<script" in response.text
+        assert doc.read_text(encoding="utf-8") == before
