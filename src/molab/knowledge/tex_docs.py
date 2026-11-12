@@ -15,7 +15,7 @@ from pathlib import PurePosixPath
 from molab.fs.base import FileSystem, PathArg
 
 TEX_CLASS = "Tex"
-"""Wire class for a TeX row. It is not one of the six Knowledge classes."""
+"""Wire class for a TeX row. It is not a knowledge class."""
 
 TEX_SUFFIXES: tuple[str, ...] = (".tex", ".ltx")
 MANUSCRIPT_CONTAINER = "manuscript"

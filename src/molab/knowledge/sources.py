@@ -113,10 +113,9 @@ class WikiSource(BaseModel, frozen=True):
     @field_validator("kind")
     @classmethod
     def _validate_kind(cls, value: str) -> str:
-        # Shape only. Whether a *registered* backend answers to this name is
-        # ``open_store``'s question, and it must raise there rather than here —
-        # listing sources has to keep working on a machine that lacks the
-        # optional dependency one of them needs.
+        # Shape only. Whether a backend answers to this name is asked when the
+        # source is opened, not here: listing sources has to keep working on a
+        # machine that lacks the optional dependency one of them needs.
         if not KIND_PATTERN.match(value):
             raise ValueError(
                 f"invalid knowledge source kind {value!r}: expected lowercase "
