@@ -102,7 +102,7 @@ def _asset_sources(run: Run, results: dict[str, JSONValue] | None) -> list[Sourc
     A result is a point in a registered asset. With no asset to pin it on,
     the value would have nowhere to live, so the call is refused.
     """
-    assets = _produced_assets(run)
+    assets = run.produced_assets()
     if not results:
         return [SourceRef.of(asset) for asset in assets]
     if not assets:
@@ -143,26 +143,6 @@ def _pin(run: Run, assets: list[Asset], results: dict[str, JSONValue]) -> list[t
             raise ValueError(f"result {key!r} matches more than one asset")
         located.append(hits[0])
     return located
-
-
-def _produced_assets(run: Run) -> list[Asset]:
-    """Assets the latest attempt of *run* registered.
-
-    Attempt ids are run-local, so a sibling run's ``e01`` is not this run's.
-    """
-    from molab.workspace.asset_repository import assets_produced_by
-    from molab.workspace.domain import ExecutionOrigin
-
-    executions = run.executions
-    if not executions:
-        return []
-    workspace = run.experiment.project.workspace
-    execution_id = executions[-1].id
-    return [
-        asset
-        for asset in assets_produced_by(workspace, execution_id, run_id=run.id)
-        if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
-    ]
 
 
 def _document_at(fs: FileSystem, path: str) -> object | None:

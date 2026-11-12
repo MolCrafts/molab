@@ -16,9 +16,7 @@ The next run names those ids in `inputs`. At execute time the root task receives
 
 ```python
 # docs: skip — conceptual illustration; requires a workspace and a finished run
-from molab.workspace.asset_repository import assets_produced_by
-
-produced = assets_produced_by(ws, run.executions[-1].id)
+produced = run.produced_assets()
 nxt = exp.add_run(inputs=(produced[0].id,))
 ```
 

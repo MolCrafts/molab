@@ -38,6 +38,7 @@ from .models import FolderMetadata, RunMetadata, RunStatus
 from .naming import RUN_CONTAINER, VALUE_CONTAINER, run_slug
 
 if TYPE_CHECKING:
+    from .domain import Asset
     from .experiment import Experiment
 
 # Re-exported for backward compatibility — the canonical definition now
@@ -512,6 +513,27 @@ class Run(Folder):
     def run_dir(self) -> Path:
         """Alias of :attr:`Folder.path` — the run directory as ``pathlib.Path``."""
         return self.path
+
+    def produced_assets(self, execution_id: str | None = None) -> list[Asset]:
+        """The assets one attempt of this run registered: *execution_id*, else the latest.
+
+        Attempt ids are run-local, so a sibling run's ``e01`` is not this
+        run's. A run with no attempt has produced nothing.
+
+        Raises:
+            ValueError: *execution_id* names no attempt of this run.
+        """
+        from .asset_repository import assets_produced_by
+
+        attempts = [item.id for item in self.executions]
+        if execution_id is None:
+            if not attempts:
+                return []
+            execution_id = attempts[-1]
+        elif execution_id not in attempts:
+            raise ValueError(f"run {self.id} has no execution {execution_id!r}")
+        workspace = self.experiment.project.workspace
+        return assets_produced_by(workspace, execution_id, run_id=self.id)
 
     def results(self, execution_id: str) -> dict[str, TaskOutput]:
         """Return the driver-side results one attempt recorded.
