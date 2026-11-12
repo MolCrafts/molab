@@ -31,20 +31,13 @@ def _mount[C: Concept](cls: type[C], root: Path, name: str) -> C:
 
 
 class TestReferenceMeta:
-    """The typed bib payload (``reference_meta``)."""
+    """The bibliographic fields of a Literature."""
 
-    def test_json_round_trip_preserves_bib_fields(self) -> None:
-        m = ReferenceMeta(
-            title="Deep Learning", authors=("LeCun", "Bengio"), year=2015, doi="10.1/x"
-        )
-        assert m.type == "reference"
-        assert m.source == "manual"
-        back = ReferenceMeta.from_json(m.to_json())
-        assert isinstance(back, ReferenceMeta)
-        assert back.title == "Deep Learning"
-        assert back.authors == ("LeCun", "Bengio")
-        assert back.year == 2015
-        assert back.doi == "10.1/x"
+    def test_an_unknown_key_is_refused(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ReferenceMeta.model_validate({"title": "T", "tags": ["x"]})
 
 
 class TestConceptRegistry:

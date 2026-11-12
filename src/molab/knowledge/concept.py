@@ -873,7 +873,6 @@ class Concept:
             The :class:`Literature` records created or updated.
         """
         from .concepts import Literature
-        from .reference_meta import ReferenceMeta
         from .write import write_knowledge
         from .zotero import ZoteroLibrary
 
@@ -883,20 +882,11 @@ class Concept:
         for item in ZoteroLibrary(path).items():
             written = write_knowledge(
                 host,  # ty: ignore[invalid-argument-type]
-                name=item.key,
+                name=str(item.source_key),
                 of=Literature,
                 created_by="zotero",
                 text="",
-                record=ReferenceMeta(
-                    title=item.title,
-                    authors=item.authors,
-                    year=item.year,
-                    doi=item.doi,
-                    url=item.url,
-                    pdf_path=item.pdf_path,
-                    source="zotero",
-                    source_key=item.key,
-                ),
+                record=item,
                 fs=self._fs,
             )
             refs.append(written)  # ty: ignore[invalid-argument-type]
@@ -973,12 +963,13 @@ def _record_as_dict(record: object) -> dict[str, object]:
 
     ``type`` and ``id`` are a concept's identity, never a record's, and are
     dropped. Every other key, ``kind`` included, is a record field and is
-    kept.
+    kept. A model contributes only the fields its caller set: a default is
+    what an absent key reads as, never a value written over a stored one.
     """
-    from .concept_meta import ConceptMeta
+    from pydantic import BaseModel
 
-    if isinstance(record, ConceptMeta):
-        payload = dict(record.model_dump(mode="json"))
+    if isinstance(record, BaseModel):
+        payload = dict(record.model_dump(mode="json", exclude_unset=True))
     elif isinstance(record, Mapping):
         payload = {str(key): value for key, value in record.items()}
     else:

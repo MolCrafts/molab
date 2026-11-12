@@ -31,7 +31,7 @@ Construct the document you mean: ``Note(host, name)``,
 A sourced document's ``inputs`` are the asset ids it cites. ``read_cited``
 reads the value at a span, and ``read`` returns the narrative.
 ``GeneratedParts(run).list()`` reads the image assets that attempt registered.
-``ZoteroLibrary(path).items()`` reads a library.
+``ZoteroLibrary(path).items()`` reads a library as Literature fields.
 ``KnowledgeSourceStore(root).search(query)`` and
 ``SourceRef.normalize(sources, default_host=...)`` stay.
 A new document's ``knowledge.created`` history is recorded by
@@ -72,7 +72,6 @@ from .sources import (
     SourceNotFoundError,
     WikiSource,
 )
-from .zotero import ZoteroItem
 
 __all__ = [
     "Edge",
@@ -98,5 +97,4 @@ __all__ = [
     "SourceRef",
     "SourcedHit",
     "WikiSource",
-    "ZoteroItem",
 ]

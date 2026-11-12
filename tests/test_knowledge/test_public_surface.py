@@ -74,7 +74,6 @@ PINNED_ALL: frozenset[str] = frozenset(
         "SourceRef",
         "SourcedHit",
         "WikiSource",
-        "ZoteroItem",
     }
 )
 

@@ -64,17 +64,10 @@ class Literature(Concept):
     @property
     def record(self) -> ReferenceMeta:
         """This literature item's bibliographic record, from its frontmatter."""
-        payload = {
-            k: v
-            for k, v in self.frontmatter().items()
-            if k not in {"class", "type", "kind", "id", "sources", "tags", "status"}
-        }
-        if "type" not in payload:
-            payload = {**payload, "type": "reference"}
-        authors = payload.get("authors")
-        if isinstance(authors, list):
-            payload["authors"] = tuple(str(a) for a in authors)
-        return ReferenceMeta.model_validate(payload)
+        meta = self.frontmatter()
+        return ReferenceMeta.model_validate(
+            {key: meta[key] for key in ReferenceMeta.model_fields if key in meta}
+        )
 
     def citation(self) -> str:
         """The human-readable citation text."""

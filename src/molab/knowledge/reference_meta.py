@@ -1,29 +1,23 @@
-"""``ReferenceMeta`` — structured bib fields for an OKF Reference Concept (wsokf-05).
+"""``ReferenceMeta`` — the bibliographic fields of a :class:`~molab.knowledge.concepts.Literature`.
 
-A :class:`~molab.knowledge.concepts.Literature` stores its bibliographic
-record in ``meta.json`` via this :class:`ConceptMeta` subtype; the narrative
-citation text lives in its ``index.md``. PDFs are *pointed at* (``pdf_path`` /
-``pdf_asset_id``), never copied.
-
-This is a port of ``molab.knowledge.references.ReferenceMeta`` onto the
-workspace surface, subclassing the workspace-local
-:class:`molab.workspace.concept_meta.ConceptMeta` (no ``molab.knowledge``
-storage dependency).
+They live in the document's frontmatter beside the keys every document
+carries; the narrative holds the citation text. A PDF is pointed at
+(``pdf_path`` / ``pdf_asset_id``), never copied.
 """
 
 from __future__ import annotations
 
-from .concept_meta import ConceptMeta
+from pydantic import BaseModel, ConfigDict
 
 
-class ReferenceMeta(ConceptMeta):
-    """Bibliographic ``meta.json`` payload of a Reference Concept.
+class ReferenceMeta(BaseModel):
+    """The bibliographic fields a Literature document stores.
 
-    Inherits :class:`ConceptMeta` (frozen, ``extra="allow"``,
-    ``from_json`` / ``to_json``); ``type`` defaults to ``"reference"``.
+    Frozen, and an unknown key is refused. A write folds in only the fields
+    the caller set (``exclude_unset``), so the ``source`` default is what an
+    absent ``source`` reads as, never a value stamped over a stored one.
 
     Attributes:
-        type: Concept discriminator (defaults to ``"reference"``).
         title: Work title.
         authors: Ordered author names.
         year: Publication year.
@@ -31,12 +25,13 @@ class ReferenceMeta(ConceptMeta):
         venue: Journal / conference / publisher.
         url: Canonical URL.
         pdf_path: Filesystem pointer to a PDF (never copied).
-        pdf_asset_id: Asset-catalog id of an imported PDF, if any.
+        pdf_asset_id: Asset id of an imported PDF, if any.
         source: Provenance label (``"manual"`` / ``"zotero"`` / …).
         source_key: Stable key in the external source (e.g. a Zotero key).
     """
 
-    type: str = "reference"
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     title: str | None = None
     authors: tuple[str, ...] = ()
     year: int | None = None

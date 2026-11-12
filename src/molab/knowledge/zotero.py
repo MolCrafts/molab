@@ -1,13 +1,11 @@
 """Read-only Zotero ingestion for the OKF workspace concepts (wsokf-05).
 
-Reads a local ``zotero.sqlite`` (opened read-only) and yields :class:`ZoteroItem`
-records. Each item's first PDF is *resolved to a path* under Zotero's own
-``storage/`` tree — no bytes are read or copied. :meth:`Concept.import_zotero`
-turns these into :class:`~molab.knowledge.concepts.Literature` documents
-whose ``ReferenceMeta.pdf_path`` points at (never copies) the original file.
-
-This is a port of ``molab.knowledge.zotero`` onto the workspace surface; it is
-the importer that yields ``Literature`` markdown files.
+Reads a local ``zotero.sqlite`` (opened read-only) and yields one
+:class:`~molab.knowledge.reference_meta.ReferenceMeta` per item: the fields a
+:class:`~molab.knowledge.concepts.Literature` document stores, with ``source``
+``"zotero"`` and the item key as ``source_key``. Each item's first PDF is
+*resolved to a path* under Zotero's own ``storage/`` tree — no bytes are read
+or copied. :meth:`Concept.import_zotero` writes them as Literature documents.
 """
 
 from __future__ import annotations
@@ -17,22 +15,10 @@ import sqlite3
 from os import PathLike
 from pathlib import Path
 
-from pydantic import BaseModel
+from .reference_meta import ReferenceMeta
 
 _STORAGE_PREFIX = "storage:"
 _YEAR = re.compile(r"\d{4}")
-
-
-class ZoteroItem(BaseModel, frozen=True):
-    """A parsed Zotero library item (bibliographic record + PDF pointer)."""
-
-    key: str
-    title: str | None = None
-    authors: tuple[str, ...] = ()
-    year: int | None = None
-    doi: str | None = None
-    url: str | None = None
-    pdf_path: str | None = None
 
 
 class ZoteroLibrary:
@@ -42,11 +28,13 @@ class ZoteroLibrary:
         """Bind the database file. Nothing is read until :meth:`items`."""
         self.path = Path(path)
 
-    def items(self) -> list[ZoteroItem]:
-        """Non-attachment, non-note items.
+    def items(self) -> list[ReferenceMeta]:
+        """Non-attachment, non-note items, as the fields a Literature stores.
 
-        Each regular item's PDF (if any) is resolved to
-        ``<db_dir>/storage/<attachment_key>/<filename>`` without touching the file.
+        Only what the library holds is set, so a re-import leaves a field
+        Zotero does not carry alone. Each regular item's PDF (if any) is
+        resolved to ``<db_dir>/storage/<attachment_key>/<filename>`` without
+        touching the file.
         """
         db = self.path
         storage_root = db.parent / "storage"
@@ -58,18 +46,22 @@ class ZoteroLibrary:
                 "WHERE it.typeName NOT IN ('attachment', 'note') "
                 "ORDER BY i.itemID"
             ).fetchall()
-            items: list[ZoteroItem] = []
+            items: list[ReferenceMeta] = []
             for item_id, key in rows:
                 fields = _item_fields(conn, item_id)
+                found: dict[str, object] = {
+                    "title": fields.get("title"),
+                    "authors": _item_authors(conn, item_id) or None,
+                    "year": _parse_year(fields.get("date")),
+                    "doi": fields.get("DOI"),
+                    "url": fields.get("url"),
+                    "pdf_path": _item_pdf(conn, item_id, storage_root),
+                    "source": "zotero",
+                    "source_key": key,
+                }
                 items.append(
-                    ZoteroItem(
-                        key=key,
-                        title=fields.get("title"),
-                        authors=_item_authors(conn, item_id),
-                        year=_parse_year(fields.get("date")),
-                        doi=fields.get("DOI"),
-                        url=fields.get("url"),
-                        pdf_path=_item_pdf(conn, item_id, storage_root),
+                    ReferenceMeta.model_validate(
+                        {name: value for name, value in found.items() if value is not None}
                     )
                 )
             return items
@@ -121,4 +113,4 @@ def _item_pdf(conn: sqlite3.Connection, item_id: int, storage_root: Path) -> str
     return str(storage_root / attachment_key / filename)
 
 
-__all__ = ["ZoteroItem", "ZoteroLibrary"]
+__all__ = ["ZoteroLibrary"]
