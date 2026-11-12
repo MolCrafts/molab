@@ -25,7 +25,6 @@ from typer.testing import CliRunner
 
 import molab.cli
 from molab._run_display import read_run_record
-from molab.cli._common import deterministic_run_id
 from molab.cli.workspace.run import _submit_to_scheduler
 from molab.profile import ProfileConfig
 from molab.workflow import (
@@ -1358,34 +1357,7 @@ def _replica_experiment(tmp_path: Path) -> Experiment:
     return ws.add_project("p").add_experiment("r", n_replicas=1, seeds=[7])
 
 
-def _legacy_run(exp: Experiment, cfg: ProfileConfig) -> Run:
-    """A replica run under HEAD's profile-aware 16-hex id."""
-    assert cfg.name is not None
-    return exp.add_run(
-        params={"seed": 7, "replica": 0},
-        id=deterministic_run_id(
-            {"seed": 7, "replica": 0, "_profile": cfg.name, "_config_hash": cfg.content_hash()}
-        ),
-    )
-
-
 class TestExperimentCandidates:
-    def test_legacy_replica_run_is_found_by_its_id(self, tmp_path: Path) -> None:
-        from molab.cli.workspace.run import _experiment_candidates
-        from molab.workspace.execution_context import profile_config_hash
-
-        exp = _replica_experiment(tmp_path)
-        cfg = ProfileConfig({"n": 1}, name="cpu")
-        legacy = _legacy_run(exp, cfg)
-
-        [(existing, _params, config_hash, _label)], _declared_runs, _total = _experiment_candidates(
-            exp, cfg
-        )
-
-        assert existing is not None
-        assert existing.id == legacy.id
-        assert config_hash == profile_config_hash(cfg)
-
     def test_empty_unnamed_profile_has_no_config_hash(self, tmp_path: Path) -> None:
         from molab.cli.workspace.run import _experiment_candidates
 
@@ -1450,16 +1422,6 @@ class TestSelectCandidateRuns:
 
         assert first.id != second.id
         assert len(exp.list_runs()) == 2
-
-    def test_legacy_replica_run_is_reused(self, tmp_path: Path) -> None:
-        exp = _replica_experiment(tmp_path)
-        cfg = ProfileConfig({"n": 1}, name="cpu")
-        legacy = _legacy_run(exp, cfg)
-
-        [selected] = _select_round(exp, cfg, None)
-
-        assert selected.id == legacy.id
-        assert len(exp.list_runs()) == 1
 
     def test_rerun_on_an_empty_experiment_selects_and_creates_nothing(self, tmp_path: Path) -> None:
         exp = _replica_experiment(tmp_path)

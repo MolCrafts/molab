@@ -16,7 +16,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeEl
 
 from molab._typing import JSONValue
 from molab.cli._app import app
-from molab.cli._common import console, deterministic_run_id, reap_zombie_run, rprint
+from molab.cli._common import console, reap_zombie_run, rprint
 from molab.cli._target import TargetOption, resolve_workspace_target
 from molab.profile import MolCfg, ProfileConfig, load_molcfg
 from molab.profile.loader import find_default_config
@@ -223,33 +223,6 @@ def _load_script_workspaces(
     return workspaces, override_path
 
 
-def _legacy_replica_run(
-    existing_by_id: Mapping[str, Run],
-    run_params: dict[str, JSONValue],
-    profile_cfg: ProfileConfig,
-) -> Run | None:
-    """Find a replica run created under the pre-UUIDv7 16-hex id scheme.
-
-    Read-only compatibility for older workspaces: the id is derived exactly as
-    ``molab run`` used to derive it (the run params, plus ``_profile`` and
-    ``_config_hash`` for a named profile) and matched against existing run ids.
-    It never reads or computes a definition hash.
-
-    Args:
-        existing_by_id: The experiment's runs keyed by id.
-        run_params: The replica's parameters (``seed`` / ``replica`` included).
-        profile_cfg: The active profile.
-
-    Returns:
-        The legacy run with that id, or ``None``.
-    """
-    id_seed = dict(run_params)
-    if profile_cfg.name is not None:
-        id_seed["_profile"] = profile_cfg.name
-        id_seed["_config_hash"] = profile_config_hash(profile_cfg)
-    return existing_by_id.get(deterministic_run_id(id_seed))
-
-
 def _experiment_candidates(
     exp: Experiment, profile_cfg: ProfileConfig
 ) -> tuple[list[RunCandidate], bool, int]:
@@ -258,8 +231,7 @@ def _experiment_candidates(
     Declared runs (any run without a ``replica`` parameter) are taken as they
     are. Otherwise one candidate per seed is built; its identity is the
     replica params plus :func:`profile_config_hash` of *profile_cfg*, looked up
-    first as a legacy 16-hex id (:func:`_legacy_replica_run`) and then through
-    :meth:`Experiment.find_run`. Nothing is created here.
+    through :meth:`Experiment.find_run`. Nothing is created here.
 
     Args:
         exp: The experiment to dispatch.
@@ -268,7 +240,6 @@ def _experiment_candidates(
     Returns:
         ``(candidates, use_declared_runs, total)``.
     """
-    existing_runs = sorted(exp.list_runs(), key=lambda item: item.id)
     # Declared runs are the cells. Replica cells exist only when the
     # experiment has none, so a later profile still gets its own run
     # instead of adopting a previous replica.
@@ -280,18 +251,12 @@ def _experiment_candidates(
     if use_declared_runs:
         candidates = [RunCandidate(run, dict(run.parameters), None, None) for run in declared_runs]
     else:
-        existing_by_id = {r.id: r for r in existing_runs}
         config_hash = profile_config_hash(profile_cfg)
         candidates = []
         for cell in exp.replica_cells():
             run_params = dict(cell)
             seed = run_params["seed"]
-            # Legacy id first: an old run's definition does not fold the
-            # config in, so a hash lookup first would let a config-less call
-            # adopt an old profile-keyed run.
-            existing = _legacy_replica_run(existing_by_id, run_params, profile_cfg)
-            if existing is None:
-                existing = exp.find_run(run_params, config_hash=config_hash)
+            existing = exp.find_run(run_params, config_hash=config_hash)
             candidates.append(RunCandidate(existing, run_params, config_hash, str(seed)))
     return candidates, use_declared_runs, total
 

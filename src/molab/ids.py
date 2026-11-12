@@ -9,10 +9,7 @@ any layer, including the OKF ``knowledge`` bottom layer, without importing
 workspace.
 
 This module must not import any molab business layer; only stdlib is
-permitted. ``molab.workspace.utils`` re-exports these symbols as
-back-compat aliases (same function objects). Run-domain id derivation
-(``derive_run_id``) is deliberately NOT here — it stays in
-``molab.workspace.utils``.
+permitted.
 """
 
 from __future__ import annotations

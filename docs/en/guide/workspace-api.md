@@ -143,7 +143,7 @@ From Python, `exp.add_run()` creates a fresh run, because a new run id is genera
 run = exp.add_run({"lr": 1e-3, "seed": 42}, id="baseline-seed-42")
 ```
 
-The CLI uses the content-addressing mechanism to achieve repeatable runs. `molab run` derives deterministic run ids from resolved parameters, replica index, and active profile metadata, so re-running the same script can discover and resume or skip existing runs.
+The CLI uses the content-addressing mechanism to achieve repeatable runs. `molab run` finds an existing run by its `definition_hash` (resolved parameters, replica index, and the active profile's content hash), so re-running the same script can discover and resume or skip existing runs.
 
 Each `Run` stores its data in `<experiment>/runs/<params>/`. `run.json` is the logical definition only (params, `definition_hash`, revision links). Direct convenience properties such as `run.id`, `run.parameters`, and `run.run_dir` expose those fields; status is derived from `run.executions` (each attempt's `execution.json`). `run.get_result(key)` reads a result persisted by `RunContext.set_result`, falling back to the completed workflow node of that name in the run's most recent execution.
 

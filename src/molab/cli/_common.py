@@ -59,23 +59,6 @@ def get_workspace(
     return Workspace(path or Path.cwd())
 
 
-def deterministic_run_id(params: dict[str, JSONValue]) -> str:
-    """Generate a deterministic 16-char run ID from parameters.
-
-    Same parameters always produce the same ID, making run creation
-    idempotent across repeated ``molab run`` invocations.  The caller
-    decides which fields to include (for profile-aware IDs, mix in
-    the profile name / config hash).
-
-    Delegates to :func:`molab.workspace.utils.derive_run_id` — the single
-    canonicalization shared with ``Experiment.add_runs`` — keeping this name
-    and its 16-char output stable for existing CLI callers.
-    """
-    from molab.workspace.utils import derive_run_id
-
-    return derive_run_id(params)
-
-
 def run_executor_info(run: Run) -> dict[str, str]:
     """Return normalized executor metadata from the run's latest Execution.
 
@@ -117,7 +100,6 @@ def run_environment(run: Run) -> dict[str, JSONValue]:
 
 __all__ = [
     "console",
-    "deterministic_run_id",
     "get_workspace",
     "pid_alive",
     "reap_zombie_run",

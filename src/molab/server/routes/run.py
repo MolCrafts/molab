@@ -532,31 +532,25 @@ LogStream = Literal["stdout", "stderr", "run"]
 #: The most one ``…/logs/{stream}`` call returns.
 _LOG_CHUNK_BYTES = 256 * 1024
 
-_LEGACY_JOB_SUFFIX = {"stdout": ".out", "stderr": ".err"}
+_JOB_STREAM_SUFFIX = {"stdout": ".out", "stderr": ".err"}
 """A scheduler job's flat stream files: ``jobs/<job>.out`` / ``.err``."""
-
-_LEGACY_RUN_LOG = ("logs", "run.log")
-"""Where an older layout kept the attempt's own log."""
 
 
 def _execution_log_path(fs, exec_dir: str, stream: LogStream) -> str | None:  # noqa: ANN001
     """The file one log *stream* of an attempt is read from, or ``None``.
 
     The attempt's own file wins: ``stdout.log`` / ``stderr.log`` (written by
-    ``molab.print`` and ``ctx.log``, D92) or ``run.log``. Only when it is
-    absent does a legacy location answer — ``jobs/*/stdout.log`` (one
-    directory per job) or ``jobs/*.out`` / ``*.err`` for the stdio streams,
-    ``logs/run.log`` for ``run``.
+    ``molab.print`` and ``ctx.log``, D92) or ``run.log``. When a stdio file
+    is absent, the scheduler job's flat stream file answers
+    (``jobs/<job>.out`` / ``.err``).
     """
     if stream == "run":
-        candidates = [fs.join(exec_dir, RUN_LOG_FILENAME), fs.join(exec_dir, *_LEGACY_RUN_LOG)]
+        candidates = [fs.join(exec_dir, RUN_LOG_FILENAME)]
     else:
-        name = STDIO_FILES[stream]
-        candidates = [fs.join(exec_dir, name)]
+        candidates = [fs.join(exec_dir, STDIO_FILES[stream])]
         jobs = fs.join(exec_dir, JOBS.name)
         if fs.is_dir(jobs):
-            candidates += sorted(fs.glob(jobs, f"*/{name}"))
-            candidates += sorted(fs.glob(jobs, f"*{_LEGACY_JOB_SUFFIX[stream]}"))
+            candidates += sorted(fs.glob(jobs, f"*{_JOB_STREAM_SUFFIX[stream]}"))
     return next((path for path in candidates if fs.is_file(path)), None)
 
 

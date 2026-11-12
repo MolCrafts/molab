@@ -744,19 +744,19 @@ class TestExecutionLogs:
         assert "execution started" in body["stdout"]
         assert body["stderr"] is None
 
-    def test_legacy_job_files_answer_when_root_files_are_absent(
+    def test_job_stream_files_answer_when_root_files_are_absent(
         self, served: ServedFactory, fresh_run: RunFixture
     ) -> None:
         ws, exp, run = fresh_run
         with run.start():
             pass
         jobs = run.execution_dir("e01") / "jobs"
-        (jobs / "123").mkdir(parents=True)
-        (jobs / "123" / "stdout.log").write_text("legacy out\n", encoding="utf-8")
-        (jobs / "123.err").write_text("legacy err\n", encoding="utf-8")
+        jobs.mkdir(parents=True, exist_ok=True)
+        (jobs / "123.out").write_text("job out\n", encoding="utf-8")
+        (jobs / "123.err").write_text("job err\n", encoding="utf-8")
         with served(ws) as client:
             body = client.get(f"{_run_url(exp, run)}/executions/e01/logs").json()
-        assert (body["stdout"], body["stderr"]) == ("legacy out\n", "legacy err\n")
+        assert (body["stdout"], body["stderr"]) == ("job out\n", "job err\n")
 
     def test_root_file_wins_over_legacy(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run

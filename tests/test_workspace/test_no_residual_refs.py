@@ -106,7 +106,6 @@ def test_manifest_family_is_gone() -> None:
     import molab.workflow.protocols as protocols
     import molab.workspace as workspace
     import molab.workspace.assets as assets
-    import molab.workspace.utils as utils
 
     assert assets.__all__ == ["lineage"]
     assert workspace.Asset is workspace.domain.Asset
@@ -119,7 +118,6 @@ def test_manifest_family_is_gone() -> None:
     assert "assets" not in protocols.UpstreamViewLike.__annotations__
     assert not hasattr(ids, "generate_asset_id")
     assert "generate_asset_id" not in getattr(ids, "__all__", ())
-    assert not hasattr(utils, "generate_asset_id")
 
     quoted = '"assets.json"'
     hits = sorted(
