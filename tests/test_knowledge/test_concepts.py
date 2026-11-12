@@ -127,10 +127,10 @@ class TestSourcedKnowledgeSources:
 
         path = tmp_path / "fa.md"
         path.write_text(
-            "---\nclass: Finding\nsources:\n- kind: file\n  ref: legacy.txt\n---\n\n# A\n",
+            "---\nclass: Observation\nsources:\n- kind: file\n  ref: legacy.txt\n---\n\n# A\n",
             encoding="utf-8",
         )
-        opened = Finding(path)
+        opened = Observation(path)
         stored = opened.frontmatter()["sources"]
 
         opened.write(tags=["t"])

@@ -2,7 +2,7 @@
 
 Three behaviors are load-bearing here and each has its own guard below:
 
-- the destination comes from ``Finding(host, name).path`` and the
+- the destination comes from ``Observation(host, name).path`` and the
   bytes land through ``Concept.write`` (one derivation, one persistence path);
 - the **cite channel keeps all three branches** — a Knowledge document through
   ``.ref``, a ``Folder``/``Asset`` through the embed resolver, and a bare path
@@ -19,18 +19,18 @@ from typing import Any
 
 import pytest
 
-from molab.knowledge import Finding, Knowledge, Literature, Note, SourceRef
+from molab.knowledge import Knowledge, Literature, Note, Observation, SourceRef
 from molab.workspace.domain import Asset
 from molab.workspace.folder import Folder
 
 
 def _write(experiment: Any, **overrides: Any) -> Knowledge:
     kwargs: dict[str, Any] = {
-        "name": "finding-demo",
-        "of": Finding,
+        "name": "observation-demo",
+        "of": Observation,
         "sources": [SourceRef.of(experiment)],
         "created_by": "tester",
-        "text": "# Finding\n\nhello\n",
+        "text": "# Observation\n\nhello\n",
     }
     kwargs.update(overrides)
     of = kwargs.pop("of")
@@ -42,23 +42,23 @@ class TestWriteKnowledge:
     def test_writes_the_sourced_document_at_the_derived_path(self, experiment: Any) -> None:
         item = _write(experiment, title="demo")
 
-        assert isinstance(item, Finding)
+        assert isinstance(item, Observation)
         assert not isinstance(item, Folder)
         assert (
             item.path
-            == Finding(experiment, "finding-demo", sources=[SourceRef.of(experiment)]).path
+            == Observation(experiment, "observation-demo", sources=[SourceRef.of(experiment)]).path
         )
-        assert Path(item.path).name == "finding-demo.md"
+        assert Path(item.path).name == "observation-demo.md"
         assert Path(item.path).parent == Path(str(experiment.resolve())) / "knowledges"
         assert item.exists()
-        assert item.read().startswith("# Finding")
+        assert item.read().startswith("# Observation")
 
     def test_sources_and_author_round_trip_through_the_head(self, experiment: Any) -> None:
         item = _write(experiment)
 
-        reopened = Finding(item.path)
+        reopened = Observation(item.path)
 
-        assert isinstance(reopened, Finding)
+        assert isinstance(reopened, Observation)
         from molab.workspace.refs import ref_of
 
         assert [(s.kind, s.ref) for s in reopened.sources] == [
@@ -71,9 +71,9 @@ class TestWriteKnowledge:
         second = _write(experiment, text="second\n")
 
         assert "second" in second.read()
-        assert "first" not in Finding(second.path).read()
+        assert "first" not in Observation(second.path).read()
         landed = sorted(p.name for p in (Path(str(experiment.resolve())) / "knowledges").iterdir())
-        assert landed == ["finding-demo.md"]
+        assert landed == ["observation-demo.md"]
 
     def test_a_knowledge_target_is_cross_referenced(self, experiment: Any) -> None:
         other = Note.mount(experiment, "Background", body="# BG\n")
@@ -128,7 +128,7 @@ class TestWriteKnowledge:
         item = _write(experiment, cite=[(object(), "references")])
 
         assert item.exists()
-        assert item.read().startswith("# Finding")
+        assert item.read().startswith("# Observation")
 
     def test_a_domain_asset_cite_writes_exactly_one_edge(
         self, experiment: Any, tmp_path: Path
@@ -278,7 +278,7 @@ class TestWriteKnowledgePath:
         from molab.knowledge.write import write_knowledge
 
         with pytest.raises(ValueError):
-            write_knowledge(experiment, name="f", of=Finding, created_by="t", text="# F\n")
+            write_knowledge(experiment, name="f", of=Observation, created_by="t", text="# F\n")
 
     def test_an_empty_rewrite_keeps_the_body(self, lab: Any) -> None:
         from molab.knowledge.write import write_knowledge

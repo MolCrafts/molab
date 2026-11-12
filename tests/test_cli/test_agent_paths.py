@@ -379,7 +379,7 @@ class TestKnowledgeCreatedBy:
         _invoke(
             "knowledge", "write", "Idea", "# An idea",
             "--on", "projects/alpha/experiments/sweep",
-            "--class", "Finding",
+            "--class", "Observation",
             "--created-by", "claude",
             "--path", str(lab),
         )  # fmt: skip
@@ -387,6 +387,6 @@ class TestKnowledgeCreatedBy:
         doc = lab / "projects" / "alpha" / "experiments" / "sweep" / "knowledges" / "idea.md"
         meta, _ = frontmatter.split(doc.read_text())
         assert meta["created_by"] == "claude"
-        assert meta["class"] == "Finding"
+        assert meta["class"] == "Observation"
         exp_meta, _ = frontmatter.split(doc.parent.parent.joinpath("index.md").read_text())
         assert exp_meta["index"]["knowledges"][0]["path"] == "knowledges/idea.md"

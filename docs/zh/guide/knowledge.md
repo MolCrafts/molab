@@ -101,6 +101,9 @@ pydantic 模型，子类扩展父类的模型。
 `molab knowledge write --source` 与 `POST /api/knowledge/doc` 的 `sources` 都接受纯字符串；
 一个都不给时，有出处的类以其宿主为来源。
 
+`Report` 与 `Finding` 必须落在已登记的字节上：至少链接一个 `molab:` 资产、run 或 execution。
+不满足的写入会被拒绝（HTTP 上为 422），手写的则由 `molab validate` 报告（`knowledge.unanchored`）。
+
 `Plan` 是唯一的计划文档。它的工作项写在叙事正文里；它要检验的断言是 `Hypothesis` 文档。
 
 ### 控制流在链接和字段里

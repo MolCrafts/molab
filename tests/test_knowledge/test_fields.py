@@ -14,7 +14,7 @@ from typing import Any, ClassVar
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from molab.knowledge import Finding, Hypothesis, Literature, Note, Report, SourceRef
+from molab.knowledge import Finding, Hypothesis, Literature, Note, Observation, Report, SourceRef
 from molab.knowledge.concepts import HypothesisFields
 from molab.knowledge.fields import replace_fields
 from molab.knowledge.validate import validate_knowledge
@@ -71,7 +71,7 @@ class TestAWriteCarriesOnlyDeclaredFields:
         assert "moon" not in doc.frontmatter()
 
     def test_frontmatter_in_the_text_is_held_to_the_same_rule(self, lab: Any) -> None:
-        doc = _sourced(lab, Finding, "Tg result")
+        doc = _sourced(lab, Observation, "Tg result")
         with pytest.raises(ValueError, match="verdict"):
             doc.write("---\nverdict: open\n---\n# Tg result\n")
         assert "verdict" not in doc.frontmatter()

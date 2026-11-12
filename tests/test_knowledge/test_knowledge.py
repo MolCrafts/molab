@@ -11,6 +11,7 @@ from molab.knowledge import (
     KnowledgeNotFoundError,
     Literature,
     Note,
+    Observation,
     SourceRef,
 )
 from molab.workspace import Experiment, Workspace
@@ -101,7 +102,7 @@ class TestCite:
         lit.write("FeNNol.\n")
         finding = Finding(
             tmp_path / "tf32",
-            sources=[SourceRef(kind="file", ref="paper/index.md")],
+            sources=[SourceRef(kind="run", ref="molab:experiment/e1/run/r1")],
         )
         finding.write("# TF32\n")
         finding.cite(lit)
@@ -122,7 +123,7 @@ class TestSourcedHostConstruction:
 
     def test_the_narrative_write_lands_at_the_host_path(self, experiment: Experiment) -> None:
         source = SourceRef.of(experiment)
-        finding = Finding(experiment, "tg-rise", sources=[source])
+        finding = Observation(experiment, "tg-rise", sources=[source])
 
         finding.write("# Tg rises with the cooling rate\n")
 

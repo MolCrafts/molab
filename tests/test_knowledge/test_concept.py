@@ -672,11 +672,11 @@ class TestConceptWrite:
 
     def test_a_legacy_disk_file_keeps_its_sources_key(self, tmp_path: Path) -> None:
         path = tmp_path / "old.md"
-        path.write_text("---\nclass: Finding\nsources:\n- kind: run\n  ref: R1\n---\n\n# Old\n")
+        path.write_text("---\nclass: Observation\nsources:\n- kind: run\n  ref: R1\n---\n\n# Old\n")
 
-        from molab.knowledge.concepts import Finding
+        from molab.knowledge.concepts import Observation
 
-        opened = Finding(path)
+        opened = Observation(path)
         opened.write(tags=["t"])
 
         assert "sources:" in path.read_text()

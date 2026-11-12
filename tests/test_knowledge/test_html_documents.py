@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from molab import htmldoc
-from molab.knowledge import Finding, Hypothesis, Knowledge, Note, SourceRef
+from molab.knowledge import Hypothesis, Knowledge, Note, Observation, SourceRef
 from molab.knowledge.concepts import _open_document
 from molab.knowledge.fields import own_fields, replace_fields
 from molab.knowledge.write import write_knowledge
@@ -88,8 +88,8 @@ class TestWrite:
     def test_a_sourced_html_document_keeps_its_sources(self, experiment: Any) -> None:
         doc = write_knowledge(
             experiment,
-            name="finding",
-            of=Finding,
+            name="observation",
+            of=Observation,
             sources=[SourceRef.of(experiment)],
             created_by="t",
             text="<p>plan</p>\n",

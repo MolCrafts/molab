@@ -1,14 +1,11 @@
 import type { EntityCard } from "@/api/generated/models/EntityCard";
 import type { KnowledgeGraphEdge } from "@/api/generated/models/KnowledgeGraphEdge";
 import type { KnowledgeGraphResponse } from "@/api/generated/models/KnowledgeGraphResponse";
-import { type MolabRefTarget, resolveMolabRef } from "@/lib/molab-ref";
 import { knowledgeLineage } from "./knowledge-map";
 import { knowledgeClassOf } from "./knowledgeClass";
 
 export type KnowledgeAuditCode =
   | "missing-reference"
-  | "ungrounded-finding"
-  | "evidence-unverified"
   | "unresolved-contradiction"
   | "verdict-evidence-review"
   | "superseded-reference";
@@ -30,12 +27,7 @@ export interface KnowledgeAuditContext {
   /** Each document's own fields (a Hypothesis `verdict`), by path. */
   fields?: Readonly<Record<string, Record<string, unknown> | undefined>>;
   cardsByPath?: Readonly<Record<string, readonly EntityCard[] | undefined>>;
-  /** Canonical server refs already resolved by the workbench, never parsed here. */
-  refIndex?: ReadonlyMap<string, MolabRefTarget>;
 }
-
-const EVIDENCE_CLASSES = new Set(["Observation", "Literature"]);
-const SOURCE_ROLES = new Set(["derived_from", "records", "cites"]);
 
 /** Read-only review prompts over declared relations. A counter-edge never
  * changes a verdict, and an unloaded entity catalog never proves a broken ref. */
@@ -70,63 +62,6 @@ export const auditKnowledge = (
         detail: "Repair or remove this reference after checking the original document.",
         related: [],
         target: edge.target,
-      });
-    }
-  }
-
-  for (const node of graph.nodes) {
-    if (knowledgeClassOf(node) !== "Finding") continue;
-    const links = outgoing.get(node.relPath) ?? [];
-    // Follow only declared provenance/citation sources. A Finding-to-Finding
-    // cycle is not evidence by itself; every path needs an actual source anchor.
-    const visited = new Set<string>();
-    let grounded = false;
-    let unresolvedEntity = false;
-    const inspectSources = (path: string): void => {
-      const sourcePaths = [
-        path,
-        ...knowledgeLineage(graph, path).ancestors.map((entry) => entry.id),
-      ];
-      for (const source of sourcePaths) {
-        if (visited.has(source)) continue;
-        visited.add(source);
-        if (EVIDENCE_CLASSES.has(knowledgeClassOf(nodes.get(source) ?? {}))) grounded = true;
-        for (const edge of outgoing.get(source) ?? []) {
-          if (edge.source === edge.target || edge.kind === "missing") continue;
-          if (edge.kind === "document" && SOURCE_ROLES.has(edge.role) && nodes.has(edge.target)) {
-            inspectSources(edge.target);
-          } else if (edge.kind === "external" && SOURCE_ROLES.has(edge.role)) {
-            grounded = true;
-          } else if (edge.kind === "ref") {
-            const card = context.cardsByPath?.[edge.source]?.find(
-              (entry) => entry.ref === edge.target,
-            );
-            if (card?.missing) continue;
-            const resolved = context.refIndex
-              ? resolveMolabRef(edge.target, context.refIndex)
-              : null;
-            const kind = card?.kind ?? resolved?.kind;
-            if (kind === "asset" || kind === "run") grounded = true;
-            else if (kind === undefined) unresolvedEntity = true;
-          }
-        }
-      }
-    };
-    inspectSources(node.relPath);
-    if (!grounded) {
-      add({
-        code: unresolvedEntity ? "evidence-unverified" : "ungrounded-finding",
-        severity: unresolvedEntity ? "info" : "review",
-        document: node.relPath,
-        title: unresolvedEntity
-          ? "Resolve entity sources to check evidence"
-          : "Finding has no declared evidence",
-        detail: unresolvedEntity
-          ? "The graph has entity references whose kinds are not loaded. Resolve them before deciding whether this finding is grounded."
-          : "No run, asset, cited external source, or provenance/citation path to an observation or literature is declared. A plan or ordinary mention alone is not evidence.",
-        related: links
-          .filter((edge) => edge.kind === "document" && nodes.has(edge.target))
-          .map((edge) => edge.target),
       });
     }
   }

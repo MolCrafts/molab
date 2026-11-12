@@ -93,7 +93,7 @@ class TestEvidenceRoles:
             project,
             name="Tg result",
             of=Finding,
-            sources=[SourceRef.of(project)],
+            sources=[SourceRef(kind="run", ref="molab:experiment/e1/run/r1")],
             created_by="t",
             text="# R\n",
             cite=[(hypothesis, role)],

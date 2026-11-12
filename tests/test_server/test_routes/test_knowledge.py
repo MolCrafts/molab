@@ -276,11 +276,11 @@ class TestGetNote:
 
 
 class TestEditDoc:
-    def test_edit_writes_finding_body(self, served: ServedFactory, lab: RunFixture) -> None:
-        from molab.knowledge import Finding, SourceRef
+    def test_edit_writes_the_body(self, served: ServedFactory, lab: RunFixture) -> None:
+        from molab.knowledge import Observation, SourceRef
 
         ws, _exp, _run = lab
-        finding = Finding(
+        finding = Observation(
             Path(str(ws.root)) / "knowledges" / "tg",
             sources=[SourceRef(kind="file", ref="index.md")],
         )

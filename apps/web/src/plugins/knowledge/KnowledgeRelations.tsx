@@ -36,7 +36,6 @@ import {
 import type { KnowledgeGraphResponse } from "@/api/generated/models/KnowledgeGraphResponse";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { RendererProps, RendererSnapshot } from "@/app/types";
-import { buildMolabRefIndex } from "@/lib/entity-linkify";
 import { GraphSearch } from "./GraphSearch";
 import { GraphViewMenu } from "./GraphViewMenu";
 import { DEFAULT_GRAPH_VIEW, projectGraphView, revealGraphNode } from "./graph-view";
@@ -264,17 +263,16 @@ const MapView = ({
     );
     return auditGraph.nodes.filter((node) => {
       const cls = knowledgeClassOf(node);
-      return cls === "Finding" || cls in STATEFUL || entitySources.has(node.relPath);
+      return cls in STATEFUL || entitySources.has(node.relPath);
     });
   }, [auditGraph]);
-  // Reuse cached fields, and resolve Finding/entity source cards only on audit demand.
+  // Reuse cached fields, and resolve entity source cards only on audit demand.
   const auditDetails = useQueries({
     queries: auditNodes.map((node) => ({
       ...knowledgeNoteQueryOptions(node.relPath),
       enabled: auditOpen,
     })),
   });
-  const refIndex = useMemo(() => buildMolabRefIndex(snapshot), [snapshot]);
   const audit = auditOpen
     ? auditKnowledge(auditGraph, {
         fields: {
@@ -297,7 +295,6 @@ const MapView = ({
             ),
           ),
         },
-        refIndex,
       })
     : { issues: [], uncheckedHypotheses: [] };
   const auditErrors = auditNodes.flatMap((node, index) =>

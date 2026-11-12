@@ -109,6 +109,10 @@ the entity's kind), an http(s) URL or a DOI (a `reference`), or a file path.
 `molab knowledge write --source` and `sources` on `POST /api/knowledge/doc`
 take these as plain strings; given none, a sourced class names its host.
 
+A `Report` or a `Finding` rests on registered bytes: it must link at least one
+`molab:` asset, run or execution. A write that does not is refused (422 over
+HTTP), and `molab validate` reports a hand-written one (`knowledge.unanchored`).
+
 A `Plan` is the one planning document. Its work items live in its narrative
 body; the claims it sets out to test are `Hypothesis` documents.
 

@@ -395,7 +395,7 @@ class TestScopedFind:
                     "/api/knowledge/doc",
                     json={
                         "name": f"From {kind}",
-                        "cls": "Report",
+                        "cls": "Observation",
                         "sources": [ref],
                     },
                 )

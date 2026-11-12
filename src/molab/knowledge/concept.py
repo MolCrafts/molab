@@ -772,10 +772,15 @@ class Concept:
             if narrative is None:
                 narrative = self.read()
             parent = str(PurePosixPath(self._path).parent)
-            self._fs.mkdir(parent, parents=True, exist_ok=True)
             body, _appended = append_source_links(
                 narrative or "", sources, base_dir=parent, path=self._path
             )
+            from .content_rules import unanchored
+
+            problem = unanchored(type(self), body)
+            if problem is not None:
+                raise ValueError(problem)
+            self._fs.mkdir(parent, parents=True, exist_ok=True)
             self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body, path=self._path))
 
     def _accept_head(

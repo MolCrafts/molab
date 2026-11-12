@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from molab.knowledge.validate import RULE_HINTS, validate_knowledge
 
 PLAN = "---\nclass: Plan\nname: Plan\n---\n# Plan\n"
@@ -114,9 +116,53 @@ class TestHygieneRules:
         _doc(lab, "fragments-v3", "---\nclass: Note\nname: Fragments v3\n---\nbody\n")
         assert ("knowledge.versioned_name", "knowledges/fragments-v3.md", "error") in _issues(lab)
 
-    def test_a_report_without_a_molab_ref_is_an_error(self, lab: Any) -> None:
-        _doc(lab, "boxes", "---\nclass: Report\nname: Boxes\n---\nfiles in out/export/\n")
-        assert ("knowledge.report_unanchored", "knowledges/boxes.md", "error") in _issues(lab)
+    @pytest.mark.parametrize("cls", ["Report", "Finding"])
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "files in out/export/\n",
+            "- [@derived_from e](molab:experiment/e1)\n",
+            "- [@derived_from bad](molab:asset/)\n",
+        ],
+    )
+    def test_an_evidence_class_without_an_asset_run_or_execution_is_an_error(
+        self, lab: Any, cls: str, body: str
+    ) -> None:
+        _doc(lab, "boxes", f"---\nclass: {cls}\nname: Boxes\n---\n{body}")
+        assert ("knowledge.unanchored", "knowledges/boxes.md", "error") in _issues(lab)
+
+    @pytest.mark.parametrize(
+        "ref",
+        [
+            "molab:asset/01a1ac09-072e-7f27-9d1e-3c964b52c345",
+            "molab:experiment/e1/run/r1",
+            "molab:experiment/e1/run/r1/execution/e01",
+        ],
+    )
+    def test_a_finding_citing_an_asset_run_or_execution_is_anchored(
+        self, lab: Any, ref: str
+    ) -> None:
+        _doc(lab, "boxes", f"---\nclass: Finding\nname: Boxes\n---\n- [@derived_from x]({ref})\n")
+        assert "knowledge.unanchored" not in {rule for rule, _path, _sev in _issues(lab)}
+
+    @pytest.mark.parametrize("cls", ["Report", "Finding"])
+    def test_writing_an_unanchored_evidence_document_is_refused(self, lab: Any, cls: str) -> None:
+        from molab.knowledge import Finding, Report
+        from molab.knowledge.knowledge_item import SourceRef
+        from molab.knowledge.write import write_knowledge
+
+        klass = {"Report": Report, "Finding": Finding}[cls]
+        experiment = lab.get_project("p").get_experiment("e")
+        with pytest.raises(ValueError, match="asset, run or execution"):
+            write_knowledge(
+                experiment,
+                name="Loose",
+                of=klass,
+                sources=[SourceRef.of(experiment)],
+                created_by="t",
+                text="# Loose\n",
+            )
+        assert not list(Path(str(experiment.resolve())).glob("knowledges/loose.*"))
 
     def test_a_report_citing_an_asset_is_anchored(self, lab: Any) -> None:
         _doc(
@@ -126,4 +172,4 @@ class TestHygieneRules:
             "![box](molab:asset/01a1ac09-072e-7f27-9d1e-3c964b52c345)\n",
         )
         rules = {rule for rule, _path, _sev in _issues(lab)}
-        assert "knowledge.report_unanchored" not in rules
+        assert "knowledge.unanchored" not in rules

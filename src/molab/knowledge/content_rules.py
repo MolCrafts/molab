@@ -15,10 +15,11 @@ is on disk and report, for :mod:`molab.knowledge.validate`:
   address: a port that served one session, dead for every later reader.
 * ``knowledge.versioned_name`` (error) — a document named ``…-v2``. One
   subject is one document, rewritten in place; git keeps the old text.
-* ``knowledge.report_unanchored`` (error) — a Report that cites no ``molab:``
-  asset, run or execution, so nothing ties its claims to the bytes.
+* ``knowledge.unanchored`` (error) — a Report or Finding that cites no
+  ``molab:`` asset, run or execution, so nothing ties its claims to the bytes.
+  :func:`unanchored` is the rule; :meth:`Concept.write` refuses such a write.
 
-Read-only. ``molab.workspace`` is imported only inside function bodies.
+``molab.workspace`` is imported only inside function bodies.
 """
 
 from __future__ import annotations
@@ -61,9 +62,9 @@ CONTENT_RULE_HINTS: dict[str, str] = {
         "Rewrite the document under its stable name (`molab knowledge write NAME …` "
         "replaces it; git keeps the old text) and delete the numbered copies."
     ),
-    "knowledge.report_unanchored": (
-        "Cite what the report is about: the `molab:asset/<id>` of each product it "
-        "describes, or the run / execution ref that made them."
+    "knowledge.unanchored": (
+        "Cite what the report or finding rests on: the `molab:asset/<id>` of each "
+        "product it describes, or the run / execution ref that made them."
     ),
 }
 
@@ -71,7 +72,8 @@ _EPHEMERAL_RE = re.compile(
     r"https?://(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\])(?::\d+)?", re.I
 )
 _VERSIONED_RE = re.compile(r"[-_ ]v\d+$", re.I)
-_ANCHOR_RE = re.compile(r"molab:(?:asset/[0-9a-f-]+|experiment/[0-9a-z-]+/run/[0-9a-z-]+)")
+#: The ref kinds that tie a claim to registered bytes.
+_ANCHOR_KINDS = frozenset({"asset", "run", "execution"})
 
 
 @dataclass(frozen=True)
@@ -167,17 +169,41 @@ def _versioned_issue(doc: Concept) -> ContentIssue | None:
     )
 
 
-def _anchor_issue(doc: Concept) -> ContentIssue | None:
-    from .concepts import Report
+def _is_anchor(target: str) -> bool:
+    """Whether a link *target* is a well-formed asset, run or execution ref."""
+    from molab.workspace.refs import InvalidRefError, is_ref, parse_ref
 
-    if not isinstance(doc, Report) or _ANCHOR_RE.search(doc.read()):
+    ref = target.split("#", 1)[0]
+    if not is_ref(ref):
+        return False
+    try:
+        return parse_ref(ref).kind in _ANCHOR_KINDS
+    except InvalidRefError:
+        # A document's text is outside data: a malformed ref anchors nothing.
+        return False
+
+
+def unanchored(klass: type[Concept], body: str) -> str | None:
+    """Why a *klass* document whose narrative is *body* rests on nothing, or ``None``.
+
+    A Report or Finding (or a subclass) must link a ``molab:`` asset, run or
+    execution; every other class answers ``None``.
+    """
+    from .concept import markdown_links
+    from .concepts import Finding, Report
+
+    if not issubclass(klass, (Report, Finding)):
         return None
-    return ContentIssue(
-        str(doc.path),
-        "knowledge.report_unanchored",
-        "the report cites no molab: asset, run or execution",
-        "error",
-    )
+    if any(_is_anchor(link.group(2)) for link in markdown_links(body)):
+        return None
+    return f"a {klass.__name__} cites no molab: asset, run or execution"
+
+
+def _anchor_issue(doc: Concept) -> ContentIssue | None:
+    problem = unanchored(type(doc), doc.read())
+    if problem is None:
+        return None
+    return ContentIssue(str(doc.path), "knowledge.unanchored", problem, "error")
 
 
 def content_issues(
