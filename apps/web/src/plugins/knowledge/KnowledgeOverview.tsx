@@ -48,8 +48,7 @@ const DocumentsTable = ({
       </thead>
       <tbody>
         {rows.map(({ note, where }) => {
-          const cls = knowledgeClassOf(note);
-          const Icon = knowledgeClassIcon(cls);
+          const Icon = knowledgeClassIcon(knowledgeClassOf(note));
           return (
             <tr
               key={note.relPath}
@@ -57,7 +56,7 @@ const DocumentsTable = ({
               className="h-list-row cursor-pointer hover:bg-interactive"
             >
               <td>
-                <Icon aria-label={cls} className="size-icon-sm text-muted-foreground" />
+                <Icon aria-label={note.cls} className="size-icon-sm text-muted-foreground" />
               </td>
               <td className="truncate">{note.name}</td>
               <td className="truncate text-muted-foreground max-sm:hidden">{where}</td>

@@ -107,10 +107,17 @@ export interface DocPageProps {
   onOpen: (path: string) => void;
 }
 
+/** The page's class. The server opens only a knowledge document, so a detail without one is a broken invariant. */
+const documentClass = (note: NoteDetailResponse): KnowledgeClass => {
+  const cls = knowledgeClassOf(note);
+  if (cls === null) throw new Error(`${note.relPath} is not a knowledge document (${note.cls})`);
+  return cls;
+};
+
 export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps): JSX.Element => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const draft = useDocDraft(note);
-  const cls: KnowledgeClass = knowledgeClassOf(summary ?? { cls: "Note" });
+  const cls = documentClass(note);
   const hostPath = summary?.hostPath ?? "";
   const title = leadingTitle(draft.body);
   const headings = useMemo(() => docHeadings(parseDocBlocks(draft.body)), [draft.body]);

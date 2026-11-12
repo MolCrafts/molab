@@ -16,7 +16,6 @@ import {
   Blocks,
   BookOpen,
   Check,
-  FileText,
   Filter,
   FlaskConical,
   PlayCircle,
@@ -384,11 +383,9 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
       return {
         id: node.id,
         label: node.name,
-        icon: isTexDocument(path)
-          ? FileText
-          : knowledgeClassIcon(
-              knowledgeClassOf(notes.find((note) => note.relPath === path) ?? { cls: "Note" }),
-            ),
+        icon: knowledgeClassIcon(
+          knowledgeClassOf(notes.find((note) => note.relPath === path) ?? { cls: "" }),
+        ),
         iconClassName: "text-muted-foreground",
         onPrefetch: () => {
           void import("./KnowledgeViewer");

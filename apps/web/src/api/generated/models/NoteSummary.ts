@@ -13,7 +13,10 @@ export type NoteSummary = {
     excerpt: string;
     tags?: Array<string>;
     status?: (string | null);
-    cls?: string;
+    /**
+     * The knowledge class, or `Tex` for a TeX file.
+     */
+    cls: string;
     format?: NoteSummary.format;
     /**
      * ISO-8601 UTC time the file was last modified.

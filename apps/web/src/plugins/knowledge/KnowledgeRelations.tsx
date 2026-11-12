@@ -47,7 +47,6 @@ import {
   projectResearchMap,
   toResearchGraph,
 } from "./knowledge-map";
-import { knowledgeClassOf } from "./knowledgeClass";
 import { MAP_SHAPE_SIZE } from "./map-layout";
 import { knowledgeGraphQueryOptions, knowledgeNoteQueryOptions } from "./queries";
 import { type MapNode, type ResearchMap, STATEFUL } from "./research-map";
@@ -261,10 +260,9 @@ const MapView = ({
     const entitySources = new Set(
       auditGraph.edges.filter((edge) => edge.kind === "ref").map((edge) => edge.source),
     );
-    return auditGraph.nodes.filter((node) => {
-      const cls = knowledgeClassOf(node);
-      return cls in STATEFUL || entitySources.has(node.relPath);
-    });
+    return auditGraph.nodes.filter(
+      (node) => node.cls in STATEFUL || entitySources.has(node.relPath),
+    );
   }, [auditGraph]);
   // Reuse cached fields, and resolve entity source cards only on audit demand.
   const auditDetails = useQueries({

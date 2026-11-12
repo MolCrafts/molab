@@ -68,18 +68,18 @@ export function buildResearchMap(
   fields: Readonly<Record<string, Record<string, unknown>>> = {},
   classes: ReadonlySet<string> = MAP_CLASSES,
 ): ResearchMap {
-  const docs = graph.nodes.filter((doc) => classes.has(doc.cls ?? "Note"));
+  const docs = graph.nodes.filter((doc) => classes.has(doc.cls));
   const shown = new Set(docs.map((doc) => doc.relPath));
   const onMap = (edge: KnowledgeGraph["edges"][number]): boolean =>
     edge.kind === "document" && shown.has(edge.target);
 
   const nodes: MapNode[] = docs.map((doc) => {
     const host = doc.relPath.match(EXPERIMENT_KNOWLEDGE)?.[1] ?? null;
-    const stateful = STATEFUL[doc.cls ?? "Note"];
+    const stateful = STATEFUL[doc.cls];
     const value = stateful === undefined ? undefined : fields[doc.relPath]?.[stateful.field];
     return {
       id: doc.relPath,
-      cls: doc.cls ?? "Note",
+      cls: doc.cls,
       title: doc.title || doc.name,
       excerpt: doc.excerpt,
       note: host === null ? "" : `Filed under ${host}`,

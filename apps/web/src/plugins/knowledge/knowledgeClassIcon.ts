@@ -22,4 +22,6 @@ export const KNOWLEDGE_CLASS_ICON: Record<KnowledgeClass, LucideIcon> = {
   Plan: ListChecks,
 };
 
-export const knowledgeClassIcon = (cls: KnowledgeClass): LucideIcon => KNOWLEDGE_CLASS_ICON[cls];
+/** The class's icon; a file with no knowledge class (a TeX manuscript) is a plain file. */
+export const knowledgeClassIcon = (cls: KnowledgeClass | null): LucideIcon =>
+  cls === null ? FileText : KNOWLEDGE_CLASS_ICON[cls];

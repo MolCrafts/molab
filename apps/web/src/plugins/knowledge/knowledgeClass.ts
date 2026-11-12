@@ -8,8 +8,6 @@ export const KNOWLEDGE_CLASSES: readonly KnowledgeClass[] = Object.values(DocCre
 
 const CLASS_SET = new Set<string>(KNOWLEDGE_CLASSES);
 
-/** Class name from a list row. A TeX manuscript row (`Tex`) has no knowledge class and reads as a Note. */
-export const knowledgeClassOf = (row: { cls?: string | null }): KnowledgeClass => {
-  const raw = row.cls ?? "";
-  return CLASS_SET.has(raw) ? (raw as KnowledgeClass) : "Note";
-};
+/** Knowledge class of a row, or `null` when the row is no knowledge document (a TeX manuscript, `Tex`). */
+export const knowledgeClassOf = (row: { cls: string }): KnowledgeClass | null =>
+  CLASS_SET.has(row.cls) ? (row.cls as KnowledgeClass) : null;

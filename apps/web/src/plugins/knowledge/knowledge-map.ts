@@ -1,5 +1,4 @@
 import type { KnowledgeGraphResponse } from "@/api/generated/models/KnowledgeGraphResponse";
-import { knowledgeClassOf } from "./knowledgeClass";
 import { foldedReferences, layoutKnowledgeMap } from "./map-layout";
 import { buildResearchMap, type ResearchMap } from "./research-map";
 
@@ -43,7 +42,7 @@ export const projectKnowledgeMap = (graph: KnowledgeGraphResponse, projectPath: 
   }
   const nodes = graph.nodes
     .filter((node) => ids.has(node.relPath))
-    .map((node) => ({ ...node, id: node.relPath, cls: knowledgeClassOf(node) }));
+    .map((node) => ({ ...node, id: node.relPath }));
   const seen = new Set<string>();
   const edges = graph.edges.flatMap((edge) => {
     const key = JSON.stringify([edge.source, edge.target, edge.role]);

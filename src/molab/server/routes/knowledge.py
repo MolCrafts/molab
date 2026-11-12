@@ -68,7 +68,7 @@ class NoteSummary(BaseModel):
     excerpt: str
     tags: list[str] = []
     status: str | None = None
-    cls: str = "Note"
+    cls: str = Field(description="The knowledge class, or `Tex` for a TeX file.")
     format: DocFormat = "md"
     updatedAt: str | None = Field(
         default=None, description="ISO-8601 UTC time the file was last modified."

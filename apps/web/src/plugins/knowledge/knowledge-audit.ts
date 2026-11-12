@@ -2,7 +2,6 @@ import type { EntityCard } from "@/api/generated/models/EntityCard";
 import type { KnowledgeGraphEdge } from "@/api/generated/models/KnowledgeGraphEdge";
 import type { KnowledgeGraphResponse } from "@/api/generated/models/KnowledgeGraphResponse";
 import { knowledgeLineage } from "./knowledge-map";
-import { knowledgeClassOf } from "./knowledgeClass";
 
 export type KnowledgeAuditCode =
   | "missing-reference"
@@ -68,7 +67,7 @@ export const auditKnowledge = (
 
   const uncheckedHypotheses: string[] = [];
   for (const node of graph.nodes) {
-    if (knowledgeClassOf(node) !== "Hypothesis") continue;
+    if (node.cls !== "Hypothesis") continue;
     const evidence = (incoming.get(node.relPath) ?? []).filter(
       (edge) => edge.kind === "document" && nodes.has(edge.source) && edge.source !== node.relPath,
     );
@@ -193,7 +192,7 @@ export const knowledgeChangeImpact = (
     affected.set(id, {
       id,
       title: node.title || node.name,
-      cls: knowledgeClassOf(node),
+      cls: node.cls,
       depth,
       via,
       reasons: [reason],

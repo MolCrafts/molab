@@ -2,9 +2,13 @@ import { describe, expect, it } from "@rstest/core";
 import { knowledgeClassOf } from "./knowledgeClass";
 
 describe("knowledgeClass", () => {
-  it("reads cls from a list row and reads a TeX row as Note", () => {
+  it("reads cls from a list row", () => {
     expect(knowledgeClassOf({ cls: "Finding" })).toBe("Finding");
     expect(knowledgeClassOf({ cls: "Hypothesis" })).toBe("Hypothesis");
-    expect(knowledgeClassOf({ cls: "Tex" })).toBe("Note");
+  });
+
+  it("gives a row with no knowledge class none, not Note", () => {
+    expect(knowledgeClassOf({ cls: "Tex" })).toBeNull();
+    expect(knowledgeClassOf({ cls: "" })).toBeNull();
   });
 });

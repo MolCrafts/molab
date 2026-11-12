@@ -120,7 +120,7 @@ const BacklinkRow = ({
         className={cn(rowClass, "hover:bg-surface-subtle")}
       >
         <ClassIcon aria-hidden className="size-icon-sm flex-none text-muted-foreground" />
-        <RowText name={note.name} kind={knowledgeClassOf(note).toLowerCase()} />
+        <RowText name={note.name} kind={note.cls.toLowerCase()} />
       </button>
     </li>
   );
