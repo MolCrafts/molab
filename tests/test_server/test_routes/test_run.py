@@ -167,6 +167,18 @@ class TestHarvestRunRoute:
         assert response.status_code == 200, response.text
         assert response.json()["name"]
 
+    def test_a_narrative_that_breaks_a_content_rule_is_422(
+        self, served: ServedFactory, terminal_run: RunFixture
+    ) -> None:
+        ws, exp, run = terminal_run
+        with served(ws, raise_server_exceptions=False) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/harvest",
+                json={"cls": "Finding", "narrative": "See [it](http://localhost:8771/x)."},
+            )
+        assert response.status_code == 422, response.text
+        assert "knowledge.ephemeral_link" in response.text
+
 
 class TestHarvestRunRouteRedirect:
     """The harvest route parses + writes through ``molab.knowledge``."""

@@ -856,6 +856,7 @@ def harvest_run_route(
 ) -> dict[str, str]:
     """Harvest a terminal run into sourced Knowledge under its experiment."""
     from molab.knowledge.concepts import HARVEST_TARGETS
+    from molab.knowledge.content_rules import ContentRuleError
 
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
@@ -868,6 +869,8 @@ def harvest_run_route(
             results=body.results,
             name=body.name,
         )
+    except ContentRuleError:
+        raise  # 422 through the app's handler, like every other knowledge write
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
