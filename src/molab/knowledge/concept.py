@@ -485,9 +485,7 @@ class Concept:
         from .mutation import mutation
 
         self._require_document("rename")
-        slug = document_slug(new_name)
-        if type(self).FILE_DOCUMENT:
-            slug = f"{slug}{PurePosixPath(self._path).suffix}"
+        slug = f"{document_slug(new_name)}{PurePosixPath(self._path).suffix}"
         dst = self._fs.join(self._fs.dirname(self._path), slug)
         if self._norm(dst) == self._norm(self._path):
             return
@@ -672,7 +670,6 @@ class Concept:
         from .content_rules import refuse_errors
         from .frontmatter import dump_frontmatter, split_frontmatter
         from .mutation import mutation
-        from .naming import as_knowledge_file
 
         self._require_document("write")
         if text is None and not replace:
@@ -700,8 +697,6 @@ class Concept:
                 self._fs.atomic_write_text(self._path, text)
                 return
 
-            if self.__class__.FILE_DOCUMENT:
-                self._path = as_knowledge_file(self._path)
             head: dict[str, object] = {}
             narrative = text
             if text is not None:
@@ -766,9 +761,7 @@ class Concept:
         """
         from molab.workspace.refs import is_ref
 
-        base = PurePosixPath(self._path)
-        if self.__class__.FILE_DOCUMENT:
-            base = base.parent
+        base = PurePosixPath(self._path).parent
         concepts: list[str] = []
         external: list[str] = []
         other: list[str] = []
@@ -934,10 +927,8 @@ def _skip_link(target: str) -> bool:
 
 
 def _link_base(doc: Concept) -> str:
-    """The directory relative links in *doc* are resolved against."""
-    if type(doc).FILE_DOCUMENT:
-        return str(PurePosixPath(doc.path).parent)
-    return str(doc.path)
+    """The directory relative links in document *doc* are resolved against."""
+    return str(PurePosixPath(doc.path).parent)
 
 
 def _rehome_link(target: str, old_dir: str, new_dir: str) -> str | None:
@@ -1178,7 +1169,7 @@ def append_link(
         with mutation(src, "knowledge.linked", f"@{role} {target} from {src.name}"):
             _append_line(src, link_line(encode_label(role, label), target))
         return
-    src_base = str(Path(src.path).parent) if type(src).FILE_DOCUMENT else str(src.path)
+    src_base = str(Path(src.path).parent)
     rel_posix = PurePosixPath(os.path.relpath(target, src_base)).as_posix()
     label = text if text is not None else PurePosixPath(target).name
     with mutation(src, "knowledge.linked", f"@{role} {rel_posix} from {src.name}"):

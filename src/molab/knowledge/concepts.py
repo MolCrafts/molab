@@ -175,15 +175,7 @@ class _SourcedKnowledge(Concept):
 
         A document that is not on disk yet returns the constructor list.
         """
-        from pathlib import PurePosixPath
-
-        from .naming import is_knowledge_file
-
-        if (
-            self.exists()
-            and self.FILE_DOCUMENT
-            and is_knowledge_file(PurePosixPath(self._path).name)
-        ):
+        if self.exists():
             from molab.workspace.refs import InvalidRefError
 
             found: list[SourceRef] = []
