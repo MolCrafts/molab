@@ -82,12 +82,16 @@ author. Every class lands one file; the `class:` frontmatter names which one:
 
 | Class | The one question it answers | Fields (`FIELDS`) | Never contains |
 |---|---|---|---|
-| `Plan` | What are we asking, in what scope, under what constraints? | none; its work items live in its body | the claims to test (those are Hypotheses) |
+| `Plan` | What are we asking, in what scope, under what constraints? | none | stages, work items, criteria (Roadmap, Todo, Milestone); the claims to test (Hypotheses) |
+| `Roadmap` | In what order is the work done? | `stages`: each `id`, `title`, optional `experiment`, `depends_on` (ids unique, every dependency a stage, no cycle) | work items, criteria |
+| `Todo` | What work remains? | `items`: each `id`, `title`, `status` `open` \| `done` \| `blocked` (default `open`), optional `stage` (ids unique) | the stage order |
+| `Milestone` | When is the work accepted? | `criterion` (required), `status` `open` \| `met` \| `missed` (default `open`), optional `stage` it closes | the work that meets it |
 | `Hypothesis` | What do we claim will turn out to be true? | `verdict`: `open` \| `supported` \| `refuted` \| `unsettled` (default `open`) | the evidence itself (that is a Finding) |
 | `Observation` | What was observed or given, before any interpretation? | none | a conclusion (Finding) |
 | `Finding` | What does the evidence establish? | none | a choice, a plan |
 | `Report` | What do we tell readers? It compiles; it claims nothing new. | none | a result stated nowhere else |
 | `Literature` | What does a published source say? | `LiteratureFields`: the bibliography; PDFs pointed at, never copied | |
+| `Decision` | What was chosen, by whom, and why? | `status`: `made` (default) \| `open` while it waits for a person | an observed fact (Observation), a result (Finding) |
 | `Note` | None of the above: free text with no claim on the reasoning. | `status` (default `active`) | |
 
 A `Report` is defined by its purpose (telling readers), not by its length: a
@@ -121,12 +125,20 @@ a numbered name such as `notes-v2` (`knowledge.versioned_name`), and page
 markup — `<!doctype`, `<html>`, `<head>`, `<body>`, `<iframe>`, `<script>` or
 `<style>` outside code — in a markdown document (`knowledge.html_page`; an
 `.html` document is the one meant to be a page). Nothing is written; over HTTP
-the write is 422 and the message names each rule and the offending text.
+the write is 422 and the message names each rule and the offending text. The
+one rule that reads more than one document, `knowledge.stage` (below), is
+reported by `molab validate` and the end-of-session check but refuses no write,
+so a Todo may be written before its Roadmap.
 Moving or renaming a document still relinks the documents that point at it,
 even one that already breaks a rule.
 
-A `Plan` is the one planning document. Its work items live in its narrative
-body; the claims it sets out to test are `Hypothesis` documents.
+A `Plan` asks the question and sets the scope and constraints. Its stage
+order is a `Roadmap`, its work items a `Todo`, and each acceptance criterion a
+`Milestone`; each of those cites the Plan (any link to the Plan's file). A
+stage a `Todo` item or a `Milestone` names must be on a `Roadmap` that cites
+the same Plan (`knowledge.stage`); a document that cites no Plan is not
+checked. A Milestone's `stage` is optional: a reproduction checkpoint closes no
+stage. The claims a Plan sets out to test are `Hypothesis` documents.
 
 ### Control flow lives in the links and the fields
 

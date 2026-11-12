@@ -78,12 +78,16 @@ frontmatter 标出是哪一个：
 
 | 类 | 它回答的唯一问题 | 字段（`FIELDS`） | 绝不包含 |
 |---|---|---|---|
-| `Plan` | 我们在问什么，范围多大，受哪些约束？ | 无；工作项写在正文里 | 待检验的断言（那些是 Hypothesis） |
+| `Plan` | 我们在问什么，范围多大，受哪些约束？ | 无 | 阶段、工作项、验收标准（Roadmap、Todo、Milestone）；待检验的断言（Hypothesis） |
+| `Roadmap` | 工作按什么顺序做？ | `stages`：每项 `id`、`title`、可选的 `experiment`、`depends_on`（id 不重复，依赖都是已有阶段，无环） | 工作项、验收标准 |
+| `Todo` | 还剩哪些工作？ | `items`：每项 `id`、`title`、`status` `open` \| `done` \| `blocked`（默认 `open`）、可选的 `stage`（id 不重复） | 阶段顺序 |
+| `Milestone` | 工作什么时候算验收通过？ | `criterion`（必填）、`status` `open` \| `met` \| `missed`（默认 `open`）、可选的所关闭的 `stage` | 达成它的工作本身 |
 | `Hypothesis` | 我们断言什么会成立？ | `verdict`：`open` \| `supported` \| `refuted` \| `unsettled`（默认 `open`） | 证据本身（那是 Finding） |
 | `Observation` | 在做任何解释之前，观察到了什么、给定了什么？ | 无 | 结论（Finding） |
 | `Finding` | 证据确立了什么？ | 无 | 选择、计划 |
 | `Report` | 我们要告诉读者什么？它只做汇编，不提出新的断言。 | 无 | 别处没有陈述过的结果 |
 | `Literature` | 一份已发表的文献说了什么？ | `LiteratureFields`：书目字段；PDF 只记路径，从不拷贝 | |
+| `Decision` | 选了什么、由谁选、为什么？ | `status`：`made`（默认）\| `open`（等人来定） | 观察到的事实（Observation）、结果（Finding） |
 | `Note` | 以上都不是：对推理不作任何断言的自由文本。 | `status`（默认 `active`） | |
 
 `Report` 由它的目的（告诉读者）界定，而不是由篇幅界定：一个结果写得再长，也仍然是 `Finding`。
@@ -109,10 +113,15 @@ pydantic 模型，子类扩展父类的模型。
 地址的链接（`knowledge.ephemeral_link`）、带编号的名字如 `notes-v2`（`knowledge.versioned_name`），
 以及 markdown 文档里代码之外的页面标记 —— `<!doctype`、`<html>`、`<head>`、`<body>`、`<iframe>`、
 `<script>` 或 `<style>`（`knowledge.html_page`；要做成页面的是 `.html` 文档）。什么都不会写入；
-HTTP 上为 422，消息写明每条规则和出问题的文本。移动或重命名文档时，指向它的文档照样会被改链，
+HTTP 上为 422，消息写明每条规则和出问题的文本。唯一一条要读多份文档的规则 `knowledge.stage`（见下）
+由 `molab validate` 和会话结束时的检查报告，但不拒绝写入，所以可以先写 Todo、后写 Roadmap。移动或重命名文档时，指向它的文档照样会被改链，
 即使那份文档本身已经违反某条规则。
 
-`Plan` 是唯一的计划文档。它的工作项写在叙事正文里；它要检验的断言是 `Hypothesis` 文档。
+`Plan` 提出问题、划定范围和约束。它的阶段顺序是一份 `Roadmap`，工作项是一份 `Todo`，每条验收
+标准是一份 `Milestone`；它们都引用这份 Plan（任何指向 Plan 文件的链接）。`Todo` 条目或 `Milestone`
+写的阶段，必须出现在引用同一份 Plan 的某个 `Roadmap` 上（`knowledge.stage`）；不引用任何 Plan 的文档
+不做这项检查。Milestone 的 `stage` 可以不写：复现检查点不关闭任何阶段。Plan 要检验的断言是
+`Hypothesis` 文档。
 
 ### 控制流在链接和字段里
 

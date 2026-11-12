@@ -24,6 +24,11 @@ one (:class:`ContentRuleError`). The rules:
   renders; an ``.html`` document is the one meant to be a page.
 * ``knowledge.unanchored`` (error) — a Report or Finding that cites no
   ``molab:`` asset, run or execution, so nothing ties its claims to the bytes.
+* ``knowledge.stage`` (error) — a Todo item or a Milestone names a stage that
+  no Roadmap citing the same Plan has. A document that cites no Plan belongs
+  to no plan's order and is not checked. This is the one rule that reads more
+  than one document, so a write is not refused for it (writing the Todo before
+  its Roadmap is legal); ``molab validate`` and the end-of-session check report it.
 
 ``molab.workspace`` is imported only inside function bodies.
 """
@@ -82,6 +87,10 @@ CONTENT_RULE_HINTS: dict[str, str] = {
     "knowledge.unanchored": (
         "Cite what the report or finding rests on: the `molab:asset/<id>` of each "
         "product it describes, or the run / execution ref that made them."
+    ),
+    "knowledge.stage": (
+        "Name a stage the Roadmap of the same Plan declares, or add the stage to that "
+        "Roadmap (`molab knowledge write NAME --class Roadmap --fields '{\"stages\": [...]}'`)."
     ),
 }
 
@@ -263,6 +272,71 @@ def unanchored(klass: type[Concept], body: str) -> str | None:
     return f"a {klass.__name__} cites no molab: asset, run or execution"
 
 
+def _named_stages(doc: Concept) -> list[str]:
+    """The Roadmap stages a Todo's items or a Milestone name; ``[]`` for any other class.
+
+    *doc*'s fields already passed its class's model.
+    """
+    from .concepts import Milestone, Todo
+
+    if isinstance(doc, Todo):
+        return [item.stage for item in doc.fields().items if item.stage is not None]
+    if isinstance(doc, Milestone):
+        stage = doc.fields().stage
+        return [] if stage is None else [stage]
+    return []
+
+
+def _local_targets(doc: Concept) -> set[str]:
+    """The normalized local files *doc* links, whatever the role."""
+    found: set[str] = set()
+    for edge in doc.links():
+        target = edge.target.split("#", 1)[0]
+        if target and _is_local(target):
+            # links() already resolved the target against the document's directory.
+            found.add(posixpath.normpath(target))
+    return found
+
+
+def _stage_issues(docs: Sequence[Concept], root: str, fs: FileSystem) -> Iterator[ContentIssue]:
+    """``knowledge.stage`` for each stage a Todo item or Milestone names that its Plan lacks.
+
+    The Plans a document cites are the Plan documents it links. Their stages
+    are those of every Roadmap anywhere under *root* that links the same
+    Plan. A document that links no Plan is not checked.
+    """
+    named = [(doc, stages) for doc in docs if (stages := _named_stages(doc))]
+    if not named:
+        return
+    from .concept import Knowledge
+    from .concepts import Plan, Roadmap
+
+    everything = list(Knowledge(root, fs=fs).walk())
+    plans = {posixpath.normpath(str(doc.path)) for doc in everything if isinstance(doc, Plan)}
+    staged: dict[str, set[str]] = {plan: set() for plan in plans}
+    for roadmap in (doc for doc in everything if isinstance(doc, Roadmap)):
+        try:
+            ids = {stage.id for stage in roadmap.fields().stages}
+        except ValueError:
+            # The frontmatter is outside data: knowledge.fields reports a refused one.
+            continue
+        for plan in _local_targets(roadmap) & plans:
+            staged[plan] |= ids
+    for doc, stages in named:
+        cited = _local_targets(doc) & plans
+        if not cited:
+            continue
+        known = set().union(*(staged[plan] for plan in cited))
+        for stage in stages:
+            if stage not in known:
+                yield ContentIssue(
+                    str(doc.path),
+                    "knowledge.stage",
+                    f"names stage {stage!r}, which no Roadmap citing its Plan declares",
+                    "error",
+                )
+
+
 def content_issues(
     paths: Iterable[str],
     *,
@@ -290,6 +364,8 @@ def content_issues(
     found: list[ContentIssue] = []
     for doc in docs:
         found.extend(error_issues(type(doc), str(doc.path), doc.frontmatter(), doc.read()))
+    refused = {issue.path for issue in found if issue.rule == "knowledge.fields"}
+    found.extend(_stage_issues([doc for doc in docs if str(doc.path) not in refused], root, fs))
     if errors_only:
         return found
     for doc in docs:

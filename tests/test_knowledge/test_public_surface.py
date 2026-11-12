@@ -41,8 +41,12 @@ REQUIRED_PUBLIC: tuple[str, ...] = (
     "GeneratedPart",
     "GeneratedParts",
     "Plan",
+    "Roadmap",
+    "Todo",
+    "Milestone",
     "Observation",
     "Hypothesis",
+    "Decision",
     "SourceRef",
     "KnowledgeNotFoundError",
 )
@@ -51,6 +55,7 @@ REQUIRED_PUBLIC: tuple[str, ...] = (
 #: out silently (a subset assertion would miss it).
 PINNED_ALL: frozenset[str] = frozenset(
     {
+        "Decision",
         "Edge",
         "EdgeRole",
         "Finding",
@@ -66,13 +71,16 @@ PINNED_ALL: frozenset[str] = frozenset(
         "Hypothesis",
         "Plan",
         "LiteratureFields",
+        "Milestone",
         "Report",
+        "Roadmap",
         "SearchHit",
         "SearchResult",
         "SourceKind",
         "SourceNotFoundError",
         "SourceRef",
         "SourcedHit",
+        "Todo",
         "WikiSource",
     }
 )

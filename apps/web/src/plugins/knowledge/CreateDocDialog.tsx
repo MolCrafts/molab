@@ -31,12 +31,12 @@ export interface CreateDocInput {
   body: string;
   /** `molab:` refs the document rests on; a sourced class given none names its host. */
   sources?: string[];
-  /** The fields the class declares (a Literature's bibliography). */
+  /** The fields the class declares (a Literature's bibliography, a Milestone's criterion). */
   fields?: Record<string, unknown>;
 }
 
 /** The field a validation message belongs under. */
-type ErrorField = "name" | "year";
+type ErrorField = "name" | "year" | "criterion";
 
 interface FieldErrorState {
   field: ErrorField;
@@ -82,6 +82,7 @@ export const CreateDocDialog = ({
   const [doi, setDoi] = useState("");
   const [venue, setVenue] = useState("");
   const [url, setUrl] = useState("");
+  const [criterion, setCriterion] = useState("");
   const [localError, setLocalError] = useState<FieldErrorState | null>(null);
   const runsRef = useRef(runs);
   runsRef.current = runs;
@@ -100,6 +101,7 @@ export const CreateDocDialog = ({
     setDoi("");
     setVenue("");
     setUrl("");
+    setCriterion("");
     setLocalError(null);
   }, [open]);
 
@@ -114,6 +116,10 @@ export const CreateDocDialog = ({
     const yearNumber = year.trim() ? Number(year) : undefined;
     if (year.trim() && !Number.isInteger(yearNumber)) {
       setLocalError({ field: "year", message: "Year must be a whole number." });
+      return;
+    }
+    if (cls === "Milestone" && !criterion.trim()) {
+      setLocalError({ field: "criterion", message: "Criterion required." });
       return;
     }
     setLocalError(null);
@@ -153,6 +159,7 @@ export const CreateDocDialog = ({
             },
           }
         : {}),
+      ...(cls === "Milestone" ? { fields: { criterion: criterion.trim() } } : {}),
     });
   };
 
@@ -271,6 +278,19 @@ export const CreateDocDialog = ({
             />
             <Label htmlFor="doc-url">URL</Label>
             <Input id="doc-url" value={url} onChange={(event) => setUrl(event.target.value)} />
+          </div>
+        )}
+        {cls === "Milestone" && (
+          <div className="grid gap-2">
+            <Label htmlFor="doc-criterion">Criterion</Label>
+            <Input
+              id="doc-criterion"
+              value={criterion}
+              onChange={(event) => setCriterion(event.target.value)}
+              placeholder="What must be true for the work to be accepted"
+              disabled={busy}
+            />
+            <FieldError error={localError} field="criterion" />
           </div>
         )}
         <div className="grid gap-2">

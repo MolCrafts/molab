@@ -186,10 +186,12 @@ def _layout() -> str:
 def _knowledge_classes() -> str:
     from molab.knowledge.concepts import _PRODUCTS
 
-    lines = ["| class | what it is |", "|---|---|"]
+    lines = ["| class | what it is | its fields |", "|---|---|---|"]
     for name, klass in _PRODUCTS.items():
         doc = (klass.__doc__ or "").strip().splitlines()
-        lines.append(f"| `{name}` | {_md(doc[0]) if doc else ''} |")
+        model = klass.FIELDS
+        fields = ", ".join(f"`{key}`" for key in model.model_fields) if model else "none"
+        lines.append(f"| `{name}` | {_md(doc[0]) if doc else ''} | {fields} |")
     return "\n".join(lines)
 
 
@@ -284,6 +286,10 @@ def render_agent_guide(ws: Workspace) -> str:
         "(`--format html` for the HTML form).",
         "",
         _knowledge_classes(),
+        "",
+        "Any other frontmatter key is refused. A `Roadmap`, `Todo` or `Milestone` cites "
+        "the `Plan` it belongs to; a stage a `Todo` item or a `Milestone` names must be "
+        "on a `Roadmap` that cites the same `Plan`.",
         "",
         "### To do this, run that",
         "",

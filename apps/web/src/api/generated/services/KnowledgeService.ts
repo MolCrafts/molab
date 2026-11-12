@@ -88,7 +88,7 @@ export class KnowledgeService {
      */
     public static searchKnowledge(
         q: string,
-        cls?: ('Note' | 'Literature' | 'Report' | 'Finding' | 'Plan' | 'Observation' | 'Hypothesis' | null),
+        cls?: ('Note' | 'Literature' | 'Report' | 'Finding' | 'Plan' | 'Roadmap' | 'Todo' | 'Milestone' | 'Observation' | 'Hypothesis' | 'Decision' | null),
         tag?: (string | null),
         molabSession?: (string | null),
     ): CancelablePromise<KnowledgeSearchResponse> {

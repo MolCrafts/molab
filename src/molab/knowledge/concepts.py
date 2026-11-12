@@ -10,10 +10,12 @@ handles it.
 from __future__ import annotations
 
 import logging
+from collections import Counter
+from graphlib import TopologicalSorter
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from molab.fs import FileSystem, LocalFS, PathArg
 
@@ -80,6 +82,101 @@ class HypothesisFields(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     verdict: HypothesisVerdict = "open"
+
+
+DecisionStatus = Literal["open", "made"]
+TodoStatus = Literal["open", "done", "blocked"]
+MilestoneStatus = Literal["open", "met", "missed"]
+
+
+def _require_unique(what: str, ids: list[str]) -> None:
+    """Refuse *ids* that repeat. Raises ``ValueError`` naming them."""
+    repeated = sorted(key for key, count in Counter(ids).items() if count > 1)
+    if repeated:
+        raise ValueError(f"{what} ids repeat: {repeated}")
+
+
+class DecisionFields(BaseModel):
+    """Whether the choice is ``made``, or ``open`` while it waits for a person."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: DecisionStatus = "made"
+
+
+class TodoItem(BaseModel):
+    """One piece of work. ``stage`` names a Roadmap stage; it does not copy it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    title: str
+    status: TodoStatus = "open"
+    stage: str | None = None
+
+
+class TodoFields(BaseModel):
+    """A Todo's work items, each id once."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    items: tuple[TodoItem, ...] = ()
+
+    @model_validator(mode="after")
+    def _ids_unique(self) -> TodoFields:
+        _require_unique("todo item", [item.id for item in self.items])
+        return self
+
+
+class RoadmapStage(BaseModel):
+    """One stage on a Roadmap.
+
+    Attributes:
+        id: The stable id a Todo item or a Milestone names. Not a title.
+        title: What the stage is.
+        experiment: The experiment directory that carries the stage, if any.
+        depends_on: Stage ids that finish before this one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    title: str
+    experiment: str | None = None
+    depends_on: tuple[str, ...] = ()
+
+
+class RoadmapFields(BaseModel):
+    """A Roadmap's stages: each id once, every dependency a stage, no cycle."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    stages: tuple[RoadmapStage, ...] = ()
+
+    @model_validator(mode="after")
+    def _an_acyclic_order(self) -> RoadmapFields:
+        _require_unique("roadmap stage", [stage.id for stage in self.stages])
+        graph = {stage.id: stage.depends_on for stage in self.stages}
+        for stage_id, depends_on in graph.items():
+            unknown = [dep for dep in depends_on if dep not in graph]
+            if unknown:
+                raise ValueError(f"stage {stage_id!r} depends on unknown stage(s) {unknown}")
+        # CycleError is a ValueError: pydantic reports it as this model's error.
+        TopologicalSorter(graph).prepare()
+        return self
+
+
+class MilestoneFields(BaseModel):
+    """When the work is accepted: the criterion, where it stands, the stage it closes.
+
+    ``stage`` is optional: a reproduction checkpoint closes no Roadmap stage.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    criterion: str
+    status: MilestoneStatus = "open"
+    stage: str | None = None
 
 
 class Note(Concept):
@@ -283,9 +380,55 @@ class Finding(_SourcedKnowledge):
 class Plan(_SourcedKnowledge):
     """What are we asking, in what scope, under what constraints?
 
-    The single planning document. Its work items live in its narrative. The
-    claims to test are :class:`Hypothesis` documents.
+    A Plan does not list stages, todos or criteria: those live in
+    :class:`Roadmap`, :class:`Todo` and :class:`Milestone` documents that cite
+    the Plan. The claims to test are :class:`Hypothesis` documents.
     """
+
+
+class Roadmap(_SourcedKnowledge):
+    """In what order is the work done?
+
+    ``stages`` is its one field: each stage's id and title, the experiment
+    that carries it, and the stages it depends on. It cites the :class:`Plan`
+    it orders. It lists no work items and no criterion.
+    """
+
+    FIELDS: ClassVar[type[RoadmapFields]] = RoadmapFields
+
+    def fields(self) -> RoadmapFields:
+        """This roadmap's stages, read from its frontmatter."""
+        return self._fields_of(type(self).FIELDS)
+
+
+class Todo(_SourcedKnowledge):
+    """What work remains?
+
+    ``items`` is its one field: each item's id, title, ``status`` (``open``,
+    ``done`` or ``blocked``) and the Roadmap ``stage`` it serves. It cites the
+    :class:`Plan` the work is for. It does not define the stage order.
+    """
+
+    FIELDS: ClassVar[type[TodoFields]] = TodoFields
+
+    def fields(self) -> TodoFields:
+        """This todo's items, read from its frontmatter."""
+        return self._fields_of(type(self).FIELDS)
+
+
+class Milestone(_SourcedKnowledge):
+    """When is the work accepted?
+
+    ``criterion`` is required; ``status`` is ``open``, ``met`` or ``missed``;
+    ``stage`` names the Roadmap stage it closes, when it closes one. It cites
+    the :class:`Plan`. It does not list the work that meets the criterion.
+    """
+
+    FIELDS: ClassVar[type[MilestoneFields]] = MilestoneFields
+
+    def fields(self) -> MilestoneFields:
+        """This milestone's criterion, status and stage, read from its frontmatter."""
+        return self._fields_of(type(self).FIELDS)
 
 
 class Observation(_SourcedKnowledge):
@@ -316,6 +459,21 @@ class Hypothesis(_SourcedKnowledge):
         return self.fields().verdict
 
 
+class Decision(_SourcedKnowledge):
+    """What was chosen, by whom, and why?
+
+    ``status`` is its one field: ``made`` (the default), or ``open`` while the
+    choice waits for a person. An observed fact is an :class:`Observation`; a
+    result is a :class:`Finding`.
+    """
+
+    FIELDS: ClassVar[type[DecisionFields]] = DecisionFields
+
+    def fields(self) -> DecisionFields:
+        """This decision's status, read from its frontmatter."""
+        return self._fields_of(type(self).FIELDS)
+
+
 #: The one class-name → Knowledge subclass table on the knowledge side. The
 #: keys are the names callers already spell in a config, a CLI flag or an agent
 #: tool payload.
@@ -325,8 +483,12 @@ _PRODUCTS: dict[str, type[Concept]] = {
     "Report": Report,
     "Finding": Finding,
     "Plan": Plan,
+    "Roadmap": Roadmap,
+    "Todo": Todo,
+    "Milestone": Milestone,
     "Observation": Observation,
     "Hypothesis": Hypothesis,
+    "Decision": Decision,
 }
 
 
@@ -415,14 +577,24 @@ HARVEST_TARGETS: MappingProxyType[str, type[_SourcedKnowledge]] = MappingProxyTy
 
 
 __all__ = [
+    "Decision",
+    "DecisionFields",
     "Finding",
     "Hypothesis",
     "HypothesisFields",
     "Literature",
     "LiteratureFields",
+    "Milestone",
+    "MilestoneFields",
     "Note",
     "NoteFields",
     "Observation",
     "Plan",
     "Report",
+    "Roadmap",
+    "RoadmapFields",
+    "RoadmapStage",
+    "Todo",
+    "TodoFields",
+    "TodoItem",
 ]

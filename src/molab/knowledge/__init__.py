@@ -14,10 +14,12 @@ the class (``class: Finding``), the rest is the narrative. Path is identity::
     Note("/data/group/wiki/cooling.md")
 
 The subclasses are ``Note``, ``Literature``, ``Report``, ``Finding``,
-``Plan``, ``Observation``, and ``Hypothesis``. Each answers one question
-(the first line of its docstring). A Plan is the one planning document:
-question, scope, constraints, and the work items in its narrative. Failure
-analysis is a Report; harvest of a scientific outcome is a Finding.
+``Plan``, ``Roadmap``, ``Todo``, ``Milestone``, ``Observation``,
+``Hypothesis``, and ``Decision``. Each answers one question (the first line
+of its docstring). A Plan is the question, scope and constraints; the
+Roadmap, Todo and Milestone that cite it hold its stage order, its work items
+and its acceptance criteria. Failure analysis is a Report; harvest of a
+scientific outcome is a Finding.
 
 A path, or a **host plus a name**: ``Note(experiment, "Tg Cooling")`` derives
 ``<experiment>/knowledges/tg-cooling.md`` (and the host's own disk) without
@@ -48,14 +50,18 @@ cannot supply a git history or an id simply observes nothing.
 
 from .concept import Knowledge
 from .concepts import (
+    Decision,
     Finding,
     Hypothesis,
     Literature,
     LiteratureFields,
+    Milestone,
     Note,
     Observation,
     Plan,
     Report,
+    Roadmap,
+    Todo,
 )
 from .edges import Edge, EdgeRole
 from .errors import KnowledgeNotFoundError
@@ -74,6 +80,7 @@ from .sources import (
 )
 
 __all__ = [
+    "Decision",
     "Edge",
     "EdgeRole",
     "Finding",
@@ -86,15 +93,18 @@ __all__ = [
     "KnowledgeSourceStore",
     "Literature",
     "LiteratureFields",
+    "Milestone",
     "Note",
     "Observation",
     "Plan",
     "Report",
+    "Roadmap",
     "SearchHit",
     "SearchResult",
     "SourceKind",
     "SourceNotFoundError",
     "SourceRef",
     "SourcedHit",
+    "Todo",
     "WikiSource",
 ]
