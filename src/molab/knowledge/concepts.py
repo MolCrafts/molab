@@ -21,8 +21,6 @@ if TYPE_CHECKING:
     from molab._typing import JSONValue
     from molab.workspace.run import Run
 
-NOTE_KIND = "note.note"
-REFERENCE_KIND = "reference.reference"
 _LOG = logging.getLogger(__name__)
 
 
@@ -33,7 +31,6 @@ class Note(Concept):
     """
 
     FILE_DOCUMENT: ClassVar[bool] = True
-    DEFAULT_TYPE: ClassVar[str] = NOTE_KIND
 
     def status(self) -> str:
         """This note's lifecycle status (``"active"`` by default)."""
@@ -59,7 +56,6 @@ class Literature(Concept):
     """What does a published source say? Bib fields in the frontmatter."""
 
     FILE_DOCUMENT: ClassVar[bool] = True
-    DEFAULT_TYPE: ClassVar[str] = REFERENCE_KIND
 
     @property
     def record(self) -> ReferenceMeta:
@@ -90,9 +86,7 @@ class _SourcedKnowledge(Concept):
         name: str | None = None,
         *,
         sources: list[SourceRef] | None = None,
-        declared_type: str | None = None,
         fs: FileSystem | None = None,
-        type: str | None = None,
     ) -> None:
         """Bind this document, keeping ``sources`` mandatory.
 
@@ -103,10 +97,8 @@ class _SourcedKnowledge(Concept):
             name: A human document name; the host then derives the landed path.
             sources: The :class:`~molab.knowledge.knowledge_item.SourceRef` list
                 this document harvests from; at least one is required.
-            declared_type: Legacy spelling of *type*.
             fs: The filesystem to read and write through; defaults to the host's
                 own disk in the *name* form.
-            type: Declared type; defaults to :attr:`DEFAULT_TYPE`.
 
         Raises:
             ValueError: If *sources* is empty and this is not a file already on
@@ -117,22 +109,12 @@ class _SourcedKnowledge(Concept):
         if not sources:
             if name is not None:
                 raise ValueError(f"{self.__class__.__name__} requires at least one SourceRef")
-            super().__init__(
-                path,
-                None,
-                type=declared_type if declared_type is not None else type,
-                fs=fs,
-            )
+            super().__init__(path, None, fs=fs)
             if not self.exists():
                 raise ValueError(f"{self.__class__.__name__} requires at least one SourceRef")
             self._sources = []
             return
-        super().__init__(
-            path,
-            name,
-            type=declared_type if declared_type is not None else type,
-            fs=fs,
-        )
+        super().__init__(path, name, fs=fs)
         self._sources = list(sources)
 
     @property
@@ -409,8 +391,6 @@ HARVEST_TARGETS: MappingProxyType[str, type[_SourcedKnowledge]] = MappingProxyTy
 
 
 __all__ = [
-    "NOTE_KIND",
-    "REFERENCE_KIND",
     "Finding",
     "Hypothesis",
     "Literature",

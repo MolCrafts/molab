@@ -753,7 +753,7 @@ class EntityBacklinkRow(BaseModel):
 
     path: str
     title: str
-    type: str
+    cls: str
     role: str
 
 
@@ -838,13 +838,11 @@ def _citing_rows(workspace: Workspace, ref: str) -> list[EntityBacklinkRow]:
     rows: list[EntityBacklinkRow] = []
     for link in backlinks_to([ref], within=workspace.root, fs=workspace.fs):
         narrative = link.source.read() or ""
-        front = link.source.frontmatter()
-        kind_name = front.get("class") or front.get("type") or type(link.source).__name__
         rows.append(
             EntityBacklinkRow(
                 path=_rel(workspace, link.source),
                 title=extract_title(narrative) or link.source.name,
-                type=str(kind_name),
+                cls=type(link.source).__name__,
                 role=str(link.role),
             )
         )
@@ -856,7 +854,7 @@ class KnowledgeSearchRow(BaseModel):
 
     path: str
     title: str
-    type: str
+    cls: str
     tags: list[str] = []
     snippet: str | None = None
     source: str = ""
@@ -872,7 +870,7 @@ class KnowledgeSearchResponse(BaseModel):
 @router.get("/search", response_model=KnowledgeSearchResponse)
 def search_knowledge(
     q: Annotated[str, Query(description="Case-insensitive needle (path/title/tags/body).")],
-    type: Annotated[str | None, Query(description="Exact Knowledge class name.")] = None,
+    cls: Annotated[str | None, Query(description="Exact Knowledge class name.")] = None,
     tag: Annotated[str | None, Query(description="Only documents carrying this tag.")] = None,
     workspace: Workspace = Depends(get_workspace),
 ) -> KnowledgeSearchResponse:
@@ -886,12 +884,12 @@ def search_knowledge(
     from molab.knowledge.concepts import _product
     from molab.knowledge.sources import KnowledgeSourceStore
 
-    cls = _product(type) if type else None
+    of = _product(cls) if cls else None
     truncated = False
 
     def workspace_searcher():  # noqa: ANN202
         nonlocal truncated
-        result = Knowledge(workspace.root, fs=workspace.fs).search(q, of=cls, tag=tag)
+        result = Knowledge(workspace.root, fs=workspace.fs).search(q, of=of, tag=tag)
         truncated = result.truncated
         return result
 
@@ -900,7 +898,7 @@ def search_knowledge(
         workspace_root=workspace.root,
         include_workspace=True,
         tag=tag,
-        concept_type=type,
+        of=of,
         limit=50,
         workspace_searcher=workspace_searcher,
     )
@@ -909,7 +907,7 @@ def search_knowledge(
             KnowledgeSearchRow(
                 path=hit.hit.entry.path,
                 title=hit.hit.entry.title or hit.hit.entry.path,
-                type=hit.hit.entry.type,
+                cls=hit.hit.entry.cls,
                 tags=list(hit.hit.entry.tags),
                 snippet=hit.hit.snippet,
                 source=hit.source,

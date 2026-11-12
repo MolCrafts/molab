@@ -45,7 +45,7 @@ class TestProjectKnowledge:
         ws = _workspace(tmp_path)
         Note.mount(ws, "Idea", body="# Idea\n")
         assert project_knowledge(ws) == [
-            KnowledgeRef(path="knowledges/idea.md", type="Note", title="Idea", id="idea")
+            KnowledgeRef(path="knowledges/idea.md", cls="Note", title="Idea", id="idea")
         ]
 
     def test_empty_workspace_projects_nothing(self, tmp_path: Path) -> None:
@@ -57,7 +57,7 @@ class TestProjectKnowledge:
         assert project_knowledge(ws) == [
             KnowledgeRef(
                 path="knowledges/no-heading.md",
-                type="Note",
+                cls="Note",
                 title="no-heading",
                 id="no-heading",
             )
@@ -94,7 +94,7 @@ class TestProjectKnowledge:
             text="The fragments pack.\n",
             record={"verdict": "open"},
         )
-        rows = {row.type: row.path for row in project_knowledge(ws)}
+        rows = {row.cls: row.path for row in project_knowledge(ws)}
         assert rows["Plan"] == "knowledges/overview.md"
         assert rows["Hypothesis"] == "knowledges/claim.md"
 
@@ -120,7 +120,7 @@ class TestContextWithKnowledge:
         got = context_with_knowledge(ws, focus=focus)
         assert isinstance(got, KnowledgeContext)
         assert got.knowledge == [
-            KnowledgeRef(path="knowledges/idea.md", type="Note", title="Idea", id="idea")
+            KnowledgeRef(path="knowledges/idea.md", cls="Note", title="Idea", id="idea")
         ]
         assert "open_questions" not in KnowledgeContext.model_fields
         assert got.focus == focus
@@ -163,11 +163,11 @@ class TestKnowledgeRef:
     def test_shape_and_frozen(self) -> None:
         import pydantic
 
-        ref = KnowledgeRef(path="knowledges/idea.md", type="Note", title="Idea")
+        ref = KnowledgeRef(path="knowledges/idea.md", cls="Note", title="Idea")
 
         assert ref.model_dump() == {
             "path": "knowledges/idea.md",
-            "type": "Note",
+            "cls": "Note",
             "title": "Idea",
             "id": None,
         }

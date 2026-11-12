@@ -57,7 +57,7 @@ def _record(monkeypatch: pytest.MonkeyPatch) -> list[WorkspaceContext]:
 
 
 def _rows(recorded: WorkspaceContext) -> list[tuple[str, str, str, str | None]]:
-    return [(ref.path, ref.type, ref.title, ref.id) for ref in recorded.knowledge]
+    return [(ref.path, ref.cls, ref.title, ref.id) for ref in recorded.knowledge]
 
 
 class TestContextConsumesProjection:

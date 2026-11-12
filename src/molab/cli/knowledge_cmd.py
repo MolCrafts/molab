@@ -309,12 +309,9 @@ def knowledge_search(
         list[str] | None,
         typer.Option("--source", help="Restrict to these sources (repeatable)."),
     ] = None,
-    concept_type: Annotated[
+    doc_class: Annotated[
         str | None,
-        typer.Option(
-            "--type",
-            help="Knowledge class name filter (Note, Literature, Finding, ...).",
-        ),
+        typer.Option("--class", help="Only documents of this knowledge class."),
     ] = None,
     tag: Annotated[str | None, typer.Option("--tag", help="Only concepts with this tag.")] = None,
     limit: Annotated[int, typer.Option("--limit", help="Maximum hits to show.")] = 10,
@@ -337,7 +334,7 @@ def knowledge_search(
 
     ws_root = _workspace_root(path)
     try:
-        cls = _product(concept_type) if concept_type else None
+        cls = _product(doc_class) if doc_class else None
     except ValueError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
@@ -347,7 +344,7 @@ def knowledge_search(
         workspace_root=ws_root,
         include_workspace=ws_root is not None,
         limit=limit,
-        concept_type=concept_type,
+        of=cls,
         tag=tag,
         workspace_searcher=(
             (lambda: Knowledge(ws_root).search(query, of=cls, tag=tag, limit=limit))

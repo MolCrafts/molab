@@ -8,7 +8,7 @@
 export type EntityBacklinkRow = {
     path: string;
     title: string;
-    type: string;
+    cls: string;
     role: string;
 };
 

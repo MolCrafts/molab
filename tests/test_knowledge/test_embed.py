@@ -96,7 +96,7 @@ class TestSummarizeEntity:
 
         assert (summary.id, summary.kind, summary.title) == (
             str(note.path),
-            "note.note",
+            "Note",
             "My Note",
         )
 
@@ -108,7 +108,7 @@ class TestSummarizeEntity:
 
         assert (summary.id, summary.kind, summary.title) == (
             str(document.path),
-            "reference.reference",
+            "Literature",
             "Head Title",
         )
 
@@ -120,7 +120,7 @@ class TestSummarizeEntity:
 
         assert (summary.id, summary.kind, summary.title) == (
             str(lit.path),
-            "reference.reference",
+            "Literature",
             "Smith 2024",
         )
 

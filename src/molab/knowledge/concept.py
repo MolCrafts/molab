@@ -75,10 +75,6 @@ def markdown_links(text: str) -> list[re.Match[str]]:
     ]
 
 
-#: Declared type of a bare root handle.
-FALLBACK_CONCEPT_TYPE = "concept"
-
-
 class LinkScan(NamedTuple):
     """Resolved out-links of a Concept's narrative.
 
@@ -108,8 +104,6 @@ class Concept:
     record names the class.
     """
 
-    #: Declared type of a bare root handle. A file document uses its own.
-    DEFAULT_TYPE: ClassVar[str] = FALLBACK_CONCEPT_TYPE
     #: Product documents are markdown files, not directories.
     FILE_DOCUMENT: ClassVar[bool] = False
 
@@ -118,7 +112,6 @@ class Concept:
         path: PathArg,
         name: str | None = None,
         *,
-        type: str | None = None,
         fs: FileSystem | None = None,
     ) -> None:
         """Bind this Concept to *path*, or to *path* (a host) plus *name*.
@@ -133,7 +126,6 @@ class Concept:
                 ``<host>/knowledges/<slug>.md``. Nothing touches disk; the first
                 :meth:`write` / :meth:`ref` lands the bytes. A bare
                 :class:`Concept` is not a document and raises ``TypeError``.
-            type: Declared type; defaults to :attr:`DEFAULT_TYPE`.
             fs: The filesystem to read and write through; defaults to the
                 host's own disk (never the local one) in the *name* form, and
                 to :class:`~molab.fs.LocalFS` otherwise.
@@ -146,9 +138,7 @@ class Concept:
         if name is not None:
             from .location import _folder, _host_fs
 
-            # ``self.__class__``, not ``type(self)``: the *type* kwarg below
-            # shadows the builtin.
-            raw = str(_folder(path, name, self.__class__))
+            raw = str(_folder(path, name, type(self)))
             disk = fs if fs is not None else _host_fs(path)
         else:
             raw = str(path)
@@ -159,16 +149,15 @@ class Concept:
             disk = fs if fs is not None else LocalFS()
         self._fs: FileSystem = disk
         self._path = raw
-        self._type = type if type is not None else self.DEFAULT_TYPE
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}({self._path!r}, type={self._type!r})"
+        return f"{type(self).__name__}({self._path!r})"
 
     def __eq__(self, other: object) -> bool:
         """Two Concepts are equal when they address the same directory.
 
-        Path *is* identity, so this is the only sound definition — the declared
-        type is metadata about that directory, not a second identity axis.
+        Path *is* identity, so this is the only sound definition — the class
+        is what the file declares, not a second identity axis.
         """
         if not isinstance(other, Concept):
             return NotImplemented
@@ -310,7 +299,7 @@ class Concept:
 
         Returns:
             The ranked hits. Each entry path is relative to this handle and
-            keeps its ``.md`` / ``.html`` suffix. ``type`` is the Knowledge
+            keeps its ``.md`` / ``.html`` suffix. ``cls`` is the Knowledge
             class name. An HTML document is titled by its record ``name`` (or
             ``title``) and ranked on its text without tags.
         """
@@ -345,7 +334,7 @@ class Concept:
             entries.append(
                 ConceptIndexEntry(
                     path=rel,
-                    type=klass.__name__,
+                    cls=klass.__name__,
                     title=title,
                     tags=tags,
                 )
@@ -357,10 +346,6 @@ class Concept:
             limit=limit,
             include_body=include_text,
         )
-
-    def type(self) -> str:
-        """This handle's declared type. A file document does not read disk."""
-        return self._type
 
     def tags(self) -> list[str]:
         """Categorical labels from frontmatter."""
@@ -759,8 +744,6 @@ class Concept:
                 dumped = _record_as_dict(record)
                 extra = {**dumped, **extra}
             extra["class"] = type(self).__name__
-            extra.pop("type", None)
-            extra.pop("id", None)
             sources = list(getattr(self, "_sources", None) or [])
             existing_fm = self.frontmatter()
             merged = {**existing_fm, **extra}
@@ -961,9 +944,7 @@ def _refresh_sections(fs: FileSystem, *document_paths: str) -> None:
 def _record_as_dict(record: object) -> dict[str, object]:
     """Flatten a write() record into frontmatter keys.
 
-    ``type`` and ``id`` are a concept's identity, never a record's, and are
-    dropped. Every other key, ``kind`` included, is a record field and is
-    kept. A model contributes only the fields its caller set: a default is
+    A model contributes only the fields its caller set: a default is
     what an absent key reads as, never a value written over a stored one.
     """
     from pydantic import BaseModel
@@ -974,8 +955,6 @@ def _record_as_dict(record: object) -> dict[str, object]:
         payload = {str(key): value for key, value in record.items()}
     else:
         payload = {}
-    payload.pop("type", None)
-    payload.pop("id", None)
     return payload
 
 
@@ -1300,7 +1279,6 @@ Knowledge = Concept
 
 
 __all__ = [
-    "FALLBACK_CONCEPT_TYPE",
     "Concept",
     "Knowledge",
     "LinkScan",

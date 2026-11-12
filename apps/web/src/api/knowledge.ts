@@ -52,8 +52,8 @@ export const knowledgeApi = {
   listKnowledge: (options: { tag?: string | null; status?: string | null } = {}) =>
     KnowledgeService.listKnowledge(options.tag ?? undefined, options.status ?? undefined),
   getNote: (path: string) => KnowledgeService.getNote(path),
-  searchKnowledge: (q: string, options: { type?: string | null; tag?: string | null } = {}) =>
-    KnowledgeService.searchKnowledge(q, options.type ?? undefined, options.tag ?? undefined),
+  searchKnowledge: (q: string, options: { cls?: string | null; tag?: string | null } = {}) =>
+    KnowledgeService.searchKnowledge(q, options.cls ?? undefined, options.tag ?? undefined),
   getNoteCards: async (path: string): Promise<EntityCard[]> => {
     const detail = await KnowledgeService.getNote(path);
     return detail.cards ?? [];

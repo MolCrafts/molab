@@ -17,9 +17,9 @@ from molab.knowledge.search import (
 
 
 def _entry(
-    path: str, *, type: str = "Note", title: str = "", tags: tuple[str, ...] = ()
+    path: str, *, cls: str = "Note", title: str = "", tags: tuple[str, ...] = ()
 ) -> ConceptIndexEntry:
-    return ConceptIndexEntry(path=path, type=type, title=title, tags=tags)
+    return ConceptIndexEntry(path=path, cls=cls, title=title, tags=tags)
 
 
 def _index(*entries: ConceptIndexEntry) -> tuple[ConceptIndexEntry, ...]:
@@ -63,7 +63,7 @@ class TestSearchIndex:
         assert [hit.entry.path for hit in result.hits] == []
 
     def test_concept_type_keeps_only_notes(self) -> None:
-        index = _index(_entry("a", type="Note"), _entry("b", type="Finding"))
+        index = _index(_entry("a", cls="Note"), _entry("b", cls="Finding"))
 
         result = search_index(index, {}, None, concept_type="Note")
 
@@ -148,7 +148,7 @@ class TestSearchModels:
         assert result.truncated is False
 
     def test_an_entry_defaults_title_and_tags_empty(self) -> None:
-        entry = ConceptIndexEntry(path="knowledges/a.md", type="Note")
+        entry = ConceptIndexEntry(path="knowledges/a.md", cls="Note")
 
         assert entry.title == ""
         assert entry.tags == ()

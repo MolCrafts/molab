@@ -449,7 +449,7 @@ export const featureShowcaseHandlers = [
       .map((note) => ({
         path: note.relPath,
         title: note.name,
-        type: "note",
+        cls: note.cls ?? "Note",
         snippet: note.excerpt,
         tags: note.tags,
       }));
@@ -486,7 +486,7 @@ export const featureShowcaseHandlers = [
       .map((edge) => ({
         path: edge.source,
         title: notes.get(edge.source)?.name ?? edge.source,
-        type: notes.get(edge.source)?.cls?.toLowerCase() ?? "note",
+        cls: notes.get(edge.source)?.cls ?? "Note",
         role: edge.role,
       }));
     return HttpResponse.json({ entity, backlinks });

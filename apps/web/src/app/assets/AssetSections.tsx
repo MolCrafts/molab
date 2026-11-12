@@ -8,6 +8,7 @@
 import { Skeleton } from "@molcrafts/ui";
 import { BookOpen, Copy, ExternalLink, Link2, X } from "lucide-react";
 import type { JSX, ReactNode } from "react";
+import type { EntityBacklinkRow } from "@/api/generated/models/EntityBacklinkRow";
 import { StatusIcon } from "@/app/components/entity";
 import { formatParameterValue } from "@/app/runs/runTitle";
 import type { WorkspaceExecutionRow, WorkspaceRunRow } from "@/app/runs/types";
@@ -145,13 +146,6 @@ export const DetailsPanel = ({
 
 // ── bodies ───────────────────────────────────────────────────────────────
 
-export interface Citation {
-  path: string;
-  title: string;
-  type: string;
-  role: string;
-}
-
 /** This asset: the file facts and the documents that cite it. */
 export const AssetDetails = ({
   asset,
@@ -168,7 +162,7 @@ export const AssetDetails = ({
   digest: string | null;
   file: string | null;
   registered: string;
-  citations: Citation[];
+  citations: EntityBacklinkRow[];
   citationsLoading: boolean;
   onOpenCitation: (path: string) => void;
 }): JSX.Element => (
@@ -216,7 +210,7 @@ export const AssetDetails = ({
           >
             <BookOpen aria-hidden className="size-icon-sm flex-none text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate">{row.title}</span>
-            <span className="flex-none text-micro text-muted-foreground">{row.type}</span>
+            <span className="flex-none text-micro text-muted-foreground">{row.cls}</span>
           </button>
         ))
       )}

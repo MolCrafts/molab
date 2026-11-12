@@ -50,7 +50,7 @@ class TestConceptIdentity:
 
     def test_equality_is_directory_equality(self, tmp_path: Path) -> None:
         a = Concept(tmp_path / "n")
-        b = Concept(tmp_path / "n", type="knowledge.item")
+        b = Concept(str(tmp_path / "x" / ".." / "n"))
         assert a == b
         assert len({a, b}) == 1
 
@@ -370,7 +370,7 @@ class TestConceptSearch:
 
         hit = Knowledge(ws.root).search("cooling").hits[0]
 
-        assert hit.entry.type == "Note"
+        assert hit.entry.cls == "Note"
         assert hit.entry.title == "Cooling rate"
 
     def test_tag_keeps_only_tagged_documents(self, tmp_path: Path) -> None:
@@ -1077,23 +1077,5 @@ class TestKnowledgeRootHandle:
             handle.rename("x")
         assert tmp_path.is_dir()
 
-        assert handle.type() == "concept"
         for name in ("read_meta", "write_meta", "read_index", "write_index", "_persist"):
             assert not hasattr(Concept, name)
-
-    def test_a_note_type_does_not_read_the_file(self, tmp_path: Path) -> None:
-        from molab.fs.local import LocalFS
-
-        class _Counting(LocalFS):
-            def __init__(self) -> None:
-                self.reads = 0
-
-            def read_text(self, path, encoding="utf-8"):  # type: ignore[no-untyped-def]
-                self.reads += 1
-                return super().read_text(path, encoding=encoding)
-
-        disk = _Counting()
-        note = Note(tmp_path / "a.md", fs=disk)
-
-        assert note.type() == "note.note"
-        assert disk.reads == 0

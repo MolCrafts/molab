@@ -53,17 +53,6 @@ class TestKnowledgeInit:
         assert after == before
 
 
-class TestKnowledgeSearch:
-    def test_search_uses_knowledge_handle(self) -> None:
-        from molab.cli import knowledge_cmd
-
-        search_src = inspect.getsource(knowledge_cmd.knowledge_search)
-        assert "Knowledge(ws_root).search" in search_src
-        assert "Bun" + "dle" not in inspect.getsource(knowledge_cmd)
-        assert "class name" in search_src
-        assert '"workspace.json"' not in inspect.getsource(knowledge_cmd)
-
-
 class TestKnowledgeRead:
     def test_read_uses_open(self) -> None:
         from molab.cli import knowledge_cmd

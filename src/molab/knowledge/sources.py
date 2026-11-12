@@ -286,7 +286,7 @@ class KnowledgeSourceStore:
         workspace_root: PathArg | None = None,
         include_workspace: bool = True,
         limit: int = 10,
-        concept_type: str | None = None,
+        of: type[Knowledge] | None = None,
         tag: str | None = None,
         workspace_searcher: Callable[[], SearchResult] | None = None,
     ) -> builtins.list[SourcedHit]:
@@ -307,8 +307,8 @@ class KnowledgeSourceStore:
                 ``None`` skips that source even when *include_workspace* is set.
             include_workspace: Also search *workspace_root* as an unnamed source.
             limit: Maximum fused hits to return.
-            concept_type: Exact Knowledge class name, applied per source. An
-                unknown name raises ``ValueError``.
+            of: A Knowledge class to keep (and its subclasses), applied per
+                source; ``None`` keeps every class.
             tag: Tag filter, applied per source.
             workspace_searcher: How to search the workspace itself, when given —
                 a host that already holds a scanned index passes a closure over
@@ -319,14 +319,9 @@ class KnowledgeSourceStore:
         Returns:
             The fused hits, best first, each tagged with its source and the
             absolute path of its markdown file.
-
-        Raises:
-            ValueError: If *concept_type* is not a known Knowledge class name.
         """
         from .concept import Knowledge
-        from .concepts import _product
 
-        cls = _product(concept_type) if concept_type else None
         targets: list[tuple[str, Path]] = []
         if include_workspace and workspace_root is not None:
             targets.append(("", Path(os.fspath(workspace_root))))
@@ -343,7 +338,7 @@ class KnowledgeSourceStore:
             if name == "" and workspace_searcher is not None:
                 result = workspace_searcher()
             else:
-                result = Knowledge(root).search(query, of=cls, tag=tag, limit=limit)
+                result = Knowledge(root).search(query, of=of, tag=tag, limit=limit)
             for rank, hit in enumerate(result.hits, start=1):
                 key = (name, hit.entry.path)
                 fused[key] = (1.0 / (RRF_K + rank), name, hit, root)

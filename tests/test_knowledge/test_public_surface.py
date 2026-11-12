@@ -136,7 +136,7 @@ class TestTheRefFormat:
         # chain). The workspace half below is end-to-end.
         hit = SourcedHit(
             source="lab",
-            hit=SearchHit(entry=ConceptIndexEntry(path="knowledges/tg-cooling.md", type="Note")),
+            hit=SearchHit(entry=ConceptIndexEntry(path="knowledges/tg-cooling.md", cls="Note")),
             abs_path=None,
             rank=1,
         )
@@ -164,7 +164,7 @@ class TestTheSearchHitFields:
 
         assert hit.entry.path == "knowledges/tg-cooling.md"
         assert hit.entry.title == "Cooling rate"
-        assert hit.entry.type == "Note"
+        assert hit.entry.cls == "Note"
         assert isinstance(hit.entry.tags, tuple)
         assert hit.score > 0
         assert hit.snippet  # the reason the model was given this hit
@@ -183,14 +183,14 @@ class TestTheInformationARefMustYield:
         doc = Note(wiki, "tg-cooling")
 
         title = doc.frontmatter().get("title") or doc.name  # → doc.title
-        type_ = doc.type()  # → doc.type
+        type_ = type(doc).__name__  # → doc.cls
         tags = doc.tags()  # → doc.tags
         body = doc.read()
         edges = doc.links()  # → doc.edges
         openable = doc.path  # → doc.origin.body_path
 
         assert title == "tg-cooling"
-        assert type_ == "note.note"
+        assert type_ == "Note"
         assert tuple(tags) == ()
         assert "Quench at 10 K/ns" in body
         assert edges == []

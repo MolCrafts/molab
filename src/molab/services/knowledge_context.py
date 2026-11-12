@@ -54,7 +54,7 @@ class KnowledgeRef(BaseModel, frozen=True):
     """A knowledge document's identity: workspace-relative ``.md`` path, class name, title."""
 
     path: str
-    type: str
+    cls: str
     title: str
     id: str | None = None
 
@@ -85,7 +85,7 @@ def project_knowledge(workspace: Workspace) -> list[KnowledgeRef]:
             rows.append(
                 KnowledgeRef(
                     path=Path(concept.path).relative_to(workspace.root).as_posix(),
-                    type=type(concept).__name__,
+                    cls=type(concept).__name__,
                     title=extract_title(concept.read()) or name,
                     id=str(name) if name is not None else None,
                 )

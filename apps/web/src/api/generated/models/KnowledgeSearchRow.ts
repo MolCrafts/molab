@@ -8,7 +8,7 @@
 export type KnowledgeSearchRow = {
     path: string;
     title: string;
-    type: string;
+    cls: string;
     tags?: Array<string>;
     snippet?: (string | null);
     source?: string;

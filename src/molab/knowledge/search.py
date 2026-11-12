@@ -33,7 +33,7 @@ class ConceptIndexEntry(BaseModel, frozen=True):
 
     Attributes:
         path: POSIX path relative to the searched root.
-        type: The Knowledge class name.
+        cls: The Knowledge class name.
         id: Optional stable id.
         title: The H1 if present, else the document name.
         tags: Frontmatter tags.
@@ -41,7 +41,7 @@ class ConceptIndexEntry(BaseModel, frozen=True):
     """
 
     path: str
-    type: str
+    cls: str
     id: str | None = None
     title: str = ""
     tags: tuple[str, ...] = ()
@@ -140,7 +140,7 @@ def passes_filters(
     Returns:
         ``True`` when every given filter matches.
     """
-    if concept_type is not None and entry.type != concept_type:
+    if concept_type is not None and entry.cls != concept_type:
         return False
     if tag is not None and tag not in entry.tags:
         return False
