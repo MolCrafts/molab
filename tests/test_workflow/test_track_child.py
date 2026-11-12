@@ -75,7 +75,7 @@ def test_child_metrics_print_and_asset_reach_the_sealed_parent(tmp_path: Path) -
 
     (child,) = [
         asset
-        for asset in assets_produced_by(run.experiment.project.workspace, "e01")
+        for asset in assets_produced_by(run.experiment.project.workspace, "e01", run_id=run.id)
         if asset.title == "child.bin"
     ]
     assert child.tags["k"] == "v"
@@ -104,7 +104,7 @@ def test_a_user_env_wins_and_still_attaches(tmp_path: Path) -> None:
 
     (child,) = [
         asset
-        for asset in assets_produced_by(run.experiment.project.workspace, "e01")
+        for asset in assets_produced_by(run.experiment.project.workspace, "e01", run_id=run.id)
         if asset.title == "child.bin"
     ]
     assert isinstance(child.origin, ExecutionOrigin)

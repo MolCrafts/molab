@@ -182,7 +182,7 @@ class TestCacheHitReturnsTheRef:
         assert calls["sim"] == 1
         (asset,) = [
             item
-            for item in assets_produced_by(ws, "e01")
+            for item in assets_produced_by(ws, "e01", run_id=run.id)
             if isinstance(item.origin, ExecutionOrigin) and item.origin.run_id == run.id
         ]
         assert first.outputs["sim"] == second.outputs["sim"] == asset.ref
@@ -190,7 +190,7 @@ class TestCacheHitReturnsTheRef:
         assert Path(run.asset_path(asset.id)).read_bytes() == b"xyz"
         assert [
             item
-            for item in assets_produced_by(ws, "e02")
+            for item in assets_produced_by(ws, "e02", run_id=run.id)
             if isinstance(item.origin, ExecutionOrigin) and item.origin.run_id == run.id
         ] == []
         stored = [

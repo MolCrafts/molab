@@ -30,4 +30,4 @@ async def test_json_return_is_not_auto_registered(tmp_path: Path) -> None:
         out = await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
 
     assert out.outputs["produce"] == {"value": 42}
-    assert assets_produced_by(ws, run.executions[-1].id) == []
+    assert assets_produced_by(ws, run.executions[-1].id, run_id=run.id) == []

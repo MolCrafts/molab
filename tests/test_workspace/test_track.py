@@ -134,7 +134,7 @@ class TestDispatch:
         wal = run.execution_dir("e01") / "metrics.mlp.jsonl"
         assert wal.is_file()
         assert _wal_records(wal)[0]["k"] == "loss"
-        assert assets_produced_by(ws, "e01") == []
+        assert assets_produced_by(ws, "e01", run_id=run.id) == []
         assert current() is None
 
     def test_case_3_without_with_is_sealed_at_exit(self, tmp_path, monkeypatch) -> None:
@@ -200,11 +200,11 @@ class TestAttached:
             source = ctx.execution_dir.parent / "outside.txt"
             source.write_text("bytes", encoding="utf-8")
             staged = child.register(source, title="outside.txt", tags={"k": "v"})
-            assert assets_produced_by(run.experiment.project.workspace, ctx.id) == []
+            assert assets_produced_by(run.experiment.project.workspace, ctx.id, run_id=run.id) == []
             child.close()
 
         record = run.executions[-1]
-        produced = assets_produced_by(run.experiment.project.workspace, record.id)
+        produced = assets_produced_by(run.experiment.project.workspace, record.id, run_id=run.id)
         folded = next(asset for asset in produced if asset.title == "outside.txt")
         assert isinstance(folded.origin, ExecutionOrigin)
         assert folded.origin.task == "fit"
@@ -230,7 +230,7 @@ class TestAttached:
             child.close()
         record = run.executions[-1]
         assert record.status is ExecutionStatus.SUCCEEDED
-        produced = assets_produced_by(run.experiment.project.workspace, record.id)
+        produced = assets_produced_by(run.experiment.project.workspace, record.id, run_id=run.id)
         assert [asset.title for asset in produced] == ["good.bin"]
         log = (ctx.execution_dir / "run.log").read_text()
         assert f"{MANIFEST}:2 not recorded" in log
@@ -252,7 +252,9 @@ class TestAttached:
             record = child.metrics.image("rdf", b"\x89PNG", name="rdf.png", step=1)
             assert str(record["v"]["path"]).startswith("work/_molab/staged/")
             child.close()
-        produced = assets_produced_by(run.experiment.project.workspace, run.executions[-1].id)
+        produced = assets_produced_by(
+            run.experiment.project.workspace, run.executions[-1].id, run_id=run.id
+        )
         image = next(asset for asset in produced if asset.title == "rdf.png")
         assert image.media_type == "image/png"
         (on_disk,) = _wal_records(ctx.execution_dir / "metrics.mlp.jsonl")
@@ -351,7 +353,7 @@ class TestOfflineAdopt:
         assert (attempt / "stdout.log").read_text() == "trained\n"
         assert (attempt / "stderr.log").read_text() == "warned\n"
         assert (attempt / "metrics.mlp.jsonl").is_file()
-        produced = assets_produced_by(run.experiment.project.workspace, record.id)
+        produced = assets_produced_by(run.experiment.project.workspace, record.id, run_id=run.id)
         model = next(asset for asset in produced if asset.title == "model.pt")
         assert model.tags == {"epoch": "10"}
         assert model.content.size == len(b"weights")
@@ -375,7 +377,7 @@ class TestOfflineAdopt:
 
         attempt = run.execution_dir(record.id)
         assert _wal_records(attempt / "metrics.mlp.jsonl")[0]["k"] == "loss"
-        produced = assets_produced_by(run.experiment.project.workspace, record.id)
+        produced = assets_produced_by(run.experiment.project.workspace, record.id, run_id=run.id)
         named = [asset for asset in produced if asset.title == "metrics.mlp.jsonl"]
         assert len(named) == 1
         payload = run.experiment.project.workspace.assets_at(named[0].scope).payload_path(

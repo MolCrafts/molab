@@ -53,7 +53,7 @@ class TestRegisterSnapshots:
                 ctx.register(direct, title="lammps.log")
             execution_id = ctx.id
         assert direct.read_bytes() == b"step 0\n"
-        assert assets_produced_by(ws, execution_id) == []
+        assert assets_produced_by(ws, execution_id, run_id=run.id) == []
 
     def test_register_copies_a_file_outside_the_attempt(self, tmp_path: Path) -> None:
         ws = Workspace(root=tmp_path / "ws", name="T")
@@ -74,4 +74,4 @@ class TestRegisterSnapshots:
             execution_id = ctx.id
         assert path == run.execution_dir(execution_id) / "checkpoints" / "last.json"
         assert path.is_file()
-        assert assets_produced_by(ws, execution_id) == []
+        assert assets_produced_by(ws, execution_id, run_id=run.id) == []

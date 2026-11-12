@@ -35,7 +35,7 @@ def _produced(run, execution_id: str):
     workspace = run.experiment.project.workspace
     return [
         asset
-        for asset in assets_produced_by(workspace, execution_id)
+        for asset in assets_produced_by(workspace, execution_id, run_id=run.id)
         if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
     ]
 

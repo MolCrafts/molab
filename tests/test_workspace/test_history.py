@@ -173,7 +173,7 @@ class TestSoftDependency:
         assert execution.sealed
         from molab.workspace.asset_repository import assets_produced_by
 
-        produced = assets_produced_by(ws, execution.id)
+        produced = assets_produced_by(ws, execution.id, run_id=run.id)
         assert [asset.title for asset in produced] == ["metrics.json"]
 
     def test_history_added_later_captures_the_existing_tree(self, tmp_path):

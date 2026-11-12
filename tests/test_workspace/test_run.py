@@ -445,7 +445,9 @@ class TestRunFinishedAt:
 def _results_asset(run: Run, execution_id: str):
     found = [
         asset
-        for asset in assets_produced_by(run.experiment.project.workspace, execution_id)
+        for asset in assets_produced_by(
+            run.experiment.project.workspace, execution_id, run_id=run.id
+        )
         if asset.title == "results"
     ]
     assert len(found) == 1
@@ -520,7 +522,7 @@ class TestRunResults:
             eid = ctx.id
         produced = [
             asset
-            for asset in assets_produced_by(run.experiment.project.workspace, eid)
+            for asset in assets_produced_by(run.experiment.project.workspace, eid, run_id=run.id)
             if asset.title == "results"
         ]
         assert len(produced) == 1

@@ -37,7 +37,7 @@ def test_a_registered_file_opens_in_the_next_run_and_is_cited(tmp_path: Path) ->
     with run.start() as ctx:
         trained = asyncio.run(WorkflowRuntime().execute(train.compile(), run_context=ctx))
 
-    produced = assets_produced_by(ws, run.executions[-1].id)
+    produced = assets_produced_by(ws, run.executions[-1].id, run_id=run.id)
     assert len(produced) == 1
     asset = produced[0]
     assert trained.outputs["train_task"] == asset.ref

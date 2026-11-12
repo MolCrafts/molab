@@ -89,7 +89,7 @@ def test_from_dir_gives_a_sealed_attempt_and_validates_clean(lab: Path, tracked:
     run = ws.get_project("alpha").get_experiment("sweep").get_run(payload["run_id"])
     produced = {
         asset.title: asset
-        for asset in assets_produced_by(ws, payload["execution_id"])
+        for asset in assets_produced_by(ws, payload["execution_id"], run_id=run.id)
         if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
     }
     assert set(produced) == {"loss.png", "summary.json"}

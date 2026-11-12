@@ -370,7 +370,7 @@ class TestChildTracking:
 
         notes = [
             asset
-            for asset in assets_produced_by(run.experiment.project.workspace, "e01")
+            for asset in assets_produced_by(run.experiment.project.workspace, "e01", run_id=run.id)
             if asset.title == "note.txt"
         ]
         assert len(notes) == 1

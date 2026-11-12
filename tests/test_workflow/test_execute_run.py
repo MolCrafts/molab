@@ -279,7 +279,7 @@ class TestExecuteRun:
         assert [e.status.value for e in run.executions] == ["failed"]
         assert cp == run.execution_dir("e01") / "checkpoints" / "epoch1.json"
         assert json.loads(cp.read_text(encoding="utf-8"))["data"] == {"step": 1}
-        assert assets_produced_by(run.experiment.project.workspace, "e01") == []
+        assert assets_produced_by(run.experiment.project.workspace, "e01", run_id=run.id) == []
 
         result = run.execute(_build_wf(), resume=True)
 

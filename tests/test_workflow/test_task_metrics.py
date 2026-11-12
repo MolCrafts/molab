@@ -86,7 +86,7 @@ class TestFromATask:
         assert all(r["tags"] == {"task": "measure"} for r in records)
         (image,) = [
             asset
-            for asset in assets_produced_by(run.experiment.project.workspace, eid)
+            for asset in assets_produced_by(run.experiment.project.workspace, eid, run_id=run.id)
             if asset.title == "frame.png"
         ]
         assert image.media_type == "image/png"
@@ -209,7 +209,7 @@ class TestNodeCacheReplay:
             }
         wal = run.execution_dir("e02") / "metrics.mlp.jsonl"
         assert wal.is_file()
-        assert assets_produced_by(run.experiment.project.workspace, "e02") == []
+        assert assets_produced_by(run.experiment.project.workspace, "e02", run_id=run.id) == []
 
     @pytest.mark.asyncio
     async def test_over_the_cap_nothing_is_replayed(self, tmp_path: Path, monkeypatch) -> None:
@@ -289,7 +289,9 @@ class TestProducerTask:
             await WorkflowRuntime().execute((wf).compile(), run_context=ctx)
         produced = {
             asset.title: asset.origin.task
-            for asset in assets_produced_by(run.experiment.project.workspace, run.executions[-1].id)
+            for asset in assets_produced_by(
+                run.experiment.project.workspace, run.executions[-1].id, run_id=run.id
+            )
             if isinstance(asset.origin, ExecutionOrigin)
             and asset.origin.run_id == run.id
             and asset.title in {"fast.txt", "slow.txt"}

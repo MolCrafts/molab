@@ -444,7 +444,7 @@ class _AliveRemoveFails(CountingFileSystem):
 
 
 def _produced(run: Run, execution_id: str):
-    return assets_produced_by(run.experiment.project.workspace, execution_id)
+    return assets_produced_by(run.experiment.project.workspace, execution_id, run_id=run.id)
 
 
 def _payload(run: Run, asset) -> bytes:

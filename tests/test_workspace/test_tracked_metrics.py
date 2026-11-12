@@ -67,7 +67,9 @@ class TestRoundTrip:
 def _image_asset(run, title: str):
     from molab.workspace.asset_repository import assets_produced_by
 
-    produced = assets_produced_by(run.experiment.project.workspace, run.executions[-1].id)
+    produced = assets_produced_by(
+        run.experiment.project.workspace, run.executions[-1].id, run_id=run.id
+    )
     return next(asset for asset in produced if asset.title == title)
 
 
@@ -79,7 +81,12 @@ class TestMetricsWal:
             ctx.metrics.histogram("forces", [0.0, 1.0], [2])
             execution_dir = ctx.execution_dir
         assert (execution_dir / "metrics.mlp.jsonl").is_file()
-        assert assets_produced_by(run.experiment.project.workspace, run.executions[-1].id) == []
+        assert (
+            assets_produced_by(
+                run.experiment.project.workspace, run.executions[-1].id, run_id=run.id
+            )
+            == []
+        )
 
     def test_nothing_is_written_when_no_record_is(self, run) -> None:
         with run.start() as ctx:
@@ -179,7 +186,12 @@ class TestTaskTag:
         assert recorded["tags"] == {"task": "train"}
         from molab.workspace.asset_repository import assets_produced_by
 
-        assert assets_produced_by(run.experiment.project.workspace, run.executions[-1].id) == []
+        assert (
+            assets_produced_by(
+                run.experiment.project.workspace, run.executions[-1].id, run_id=run.id
+            )
+            == []
+        )
 
     def test_a_nested_execution_starts_with_no_task(self, experiment) -> None:
         outer_run = experiment.add_run(params={"n": 1})
