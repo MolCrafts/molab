@@ -629,45 +629,6 @@ class Concept:
                 return Knowledge(root, fs=self._fs)
         raise ValueError(f"{self.path} is not inside a workspace; pass within= explicitly")
 
-    @classmethod
-    def create(
-        cls,
-        host: object,
-        name: str,
-        *,
-        sources: list[object] | None = None,
-        created_by: str,
-        text: str,
-        cite: Sequence[tuple[object, str]] = (),
-        title: str = "",
-    ) -> Concept:
-        """Write this class under *host* (idempotent on *name*).
-
-        Args:
-            host: Parent folder (a Project or Experiment).
-            name: Document name; slugified to the landed filename.
-            sources: Source list. Required for Finding, Report, Plan, Observation.
-            created_by: Author (a person or tool identifier).
-            text: Narrative for the document.
-            cite: Optional ``(target, role)`` pairs.
-            title: History summary for ``knowledge.created``. Falls back to *name*.
-
-        Returns:
-            The written document.
-        """
-        from .write import write_knowledge
-
-        return write_knowledge(
-            host,  # ty: ignore[invalid-argument-type]
-            name=name,
-            of=cls,
-            sources=list(sources or ()),
-            created_by=created_by,
-            text=text,
-            cite=cite,  # ty: ignore[invalid-argument-type]
-            title=title,
-        )
-
     def write(
         self,
         text: str | None = None,

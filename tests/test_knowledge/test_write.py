@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from molab.knowledge import Knowledge, Literature, Note, Observation, SourceRef
+from molab.knowledge.write import write_knowledge
 from molab.workspace.domain import Asset
 from molab.workspace.folder import Folder
 
@@ -32,9 +33,7 @@ def _write(experiment: Any, **overrides: Any) -> Knowledge:
         "text": "# Observation\n\nhello\n",
     }
     kwargs.update(overrides)
-    of = kwargs.pop("of")
-    name = kwargs.pop("name")
-    return of.create(experiment, name, **kwargs)
+    return write_knowledge(experiment, **kwargs)
 
 
 class TestWriteKnowledge:
@@ -234,9 +233,10 @@ class TestNormalizeSources:
         assert SourceRef.normalize(None, default_host=experiment) == [SourceRef.of(experiment)]
 
     def test_a_literature_class_writes_through_the_same_path(self, experiment: Any) -> None:
-        lit = Literature.create(
+        lit = write_knowledge(
             experiment,
-            "Smith 2024",
+            name="Smith 2024",
+            of=Literature,
             sources=[SourceRef(kind="reference", ref="10.1/x")],
             created_by="tester",
             text="# Smith 2024\n",

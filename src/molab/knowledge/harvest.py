@@ -37,6 +37,7 @@ from molab.ids import slugify
 
 from .concept import Knowledge
 from .knowledge_item import SourceRef
+from .write import write_knowledge
 
 if TYPE_CHECKING:
     from molab._typing import JSONValue
@@ -87,9 +88,10 @@ def perform(
     item_name = name or f"{slugify(kind.__name__)}-{run.id}"
     sources = [SourceRef.of(run), SourceRef.of(experiment)]
     sources.extend(_asset_sources(run, results))
-    return kind.create(
+    return write_knowledge(
         experiment,
-        item_name,
+        name=item_name,
+        of=kind,
         sources=sources,
         created_by=created_by,
         text=narrative.strip() + "\n",  # source links are appended by the writer

@@ -224,16 +224,6 @@ def normalize_sources(
     return SourceRef.normalize(list(sources) or None, default_host=default_host)
 
 
-def mount_note(host: Folder | Concept | PathArg, name: str, *, body: str = "") -> Concept:
-    """Idempotently mount a ``Note`` under *host*.
-
-    A repeat call, including ``body=""``, never truncates an existing body.
-    """
-    from .concepts import Note
-
-    return write_knowledge(host, name=name, of=Note, created_by="", text=body)
-
-
 def _append_new_edges(item: Knowledge, edges: Sequence[tuple[str, EdgeRole]]) -> None:
     """Append each ``(target, role)`` edge *item* does not already carry."""
     from molab.workspace.refs import is_ref

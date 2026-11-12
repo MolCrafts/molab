@@ -193,13 +193,13 @@ nothing refuses the write (422 over HTTP) and nothing lands.
 
 ## Writing into a workspace
 
-Two module-level verbs write knowledge into a workspace tree, both hosted by a
-`Folder`:
+One verb writes knowledge into a workspace tree, hosted by a `Folder`:
 
-- `mount_note(host, name, *, body="")` — idempotently mount a `Note`; a repeat
-  call never truncates an existing body.
 - `write_knowledge(host, *, name, of, sources, created_by, text, cite=(), title="")`
-  — write a sourced document, idempotent on `name`.
+  — write a document of class `of`, idempotent on `name`.
+
+`Note.mount(host, name, *, body="")` is that verb for a `Note`: a repeat call
+never truncates an existing body.
 
 `Finding.harvest` (the same method on `Observation` and `Report`) turns a
 finished run's outcome into knowledge under the run's experiment:

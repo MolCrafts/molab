@@ -47,7 +47,6 @@ KNOWLEDGE_SHAPES: frozenset[str] = frozenset(
         "Knowledge",
         "harvest_run",
         "write_knowledge",
-        "mount_note",
         "summarize_entity",
         "EntitySummary",
         "Edge",

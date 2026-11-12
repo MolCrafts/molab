@@ -171,12 +171,12 @@ project、experiment、run 或资产按其 `molab:` 引用链接，裸路径按�
 
 ## 写进工作区
 
-两个模块级动词把知识写进 workspace 树，宿主都是 `Folder`：
+一个动词把知识写进 workspace 树，宿主是 `Folder`：
 
-- `mount_note(host, name, *, body="")` —— 幂等地挂上一份 `Note`；重复调用绝不截断
-  已有的正文。
 - `write_knowledge(host, *, name, of, sources, created_by, text, cite=(), title="")`
-  —— 写一份有出处的文档，按 `name` 幂等。
+  —— 写一份 `of` 类的文档，按 `name` 幂等。
+
+`Note.mount(host, name, *, body="")` 是这个动词用于 `Note` 的写法：重复调用绝不截断已有的正文。
 
 `Finding.harvest`（`Observation`、`Report` 上是同一个方法）把一个终态 Run 的结果
 收获成它 experiment 之下的知识：
