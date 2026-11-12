@@ -201,6 +201,10 @@ class DocFieldsUpdate(BaseModel):
     body: str | None = None
 
 
+#: What a link points at. ``missing`` is a relative path with no file behind it.
+LinkKind = Literal["document", "ref", "external", "missing"]
+
+
 class DocRelation(BaseModel):
     """One narrative occurrence; its id is valid only with this file digest."""
 
@@ -208,7 +212,7 @@ class DocRelation(BaseModel):
     target: str
     role: EdgeRole
     label: str
-    kind: Literal["document", "ref", "external", "missing"]
+    kind: LinkKind
 
 
 class DocRelationsResponse(BaseModel):
@@ -246,10 +250,6 @@ class BacklinksResponse(BaseModel):
     backlinks: list[NoteSummary]
 
 
-#: What a graph edge points at. ``missing`` is a relative path with no file behind it.
-GraphEdgeKind = Literal["document", "ref", "external", "missing"]
-
-
 class KnowledgeGraphEdge(BaseModel):
     """One typed link from a document's narrative."""
 
@@ -262,7 +262,7 @@ class KnowledgeGraphEdge(BaseModel):
         )
     )
     role: EdgeRole
-    kind: GraphEdgeKind
+    kind: LinkKind
 
 
 class KnowledgeGraphResponse(BaseModel):
@@ -976,9 +976,9 @@ def _graph_edges(workspace: Workspace, doc: Concept, listed: set[str]) -> list[K
     source = _rel(workspace, doc.path)
     root = str(workspace.root)
     missing = set(scan.missing)
-    found: dict[tuple[str, EdgeRole, GraphEdgeKind], None] = {}
+    found: dict[tuple[str, EdgeRole, LinkKind], None] = {}
     for edge in links:
-        kind: GraphEdgeKind
+        kind: LinkKind
         if edge.is_ref:
             target, kind = edge.target, "ref"
         elif edge.target.startswith(web):
@@ -1191,7 +1191,7 @@ def _doc_relations(workspace: Workspace, path: str, doc: Concept) -> DocRelation
     digest = digest_of(doc)
     relations = []
     for link in relation_links(doc):
-        kind: Literal["document", "ref", "external", "missing"]
+        kind: LinkKind
         if is_ref(link.target):
             target, kind = link.target, "ref"
         elif link.target.startswith(("http://", "https://")):
