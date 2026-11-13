@@ -213,6 +213,45 @@ class TestStageIn:
         )
 
 
+@dataclass
+class ReadingTransport(FakeTransport):
+    """Reads each uploaded file the way rsync would; a missing source fails."""
+
+    payloads: dict[str, bytes] = field(default_factory=dict)
+
+    def upload(
+        self,
+        local: str,
+        remote: str,
+        *,
+        recursive: bool = False,
+        exclude: Sequence[str] = (),
+    ) -> None:
+        if not recursive:
+            self.payloads[remote] = Path(local).read_bytes()
+        super().upload(local, remote, recursive=recursive, exclude=exclude)
+
+
+class TestStageInCodeWorkflow:
+    def test_the_ir_snapshot_of_a_code_workflow_reaches_the_target(self, tmp_path: Path) -> None:
+        """``define`` stores a code workflow with its graph IR; rebinding the
+        staged copy to the remote entrypoint must keep that IR."""
+        _ws, run = _make_run(tmp_path)
+        script = tmp_path / "flow.py"
+        script.write_text("wf = None\n")
+        document = {"name": "flow", "tasks": [{"name": "probe", "depends_on": []}]}
+        run.experiment.bind_workflow("code", entrypoint=f"{script}:wf", document=document)
+        run._create_execution()
+        transport = ReadingTransport()
+
+        stage_in(transport, run, _remote_target(), "e01")
+
+        staged = [
+            b for remote, b in transport.payloads.items() if remote.endswith("workflow.ir.json")
+        ]
+        assert [json.loads(b) for b in staged] == [document]
+
+
 class TestStageOut:
     def test_noop_when_remote_dir_equals_run_dir(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

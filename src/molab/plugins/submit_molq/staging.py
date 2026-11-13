@@ -209,7 +209,12 @@ def stage_in(
             staged_experiment = (
                 Workspace.load(bundle).get_project(project.id).get_experiment(experiment.id)
             )
-            staged_experiment.bind_workflow("code", entrypoint=f"{code_remote}:{qualname}")
+            # Only the entrypoint moves; the graph IR ``define`` stored stays.
+            staged_experiment.bind_workflow(
+                "code",
+                entrypoint=f"{code_remote}:{qualname}",
+                document=staged_experiment.workflow_document,
+            )
             transport.mkdir(str(destination_root / code_relative), parents=True, exist_ok=True)
             transport.upload(
                 str(code_local),
