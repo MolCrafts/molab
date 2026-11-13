@@ -812,6 +812,41 @@ class TestReconcileSubmission:
         assert returned.error is None
 
     @pytest.mark.parametrize(
+        ("state", "sealed"),
+        [("timed_out", "failed"), ("failed", "failed"), ("cancelled", "cancelled")],
+    )
+    def test_a_started_attempt_whose_job_ended_is_sealed_with_the_schedulers_word(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: str, sealed: str
+    ) -> None:
+        """A job killed at its time limit leaves a worker record that says ``running``."""
+        from molab.plugins.submit_molq.submit import reconcile_submission
+
+        run, transport = _submit_remote(monkeypatch, tmp_path)
+        local = run.execution("e01")
+        transport.texts["/executions/e01/execution.json"] = json.dumps(
+            {
+                "schema_version": 4,
+                **local.model_dump(mode="json"),
+                "status": "running",
+                "started_at": "2026-01-01T00:00:01Z",
+                "executor": {"backend": "molq", "kind": "local", "host": "node7", "pid": 42},
+                "environment": {**local.environment, "host": "node7"},
+            }
+        )
+        _install_refreshing_molq(monkeypatch, state=state)
+
+        returned = reconcile_submission(run, "e01")
+
+        e01 = run.execution("e01")
+        assert e01.status.value == sealed
+        assert e01.started_at is not None
+        assert e01.error is not None
+        assert e01.error["type"] == "SchedulerJobEnded"
+        assert state in e01.error["message"]
+        assert returned.record == e01
+        assert returned.error is None
+
+    @pytest.mark.parametrize(
         "refresh_error",
         [
             OSError("scheduler unreachable"),

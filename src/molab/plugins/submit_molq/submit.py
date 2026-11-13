@@ -443,17 +443,18 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
     """Check a QUEUED molq-submitted attempt against its job and seal it if it never started.
 
     Level-triggered: every call asks molq for the job's state now
-    (``Job.status``) instead of waiting for an event. Only a QUEUED record
-    can be sealed here. A RUNNING record whose worker died is left to the
+    (``Job.status``) instead of waiting for an event. Only a record that is
+    QUEUED here is checked; one a local worker is RUNNING is left to the
     reaper.
 
     The stored ``job_id`` is a JSON ``JobRef``. While the snapshot is not
     terminal nothing changes. Once it is, a remote attempt is staged out
-    first; a record still QUEUED is sealed CANCELLED for a cancelled job and
-    FAILED otherwise, with error type ``SchedulerJobEndedBeforeStart``. A
-    remote record that cannot be read is left QUEUED. A molq ``succeeded``
-    snapshot still seals a still-queued attempt FAILED: the worker never
-    claimed the record.
+    first; a record the worker did not seal is then sealed CANCELLED for a
+    cancelled job and FAILED otherwise: ``SchedulerJobEndedBeforeStart`` when
+    it is still QUEUED, ``SchedulerJobEnded`` when the worker had claimed it
+    (the job hit its time limit, say). A remote record that cannot be read is
+    left QUEUED. A molq ``succeeded`` snapshot still seals an unsealed
+    attempt FAILED: the worker never finished the record.
 
     Idempotent. An expected failure — ``MolqError``, staging
     ``TransportError``, ``ValueError``, ``OSError``, ``KeyError`` — comes
@@ -542,7 +543,7 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
         else:
             authoritative = staging.stage_out(transport, mol_run, target, execution_id)
         if authoritative:
-            _seal_if_unstarted(repo, execution_id, state)
+            _seal_if_open(mol_run, repo, execution_id, state)
     except (MolqError, ValueError, OSError, KeyError) as exc:
         if isinstance(exc, MolqError) and exc.outcome == "unknown":
             repo.update_operational(execution_id, executor={"transfer_outcome": "unknown"})
@@ -578,21 +579,30 @@ def reconcile_latest(mol_run: Run) -> ReconcileOutcome | None:
     return reconcile_submission(mol_run, latest.id)
 
 
-def _seal_if_unstarted(repo: ExecutionRepository, execution_id: str, state: str) -> None:
-    """Seal an attempt the worker never started, once its job has ended."""
-    from molab.workspace.domain import ExecutionStatus
+def _seal_if_open(mol_run: Run, repo: ExecutionRepository, execution_id: str, state: str) -> None:
+    """Seal an attempt whose job has ended while its record is still open.
+
+    Still QUEUED, the worker never claimed it (``SchedulerJobEndedBeforeStart``).
+    Claimed and not sealed, the scheduler ended the job under the worker — a
+    time limit, a cancel, a lost node (``SchedulerJobEnded``); the heartbeat
+    the dead worker left behind is removed with the seal.
+    """
+    from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES, ExecutionStatus
+    from molab.workspace.run_heartbeat import unlink_alive
 
     current = repo.get(execution_id)
-    if current.status is not ExecutionStatus.QUEUED:
+    if current.status not in ACTIVE_EXECUTION_STATUSES:
         return
+    if current.status is ExecutionStatus.QUEUED:
+        kind, when = "SchedulerJobEndedBeforeStart", "before the worker started"
+    else:
+        kind, when = "SchedulerJobEnded", f"while the worker was {current.status.value}"
     repo.seal(
         execution_id,
         ExecutionStatus.CANCELLED if state == "cancelled" else ExecutionStatus.FAILED,
-        error={
-            "type": "SchedulerJobEndedBeforeStart",
-            "message": f"scheduler reported {state} before the worker started",
-        },
+        error={"type": kind, "message": f"scheduler reported {state} {when}"},
     )
+    unlink_alive(mol_run, execution_id)
 
 
 def make_submit_handler(
