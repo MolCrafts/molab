@@ -32,7 +32,7 @@ import posixpath
 from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from molab.param import ParamSpace
 
@@ -872,6 +872,7 @@ class Experiment(Folder):
         space: ParamSpace,
         *,
         target: str | None = None,
+        inputs: tuple[str, ...] = (),
     ) -> list[Run]:
         """Seed one fresh Run per *not yet present* cell (idempotent).
 
@@ -892,7 +893,7 @@ class Experiment(Folder):
                     cast("dict[str, JSONValue]", dict(cell)),
                     config_hash=None,
                     target=target,
-                    inputs=(),
+                    inputs=inputs,
                     index=index,
                 )
                 if created:
@@ -904,11 +905,14 @@ class Experiment(Folder):
         workflow: object,
         *,
         params: ParamSpace | Mapping[str, JSONValue] | None = None,
+        inputs: Sequence[str] = (),
     ) -> Experiment:
         """Define that this experiment executes *workflow* over *params*.
 
         Seeds one content-addressed :class:`Run` per param cell (idempotent)
-        and binds *workflow* through the workflow executor seam.
+        and binds *workflow* through the workflow executor seam. Every seeded
+        run declares *inputs*, the asset ids another run registered, as
+        ``add_run(inputs=…)`` would.
 
         Returns:
             ``self`` for chaining (``.list_runs()`` …).
@@ -918,7 +922,7 @@ class Experiment(Folder):
         space = (
             params if isinstance(params, ParamSpace) else GridSpace(dict(params or {}))  # ty: ignore[invalid-argument-type]
         )
-        self._seed_missing_runs(space)
+        self._seed_missing_runs(space, inputs=tuple(inputs))
         if _workflow_executor is None:
             raise RuntimeError(
                 "Experiment.define needs the workflow layer; `import molab` "

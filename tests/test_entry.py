@@ -145,6 +145,25 @@ class TestFluentExperimentChain:
         assert [w for w in _registry if w is ws] == [ws]
         assert len(_registry) == 1
 
+    def test_define_seeds_each_cell_with_the_declared_input_assets(self, tmp_path):
+        # A script hands a registered file to the next experiment through
+        # ``inputs``; a seeded run without them would never see the file.
+        ws = Workspace(tmp_path / "ws", name="ws")
+        project = ws.add_project("p")
+        source = tmp_path / "frame.xyz"
+        source.write_text("1\n\nNa 0 0 0\n", encoding="utf-8")
+        frame = project.add_experiment("eq").assets.import_asset("frame", source)
+
+        exp = project.add_experiment("prod").define(
+            self._workflow(), params={"seed": [1, 2]}, inputs=(frame.id,)
+        )
+        exp.define(self._workflow(), params={"seed": [1, 2]}, inputs=(frame.id,))
+
+        assert sorted((run.parameters["seed"], run.inputs) for run in exp.list_runs()) == [
+            (1, (frame.id,)),
+            (2, (frame.id,)),
+        ]
+
     def test_execute_without_registered_executor_fails_fast(self, tmp_path, monkeypatch):
         # The seam is required; without it execute() must not silently no-op.
         import molab.workspace.experiment as exp_mod
