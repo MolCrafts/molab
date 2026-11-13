@@ -354,6 +354,7 @@ class SubmitHandler:
                 repo.update_operational(
                     attempt_id,
                     executor={
+                        "target": target.name,
                         "registry_id": target.registry_id,
                         "cluster_id": cluster_id,
                         "scratch_root": target.scratch_root,
