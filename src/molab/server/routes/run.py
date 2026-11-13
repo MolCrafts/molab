@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import codecs
 import io
+import logging
 from pathlib import Path
 from typing import Literal
 
@@ -11,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from molab.fs.window import iter_file_chunks
-from molab.plugins.submit_molq.submit import SubmitHandler
+from molab.plugins.submit_molq.submit import SubmitHandler, reconcile_latest
 from molab.workflow import read_journal
 from molab.workspace import (
     ExperimentNotFoundError as WorkspaceExperimentNotFoundError,
@@ -55,6 +56,8 @@ from ..schemas import (
     RunResponse,
 )
 from ..schemas._wire import ApiModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/projects/{project_id}/experiments/{experiment_id}/runs",
@@ -252,6 +255,13 @@ def _invalidate_run_nav_cache(workspace, run_or_exp_path: str) -> None:  # noqa:
         fs.invalidate(run_or_exp_path)
 
 
+def _reconcile(run) -> None:  # noqa: ANN001
+    """Bring a finished remote submission home before its status is read."""
+    outcome = reconcile_latest(run)
+    if outcome is not None and outcome.error is not None:
+        logger.warning(outcome.error)
+
+
 @router.get("", response_model=list[RunResponse])
 def list_runs(
     project_id: str,
@@ -268,6 +278,8 @@ def list_runs(
     if isinstance(fs, CachedRemoteFS):
         fs.invalidate_dir_listing(fs.join(str(experiment.experiment_dir), "runs"))
     runs = experiment.list_runs()
+    for run in runs:
+        _reconcile(run)
     document = experiment.workflow_document
     kind = experiment.workflow_kind
     return [
@@ -291,6 +303,7 @@ def get_run(
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
+    _reconcile(run)
     return RunResponse.from_model(run)
 
 

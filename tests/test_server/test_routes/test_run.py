@@ -1030,3 +1030,47 @@ class TestLocalAttemptRunsForReal:
                 time.sleep(0.5)
         assert body["status"] == "failed"
         assert "Unknown task_type" in str(body["error"])
+
+
+class TestReadingARunReconcilesItsQueuedSubmission:
+    """A remote attempt stays QUEUED locally until something reconciles it;
+    an agent polling the server is that something."""
+
+    @staticmethod
+    def _queued_on_an_ended_job(monkeypatch: pytest.MonkeyPatch, run: Run) -> None:
+        from molab.plugins.submit_molq.submit import encode_job_ref
+
+        ref = {"cluster_id": "c", "incarnation": "1", "native_id": "7", "registry_id": "r"}
+        run._create_execution(executor={"backend": "molq", "job_id": encode_job_ref(ref)})
+
+        class _EndedJob:
+            def status(self) -> dict[str, object]:
+                return {"snapshots": [{"state": "cancelled", "terminal": True}]}
+
+        class _Client:
+            def job(self, _ref: object) -> _EndedJob:
+                return _EndedJob()
+
+        monkeypatch.setattr("molab.workspace.connection.get_client", lambda _r=None: _Client())
+
+    def test_get_run(
+        self, monkeypatch: pytest.MonkeyPatch, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        self._queued_on_an_ended_job(monkeypatch, run)
+
+        with served(ws) as client:
+            body = client.get(_run_url(exp, run)).json()
+
+        assert body["statusSummary"]["byStatus"] == {"cancelled": 1}
+
+    def test_list_runs(
+        self, monkeypatch: pytest.MonkeyPatch, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        self._queued_on_an_ended_job(monkeypatch, run)
+
+        with served(ws) as client:
+            rows = client.get(f"/api/projects/{exp.project.id}/experiments/{exp.id}/runs").json()
+
+        assert [row["statusSummary"]["byStatus"] for row in rows] == [{"cancelled": 1}]

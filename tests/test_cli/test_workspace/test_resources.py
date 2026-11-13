@@ -214,6 +214,35 @@ class TestRunList:
         assert "cpu" in result.output
         assert "queued" in result.output
 
+    @pytest.mark.parametrize("command", ["list", "info"])
+    def test_an_ended_molq_job_is_reconciled_before_the_status_shows(
+        self, command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from molab.plugins.submit_molq.submit import encode_job_ref
+
+        ws = Workspace(tmp_path / "ws", name="lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
+        ref = {"cluster_id": "c", "incarnation": "1", "native_id": "7", "registry_id": "r"}
+        run._create_execution(executor={"backend": "molq", "job_id": encode_job_ref(ref)})
+
+        class _EndedJob:
+            def status(self) -> dict[str, object]:
+                return {"snapshots": [{"state": "cancelled", "terminal": True}]}
+
+        class _Client:
+            def job(self, _ref: object) -> _EndedJob:
+                return _EndedJob()
+
+        monkeypatch.setattr("molab.workspace.connection.get_client", lambda _r=None: _Client())
+        _wide_tables(monkeypatch)
+
+        target = ["p", "e"] if command == "list" else ["p", "e", run.id]
+        result = CliRunner().invoke(app, ["runs", command, *target, "--workspace", str(ws.root)])
+
+        assert result.exit_code == 0, result.output
+        assert "cancelled" in result.output and "queued" not in result.output
+
 
 class TestRunInfo:
     def test_shows_provenance_and_attempt_ids(self, tmp_path: Path) -> None:

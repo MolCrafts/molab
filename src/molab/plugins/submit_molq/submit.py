@@ -45,6 +45,7 @@ __all__ = [
     "decode_job_ref",
     "encode_job_ref",
     "make_submit_handler",
+    "reconcile_latest",
     "reconcile_submission",
 ]
 
@@ -545,6 +546,28 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
             ),
         )
     return ReconcileOutcome(record=repo.get(execution_id))
+
+
+def reconcile_latest(mol_run: Run) -> ReconcileOutcome | None:
+    """Reconcile *mol_run*'s newest attempt when it is a QUEUED molq submission.
+
+    Every reader of a run's status calls this first (``molab runs list``, the
+    run routes, the monitor), so an attempt whose job ended elsewhere is
+    staged out and sealed the next time anyone looks.
+
+    Returns:
+        ``None`` when the newest attempt is not a QUEUED molq submission;
+        otherwise what :func:`reconcile_submission` found.
+    """
+    from molab.workspace.domain import ExecutionStatus
+
+    executions = mol_run.executions
+    if not executions:
+        return None
+    latest = executions[-1]
+    if latest.status is not ExecutionStatus.QUEUED or latest.executor.get("backend") != "molq":
+        return None
+    return reconcile_submission(mol_run, latest.id)
 
 
 def _seal_if_unstarted(repo: ExecutionRepository, execution_id: str, state: str) -> None:

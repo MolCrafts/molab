@@ -500,6 +500,15 @@ def run_adopt(
         rprint(f"  created run {run_rel}")
 
 
+def _reconcile(r: Run) -> None:
+    """Bring a finished remote submission home before its status is shown."""
+    from molab.plugins.submit_molq.submit import reconcile_latest
+
+    outcome = reconcile_latest(r)
+    if outcome is not None and outcome.error is not None:
+        rprint(f"[yellow]{outcome.error}[/yellow]")
+
+
 @run_app.command("list")
 def run_list(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
@@ -526,6 +535,9 @@ def run_list(
         rprint(f"[yellow]No runs found in {project_id}/{experiment_id}[/yellow]")
         return
     from molab._run_display import elapsed
+
+    for r in runs:
+        _reconcile(r)
 
     table = Table(title=f"Runs in {project_id}/{experiment_id}")
     table.add_column("Run", style="cyan", overflow="fold")
@@ -950,6 +962,7 @@ def run_info(
         rprint(f"[red]Error:[/red] Run not found: {run_id}")
         raise typer.Exit(1) from None
 
+    _reconcile(r)
     rprint(f"[bold]Run:[/bold] {r.name}  [dim]{r.id}[/dim]")
     rprint(f"  Path: {r.run_dir}")
     status = r.status_label
