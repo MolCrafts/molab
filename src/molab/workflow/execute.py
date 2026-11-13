@@ -265,16 +265,32 @@ def _attempt_seeds(run: Run, record: Execution, compiled: CompiledWorkflow) -> A
     Returns:
         The seeds, or ``None`` when there is nothing to take.
 
+    A predecessor that is not recorded here (a worker's staged copy never
+    received an attempt that failed before staging) gives a RESUME nothing to
+    seed and refuses a partial RERUN.
+
     Raises:
         ValueError: The selection names a task the workflow does not have.
         RunNotExecutableError: A partial rerun's config differs from its
-            predecessor's, or a selected task needs a recorded value the
-            predecessor cannot supply.
+            predecessor's, its predecessor is not recorded here, or a selected
+            task needs a recorded value the predecessor cannot supply.
     """
     based_on = record.based_on_execution_id
     selection = tuple(record.selected_tasks)
     partial = record.mode is ExecutionMode.RERUN and bool(selection)
     if not based_on or not (record.mode is ExecutionMode.RESUME or partial):
+        return None
+    if all(attempt.id != based_on for attempt in run.executions):
+        # A worker's staged copy holds no attempt that failed before it was staged.
+        if partial:
+            raise RunNotExecutableError(
+                f"partial rerun {record.id} of {list(selection)}: predecessor {based_on} "
+                "is not recorded here, so its outputs cannot be reused — rerun the whole workflow"
+            )
+        logger.warning(
+            f"RESUME Execution {record.id} has nothing to seed from: predecessor "
+            f"{based_on} is not recorded here; every node is recomputed (node cache as usual)"
+        )
         return None
     prior = run.execution(based_on)
     if _config_hashes_disagree(record, prior):

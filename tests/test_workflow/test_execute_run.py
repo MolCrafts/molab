@@ -412,6 +412,23 @@ class TestExecuteRun:
         assert resumed.mode.value == "resume"
         assert resumed.based_on_execution_id == "e01"
 
+    def test_resume_record_whose_predecessor_is_absent_recomputes(self, tmp_path: Path) -> None:
+        """A worker's copy of the run lacks an attempt that failed before it was staged."""
+        import shutil
+
+        flag = tmp_path / "healed"
+        run = _make_run(tmp_path, params={"x": 1})
+        with pytest.raises(RunFailedError):
+            _execute_run(_healing_wf(flag), run)
+        flag.write_text("ok", encoding="utf-8")
+        run._create_execution(mode=ExecutionMode.RESUME, predecessor="e01")
+        shutil.rmtree(Path(run.run_dir) / "executions" / "e01")
+
+        result = _execute_run(_healing_wf(flag), run, execution_id="e02")
+
+        assert result.outputs == {"stage_a": 2, "stage_b": 200}
+        assert run.execution("e02").status.value == "succeeded"
+
     def test_reproduce_record_bypasses_cache(self, tmp_path: Path) -> None:
         counter = tmp_path / "counter"
         wf = Workflow(name="counting")
