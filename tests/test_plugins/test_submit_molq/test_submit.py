@@ -14,6 +14,7 @@ involved.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -285,6 +286,55 @@ class TestSubmitHandler:
 
         assert spy.argv is not None
         assert spy.argv[0] == "/venvs/aarch64/bin/python"
+
+    @pytest.mark.parametrize(
+        ("written", "seconds"),
+        [
+            ("1h30m", 5400),
+            ("2d", 172800),
+            ("90s", 90),
+            ("3600", 3600),
+            ("12:00:00", 43200),
+            ("00:30:05", 1805),
+            ("1-12:00:00", 129600),
+        ],
+    )
+    def test_the_time_limit_reaches_the_scheduler(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, written: str, seconds: int
+    ) -> None:
+        _ws, project, experiment, run = _make_run(tmp_path)
+        spy = _install_fake_molq(monkeypatch, run)
+        handler = make_submit_handler(
+            scheduler="local",
+            cluster="local",
+            resources={"time": written, "mem": "8GB"},
+            scheduling={},
+        )
+
+        handler(None, run, experiment, project)
+
+        assert spy.spec.resources.time_limit_seconds == seconds
+        assert spy.spec.resources.memory_bytes == "8000000000"
+
+    @pytest.mark.parametrize(
+        "resources",
+        [{"time": "12:00"}, {"time": "soon"}, {"time": ""}, {"mem": "8 gigs"}, {"mem": "8XB"}],
+    )
+    def test_an_unreadable_resource_is_refused_before_any_attempt_exists(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, resources: dict[str, str]
+    ) -> None:
+        """A limit molab cannot read must not become a job with the scheduler's default."""
+        _ws, _project, _experiment, run = _make_run(tmp_path)
+        spy = _install_fake_molq(monkeypatch, run)
+        (value,) = resources.values()
+
+        with pytest.raises(ValueError, match=re.escape(repr(value))):
+            make_submit_handler(
+                scheduler="local", cluster="local", resources=resources, scheduling={}
+            )
+
+        assert spy.submits == 0
+        assert _execution_ids(run) == []
 
     def test_no_uuid_execution_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)

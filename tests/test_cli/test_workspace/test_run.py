@@ -1271,6 +1271,32 @@ class TestSubmitToScheduler:
         assert list(run_dir.rglob("fresh.json")) == []
         assert sorted(p.name for p in (run_dir / "executions").iterdir()) == ["e01", "e02"]
 
+    def test_an_unreadable_time_limit_stops_the_submission(
+        self, scheduler_fixture: SchedulerFixture, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A limit that was not understood once ran the job under the scheduler's default."""
+        fx = scheduler_fixture
+
+        with pytest.raises(typer.Exit) as stopped:
+            _submit_to_scheduler(
+                script=fx.script,
+                profile_cfg=ProfileConfig({}, name=None),
+                continue_verb="rerun",
+                target_path=fx.ws.root,
+                explicit_ws=True,
+                selected_target=None,
+                selected_scheduler="local",
+                cluster="registered-local",
+                resources={"time": "half a day"},
+                scheduling={},
+                block=False,
+            )
+
+        assert stopped.value.exit_code == 1
+        assert "half a day" in capsys.readouterr().out
+        assert fx.spy.execution_id is None
+        assert sorted(p.name for p in (Path(fx.run.run_dir) / "executions").iterdir()) == ["e01"]
+
     def test_resume_hands_a_queued_resume_record(
         self, monkeypatch: pytest.MonkeyPatch, scheduler_fixture: SchedulerFixture
     ) -> None:

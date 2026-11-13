@@ -1097,15 +1097,19 @@ def _submit_to_scheduler(
         raise typer.Exit(1)
 
     assert selected_scheduler is not None
-    submit_handler = make_submit_handler(
-        scheduler=selected_scheduler,
-        cluster=cluster,
-        resources=resources,
-        scheduling=scheduling,
-        target=selected_target,
-        preamble=preamble or None,
-        python=worker_python,
-    )
+    try:
+        submit_handler = make_submit_handler(
+            scheduler=selected_scheduler,
+            cluster=cluster,
+            resources=resources,
+            scheduling=scheduling,
+            target=selected_target,
+            preamble=preamble or None,
+            python=worker_python,
+        )
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
     handler: RunHandler = submit_handler
     mode_label = _profile_mode_label(profile_cfg, f"[magenta]{selected_scheduler}[/magenta]")
 
@@ -1276,11 +1280,15 @@ def run(
     ] = None,
     mem: Annotated[
         str | None,
-        typer.Option("--mem", help="Memory per job (e.g. 8G).", rich_help_panel="HPC Options"),
+        typer.Option("--mem", help="Memory per job (e.g. 8GB).", rich_help_panel="HPC Options"),
     ] = None,
     time: Annotated[
         str | None,
-        typer.Option("--time", help="Wall-clock time limit.", rich_help_panel="HPC Options"),
+        typer.Option(
+            "--time",
+            help="Wall-clock time limit (e.g. 12:00:00, 1-12:00:00, 12h, 1h30m).",
+            rich_help_panel="HPC Options",
+        ),
     ] = None,
     gpus: Annotated[
         int | None, typer.Option("--gpus", help="GPUs per job.", rich_help_panel="HPC Options")

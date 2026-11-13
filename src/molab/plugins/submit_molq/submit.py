@@ -76,6 +76,7 @@ _DUR_RE = re.compile(
     r"^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$",
     re.IGNORECASE,
 )
+_CLOCK_RE = re.compile(r"^(?:(\d+)-)?(\d+):(\d{2}):(\d{2})$")
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "timed_out"})
 
 
@@ -124,31 +125,39 @@ def _as_str(value: JSONValue) -> str | None:
 
 
 def _memory_bytes(value: JSONValue) -> str | None:
-    """Parse ``8GB`` / ``1024MB`` / ``8GiB`` into a decimal byte string."""
-    text = _as_str(value)
-    if text is None:
+    """Parse ``8GB`` / ``1024MB`` / ``8GiB`` into a decimal byte string.
+
+    Raises:
+        ValueError: *value* is given and is not such a size.
+    """
+    if value is None:
         return None
-    match = _MEM_RE.match(text.strip())
+    match = _MEM_RE.match(value.strip()) if isinstance(value, str) else None
     if match is None:
-        return None
-    unit = (match.group(2) or "b").lower()
-    scale = _MEM_SCALE.get(unit)
-    if scale is None:
-        return None
-    return str(int(float(match.group(1)) * scale))
+        raise ValueError(f"cannot read memory {value!r}: write a size such as 8GB, 512MB or 8GiB")
+    return str(int(float(match.group(1)) * _MEM_SCALE[(match.group(2) or "b").lower()]))
 
 
 def _duration_seconds(value: JSONValue) -> int | None:
-    """Parse ``90s`` / ``30m`` / ``1h`` / ``2d`` / ``1h30m`` into seconds."""
-    text = _as_str(value)
-    if text is None:
+    """Parse a time limit into seconds.
+
+    Read are ``90s`` / ``30m`` / ``1h`` / ``2d`` / ``1h30m``, the clock form
+    ``HH:MM:SS`` / ``D-HH:MM:SS``, and bare seconds.
+
+    Raises:
+        ValueError: *value* is given and is none of these. Dropping it would
+            submit the job under the scheduler's default limit.
+    """
+    if value is None:
         return None
-    stripped = text.strip()
+    stripped = value.strip() if isinstance(value, str) else ""
     if stripped.isdigit():
         return int(stripped)
-    match = _DUR_RE.match(stripped)
+    match = _CLOCK_RE.match(stripped) or _DUR_RE.match(stripped)
     if match is None or not any(match.groups()):
-        return None
+        raise ValueError(
+            f"cannot read time limit {value!r}: write 12:00:00, 1-12:00:00, 12h, 1h30m or 3600"
+        )
     days, hours, minutes, seconds = (int(part or 0) for part in match.groups())
     return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
@@ -249,7 +258,7 @@ class SubmitHandler:
         if not destination:
             raise ValueError("Submission requires an explicit molq destination")
         self._cluster: str = destination
-        self._res = _strip_none(resources)
+        self._resources = _resources(_strip_none(resources))
         self._sched = _strip_none(scheduling)
         self._block = block
         self._target = target
@@ -303,7 +312,6 @@ class SubmitHandler:
         from molab.workspace.domain import ExecutionMode, ExecutionStatus
         from molab.workspace.execution_repository import ExecutionRepository
 
-        res = self._res
         sched = self._sched
         target = self._target
 
@@ -387,7 +395,7 @@ class SubmitHandler:
                 unit = ExecutionUnit.argv("main", worker_argv, cwd=target_exec_dir, env=env)
             spec = JobSpec(
                 execution=Execution(units=(unit,), cwd=target_exec_dir, env=env),
-                resources=_resources(res),
+                resources=self._resources,
                 scheduling=_scheduling(sched, job_name),
             )
             from molab.workspace.connection import get_client
