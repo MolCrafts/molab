@@ -720,12 +720,21 @@ def execute(
         )
         raise typer.Exit(1)
 
+    from molab.workspace.workspace import set_cli_root_override
+
+    # The run's workspace is the only one this worker writes. A script that
+    # declares a root at module level (a path on the submitting machine, or
+    # one computed from its own location) resolves here while it is imported,
+    # as under an explicit ``-ws``.
+    set_cli_root_override(Path(str(experiment.project.workspace.root)), explicit=True)
     try:
         spec = compiled_workflow_for_run(run_obj)
     except WorkflowRecoveryError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         _fail_unstarted(run_obj, execution_id, exc)
         raise typer.Exit(1) from exc
+    finally:
+        set_cli_root_override(None)
     default_binding_registry.bind(experiment, spec)
 
     rprint(f"[dim]execute[/dim] run={run_obj.id} execution={execution_id}")

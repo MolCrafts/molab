@@ -289,3 +289,49 @@ class TestExecute:
         assert exit_code == 1, output
         assert "Error:" in output
         assert len(run.executions) == before
+
+
+_DECLARING_MODULE = """\
+import molab as me
+from molab.workflow import Workflow
+
+wf = Workflow(name="declaring")
+
+
+@wf.task
+def stage_a(seed: int) -> int:
+    return seed + 1
+
+
+RECORD = (
+    me.Workspace({submitter!r})
+    .add_project("p")
+    .add_experiment("e")
+    .define(wf, params={{"seed": [1]}})
+)
+"""
+
+
+class TestExecuteStagedWorkspace:
+    def test_a_script_declaring_the_submitters_root_writes_only_the_staged_workspace(
+        self, tmp_path: Path
+    ) -> None:
+        """On a compute node the script's module-level ``Workspace(<path on the
+        submitting machine>)`` must resolve to the staged workspace the worker
+        runs in; it must not create, or fail to create, the submitter's path."""
+        submitter = tmp_path / "submitting-machine" / "lab"
+        wf_file = tmp_path / "declaring_wf.py"
+        wf_file.write_text(_DECLARING_MODULE.format(submitter=str(submitter)), encoding="utf-8")
+        ws = Workspace(root=tmp_path / "ws", name="staged")
+        project = ws.add_project("p")
+        exp = project.add_experiment("e")
+        exp.bind_workflow("code", entrypoint=f"{wf_file}:wf")
+        run = exp.add_run(params={"seed": 1})
+        run.materialize()
+        _repository(ws, project, run).create(mode=ExecutionMode.INITIAL, created_by=_TEST_AGENT)
+
+        exit_code, output = _invoke(str(run.run_dir), "--execution-id", "e01")
+
+        assert exit_code == 0, output
+        assert [e.status.value for e in run.executions] == ["succeeded"]
+        assert not (tmp_path / "submitting-machine").exists()
