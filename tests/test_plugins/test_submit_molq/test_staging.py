@@ -125,9 +125,9 @@ def _queued_with_job_id(ws: Workspace, run: Run) -> None:
     )
 
 
-def _remote_doc(run: Run) -> str:
-    """The worker's sealed record of ``e01`` as it sits on the remote host."""
-    local = run.execution("e01")
+def _remote_doc(run: Run, execution_id: str = "e01") -> str:
+    """The worker's sealed record of *execution_id* as it sits on the remote host."""
+    local = run.execution(execution_id)
     doc: dict[str, object] = {
         "schema_version": 4,
         **local.model_dump(mode="json"),
@@ -430,8 +430,10 @@ def _staged_root(target: ComputeTarget, run: Run) -> Path:
     return Path(target.scratch_root) / ws.metadata.id / project.id / run.experiment.id / run.id
 
 
-def _register_remotely(target: ComputeTarget, run: Run, source: Path, title: str):
-    """What ``ctx.register`` does in the remote worker: a product of ``e01`` in the staged copy."""
+def _register_remotely(
+    target: ComputeTarget, run: Run, source: Path, title: str, execution_id: str = "e01"
+):
+    """What ``ctx.register`` does in the remote worker: a product in the staged copy."""
     from molab.workspace.domain import ExecutionOrigin
     from molab.workspace.history import SYSTEM_AGENT
 
@@ -446,16 +448,16 @@ def _register_remotely(target: ComputeTarget, run: Run, source: Path, title: str
             project_id=project.id,
             experiment_id=run.experiment.id,
             run_id=run.id,
-            execution_id="e01",
+            execution_id=execution_id,
             task="eq",
         ),
     )
 
 
-def _finish_remotely(target: ComputeTarget, run: Run) -> None:
+def _finish_remotely(target: ComputeTarget, run: Run, execution_id: str = "e01") -> None:
     ws = run.experiment.project.workspace
-    record = Path(target_run_dir(target, ws, run)) / "executions" / "e01" / "execution.json"
-    record.write_text(_remote_doc(run), encoding="utf-8")
+    record = Path(target_run_dir(target, ws, run)) / "executions" / execution_id / "execution.json"
+    record.write_text(_remote_doc(run, execution_id), encoding="utf-8")
 
 
 class TestAssetsCrossTheTarget:
@@ -513,6 +515,56 @@ class TestAssetsCrossTheTarget:
             == produced.read_text()
         )
         assert run.execution("e01").status.value == "succeeded"
+
+    def test_a_remote_attempt_replaces_the_product_an_earlier_local_attempt_left(
+        self, tmp_path: Path
+    ) -> None:
+        """Validated on this machine, then run again on the cluster: one slot, one id."""
+        from molab.workspace.asset_repository import asset_by_id, payload_path_for
+        from molab.workspace.domain import ExecutionMode, ExecutionOrigin, ExecutionStatus
+        from molab.workspace.history import SYSTEM_AGENT
+
+        ws, run = _make_run(tmp_path / "lab")
+        run._create_execution()
+        _repo(ws, run).start("e01")
+        first = tmp_path / "first.xyz"
+        first.write_text("1\n\nNa 0 0 0\n")
+        earlier = run.experiment.assets.register(
+            first,
+            title="final.xyz",
+            created_by=SYSTEM_AGENT,
+            origin=ExecutionOrigin(
+                project_id=run.experiment.project.id,
+                experiment_id=run.experiment.id,
+                run_id=run.id,
+                execution_id="e01",
+                task="eq",
+            ),
+        )
+        _repo(ws, run).seal("e01", ExecutionStatus.SUCCEEDED)
+        run._create_execution(
+            mode=ExecutionMode.RERUN,
+            predecessor="e01",
+            executor={"backend": "molq", "target": "hpc", "job_id": "j-2"},
+        )
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+
+        stage_in(transport, run, target, "e02")
+        second = tmp_path / "second.xyz"
+        second.write_text("1\n\nNa 0.5 0 0\n")
+        remote = _register_remotely(target, run, second, "final.xyz", "e02")
+        _finish_remotely(target, run, "e02")
+
+        assert remote.id == earlier.id
+        assert stage_out(transport, run, target, "e02") is True
+        local = asset_by_id(ws, earlier.id)
+        assert local is not None and local.origin == remote.origin
+        assert (
+            Path(payload_path_for(ws, earlier.id)).read_text(encoding="utf-8") == second.read_text()
+        )
+        assert [asset.id for asset in run.experiment.assets.list()] == [earlier.id]
+        assert run.execution("e02").status.value == "succeeded"
 
     def test_a_product_whose_slot_holds_another_local_asset_is_refused(
         self, tmp_path: Path

@@ -24,7 +24,9 @@ The local↔remote contract is intentionally narrow:
   Execution source snapshot takes precedence over the live entrypoint. Each
   asset the run names in ``inputs`` is uploaded as its whole slot to the same
   place in the namespace, with its host's record, so the worker resolves the
-  ``molab:asset`` ref there as it would locally.
+  ``molab:asset`` ref there as it would locally. So is each product an
+  earlier attempt of this run registered, so a later attempt re-registers
+  into that slot under the same id.
 * **Stage-out** pulls the remote ``executions/<id>/`` back **without** its
   ``execution.json`` (products, logs, the per-attempt ``alive`` heartbeat)
   and the run's ``values/`` store (the content-addressed values the pulled
@@ -66,7 +68,7 @@ from molq import MolqError
 from molab.ids import hash_bytes
 from molab.workspace import Workspace
 from molab.workspace.asset_repository import asset_by_id
-from molab.workspace.domain import ExecutionMode
+from molab.workspace.domain import Asset, ExecutionMode, ExecutionOrigin
 from molab.workspace.entity_record import ENTITY_FILENAME
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.naming import ASSET_CONTAINER, VALUE_CONTAINER
@@ -171,7 +173,7 @@ def stage_in(
         Path(str(project.project_dir)) / ENTITY_FILENAME,
         Path(str(experiment.experiment_dir)) / ENTITY_FILENAME,
     ]
-    for host in _stage_inputs(transport, mol_run, destination_root):
+    for host in _stage_assets(transport, mol_run, destination_root):
         if host / ENTITY_FILENAME not in records:
             records.append(host / ENTITY_FILENAME)
     with tempfile.TemporaryDirectory(prefix="molab-worker-") as temporary:
@@ -250,10 +252,14 @@ def _staged_root(remote_run: str, mol_run: Run) -> PurePosixPath:
     return staged
 
 
-def _stage_inputs(
+def _stage_assets(
     transport: StagingFiles, mol_run: Run, destination_root: PurePosixPath
 ) -> list[Path]:
-    """Upload each input asset's slot to the same place in the staged workspace.
+    """Upload the asset slots the run needs to the same place in the staged workspace.
+
+    These are each asset the run names in ``inputs``, and each product an
+    earlier attempt of this run registered: the worker then finds that slot
+    occupied and re-registers into it under the same id, as it would here.
 
     Returns:
         The host directories those slots belong to, whose records the staged
@@ -264,13 +270,21 @@ def _stage_inputs(
     """
     workspace = mol_run.experiment.project.workspace
     root = Path(str(workspace.root)).resolve()
-    hosts: list[Path] = []
+    needed: list[Asset] = []
     for asset_id in mol_run.inputs:
         asset = asset_by_id(workspace, asset_id)
         if asset is None:
             raise ValueError(f"input asset {asset_id} is not in this workspace")
+        needed.append(asset)
+    needed.extend(
+        asset
+        for asset in mol_run.experiment.assets.list()
+        if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == mol_run.id
+    )
+    hosts: list[Path] = []
+    for asset in needed:
         repository = workspace.assets_at(asset.scope)
-        slug = repository.find_slug(asset_id)
+        slug = repository.find_slug(asset.id)
         assert slug is not None
         host = Path(repository.scope_dir).resolve()
         remote = destination_root / host.relative_to(root) / ASSET_CONTAINER / slug
