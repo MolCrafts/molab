@@ -570,6 +570,55 @@ class AssetRepository:
                         self.fs.rm(staging, recursive=True)
             return updated
 
+    def adopt(self, directory: str | Path) -> Asset:
+        """Install a product slot another copy of this workspace wrote, keeping its id.
+
+        A remote attempt registers into its staged copy of the workspace and
+        mints the id there. *directory* is that slot (``asset.json`` plus its
+        payload) brought back to this machine. Its record must be an attempt
+        product of this scope, named by the slot this scope gives it, with
+        bytes matching its digest. The same id already here is replaced in
+        place, as a re-registration of the slot would.
+
+        Returns:
+            The installed asset.
+
+        Raises:
+            ValueError: The record is no product of this scope, its directory
+                is not its slot, its bytes do not match its digest, the slot
+                belongs to another asset, or another asset stores those bytes.
+        """
+        source = Path(directory)
+        raw = json.loads((source / "asset.json").read_text(encoding="utf-8"))
+        raw.pop("schema_version", None)
+        asset = Asset.model_validate({**raw, "scope": self.scope})
+        origin = asset.origin
+        if not isinstance(origin, ExecutionOrigin) or (
+            self.scope.kind == "experiment" and origin.experiment_id != self.scope.ids[-1]
+        ):
+            raise ValueError(f"asset {asset.id} is not a product of {self.scope.urn}")
+        slug = self.slot_slug(asset)
+        if source.name != slug:
+            raise ValueError(f"asset {asset.id} belongs in slot {slug!r}, not {source.name!r}")
+        if _digest_local(source / asset.file) != asset.content:
+            raise ValueError(f"asset {asset.id} bytes do not match {asset.content.digest}")
+        with self._lock():
+            current = self.find_slug(asset.id)
+            if current is None and self.fs.exists(self.fs.join(self.assets_dir, slug)):
+                raise ValueError(
+                    f"asset slug {slug!r} in {self.scope.urn} belongs to another asset; "
+                    f"{asset.id} cannot take it"
+                )
+            other = asset_by_digest(self.workspace, asset.content.digest)
+            if other is not None and other.id != asset.id:
+                raise ValueError(f"the bytes of {asset.id} are already {other.ref} ({other.title})")
+            if current is not None:
+                if self.get(asset.id) == asset:
+                    return asset
+                self.remove(asset.id)
+            self._copy_payload(source, self.fs.join(self.assets_dir, slug))
+            return self._read_asset(self.fs.join(self.assets_dir, slug))
+
     def _copy_payload(self, source: Path, dest: str) -> None:
         if source.is_dir():
             if isinstance(self.fs, LocalFS):

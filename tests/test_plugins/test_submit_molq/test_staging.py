@@ -375,3 +375,192 @@ def test_stage_in_refuses_tampered_execution_source(tmp_path):
     captured.write_text("tampered", encoding="utf-8")
     with pytest.raises(SourceCaptureError, match="Captured source changed"):
         stage_in(FakeTransport(), run, _remote_target(), "e01")
+
+
+class MirrorTransport:
+    """A target whose filesystem is a local directory: every transfer really copies."""
+
+    def mkdir(self, path: str, *, parents: bool = True, exist_ok: bool = True) -> None:
+        Path(path).mkdir(parents=parents, exist_ok=exist_ok)
+
+    def upload(
+        self, local: str, remote: str, *, recursive: bool = False, exclude: Sequence[str] = ()
+    ) -> None:
+        self._copy(Path(local), Path(remote), recursive, exclude)
+
+    def download(
+        self, remote: str, local: str, *, recursive: bool = False, exclude: Sequence[str] = ()
+    ) -> None:
+        self._copy(Path(remote), Path(local), recursive, exclude)
+
+    def read_text(self, path: str) -> str:
+        return Path(path).read_text(encoding="utf-8")
+
+    def exists(self, path: str) -> bool:
+        return Path(path).exists()
+
+    def glob(self, path: str, pattern: str) -> list[str]:
+        return [str(p) for p in Path(path).glob(pattern)]
+
+    @staticmethod
+    def _copy(source: Path, dest: Path, recursive: bool, exclude: Sequence[str]) -> None:
+        import shutil
+
+        if not source.exists():
+            raise OSError(f"no such file: {source}")
+        if recursive:
+            shutil.copytree(
+                source, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*exclude)
+            )
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
+
+
+def _scratch_target(tmp_path: Path) -> ComputeTarget:
+    return ComputeTarget(
+        name="hpc", registry_id="reg", cluster_id="hpc", scratch_root=str(tmp_path / "scratch")
+    )
+
+
+def _staged_root(target: ComputeTarget, run: Run) -> Path:
+    """The workspace root of *run*'s private namespace on the target."""
+    project = run.experiment.project
+    ws = project.workspace
+    return Path(target.scratch_root) / ws.metadata.id / project.id / run.experiment.id / run.id
+
+
+def _register_remotely(target: ComputeTarget, run: Run, source: Path, title: str):
+    """What ``ctx.register`` does in the remote worker: a product of ``e01`` in the staged copy."""
+    from molab.workspace.domain import ExecutionOrigin
+    from molab.workspace.history import SYSTEM_AGENT
+
+    project = run.experiment.project
+    staged = Workspace.load(_staged_root(target, run))
+    experiment = staged.get_project(project.id).get_experiment(run.experiment.id)
+    return experiment.assets.register(
+        source,
+        title=title,
+        created_by=SYSTEM_AGENT,
+        origin=ExecutionOrigin(
+            project_id=project.id,
+            experiment_id=run.experiment.id,
+            run_id=run.id,
+            execution_id="e01",
+            task="eq",
+        ),
+    )
+
+
+def _finish_remotely(target: ComputeTarget, run: Run) -> None:
+    ws = run.experiment.project.workspace
+    record = Path(target_run_dir(target, ws, run)) / "executions" / "e01" / "execution.json"
+    record.write_text(_remote_doc(run), encoding="utf-8")
+
+
+class TestAssetsCrossTheTarget:
+    def test_an_input_asset_of_another_experiment_resolves_in_the_staged_workspace(
+        self, tmp_path: Path
+    ) -> None:
+        from molab.workspace.asset_repository import asset_by_id, payload_path_for
+
+        ws = Workspace(tmp_path / "lab")
+        ws.materialize()
+        project = ws.add_project("p")
+        frames = tmp_path / "frame.xyz"
+        frames.write_text("2\n\nNa 0 0 0\nCl 1 1 1\n")
+        equilibrated = project.add_experiment("eq", params={}).assets.import_asset(
+            "frame.xyz", frames
+        )
+        run = project.add_experiment("prod", params={}).add_run(
+            params={"seed": 1}, inputs=(equilibrated.id,)
+        )
+        run._create_execution()
+        target = _scratch_target(tmp_path)
+
+        stage_in(MirrorTransport(), run, target, "e01")
+
+        staged = Workspace.load(_staged_root(target, run))
+        found = asset_by_id(staged, equilibrated.id)
+        assert found is not None and found.content == equilibrated.content
+        assert (
+            Path(payload_path_for(staged, equilibrated.id)).read_text(encoding="utf-8")
+            == frames.read_text()
+        )
+
+    def test_a_product_the_remote_attempt_registered_comes_back_with_its_id(
+        self, tmp_path: Path
+    ) -> None:
+        from molab.workspace.asset_repository import asset_by_id, payload_path_for
+
+        ws, run = _make_run(tmp_path / "lab")
+        _queued_with_job_id(ws, run)
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+        stage_in(transport, run, target, "e01")
+        produced = tmp_path / "final.xyz"
+        produced.write_text("1\n\nNa 0 0 0\n")
+        remote = _register_remotely(target, run, produced, "final.xyz")
+        _finish_remotely(target, run)
+
+        assert stage_out(transport, run, target, "e01") is True
+        assert stage_out(transport, run, target, "e01") is True
+
+        local = asset_by_id(ws, remote.id)
+        assert local is not None and local.origin == remote.origin
+        assert (
+            Path(payload_path_for(ws, remote.id)).read_text(encoding="utf-8")
+            == produced.read_text()
+        )
+        assert run.execution("e01").status.value == "succeeded"
+
+    def test_a_product_whose_slot_holds_another_local_asset_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        from molab.workspace.domain import ExecutionOrigin
+        from molab.workspace.history import SYSTEM_AGENT
+
+        ws, run = _make_run(tmp_path / "lab")
+        _queued_with_job_id(ws, run)
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+        stage_in(transport, run, target, "e01")
+        produced = tmp_path / "final.xyz"
+        produced.write_text("1\n\nNa 0 0 0\n")
+        _register_remotely(target, run, produced, "final.xyz")
+        _finish_remotely(target, run)
+        other = tmp_path / "other.xyz"
+        other.write_text("1\n\nCl 0 0 0\n")
+        run.experiment.assets.register(
+            other,
+            title="final.xyz",
+            created_by=SYSTEM_AGENT,
+            origin=ExecutionOrigin(
+                project_id=run.experiment.project.id,
+                experiment_id=run.experiment.id,
+                run_id=run.id,
+                execution_id="e01",
+            ),
+        )
+
+        with pytest.raises(ValueError, match="belongs to another asset"):
+            stage_out(transport, run, target, "e01")
+        assert run.execution("e01").status.value == "queued"
+
+    def test_a_product_whose_bytes_another_local_asset_stores_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        ws, run = _make_run(tmp_path / "lab")
+        _queued_with_job_id(ws, run)
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+        stage_in(transport, run, target, "e01")
+        produced = tmp_path / "final.xyz"
+        produced.write_text("1\n\nNa 0 0 0\n")
+        _register_remotely(target, run, produced, "final.xyz")
+        _finish_remotely(target, run)
+        run.experiment.project.assets.import_asset("same bytes", produced)
+
+        with pytest.raises(ValueError, match="already"):
+            stage_out(transport, run, target, "e01")
+        assert run.execution("e01").status.value == "queued"

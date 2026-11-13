@@ -21,13 +21,21 @@ The local↔remote contract is intentionally narrow:
   The isolated namespace also
   receives the selected ancestor ``index.md`` records and workflow code/document;
   code bindings are rewritten only in a temporary staging copy. An existing
-  Execution source snapshot takes precedence over the live entrypoint.
+  Execution source snapshot takes precedence over the live entrypoint. Each
+  asset the run names in ``inputs`` is uploaded as its whole slot to the same
+  place in the namespace, with its host's record, so the worker resolves the
+  ``molab:asset`` ref there as it would locally.
 * **Stage-out** pulls the remote ``executions/<id>/`` back **without** its
   ``execution.json`` (products, logs, the per-attempt ``alive`` heartbeat)
   and the run's ``values/`` store (the content-addressed values the pulled
   journal cites; rsync adds only the new files), then reads the remote
   ``execution.json`` and hands it to
   :meth:`~molab.workspace.execution_repository.ExecutionRepository.merge_remote`.
+  Before the merge, every asset the attempt registered in its staged
+  experiment comes back with the id the worker minted, installed by the
+  experiment's repository (``AssetRepository.adopt``); a product that cannot
+  take its slot here (another asset owns the slug or the bytes) raises and
+  leaves the local record unmerged.
   The plugin only moves bytes and decodes JSON; the workspace owns the record
   and decides how the worker's state and the local job ids combine. The
   run-level ``index.md`` is never pulled (its record is immutable and was
@@ -49,18 +57,19 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-from collections.abc import Sequence
-from pathlib import Path
+from collections.abc import Iterable, Sequence
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
 from molq import MolqError
 
 from molab.ids import hash_bytes
 from molab.workspace import Workspace
+from molab.workspace.asset_repository import asset_by_id
 from molab.workspace.domain import ExecutionMode
 from molab.workspace.entity_record import ENTITY_FILENAME
 from molab.workspace.execution_repository import ExecutionRepository
-from molab.workspace.naming import VALUE_CONTAINER
+from molab.workspace.naming import ASSET_CONTAINER, VALUE_CONTAINER
 from molab.workspace.source_snapshot import SourceCaptureError, copy_sources, source_manifest
 from molab.workspace.targets import target_run_dir
 
@@ -97,6 +106,8 @@ class StagingFiles(Protocol):
     def read_text(self, path: str) -> str: ...
 
     def exists(self, path: str) -> bool: ...
+
+    def glob(self, path: str, pattern: str) -> Iterable[str]: ...
 
 
 def stage_in(
@@ -152,19 +163,19 @@ def stage_in(
     # One private workspace namespace per run: concurrent runs never overwrite
     # each other's workflow binding. Only selected ancestor metadata is staged.
     root = Path(str(workspace.root)).resolve()
-    relative = Path(src).relative_to(root)
-    destination_root = Path(dst)
-    for _part in relative.parts:
-        destination_root = destination_root.parent
+    destination_root = _staged_root(dst, mol_run)
     experiment = mol_run.experiment
     project = experiment.project
+    records = [
+        root / ENTITY_FILENAME,
+        Path(str(project.project_dir)) / ENTITY_FILENAME,
+        Path(str(experiment.experiment_dir)) / ENTITY_FILENAME,
+    ]
+    for host in _stage_inputs(transport, mol_run, destination_root):
+        if host / ENTITY_FILENAME not in records:
+            records.append(host / ENTITY_FILENAME)
     with tempfile.TemporaryDirectory(prefix="molab-worker-") as temporary:
         bundle = Path(temporary)
-        records = [
-            root / ENTITY_FILENAME,
-            Path(str(project.project_dir)) / ENTITY_FILENAME,
-            Path(str(experiment.experiment_dir)) / ENTITY_FILENAME,
-        ]
         document = Path(str(experiment.experiment_dir)) / "workflow.ir.json"
         if document.is_file():
             records.append(document)
@@ -227,6 +238,48 @@ def stage_in(
             remote = destination_root / relative_record
             transport.mkdir(str(remote.parent), parents=True, exist_ok=True)
             transport.upload(str(bundle / relative_record), str(remote))
+
+
+def _staged_root(remote_run: str, mol_run: Run) -> PurePosixPath:
+    """The workspace root of *mol_run*'s private namespace, given its remote run dir."""
+    workspace = mol_run.experiment.project.workspace
+    relative = Path(mol_run.run_dir).resolve().relative_to(Path(str(workspace.root)).resolve())
+    staged = PurePosixPath(remote_run)
+    for _part in relative.parts:
+        staged = staged.parent
+    return staged
+
+
+def _stage_inputs(
+    transport: StagingFiles, mol_run: Run, destination_root: PurePosixPath
+) -> list[Path]:
+    """Upload each input asset's slot to the same place in the staged workspace.
+
+    Returns:
+        The host directories those slots belong to, whose records the staged
+        workspace needs to find them.
+
+    Raises:
+        ValueError: An input names no asset of this workspace.
+    """
+    workspace = mol_run.experiment.project.workspace
+    root = Path(str(workspace.root)).resolve()
+    hosts: list[Path] = []
+    for asset_id in mol_run.inputs:
+        asset = asset_by_id(workspace, asset_id)
+        if asset is None:
+            raise ValueError(f"input asset {asset_id} is not in this workspace")
+        repository = workspace.assets_at(asset.scope)
+        slug = repository.find_slug(asset_id)
+        assert slug is not None
+        host = Path(repository.scope_dir).resolve()
+        remote = destination_root / host.relative_to(root) / ASSET_CONTAINER / slug
+        transport.mkdir(str(remote), parents=True, exist_ok=True)
+        transport.upload(
+            str(host / ASSET_CONTAINER / slug), str(remote), recursive=True, exclude=_RSYNC_EXCLUDES
+        )
+        hosts.append(host)
+    return hosts
 
 
 def _stage_predecessor_journal(
@@ -309,6 +362,7 @@ def stage_out(
         )
         _pull_values(transport, remote_run, local_run)
         text = transport.read_text(f"{remote_exec}/execution.json")
+        _pull_products(transport, mol_run, execution_id, _staged_root(remote_run, mol_run))
     except MolqError as exc:
         if exc.outcome == "unknown":
             raise
@@ -327,6 +381,45 @@ def stage_out(
         fs=workspace.fs,
     ).merge_remote(execution_id, json.loads(text))
     return True
+
+
+def _pull_products(
+    transport: StagingFiles, mol_run: Run, execution_id: str, staged_root: PurePosixPath
+) -> None:
+    """Bring back every asset attempt *execution_id* registered in its staged experiment.
+
+    Each slot keeps the id the worker minted; the experiment's repository
+    installs it (:meth:`~molab.workspace.asset_repository.AssetRepository.adopt`).
+    A slot already here with the same bytes and producer is not transferred again.
+
+    Raises:
+        ValueError: A product cannot take its slot here (see ``adopt``).
+    """
+    workspace = mol_run.experiment.project.workspace
+    experiment_dir = Path(str(mol_run.experiment.experiment_dir)).resolve()
+    relative = experiment_dir.relative_to(Path(str(workspace.root)).resolve())
+    remote_assets = staged_root / relative / ASSET_CONTAINER
+    if not transport.exists(str(remote_assets)):
+        return
+    repository = mol_run.experiment.assets
+    for record in sorted(transport.glob(str(remote_assets), "*/asset.json")):
+        raw = json.loads(transport.read_text(record))
+        origin = raw.get("origin") or {}
+        if origin.get("run_id") != mol_run.id or origin.get("execution_id") != execution_id:
+            continue
+        local = asset_by_id(workspace, raw["id"])
+        if (
+            local is not None
+            and local.content.digest == raw["content"]["digest"]
+            and local.origin.model_dump(mode="json") == origin
+        ):
+            continue
+        slot = PurePosixPath(record).parent
+        with tempfile.TemporaryDirectory(prefix="molab-product-") as temporary:
+            pulled = Path(temporary) / slot.name
+            pulled.mkdir()
+            transport.download(str(slot), str(pulled), recursive=True, exclude=_RSYNC_EXCLUDES)
+            repository.adopt(pulled)
 
 
 def _pull_values(transport: StagingFiles, remote_run: str, local_run: str) -> None:
