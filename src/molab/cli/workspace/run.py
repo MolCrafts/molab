@@ -582,6 +582,7 @@ def _dispatch_runs(
     require_recoverable: bool = False,
     selected_tasks: tuple[str, ...] = (),
     task_executor: Mapping[str, JSONValue] | None = None,
+    run_selectors: tuple[str, ...] = (),
 ) -> tuple[int, list[Run]]:
     """Select the runs of every bound experiment in *script* and dispatch them.
 
@@ -602,16 +603,24 @@ def _dispatch_runs(
             re-imports the script; it cannot use this process's binding).
         selected_tasks: The tasks a partial ``--rerun`` re-executes.
         task_executor: The task-executor facts each record carries.
+        run_selectors: ``--run``: only the existing runs these name (an id or
+            a run directory name, resolved by ``Experiment.get_run``) are
+            considered; empty considers every run.
 
     Returns:
         ``(count, runs)``. Dry-run and select-only return the selected count.
         A live dispatch returns how many runs were actually handed to the
         handler; a creation skip is not counted.
+
+    Raises:
+        typer.Exit: Exit code 1 when a ``--run`` selector names no run of the
+            script's experiments; nothing is created.
     """
     workspaces, override_path = _load_script_workspaces(script, workspace, explicit_workspace)
 
     total_dispatched = 0
     all_replicas: list[tuple[Run, Experiment, Project]] = []
+    matched: set[str] = set()
 
     for ws in workspaces:
         if override_path is not None and ws.root == override_path:
@@ -621,6 +630,17 @@ def _dispatch_runs(
                 if default_binding_registry.for_experiment(exp) is None:
                     continue
                 candidates, use_declared_runs, total = _experiment_candidates(exp, profile_cfg)
+                if run_selectors:
+                    named = {sel for sel in run_selectors if exp.has_run(sel)}
+                    matched |= named
+                    wanted = {exp.get_run(sel).id for sel in named}
+                    candidates = [
+                        item
+                        for item in candidates
+                        if item.existing_run is not None and item.existing_run.id in wanted
+                    ]
+                    if not candidates:
+                        continue
                 label = (
                     f"[cyan]{continue_verb}[/cyan] + {mode_label}"
                     if continue_verb is not None
@@ -641,6 +661,14 @@ def _dispatch_runs(
                 )
                 all_replicas.extend((mol_run, exp, project) for mol_run, _label in selected_runs)
                 total_dispatched += len(selected_runs)
+
+    unmatched = [sel for sel in run_selectors if sel not in matched]
+    if unmatched:
+        rprint(
+            f"[red]Error:[/red] --run {', '.join(unmatched)} names no run of the "
+            "experiments this script defines; nothing was created."
+        )
+        raise typer.Exit(1)
 
     if dry_run or run_handler is None:
         if not suppress_ok:
@@ -892,6 +920,7 @@ def _spawn_background_local_run(
     rerun: bool,
     fresh: bool = False,
     selected_tasks: tuple[str, ...] = (),
+    run_selectors: tuple[str, ...] = (),
     extra_args: tuple[str, ...] = (),
 ) -> None:
     """Spawn a detached local ``molab run`` worker for long-running jobs."""
@@ -923,6 +952,8 @@ def _spawn_background_local_run(
         cmd.append("--fresh")
     for name in selected_tasks:
         cmd.extend(["--task", name])
+    for selector in run_selectors:
+        cmd.extend(["--run", selector])
     cmd.extend(extra_args)
 
     with log_path.open("ab") as log:
@@ -994,6 +1025,7 @@ def _run_dry_run(
     continue_verb: str | None,
     target_path: Path,
     explicit_ws: bool,
+    run_selectors: tuple[str, ...] = (),
 ) -> None:
     """Compile/materialize the run plan without executing tasks."""
     mode_label = "[blue]dry-run[/blue] compile-only"
@@ -1006,6 +1038,7 @@ def _run_dry_run(
         run_handler=None,
         mode_label=mode_label,
         dry_run=True,
+        run_selectors=run_selectors,
     )
     if runs:
         watch_arg = _watch_path_for(target_path, runs)
@@ -1087,6 +1120,7 @@ def _run_local_inprocess(
     fresh: bool = False,
     selected_tasks: tuple[str, ...] = (),
     task_executor: Mapping[str, JSONValue] | None = None,
+    run_selectors: tuple[str, ...] = (),
 ) -> None:
     """Execute the run plan in-process, with a progress bar.
 
@@ -1122,6 +1156,7 @@ def _run_local_inprocess(
         fresh=fresh,
         selected_tasks=selected_tasks,
         task_executor=task_executor,
+        run_selectors=run_selectors,
     )
     _report_local_results(dispatched, continue_verb)
 
@@ -1144,6 +1179,7 @@ def _submit_to_scheduler(
     preamble: list[str] | None = None,
     selected_tasks: tuple[str, ...] = (),
     task_executor: Mapping[str, JSONValue] | None = None,
+    run_selectors: tuple[str, ...] = (),
 ) -> None:
     """Submit the run plan through molq and report (or monitor) the result."""
     from molab.plugins.submit_molq.metadata import supported_schedulers
@@ -1187,6 +1223,7 @@ def _submit_to_scheduler(
         require_recoverable=True,
         selected_tasks=selected_tasks,
         task_executor=task_executor,
+        run_selectors=run_selectors,
     )
     if n == 0:
         verb = {"resume": "resumed", "rerun": "reran"}.get(continue_verb or "", "submitted")
@@ -1300,6 +1337,18 @@ def run(
                 "from its record and every task downstream of a selected one is "
                 "skipped. Refused, before any attempt is created, when the workflow "
                 "has no such task or an upstream it needs has no usable recorded output."
+            ),
+        ),
+    ] = None,
+    runs: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--run",
+            help=(
+                "Dispatch only this run (repeatable): its id or its directory name "
+                "(e.g. seed=1), on whatever backend the other flags choose. A name that "
+                "matches no run of the script's experiments is refused before anything "
+                "is created."
             ),
         ),
     ] = None,
@@ -1471,6 +1520,7 @@ def run(
         )
         raise typer.Exit(1)
     continue_verb = "resume" if resume else ("rerun" if rerun else None)
+    run_selectors = tuple(dict.fromkeys(runs or ()))
 
     selected_target, selected_scheduler, is_local = _select_backend(
         target_path=target.path,
@@ -1496,6 +1546,7 @@ def run(
             rerun=rerun,
             fresh=fresh,
             selected_tasks=selected_tasks,
+            run_selectors=run_selectors,
             extra_args=(
                 *(("--executor", executor) if executor else ()),
                 *(("--max-workers", str(max_workers)) if max_workers else ()),
@@ -1510,6 +1561,7 @@ def run(
             continue_verb=continue_verb,
             target_path=target.path,
             explicit_ws=explicit_ws,
+            run_selectors=run_selectors,
         )
         return
 
@@ -1523,6 +1575,7 @@ def run(
             fresh=fresh,
             selected_tasks=selected_tasks,
             task_executor=task_executor,
+            run_selectors=run_selectors,
         )
         return
 
@@ -1544,6 +1597,7 @@ def run(
         preamble=preamble or [],
         selected_tasks=selected_tasks,
         task_executor=task_executor,
+        run_selectors=run_selectors,
     )
 
 

@@ -1064,6 +1064,62 @@ class TestRun:
         run = _only_run(tmp_path)
         assert [item.id for item in run.executions] == ["e01"]
 
+    def test_rerun_of_one_selected_run_leaves_the_others(self, tmp_path: Path) -> None:
+        script = tmp_path / "split.py"
+        script.write_text(_SPLIT_SCRIPT, encoding="utf-8")
+        _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        [project] = Workspace.load(tmp_path).list_projects()
+        [exp] = project.list_experiments()
+        first = next(run for run in exp.list_runs() if run.metadata.parameters["seed"] == 1)
+
+        exit_code, output = _molab(
+            "run", str(script), "--rerun", "--run", first.id, "--local", "-ws", str(tmp_path)
+        )
+
+        assert exit_code == 0, output
+        attempts = {
+            run.metadata.parameters["seed"]: [e.id for e in run.executions]
+            for run in exp.list_runs()
+        }
+        assert attempts == {1: ["e01", "e02"], 2: ["e01"]}
+
+    def test_a_run_is_selected_by_its_directory_name(self, tmp_path: Path) -> None:
+        script = tmp_path / "split.py"
+        script.write_text(_SPLIT_SCRIPT, encoding="utf-8")
+        _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        [project] = Workspace.load(tmp_path).list_projects()
+        [exp] = project.list_experiments()
+        second = next(run for run in exp.list_runs() if run.metadata.parameters["seed"] == 2)
+
+        exit_code, output = _molab(
+            "run",
+            str(script),
+            "--resume",
+            "--run",
+            Path(second.run_dir).name,
+            "--local",
+            "-ws",
+            str(tmp_path),
+        )
+
+        assert exit_code == 1, output  # seed 2 fails again
+        assert [e.mode.value for e in second.executions] == ["initial", "resume"]
+
+    def test_a_selector_naming_no_run_creates_nothing(self, tmp_path: Path) -> None:
+        script = tmp_path / "split.py"
+        script.write_text(_SPLIT_SCRIPT, encoding="utf-8")
+        _molab("run", str(script), "--local", "-ws", str(tmp_path))
+
+        exit_code, output = _molab(
+            "run", str(script), "--rerun", "--run", "no-such-run", "--local", "-ws", str(tmp_path)
+        )
+
+        assert exit_code == 1, output
+        assert "no-such-run" in output
+        [project] = Workspace.load(tmp_path).list_projects()
+        [exp] = project.list_experiments()
+        assert [[e.id for e in run.executions] for run in exp.list_runs()] == [["e01"], ["e01"]]
+
     def test_one_failed_run_of_two_exits_1(self, tmp_path: Path) -> None:
         script = tmp_path / "split.py"
         script.write_text(_SPLIT_SCRIPT, encoding="utf-8")
@@ -1384,6 +1440,32 @@ class TestSubmitToScheduler:
         assert "nope" in capsys.readouterr().out
         assert fx.spy.submits == 0
         assert sorted(p.name for p in (Path(fx.run.run_dir) / "executions").iterdir()) == ["e01"]
+
+    def test_rerun_submits_only_the_selected_run(self, scheduler_fixture: SchedulerFixture) -> None:
+        fx = scheduler_fixture
+        other = fx.run.experiment.add_run(params={"seed": 2})
+        other._create_execution()
+        other.cancel("e01")
+
+        _submit_to_scheduler(
+            script=fx.script,
+            profile_cfg=ProfileConfig({}, name=None),
+            continue_verb="rerun",
+            target_path=fx.ws.root,
+            explicit_ws=True,
+            selected_target=None,
+            selected_scheduler="local",
+            cluster="registered-local",
+            resources={},
+            scheduling={},
+            block=False,
+            run_selectors=(fx.run.id,),
+        )
+
+        assert fx.spy.submits == 1
+        assert fx.spy.record_error is None, fx.spy.record_error
+        assert [e.id for e in fx.run.executions] == ["e01", "e02"]
+        assert [e.id for e in other.executions] == ["e01"]
 
     def test_resume_hands_a_queued_resume_record(
         self, monkeypatch: pytest.MonkeyPatch, scheduler_fixture: SchedulerFixture

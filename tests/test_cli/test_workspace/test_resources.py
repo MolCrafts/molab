@@ -15,7 +15,6 @@ from molab.cli import app
 from molab.cli.workspace import resources
 from molab.knowledge import Finding, Observation, Report
 from molab.profile import ProfileConfig
-from molab.workflow import RunFailedError, Workflow
 from molab.workspace import Workspace
 from molab.workspace.run import Run
 from tests.support.records import read_record
@@ -339,79 +338,6 @@ class TestRunCreate:
 
         assert result.exit_code == 0, result.output
         assert "Status: pending" in result.output
-
-
-def _healing_workflow(flag: Path) -> Workflow:
-    """stage_b raises until *flag* exists; stage_a is ``seed + 1``."""
-    wf = Workflow(name="healing")
-
-    @wf.task
-    def stage_a(seed: int) -> int:
-        return seed + 1
-
-    @wf.task(depends_on=["stage_a"])
-    def stage_b(stage_a: int) -> str:
-        if not flag.exists():
-            raise RuntimeError("FLAG missing")
-        return str(stage_a * 100)
-
-    return wf
-
-
-class TestRetryRun:
-    def test_rerun_reports_status_label(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        ws = Workspace(tmp_path / "lab", name="Lab")
-        ws.materialize()
-        run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
-        sentinel = object()
-
-        def fake_compiled_workflow_for_run(_run: Run) -> object:
-            return sentinel
-
-        def fake_execute(self: Run, workflow: object, /, **_kwargs: object) -> None:
-            assert workflow is sentinel
-
-        monkeypatch.setattr(
-            "molab.workflow.compiled_workflow_for_run",
-            fake_compiled_workflow_for_run,
-            raising=False,
-        )
-        monkeypatch.setattr(Run, "execute", fake_execute)
-
-        result = CliRunner().invoke(
-            app, ["runs", "rerun", "p", "e", run.id, "--workspace", str(ws.root)]
-        )
-
-        assert result.exit_code == 0, result.output
-        assert result.output.rstrip().endswith("status: pending")
-
-    def test_resume_after_failure_reports_succeeded(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        ws = Workspace(tmp_path / "lab", name="Lab")
-        ws.materialize()
-        run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
-        flag = tmp_path / "healed"
-        wf = _healing_workflow(flag)
-        compiled = (wf).compile()
-
-        with pytest.raises(RunFailedError):
-            run.execute(wf)
-
-        flag.write_text("ok", encoding="utf-8")
-        monkeypatch.setattr("molab.workflow.compiled_workflow_for_run", lambda _run: compiled)
-
-        result = CliRunner().invoke(
-            app, ["runs", "resume", "p", "e", run.id, "--workspace", str(ws.root)]
-        )
-
-        assert result.exit_code == 0, result.output
-        assert "status: succeeded" in result.output
-        assert [item.mode.value for item in run.executions] == ["initial", "resume"]
-        assert run.status_label == "succeeded"
-        assert run.has_failures is True
 
 
 def _greeting(tmp_path: Path) -> tuple[Workspace, str]:

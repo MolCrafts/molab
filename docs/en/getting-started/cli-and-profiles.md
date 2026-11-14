@@ -98,6 +98,7 @@ Each verb owns a **disjoint** job. Nothing overlaps, nothing falls back silently
 | `--resume` | `failed` / `cancelled` | Creates a new Execution and seeds completed tasks |
 | `--rerun` | `failed` / `cancelled` | Opens a fresh execution from the top |
 | `--rerun --fresh` | `failed` / `cancelled` | Like `--rerun` but also bypasses the cache read |
+| `--run ID` (repeatable) | the runs it names | Narrows any of the above to those runs (an id or a run directory name such as `seed=1`), on any backend (`--local`, `--scheduler`, `--compute-target`) |
 
 A profile `config_hash` is content-only and the profile name is only a label. New run ids are UUIDv7. The process exit code follows the attempt that actually ran. `succeeded` and `running` runs are skipped unless you ask for another attempt. Asking again is always explicit.
 
@@ -106,6 +107,7 @@ molab run train.py --profile smoke
 molab run train.py --profile smoke --override optimizer.lr=0.0005
 molab run train.py --profile smoke --resume
 molab run train.py --profile smoke --rerun --fresh
+molab run train.py --profile smoke --rerun --run seed=3 --compute-target hpc
 ```
 
 `--resume` and `--rerun` are mutually exclusive. Both are profile-aware: the resolved profile is part of the run's identity, so a different profile addresses a different run.
