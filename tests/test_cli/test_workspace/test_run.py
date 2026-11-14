@@ -1641,3 +1641,98 @@ class TestRunHelpText:
 
         assert code == 0
         assert "run-<id>" not in out
+
+
+# ── exec ──────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class _ExecSpy:
+    specs: list[object] = field(default_factory=list)
+
+
+def _fake_exec_client(monkeypatch: pytest.MonkeyPatch, *, reject: str | None = None) -> _ExecSpy:
+    """A molq client whose cluster runs every job to success, printing ``node7``."""
+    from molq import MolqError
+
+    spy = _ExecSpy()
+
+    class _Job:
+        def wait(self, *, timeout: float) -> dict[str, object]:
+            del timeout
+            return {"snapshots": [{"state": "succeeded"}]}
+
+        def logs(self, *, stream: str, offset: int) -> dict[str, object]:
+            text = "node7\n"[offset:] if stream == "stdout" else ""
+            return {"text": text, "next_offset": offset + len(text), "bytes_read": len(text)}
+
+    class _Cluster:
+        def submit(self, spec: object) -> _Job:
+            if reject is not None:
+                raise MolqError(
+                    "SUBMISSION_REJECTED",
+                    "Native scheduler command failed",
+                    command="sbatch",
+                    stderr=reject,
+                )
+            spy.specs.append(spec)
+            return _Job()
+
+    class _Client:
+        def cluster(self, _name: str) -> _Cluster:
+            return _Cluster()
+
+    monkeypatch.setattr("molab.workspace.connection.get_client", lambda _r=None: _Client())
+    return spy
+
+
+def _workspace_with_remote_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from molab.workspace import ComputeTarget
+
+    ws = Workspace(tmp_path / "ws", name="lab")
+    ws.materialize()
+    ws.add_target(
+        ComputeTarget(name="hpc", registry_id="reg", cluster_id="hpc", scratch_root="/scratch")
+    )
+    monkeypatch.chdir(ws.root)
+
+
+class TestExec:
+    def test_account_and_partition_reach_the_scheduler(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """sbatch on a multi-account cluster refuses a job that names no account."""
+        _workspace_with_remote_target(tmp_path, monkeypatch)
+        spy = _fake_exec_client(monkeypatch)
+
+        exit_code, output = _molab(
+            "exec",
+            "-t",
+            "@hpc",
+            "-A",
+            "proj-1",
+            "-p",
+            "cpu",
+            "--time",
+            "00:05:00",
+            "--",
+            "hostname",
+        )
+
+        assert exit_code == 0, output
+        assert "node7" in output
+        [spec] = spy.specs
+        assert spec.scheduling.account == "proj-1"  # type: ignore[attr-defined]
+        assert spec.scheduling.partition == "cpu"  # type: ignore[attr-defined]
+        assert spec.resources.time_limit_seconds == 300  # type: ignore[attr-defined]
+
+    def test_a_rejected_submission_names_the_scheduler_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _workspace_with_remote_target(tmp_path, monkeypatch)
+        _fake_exec_client(monkeypatch, reject="sbatch: error: Invalid account")
+
+        exit_code, output = _molab("exec", "-t", "@hpc", "--", "hostname")
+
+        assert exit_code == 1
+        assert "sbatch: error: Invalid account" in output

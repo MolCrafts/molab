@@ -45,6 +45,8 @@ __all__ = [
     "SubmitHandler",
     "decode_job_ref",
     "encode_job_ref",
+    "job_resources",
+    "job_scheduling",
     "make_submit_handler",
     "reconcile_latest",
     "reconcile_submission",
@@ -165,7 +167,12 @@ def _duration_seconds(value: JSONValue) -> int | None:
     return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
-def _resources(res: dict[str, JSONValue]) -> Resources | None:
+def job_resources(res: dict[str, JSONValue]) -> Resources | None:
+    """The molq ``Resources`` of the CLI's resource flags (``cpus`` / ``mem`` / ``time`` / …).
+
+    Raises:
+        ValueError: A ``mem`` or ``time`` value cannot be read.
+    """
     from molq import Accelerator, Resources
 
     gpus = _as_int(res.get("gpus"))
@@ -183,7 +190,8 @@ def _resources(res: dict[str, JSONValue]) -> Resources | None:
     return built
 
 
-def _scheduling(sched: dict[str, JSONValue], job_name: str) -> Scheduling | None:
+def job_scheduling(sched: dict[str, JSONValue], job_name: str) -> Scheduling | None:
+    """The molq ``Scheduling`` of the CLI's ``queue`` / ``account`` / ``qos`` flags."""
     from molq import Scheduling
 
     built = Scheduling(
@@ -261,7 +269,7 @@ class SubmitHandler:
         if not destination:
             raise ValueError("Submission requires an explicit molq destination")
         self._cluster: str = destination
-        self._resources = _resources(_strip_none(resources))
+        self._resources = job_resources(_strip_none(resources))
         self._sched = _strip_none(scheduling)
         self._block = block
         self._target = target
@@ -399,7 +407,7 @@ class SubmitHandler:
             spec = JobSpec(
                 execution=Execution(units=(unit,), cwd=target_exec_dir, env=env),
                 resources=self._resources,
-                scheduling=_scheduling(sched, job_name),
+                scheduling=job_scheduling(sched, job_name),
             )
             from molab.workspace.connection import get_client
 

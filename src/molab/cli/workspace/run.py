@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, NamedTuple, Protocol
 
 import typer
+from molq import MolqError
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from molab._typing import JSONValue
@@ -1610,9 +1611,27 @@ def exec_cmd(
         str | None, typer.Option("--cwd", help="Working directory on the target")
     ] = None,
     timeout: Annotated[float | None, typer.Option("--timeout", help="Timeout in seconds")] = None,
+    account: Annotated[
+        str | None,
+        typer.Option("--account", "-A", help="Account / project name (remote target)."),
+    ] = None,
+    partition: Annotated[
+        str | None,
+        typer.Option("--partition", "-p", help="Partition / queue (remote target)."),
+    ] = None,
+    qos: Annotated[str | None, typer.Option("--qos", help="QOS (remote target).")] = None,
+    time: Annotated[
+        str | None,
+        typer.Option("--time", help="Job time limit, e.g. 00:05:00 (remote target)."),
+    ] = None,
     target_spec: TargetOption = ".",
 ) -> None:
-    """Execute a command on the workspace target (local or remote transport)."""
+    """Execute a command on the workspace target (local or remote transport).
+
+    On a remote target the command is one scheduler job. A cluster that
+    needs an account or a partition gets it from ``-A`` / ``-p``, as
+    ``molab run`` does; a refused submission prints the scheduler's message.
+    """
     target, _fs = resolve_workspace_target(target_spec)
 
     cmd: list[str] = list(command) if command else []
@@ -1630,16 +1649,18 @@ def exec_cmd(
         if isinstance(target, RemoteTarget):
             from molq import Execution, ExecutionUnit, JobSpec
 
+            from molab.plugins.submit_molq.submit import job_resources, job_scheduling
             from molab.workspace.connection import get_client
 
             assert target.cluster_id is not None
-            job = (
-                get_client(target.registry_id)
-                .cluster(target.cluster_id)
-                .submit(
-                    JobSpec(execution=Execution((ExecutionUnit.argv("main", cmd),), cwd=remote_cwd))
-                )
+            spec = JobSpec(
+                execution=Execution((ExecutionUnit.argv("main", cmd),), cwd=remote_cwd),
+                resources=job_resources({"time": time} if time is not None else {}),
+                scheduling=job_scheduling(
+                    {"queue": partition, "account": account, "qos": qos}, "molab-exec"
+                ),
             )
+            job = get_client(target.registry_id).cluster(target.cluster_id).submit(spec)
             observation = job.wait(timeout=timeout or 3600)
             for stream in ("stdout", "stderr"):
                 offset = 0
@@ -1660,6 +1681,10 @@ def exec_cmd(
                 raise typer.Exit(result.returncode)
     except (OSError, ValueError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    except MolqError as exc:
+        detail = exc.context.get("stderr")
+        rprint(f"[red]Error:[/red] {exc}" + (f"\n{str(detail).rstrip()}" if detail else ""))
         raise typer.Exit(1) from exc
 
 
