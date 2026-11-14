@@ -42,7 +42,13 @@ from .file_store import FileStore
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFS
 
-__all__ = ["SourceCaptureError", "copy_sources", "local_import_digest", "source_manifest"]
+__all__ = [
+    "SourceCaptureError",
+    "captured_names",
+    "copy_sources",
+    "local_import_digest",
+    "source_manifest",
+]
 
 
 class SourceCaptureError(RuntimeError):
@@ -266,6 +272,49 @@ def _vcs_state(directory: Path) -> tuple[str | None, bool | None]:
     return commit, dirty
 
 
+def _captured(path: Path) -> list[tuple[str, Path]]:
+    """``(name under source/, original)`` for each file an attempt of *path* captures.
+
+    Raises:
+        SourceCaptureError: A file lies outside the entrypoint directory, or two
+            files would be stored under one name.
+    """
+    root = path.parent
+    captured: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+    for src in _local_import_closure(path):
+        name = _capture_name(root, src)
+        if name in seen:
+            raise SourceCaptureError(f"two source files would be stored as {name!r}")
+        seen.add(name)
+        captured.append((name, src))
+    return captured
+
+
+def captured_names(entrypoint: PathArg) -> tuple[str, ...]:
+    """The names, relative to its directory, of the files an attempt of *entrypoint* captures.
+
+    The one rule for "which files beside a workflow script belong to it":
+    :func:`source_manifest` stores exactly these, and the layout validator
+    holds them legal beside an experiment's ``workflow.py``.
+
+    Args:
+        entrypoint: The workflow script; it must be a file.
+
+    Returns:
+        POSIX paths (``workflow.py``, ``helper.py``, ``pkg/units.py``), the
+        entrypoint first.
+
+    Raises:
+        FileNotFoundError: *entrypoint* is not a file.
+        SourceCaptureError: The closure cannot be stored under ``source/``.
+    """
+    path = Path(entrypoint).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"source entrypoint {str(entrypoint)!r} is not a file")
+    return tuple(name for name, _src in _captured(path))
+
+
 def source_manifest(entrypoint: PathArg, *, now: datetime | None = None) -> SourceManifest:
     """Describe the source an attempt would capture, without copying anything.
 
@@ -295,13 +344,7 @@ def source_manifest(entrypoint: PathArg, *, now: datetime | None = None) -> Sour
     if not path.is_file():
         raise FileNotFoundError(f"source entrypoint {str(entrypoint)!r} is not a file")
     files: list[SourceFile] = []
-    seen_names: set[str] = set()
-    root = path.parent
-    for src in _local_import_closure(path):
-        name = _capture_name(root, src)
-        if name in seen_names:
-            raise SourceCaptureError(f"two source files would be stored as {name!r}")
-        seen_names.add(name)
+    for name, src in _captured(path):
         try:
             files.append(SourceFile(name=name, sha256=_sha256(src)))
         except OSError as exc:
