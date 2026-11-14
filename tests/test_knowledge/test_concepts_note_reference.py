@@ -107,21 +107,27 @@ class TestNote:
     def test_tags_and_status_round_trip(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
         note.write(tags=["analysis", "rdf"])
-        note.write(fields={"status": "draft"})
+        note.write(fields={"status": "retired"})
         assert note.tags() == ["analysis", "rdf"]
-        assert note.status() == "draft"
+        assert note.status() == "retired"
 
     def test_set_tags_preserves_status(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
-        note.write(fields={"status": "draft"})
+        note.write(fields={"status": "retired"})
         note.write(tags=["x"])
-        assert note.status() == "draft"
+        assert note.status() == "retired"
 
     def test_bare_marker_reads_back_with_additive_defaults(self, tmp_path: Path) -> None:
         # A legacy note whose meta.json is only {type, id} — no migration needed.
         note = _mount(Note, tmp_path, "idea")
         assert note.tags() == []
-        assert note.status() == "active"
+        assert note.status() == "proposed"
+
+    def test_a_status_outside_the_lifecycle_is_refused(self, tmp_path: Path) -> None:
+        note = _mount(Note, tmp_path, "idea")
+        with pytest.raises(ValueError, match="status"):
+            note.write(fields={"status": "draft"})
+        assert note.status() == "proposed"
 
 
 class TestLiterature:

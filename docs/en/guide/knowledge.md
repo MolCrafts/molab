@@ -92,7 +92,7 @@ author. Every class lands one file; the `class:` frontmatter names which one:
 | `Report` | What do we tell readers? It compiles; it claims nothing new. | none | a result stated nowhere else |
 | `Literature` | What does a published source say? | `LiteratureFields`: the bibliography; PDFs pointed at, never copied | |
 | `Decision` | What was chosen, by whom, and why? | `status`: `made` (default) \| `open` while it waits for a person | an observed fact (Observation), a result (Finding) |
-| `Note` | None of the above: free text with no claim on the reasoning. | `status` (default `active`) | |
+| `Note` | None of the above: free text with no claim on the reasoning. | `status`: `proposed` (default) \| `active` (reviewed; set explicitly) \| `retired` | |
 
 A `Report` is defined by its purpose (telling readers), not by its length: a
 result written up at length is still a `Finding`.

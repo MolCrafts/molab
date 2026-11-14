@@ -162,15 +162,15 @@ class TestNoteFrontmatterOnly:
         note.write("# N\n")
 
         assert note.tags() == []
-        assert note.status() == "active"
+        assert note.status() == "proposed"
 
     def test_tags_and_status_come_from_frontmatter(self, tmp_path: Path) -> None:
         path = tmp_path / "n.md"
         path.write_text(
-            "---\nclass: Note\ntags:\n- tg\nstatus: draft\n---\n\n# N\n",
+            "---\nclass: Note\ntags:\n- tg\nstatus: retired\n---\n\n# N\n",
             encoding="utf-8",
         )
         note = Note(path)
 
         assert note.tags() == ["tg"]
-        assert note.status() == "draft"
+        assert note.status() == "retired"

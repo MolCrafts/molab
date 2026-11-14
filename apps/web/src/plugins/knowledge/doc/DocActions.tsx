@@ -28,7 +28,8 @@ import { knowledgeKeys } from "../queries";
 import { MAP_CLASSES } from "../research-map";
 import { useKnowledgeDocs } from "../useKnowledgeDocs";
 
-const STATUS_WORDS = ["draft", "active", "archived"] as const;
+// A Note's lifecycle (molab.knowledge.concepts.NoteStatus): `active` is the reviewed one.
+const STATUS_WORDS = ["proposed", "active", "retired"] as const;
 
 export interface DocActionsProps {
   relPath: string;

@@ -56,9 +56,9 @@ class TestAWriteCarriesOnlyDeclaredFields:
             of=Note,
             created_by="t",
             text="x",
-            fields={"status": "done"},
+            fields={"status": "active"},
         )
-        assert Note(note.path).status() == "done"
+        assert Note(note.path).status() == "active"
         with pytest.raises(ValueError, match="status"):
             _sourced(lab, Report, "Summary", {"status": "done"})
 
@@ -127,13 +127,15 @@ class TestValidateReportsAStrayKey:
         root = Path(str(lab.root)) / "knowledges"
         root.mkdir(parents=True, exist_ok=True)
         (root / "a.md").write_text("---\nclass: Report\nname: A\nstatus: draft\n---\n# A\n")
-        (root / "b.md").write_text("---\nclass: Note\nname: B\nstatus: draft\n---\n# B\n")
+        (root / "b.md").write_text("---\nclass: Note\nname: B\nstatus: retired\n---\n# B\n")
+        (root / "c.md").write_text("---\nclass: Note\nname: C\nstatus: draft\n---\n# C\n")
         issues = [
             (issue["path"], issue["severity"])
             for issue in validate_knowledge(lab, errors_only=True)
             if issue["rule"] == "knowledge.fields"
         ]
-        assert issues == [("knowledges/a.md", "error")]
+        # A Note's status is its lifecycle: proposed, active or retired.
+        assert issues == [("knowledges/a.md", "error"), ("knowledges/c.md", "error")]
 
 
 class TestFieldsComposeAlongTheClassTree:

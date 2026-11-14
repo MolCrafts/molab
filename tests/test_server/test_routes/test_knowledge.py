@@ -150,6 +150,24 @@ class TestListKnowledge:
         assert body["total"] >= 1
         assert any(row["name"] == "idea" and row.get("cls") == "Note" for row in body["notes"])
 
+    def test_a_note_written_without_a_status_is_not_active(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        """Only a person's explicit change makes a Note ``active`` (what a reader trusts)."""
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            created = client.post("/api/knowledge/doc", json={"name": "lesson", "body": "x"})
+            assert created.status_code == 201, created.text
+            active = client.get("/api/knowledge", params={"status": "active"}).json()
+            proposed = client.get("/api/knowledge", params={"status": "proposed"}).json()
+            refused = client.post(
+                "/api/knowledge/doc",
+                json={"name": "other", "body": "x", "fields": {"status": "draft"}},
+            )
+        assert "lesson" not in [row["name"] for row in active["notes"]]
+        assert "lesson" in [row["name"] for row in proposed["notes"]]
+        assert refused.status_code == 422, refused.text
+
     def test_list_reads_the_workspace_disk(self, served: ServedFactory, lab: RunFixture) -> None:
         from molab.fs import LocalFS
         from molab.server.deps.resolution import get_workspace

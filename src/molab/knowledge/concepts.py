@@ -32,11 +32,17 @@ _LOG = logging.getLogger(__name__)
 
 
 class NoteFields(BaseModel):
-    """What a Note stores beyond the common keys: its lifecycle status."""
+    """What a Note stores beyond the common keys: its lifecycle status.
+
+    ``proposed`` (the default, so every Note written without a status, and
+    every Note that predates the field, reads as unreviewed), ``active``
+    (a person reviewed it and it applies; set explicitly, never by
+    default), ``retired`` (it no longer applies). Anything else is refused.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    status: str = "active"
+    status: NoteStatus = "proposed"
 
 
 class LiteratureFields(BaseModel):
@@ -87,6 +93,7 @@ class HypothesisFields(BaseModel):
 DecisionStatus = Literal["open", "made"]
 TodoStatus = Literal["open", "done", "blocked"]
 MilestoneStatus = Literal["open", "met", "missed"]
+NoteStatus = Literal["proposed", "active", "retired"]
 
 
 def _require_unique(what: str, ids: list[str]) -> None:
@@ -192,8 +199,8 @@ class Note(Concept):
         """This note's fields, read from its frontmatter."""
         return self._fields_of(type(self).FIELDS)
 
-    def status(self) -> str:
-        """This note's lifecycle status (``"active"`` by default)."""
+    def status(self) -> NoteStatus:
+        """This note's lifecycle status (``"proposed"`` until a person sets another)."""
         return self.fields().status
 
     @classmethod
