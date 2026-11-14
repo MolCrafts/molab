@@ -372,7 +372,7 @@ workflow = (wf).compile()
 
 
 class TestRemoteWorkerOpensStagedAttempt:
-    @pytest.mark.parametrize("entry_kind", ["file", "package", "captured"])
+    @pytest.mark.parametrize("entry_kind", ["package", "captured"])
     def test_worker_runs_from_a_staged_only_layout(self, tmp_path: Path, entry_kind: str) -> None:
         """The worker must run from exactly what ``stage_in`` uploads.
 
@@ -408,9 +408,7 @@ class TestRemoteWorkerOpensStagedAttempt:
         experiment.bind_workflow("code", entrypoint=f"{entrypoint}:workflow")
         run = experiment.add_run(params={"seed": 1})
         run.materialize()
-        queued = run._create_execution(
-            source_entrypoint=wf_file if entry_kind == "captured" else None
-        )
+        queued = run._create_execution()
         if entry_kind == "captured":
             wf_file.write_text("raise RuntimeError('changed after queueing')", encoding="utf-8")
         assert queued.id == "e01"

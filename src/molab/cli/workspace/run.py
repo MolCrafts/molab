@@ -360,8 +360,9 @@ def _create_dispatch_execution(
             false.
         profile_cfg: The profile the attempt runs under; recorded as its
             ``profile`` / ``config`` / ``config_hash``.
-        script: The defining script; recorded as ``environment.script`` and
-            captured as the attempt's source entrypoint.
+        script: The defining script; recorded as ``environment.script``.
+            The attempt captures the experiment's bound entrypoint as its
+            source, as every attempt does (``Run._create_execution``).
         submit_cwd: The directory ``molab run`` was invoked from.
         selected_tasks: The tasks a partial ``--rerun`` re-executes.
         task_executor: ``--executor`` / ``--max-workers`` as the record's
@@ -399,14 +400,13 @@ def _create_dispatch_execution(
             bypass_cache=bypass_cache,
             profile_config=profile_cfg,
             environment={"script": str(entrypoint), "submit_cwd": submit_cwd},
-            source_entrypoint=entrypoint,
             selected_tasks=selected_tasks,
             executor=dict(task_executor or {}),
         )
-    except SourceCaptureError as exc:
+    except (SourceCaptureError, FileNotFoundError) as exc:
         rprint(
             f"[red]Error:[/red] could not capture the source of "
-            f"{script.name} for run {mol_run.id}: {exc}"
+            f"{mol_run.experiment.entrypoint_file} for run {mol_run.id}: {exc}"
         )
         raise typer.Exit(1) from exc
     return record.id

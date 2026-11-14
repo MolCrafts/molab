@@ -366,8 +366,9 @@ class TestCreateDispatchExecution:
         from molab.cli.workspace.run import _create_dispatch_execution
         from molab.workspace.execution_context import profile_config_hash
 
-        _ws, _project, _exp, [run] = _declared(tmp_path)
+        _ws, _project, exp, [run] = _declared(tmp_path)
         script = _plain_script(tmp_path)
+        exp.bind_workflow("code", entrypoint=f"{script}:x")
         cfg = ProfileConfig({"k": 1}, name="cpu")
 
         execution_id = _create_dispatch_execution(

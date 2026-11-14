@@ -62,6 +62,7 @@ from .folder import (
     register_entity_class,
 )
 from .fs import PathArg
+from .fs_local import LocalFS
 from .models import ExperimentMetadata, FolderMetadata, WorkflowKind
 from .naming import EXPERIMENT_CONTAINER, RUN_CONTAINER, disambiguate, entity_slug, run_slug
 from .run import Run, compute_run_definition_hash
@@ -419,6 +420,25 @@ class Experiment(Folder):
         if posixpath.isabs(source):
             return locator
         return f"{posixpath.normpath(posixpath.join(str(self.resolve()), source))}:{qualname}"
+
+    @property
+    def entrypoint_file(self) -> Path | None:
+        """The file this experiment's code workflow is imported from.
+
+        Every attempt captures it, with its first-party imports, as its
+        source (``Run._create_execution``). ``None`` for a document or
+        unbound experiment, a package (directory) locator, and a workspace
+        this machine reaches only through a remote filesystem, whose files
+        cannot be read here. A missing file is still returned: its capture
+        fails rather than recording no source.
+        """
+        locator = self.entrypoint
+        if self.workflow_kind != "code" or not locator or ":" not in locator:
+            return None
+        if not isinstance(self._disk(), LocalFS):
+            return None
+        path = Path(locator.rsplit(":", 1)[0])
+        return None if path.is_dir() else path
 
     def _portable_locator(self, locator: str | None) -> str | None:
         """*locator* with a file inside the workspace made relative to this experiment.

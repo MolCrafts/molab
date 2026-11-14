@@ -13,7 +13,7 @@ directory, transitively), per attempt, in two steps:
    and verifies every copy against the manifest, raising
    :class:`SourceCaptureError` on any mismatch.
 
-``Run._create_execution(source_entrypoint=...)`` runs them in that order around
+``Run._create_execution`` runs them, on the experiment's bound entrypoint, in that order around
 creating the record, so each attempt's manifest is on its Execution record and
 its copies are under ``executions/eNN/source/``.
 

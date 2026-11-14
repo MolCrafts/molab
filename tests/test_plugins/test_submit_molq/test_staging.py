@@ -370,7 +370,7 @@ def test_stage_in_refuses_tampered_execution_source(tmp_path):
     script = tmp_path / "workflow.py"
     script.write_text("workflow = None", encoding="utf-8")
     run.experiment.bind_workflow("code", entrypoint=f"{script}:workflow")
-    run._create_execution(source_entrypoint=script)
+    run._create_execution()
     captured = Path(str(run.execution_dir("e01"))) / "source" / script.name
     captured.write_text("tampered", encoding="utf-8")
     with pytest.raises(SourceCaptureError, match="Captured source changed"):

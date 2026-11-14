@@ -778,7 +778,6 @@ class Run(Folder):
         environment: dict[str, JSONValue] | None = None,
         executor: dict[str, JSONValue] | None = None,
         created_by: AgentRef | None = None,
-        source_entrypoint: PathArg | None = None,
         selected_tasks: Sequence[str] = (),
     ) -> Execution:
         """Record a new QUEUED attempt carrying its creation-time facts only.
@@ -811,8 +810,6 @@ class Run(Folder):
             executor: Creation-time executor facts (backend, target).
                 Start-time keys are refused.
             created_by: Who creates the attempt; defaults to this process.
-            source_entrypoint: The workflow script to capture. ``None``
-                captures nothing and leaves ``source`` unset.
             selected_tasks: The tasks a partial ``rerun`` re-executes; empty
                 means every task. Only valid with ``rerun``.
 
@@ -824,7 +821,7 @@ class Run(Folder):
                 *executor* names a start-time key, *mode* and the predecessor
                 or the predecessor disagree, or an attempt is active.
             KeyError: The named predecessor does not exist.
-            FileNotFoundError: *source_entrypoint* is not a file; no record
+            FileNotFoundError: The bound entrypoint file is missing; no record
                 is created.
             SourceCaptureError: A source file cannot be read, or the copy
                 failed or did not match the manifest.
@@ -837,7 +834,6 @@ class Run(Folder):
             environment=environment,
             executor=executor,
             created_by=created_by,
-            source_entrypoint=source_entrypoint,
             selected_tasks=selected_tasks,
         )
 
@@ -982,7 +978,6 @@ class Run(Folder):
         environment: dict[str, JSONValue] | None = None,
         executor: dict[str, JSONValue] | None = None,
         created_by: AgentRef | None = None,
-        source_entrypoint: PathArg | None = None,
         selected_tasks: Sequence[str] = (),
     ) -> Execution:
         """Record a new QUEUED attempt carrying its creation-time facts only.
@@ -1011,8 +1006,12 @@ class Run(Folder):
           creator-written host would pin it to a machine the attempt never
           ran on.
 
-        Source capture, when *source_entrypoint* is given, runs in this
-        order, after the key rules:
+        Every attempt captures its source by one rule, whoever creates it
+        (``molab run``, the server, ``run.execute``): the file the
+        experiment's code workflow is imported from
+        (:attr:`Experiment.entrypoint_file`) and its first-party imports.
+        A document or unbound experiment has no such file and captures
+        nothing. Capture runs in this order, after the key rules:
 
         1. Build the :class:`SourceManifest` (the entrypoint and its
            first-party imports, with digests and VCS state) from the
@@ -1046,8 +1045,6 @@ class Run(Folder):
             environment: Extra creation-time environment facts.
             executor: Creation-time executor facts (backend, target).
             created_by: Who creates the attempt; defaults to this process.
-            source_entrypoint: The workflow script to capture; ``None``
-                captures nothing and leaves ``source`` unset.
             selected_tasks: The tasks a partial ``rerun`` re-executes; empty
                 means every task. Only valid with ``rerun``.
 
@@ -1063,7 +1060,7 @@ class Run(Folder):
                 *executor* names a start-time key, *mode* and the
                 predecessor disagree, or an attempt is active.
             KeyError: The named predecessor does not exist.
-            FileNotFoundError: *source_entrypoint* is not a file; no record
+            FileNotFoundError: The bound entrypoint file is missing; no record
                 is created.
             SourceCaptureError: A file in the source closure exists but
                 cannot be read (raised before any record exists), or the
@@ -1087,7 +1084,8 @@ class Run(Folder):
         if inherited is not None:
             predecessor = inherited.id
         profile_environment = _creation_environment(profile_config, inherit_from=inherited)
-        manifest = source_manifest(source_entrypoint) if source_entrypoint is not None else None
+        entrypoint = self.experiment.entrypoint_file
+        manifest = source_manifest(entrypoint) if entrypoint is not None else None
         state = repo.create(
             mode=mode,
             created_by=created_by or _system_agent(),
