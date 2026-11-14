@@ -10,8 +10,16 @@ embed, rename, move, delete, backlinks and export call the knowledge verbs
 A host's ``manuscript/*.tex`` and ``knowledges/*.tex`` are listed and opened
 read-only beside those documents. Knowledge verbs do not write them.
 
+A node served below a workspace (``molab serve <project>``) also lists and
+opens the workspace root's own Notes, where reviewed lessons live. Their
+``relPath`` and ``hostPath`` climb out of the served node (``../../knowledges/
+<name>.md``), which is how a reader tells them apart, and they are read-only
+there: a write names its document by ``path``, and a path outside the served
+node is refused with 403.
+
 Each mutating handler is gated by :func:`_require_writable` (405 against a
-remote/read-only served workspace). A missing document is a 404.
+remote/read-only served workspace, 403 for a document outside the served
+node). A missing document is a 404.
 """
 
 from __future__ import annotations
@@ -20,6 +28,7 @@ import io
 import json
 import logging
 import os
+import posixpath
 import re
 import zipfile
 from datetime import UTC, datetime
@@ -299,20 +308,43 @@ def _path_of(target: object) -> str:
 
 
 def _rel(workspace: Workspace, path: object) -> str:
-    """*path* relative to the workspace root, as a posix string."""
-    return _StdPath(_path_of(path)).relative_to(_StdPath(str(workspace.root))).as_posix()
+    """*path* relative to the served root, as a posix string.
+
+    A path above the served root climbs out of it with ``..`` segments.
+    """
+    return posixpath.relpath(_path_of(path), str(workspace.root))
 
 
 def _host_rel(workspace: Workspace, doc_path: object) -> str:
-    """Host of *doc_path* relative to the workspace root. ``.`` is ``""``."""
+    """Host of *doc_path* relative to the served root (:func:`_rel`). ``.`` is ``""``."""
     from molab.knowledge.location import host_of
 
-    host = host_of(_path_of(doc_path))
-    try:
-        rel = _StdPath(str(host)).relative_to(_StdPath(str(workspace.root))).as_posix()
-    except ValueError:
-        return ""
+    rel = _rel(workspace, host_of(_path_of(doc_path)))
     return "" if rel == "." else rel
+
+
+def _outside_served(path: str) -> bool:
+    """Whether the request *path* names a file outside the served node."""
+    normal = posixpath.normpath(path)
+    return posixpath.isabs(normal) or normal == ".." or normal.startswith("../")
+
+
+def _workspace_notes(workspace: Workspace) -> list[Concept]:
+    """The enclosing workspace root's own Notes, for a node served below that root.
+
+    Empty when the served node is the workspace root (its walk already lists
+    them) or lies in no workspace. Only the root's ``knowledges/`` is read:
+    a sibling project's documents stay out of scope.
+    """
+    from molab.knowledge import Knowledge
+    from molab.knowledge.naming import KNOWLEDGE_CONTAINER
+
+    served = str(workspace.root)
+    root = Workspace.enclosing_root(served, fs=workspace.fs)
+    if root is None or posixpath.normpath(str(root)) == posixpath.normpath(served):
+        return []
+    container = workspace.fs.join(str(root), KNOWLEDGE_CONTAINER)
+    return [doc for doc in Knowledge(container, fs=workspace.fs).walk() if isinstance(doc, Note)]
 
 
 def _host_folder(workspace: Workspace, host_path: str | None) -> Folder:
@@ -486,8 +518,16 @@ def _require_writable(request: Request) -> None:
     router, so it carries its own write-gate: it 405s a mutating verb against a
     remote served workspace (via :func:`assert_workspace_writable`); a local /
     unmanaged workspace stays writable. Safe methods pass through untouched.
+    A document named by a ``path`` outside the served node (a workspace Note
+    a project serve lists) is read-only here: 403.
     """
     assert_workspace_writable(active_served_key() or "", request.method)
+    path = request.query_params.get("path")
+    if path is not None and _outside_served(path):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"{path!r} lies outside the served node; serve the workspace to change it",
+        )
 
 
 def _updated_at(workspace: Workspace, path: object) -> str | None:
@@ -937,7 +977,7 @@ def list_knowledge(
     root = Knowledge(workspace.root, fs=workspace.fs)
     notes: list[NoteSummary] = []
     references: list[ReferenceSummary] = []
-    for item in root.walk():
+    for item in [*root.walk(), *_workspace_notes(workspace)]:
         summary = _note_summary(workspace, item)
         if tag is not None and tag not in summary.tags:
             continue

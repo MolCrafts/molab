@@ -452,6 +452,76 @@ class TestScopedKnowledgeListing:
         assert all(not row["relPath"].endswith("index.md") for row in response.json()["notes"])
 
 
+class TestWorkspaceNotesFromAScopedServe:
+    """A served node below a workspace reads the workspace's own Notes, and only reads them."""
+
+    @staticmethod
+    def _lesson(ws: Workspace) -> Path:
+        from molab.knowledge import Note
+
+        lesson = Note(ws, "lesson")
+        lesson.write("# Reviewed lesson\n", {"status": "active"}, tags=["md"])
+        Note(ws, "unreviewed").write("# u\n", tags=["md"])
+        plan = Path(str(lesson.path)).with_name("workspace-plan.md")
+        plan.write_text("---\nclass: Plan\nname: workspace plan\n---\n# not a note\n")
+        return Path(str(lesson.path))
+
+    def test_a_project_serve_lists_and_reads_workspace_notes(self, client_at: tuple) -> None:
+        import os
+
+        from molab.knowledge import Note
+
+        ws, alpha, _experiment, _run, beta, open_at = client_at
+        lesson = self._lesson(ws)
+        Note(beta, "other project").write("# b\n", {"status": "active"})
+        served = Path(str(alpha.resolve()))
+        expected = Path(os.path.relpath(lesson, served)).as_posix()
+        with open_at(served) as client:
+            active = client.get("/api/knowledge", params={"status": "active"}).json()["notes"]
+            tagged = client.get("/api/knowledge", params={"tag": "md"}).json()["notes"]
+            untagged = client.get("/api/knowledge", params={"tag": "nope"}).json()["notes"]
+            listed = client.get("/api/knowledge").json()["notes"]
+            note = client.get("/api/knowledge/note", params={"path": expected})
+        assert [row["relPath"] for row in active] == [expected]
+        assert expected.startswith("../")
+        assert active[0]["hostPath"] == Path(os.path.relpath(ws.root, served)).as_posix()
+        assert {row["name"] for row in tagged} == {"lesson", "unreviewed"}
+        assert untagged == []
+        assert not any("workspace-plan" in row["relPath"] for row in listed)
+        assert not any("other-project" in row["relPath"] for row in listed)
+        assert note.status_code == 200, note.text
+        assert "Reviewed lesson" in note.json()["body"]
+
+    def test_a_project_serve_cannot_write_a_workspace_note(self, client_at: tuple) -> None:
+        import os
+
+        ws, alpha, _experiment, _run, _beta, open_at = client_at
+        lesson = self._lesson(ws)
+        before = lesson.read_text()
+        served = Path(str(alpha.resolve()))
+        rel = Path(os.path.relpath(lesson, served)).as_posix()
+        with open_at(served) as client:
+            edit = client.put("/api/knowledge/doc", params={"path": rel}, json={"body": "x"})
+            fields = client.get("/api/knowledge/doc/fields", params={"path": rel}).json()
+            patch = client.patch(
+                "/api/knowledge/doc/fields",
+                params={"path": rel},
+                json={"fields": {"status": "retired"}, "ifMatch": fields["digest"]},
+            )
+            delete = client.delete("/api/knowledge/doc", params={"path": rel})
+        assert edit.status_code == 403, edit.text
+        assert patch.status_code == 403, patch.text
+        assert delete.status_code == 403, delete.text
+        assert lesson.read_text() == before
+
+    def test_the_workspace_serve_lists_its_notes_once(self, client_at: tuple) -> None:
+        ws, _alpha, _experiment, _run, _beta, open_at = client_at
+        self._lesson(ws)
+        with open_at(Path(str(ws.root))) as client:
+            active = client.get("/api/knowledge", params={"status": "active"}).json()["notes"]
+        assert [row["relPath"] for row in active] == ["knowledges/lesson.md"]
+
+
 class TestScopedKnowledgeGraph:
     """A served node's graph holds the documents the listing holds, and no others."""
 
