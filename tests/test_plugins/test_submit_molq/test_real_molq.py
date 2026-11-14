@@ -184,9 +184,35 @@ class TestCancel:
         code, output = _molab("runs", "cancel", run.id, "--yes", "-ws", str(lab.root))
 
         assert code == 0, output
-        assert run.executions[-1].status is ExecutionStatus.CANCELLED
-        state = job.wait(timeout=30, interval=0.2)["snapshots"][0]["state"]
-        assert state == "cancelled"
+        assert _settle(run) is ExecutionStatus.CANCELLED
+        # Sealed from the scheduler's report, not from the cancel request.
+        error = run.executions[-1].error
+        assert error is not None
+        assert "scheduler reported cancelled" in str(error["message"])
+
+    def test_a_cancelled_job_comes_home_like_any_ended_job(self, lab: Lab) -> None:
+        lab.hold.write_text("")
+        run = _submit(lab, seed=1)
+        native = _job_ref(run)["native_id"]
+        remote = _remote_attempt(lab, run)
+        deadline = time.monotonic() + 60
+        while not list(remote.rglob("data.txt")):
+            assert time.monotonic() < deadline, "the worker never wrote its output"
+            time.sleep(0.2)
+
+        code, output = _molab("runs", "cancel", run.id, "--yes", "-ws", str(lab.root))
+
+        assert code == 0, output
+        assert _settle(run) is ExecutionStatus.CANCELLED
+        record = run.executions[-1]
+        assert "host" in record.executor, "the worker's record came home"
+        attempt = Path(str(run.execution_dir(record.id)))
+        assert (attempt / "run.log").is_file()
+        assert "probe stdout" in (attempt / "jobs" / f"{native}.out").read_text()
+        assert not list(attempt.rglob("data.txt")), "a cancelled attempt's output stays remote"
+        assert list(remote.rglob("data.txt"))
+        assert not (attempt / "jobs" / ".molq").exists()
+        assert not (remote / "jobs" / ".molq").exists()
 
 
 class TestExec:

@@ -851,6 +851,8 @@ def cancel_execution(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # A remote attempt is sealed when it comes home; bring it now if its job has ended.
+    _reconcile(run)
     return _execution_response(run.execution(execution_id))
 
 

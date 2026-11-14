@@ -735,6 +735,8 @@ def run_cancel(
         if warning is not None:
             rprint(f"  [yellow]Warning:[/yellow] {warning} (workspace state updated)")
             errors += 1
+        # A remote attempt is sealed when it comes home; bring it now if its job has ended.
+        _reconcile(r)
         rprint(f"  [green]OK[/green] Cancelled {r.id}")
         cancelled += 1
 

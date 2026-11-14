@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from .domain import Execution
     from .run import Run
 
 __all__ = ["cancel_run"]
@@ -41,8 +42,9 @@ def cancel_run(
             (molq scheduler job / local worker pid) before the status flip.
             It returns ``None`` on success or a warning string (never raises
             for caller-actionable reasons). It must not seal the attempt;
-            this function seals. Workspace stays scheduler-agnostic; the
-            shells inject the plugin hook.
+            this function seals, except an attempt left to its stage-out
+            (:func:`_seal_cancelled`). Workspace stays scheduler-agnostic;
+            the shells inject the plugin hook.
         allow_pending: Also cancel a ``pending`` run — record a CANCELLED
             initial Execution so plain ``run`` never starts it (bulk-cancel
             CLI semantics). The default keeps the strict intervene domain:
@@ -52,7 +54,7 @@ def cancel_run(
 
     Returns:
         ``None`` on a clean cancel, or the executor-signal warning (the
-        workspace state is flipped to ``cancelled`` regardless, so the
+        workspace state is then flipped to ``cancelled`` regardless, so the
         recorded state always reflects the user's intent).
 
     Raises:
@@ -75,7 +77,7 @@ def cancel_run(
                 f"execution {execution_id!r} of run {run.id} is {state.status.value!r}, not running"
             )
         warning = signal_executor(run) if signal_executor is not None else None
-        run.cancel(execution_id)
+        _seal_cancelled(run, state, signalled=warning is None)
         return warning
 
     active = [state for state in run.executions if state.status in ACTIVE_EXECUTION_STATUSES]
@@ -98,5 +100,22 @@ def cancel_run(
 
     warning = signal_executor(run) if signal_executor is not None else None
     for state in active:
-        run.cancel(state.id)
+        _seal_cancelled(run, state, signalled=warning is None)
     return warning
+
+
+def _seal_cancelled(run: Run, state: Execution, *, signalled: bool) -> None:
+    """Seal *state* CANCELLED, unless its job was signalled on a compute target.
+
+    An attempt dispatched to a compute target (``executor["target"]``) is a
+    local copy of the record its worker writes there. It is sealed where it
+    comes home: the reconcile every status reader runs stages the attempt out
+    once the scheduler reports the job ended, merges the worker's record and
+    seals it CANCELLED, so a cancelled attempt's records, logs and job files
+    take the path of every other ended job. A local seal now would make that
+    merge a no-op and leave the attempt on the target. When the signal failed
+    nothing will end the job, and the local seal records the user's intent.
+    """
+    if signalled and state.executor.get("target") is not None:
+        return
+    run.cancel(state.id)

@@ -24,7 +24,7 @@ pip install molq
 
 ## What gets recorded
 
-The plugin creates a QUEUED `eNN` before it submits, and stages `executions/<id>/`. A scheduler RESUME on a remote target recomputes, because the predecessor journal is not staged. A record that stays QUEUED because the scheduler job died is cleared with `molab runs cancel <run-id>…`, which cancels each run's active attempt, QUEUED included.
+The plugin creates a QUEUED `eNN` before it submits, and stages `executions/<id>/`. A scheduler RESUME on a remote target recomputes, because the predecessor journal is not staged. A record that stays QUEUED because the scheduler job died is cleared with `molab runs cancel <run-id>…`, which cancels each run's active attempt, QUEUED included. A cancel the scheduler accepted leaves a remote attempt open: the next reconcile brings it home like any ended job (records and logs home, `out/` left on the target, molq's job files removed) and seals it CANCELLED. When the signal fails, the attempt is sealed CANCELLED at once.
 
 ## Optional Dependency Boundaries
 
