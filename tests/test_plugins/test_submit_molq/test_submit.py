@@ -568,13 +568,25 @@ def _install_refreshing_molq(
     *,
     state: str = "queued",
     refresh_error: Exception | None = None,
+    logs: dict[str, str] | None = None,
+    logs_error: Exception | None = None,
 ) -> RefreshSpy:
-    """Replace the application client with a fake whose ``status`` reports *state*."""
+    """Replace the application client with a fake whose ``status`` reports *state*.
+
+    ``logs`` is the scheduler's own output per stream, served in 4-byte chunks.
+    """
     spy = RefreshSpy()
+    served = logs or {}
 
     class _Job:
         def __init__(self, ref: dict[str, str]) -> None:
             self.ref = ref
+
+        def logs(self, *, stream: str = "stdout", offset: int = 0) -> dict[str, object]:
+            if logs_error is not None:
+                raise logs_error
+            text = served.get(stream, "")[offset : offset + 4]
+            return {"text": text, "next_offset": offset + len(text), "bytes_read": len(text)}
 
         def status(self, **_kw: object) -> dict[str, object]:
             if refresh_error is not None:
@@ -651,6 +663,43 @@ class TestReconcileSubmission:
         assert state in str(e01.error["message"]).lower()
         assert returned.record == e01
         assert returned.error is None
+
+    def test_the_scheduler_output_of_an_ended_job_is_kept_in_jobs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A worker that dies before it starts leaves only the scheduler's own output."""
+        from molab.plugins.submit_molq.submit import reconcile_submission
+
+        _ws, _project, run = _submit_local(monkeypatch, tmp_path)
+        _install_refreshing_molq(
+            monkeypatch,
+            state="failed",
+            logs={"stdout": "loading env\n", "stderr": "python: No such file or directory\n"},
+        )
+
+        reconcile_submission(run, "e01")
+
+        jobs = run.execution_dir("e01") / "jobs"
+        assert (jobs / "fake-sched-id.out").read_text() == "loading env\n"
+        assert (jobs / "fake-sched-id.err").read_text() == "python: No such file or directory\n"
+        assert run.execution("e01").status.value == "failed"
+
+    def test_unreadable_scheduler_output_does_not_stop_the_seal(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from molab.plugins.submit_molq.submit import reconcile_submission
+
+        _ws, _project, run = _submit_local(monkeypatch, tmp_path)
+        _install_refreshing_molq(
+            monkeypatch,
+            state="failed",
+            logs_error=MolqError("FILE_UNAVAILABLE", "Native log location unavailable"),
+        )
+
+        returned = reconcile_submission(run, "e01")
+
+        assert returned.record.status.value == "failed"
+        assert not (run.execution_dir("e01") / "jobs" / "fake-sched-id.out").exists()
 
     def test_rebuilds_the_job_from_recorded_executor(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

@@ -483,6 +483,9 @@ class TestReconcileAfterAPrecreatedSubmission:
             def status(self) -> dict[str, Any]:
                 return {"snapshots": [{"state": "succeeded", "terminal": True}]}
 
+            def logs(self, *, stream: str, offset: int) -> dict[str, Any]:
+                return {"text": "", "next_offset": offset, "bytes_read": 0}
+
         class _Client:
             def job(self, _ref: object) -> _EndedJob:
                 return _EndedJob()

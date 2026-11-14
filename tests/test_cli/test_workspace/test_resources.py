@@ -229,6 +229,9 @@ class TestRunList:
             def status(self) -> dict[str, object]:
                 return {"snapshots": [{"state": "cancelled", "terminal": True}]}
 
+            def logs(self, *, stream: str, offset: int) -> dict[str, object]:
+                return {"text": "", "next_offset": offset, "bytes_read": 0}
+
         class _Client:
             def job(self, _ref: object) -> _EndedJob:
                 return _EndedJob()

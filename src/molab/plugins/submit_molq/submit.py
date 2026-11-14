@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from mollog import get_logger
 from molq import MolqError
 
 from molab._typing import JSONValue
@@ -48,6 +49,8 @@ __all__ = [
     "reconcile_latest",
     "reconcile_submission",
 ]
+
+logger = get_logger(__name__)
 
 _REF_KEYS = ("cluster_id", "incarnation", "native_id", "registry_id")
 _EXECUTION_ENV = "MOLAB_EXECUTION_ID"
@@ -529,7 +532,8 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
 
         from molab.workspace.connection import get_client
 
-        status = get_client(ref["registry_id"]).job(ref).status()
+        job = get_client(ref["registry_id"]).job(ref)
+        status = job.status()
         snapshots = status.get("snapshots") or []
         if not snapshots:
             raise MolqError("JOB_NOT_FOUND", f"job {job_id} returned no snapshot")
@@ -537,6 +541,7 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
         state = str(snapshot.get("state") or "unknown")
         if not snapshot.get("terminal") and state not in _TERMINAL_STATES:
             return ReconcileOutcome(record=record)
+        _keep_scheduler_output(job, mol_run, execution_id, ref)
 
         if target is None or transport is None:
             authoritative = True
@@ -555,6 +560,47 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
             ),
         )
     return ReconcileOutcome(record=repo.get(execution_id))
+
+
+def _keep_scheduler_output(
+    job: Any,  # noqa: ANN401 — a molq ``Job`` handle; molq ships no protocol for it
+    mol_run: Run,
+    execution_id: str,
+    ref: dict[str, str],
+) -> None:
+    """Copy an ended job's own stdout / stderr into the attempt's ``jobs/``.
+
+    molq moves a terminal job's directory off the target and keeps it only
+    for its retention window, and nothing else holds what the job printed
+    before the worker started (a missing interpreter, a failing preamble).
+    The attempt keeps it as scheduler evidence: ``jobs/<native id>.out`` and
+    ``.err``. An output molq cannot read is logged and left out; it never
+    stops the seal.
+    """
+    from molab.workspace.execution_dirs import JOBS
+    from molab.workspace.file_store import FileStore
+
+    store = FileStore(
+        mol_run.execution_dir(execution_id), fs=mol_run.experiment.project.workspace.fs
+    )
+    name = ref.get("native_id") or "job"
+    for stream, suffix in (("stdout", "out"), ("stderr", "err")):
+        chunks: list[str] = []
+        offset = 0
+        try:
+            while True:
+                chunk = job.logs(stream=stream, offset=offset)
+                if not chunk["bytes_read"]:
+                    break
+                chunks.append(chunk["text"])
+                offset = chunk["next_offset"]
+        except MolqError as exc:
+            logger.warning(
+                f"run {mol_run.id} attempt {execution_id}: scheduler {stream} of job "
+                f"{name} is not kept: {exc}"
+            )
+            continue
+        store.put(f"{JOBS.name}/{name}.{suffix}", "".join(chunks).encode())
 
 
 def reconcile_latest(mol_run: Run) -> ReconcileOutcome | None:
