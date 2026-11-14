@@ -409,9 +409,18 @@ class MirrorTransport:
         if not source.exists():
             raise OSError(f"no such file: {source}")
         if recursive:
-            shutil.copytree(
-                source, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*exclude)
-            )
+            # rsync semantics: ``/name`` is anchored at the transfer root, ``name``
+            # matches an entry of that name at any depth.
+            anchored = {pattern[1:] for pattern in exclude if pattern.startswith("/")}
+            by_name = shutil.ignore_patterns(*(p for p in exclude if not p.startswith("/")))
+
+            def ignore(directory: str, names: list[str]) -> set[str]:
+                ignored = set(by_name(directory, names))
+                if Path(directory) == source:
+                    ignored |= anchored & set(names)
+                return ignored
+
+            shutil.copytree(source, dest, dirs_exist_ok=True, ignore=ignore)
         else:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
@@ -616,3 +625,62 @@ class TestAssetsCrossTheTarget:
         with pytest.raises(ValueError, match="already"):
             stage_out(transport, run, target, "e01")
         assert run.execution("e01").status.value == "queued"
+
+
+def _finish_remotely_as(target: ComputeTarget, run: Run, status: str) -> Path:
+    """The remote attempt dir of ``e01`` after a worker left *status* in its record."""
+    ws = run.experiment.project.workspace
+    attempt = Path(target_run_dir(target, ws, run)) / "executions" / "e01"
+    doc = json.loads(_remote_doc(run))
+    if status != "succeeded":
+        doc.update(status=status, finished_at=None, sealed_at=None)
+    (attempt / "execution.json").write_text(json.dumps(doc), encoding="utf-8")
+    (attempt / "run.log").write_text("task md started\n", encoding="utf-8")
+    (attempt / "traceback.txt").write_text("Traceback ...\n", encoding="utf-8")
+    (attempt / "workflow.json").write_text("{}", encoding="utf-8")
+    (attempt / "jobs").mkdir(exist_ok=True)
+    (attempt / "jobs" / "5248413.out").write_text("worker\n", encoding="utf-8")
+    (attempt / "out" / "md").mkdir(parents=True)
+    (attempt / "out" / "md" / "trajectory.mrec").write_bytes(b"x" * 4096)
+    (attempt / "work").mkdir()
+    (attempt / "work" / "scratch.bin").write_bytes(b"y" * 4096)
+    return attempt
+
+
+class TestStageOutOfAnUnfinishedAttempt:
+    """A killed attempt brings back its records and evidence, not its bulk tiers."""
+
+    @pytest.mark.parametrize("status", ["running", "failed"])
+    def test_records_and_logs_come_back_without_out_and_work(
+        self, tmp_path: Path, status: str
+    ) -> None:
+        ws, run = _make_run(tmp_path / "lab")
+        _queued_with_job_id(ws, run)
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+        stage_in(transport, run, target, "e01")
+        _finish_remotely_as(target, run, status)
+
+        assert stage_out(transport, run, target, "e01") is True
+
+        local = run.execution_dir("e01")
+        for name in ("run.log", "traceback.txt", "workflow.json", "jobs/5248413.out"):
+            assert (local / name).is_file(), name
+        assert not (local / "out").exists()
+        assert not (local / "work").exists()
+        assert run.execution("e01").status.value == status
+
+    def test_a_succeeded_attempt_still_brings_back_its_out_tier(self, tmp_path: Path) -> None:
+        ws, run = _make_run(tmp_path / "lab")
+        _queued_with_job_id(ws, run)
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+        stage_in(transport, run, target, "e01")
+        _finish_remotely_as(target, run, "succeeded")
+
+        assert stage_out(transport, run, target, "e01") is True
+
+        local = run.execution_dir("e01")
+        assert (local / "out" / "md" / "trajectory.mrec").stat().st_size == 4096
+        assert (local / "work" / "scratch.bin").is_file()
+        assert (local / "run.log").is_file()

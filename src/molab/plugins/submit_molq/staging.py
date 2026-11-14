@@ -28,11 +28,21 @@ The local↔remote contract is intentionally narrow:
   earlier attempt of this run registered, so a later attempt re-registers
   into that slot under the same id.
 * **Stage-out** pulls the remote ``executions/<id>/`` back **without** its
-  ``execution.json`` (products, logs, the per-attempt ``alive`` heartbeat)
-  and the run's ``values/`` store (the content-addressed values the pulled
-  journal cites; rsync adds only the new files), then reads the remote
-  ``execution.json`` and hands it to
+  ``execution.json`` and **without its bulk tiers** (the attempt directories
+  declared not ``versioned``: ``out/``, ``work/``), and the run's ``values/``
+  store (the content-addressed values the pulled journal cites; rsync adds
+  only the new files), then reads the remote ``execution.json`` and hands it
+  to
   :meth:`~molab.workspace.execution_repository.ExecutionRepository.merge_remote`.
+  The bulk tiers come back only when that record says the attempt
+  **succeeded**. That is the whole of what the rest needs from a failed,
+  killed or cancelled attempt: reconcile and the reaper read the record, the
+  ``alive`` heartbeat and the scheduler evidence under ``jobs/``; a person
+  reads ``run.log`` / ``traceback.txt`` / ``stdout.log`` / ``stderr.log``; a
+  resume seeds from the journal (``workflow.json``, ``nodes/``) and
+  ``values/``; asset adoption reads the staged experiment's ``assets/``,
+  outside the attempt. None of it lives in ``out/`` or ``work/``, whose
+  bytes (a killed MD run's 29 GB trajectory) stay on the target.
   Before the merge, every asset the attempt registered in its staged
   experiment comes back with the id the worker minted, installed by the
   experiment's repository (``AssetRepository.adopt``); a product that cannot
@@ -68,8 +78,9 @@ from molq import MolqError
 from molab.ids import hash_bytes
 from molab.workspace import Workspace
 from molab.workspace.asset_repository import asset_by_id
-from molab.workspace.domain import Asset, ExecutionMode, ExecutionOrigin
+from molab.workspace.domain import Asset, ExecutionMode, ExecutionOrigin, ExecutionStatus
 from molab.workspace.entity_record import ENTITY_FILENAME
+from molab.workspace.execution_dirs import scratch_dirs
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.naming import ASSET_CONTAINER, VALUE_CONTAINER
 from molab.workspace.source_snapshot import SourceCaptureError, copy_sources, source_manifest
@@ -329,7 +340,9 @@ def stage_out(
     """Pull one attempt's files back and merge the worker's record locally.
 
     The remote ``executions/<execution_id>/`` is pulled without its
-    ``execution.json``; the remote record is then read and merged through
+    ``execution.json`` and, unless the remote record says it succeeded,
+    without its bulk tiers (see the module doc for why that is all the rest
+    needs); the remote record is then read and merged through
     ``ExecutionRepository.merge_remote``, so the local job ids survive and a
     locally sealed record is never overwritten. Idempotent: a replayed call
     merges into an already-sealed record, which is a no-op.
@@ -367,15 +380,19 @@ def stage_out(
     remote_exec = f"{remote_run}/executions/{execution_id}"
     local_exec = str(Path(local_run) / "executions" / execution_id)
     Path(local_exec).mkdir(parents=True, exist_ok=True)
+    bulk = [directory.name for directory in scratch_dirs()]
     try:
         transport.download(
             remote_exec,
             local_exec,
             recursive=True,
-            exclude=(*_RSYNC_EXCLUDES, "execution.json"),
+            # ``/name`` is anchored at the attempt directory (rsync semantics).
+            exclude=(*_RSYNC_EXCLUDES, "execution.json", *(f"/{name}" for name in bulk)),
         )
         _pull_values(transport, remote_run, local_run)
         text = transport.read_text(f"{remote_exec}/execution.json")
+        if json.loads(text).get("status") == ExecutionStatus.SUCCEEDED.value:
+            _pull_bulk(transport, remote_exec, local_exec, bulk)
         _pull_products(transport, mol_run, execution_id, _staged_root(remote_run, mol_run))
     except MolqError as exc:
         if exc.outcome == "unknown":
@@ -395,6 +412,19 @@ def stage_out(
         fs=workspace.fs,
     ).merge_remote(execution_id, json.loads(text))
     return True
+
+
+def _pull_bulk(
+    transport: StagingFiles, remote_exec: str, local_exec: str, names: Sequence[str]
+) -> None:
+    """Pull the bulk tiers *names* of a succeeded attempt; an absent one has nothing to pull."""
+    for name in names:
+        remote = f"{remote_exec}/{name}"
+        if not transport.exists(remote):
+            continue
+        local = Path(local_exec) / name
+        local.mkdir(parents=True, exist_ok=True)
+        transport.download(remote, str(local), recursive=True, exclude=_RSYNC_EXCLUDES)
 
 
 def _pull_products(
