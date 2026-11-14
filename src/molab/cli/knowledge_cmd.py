@@ -624,8 +624,9 @@ def knowledge_write(
         list[str] | None,
         typer.Option(
             "--source",
-            help="An entity ref, URL or DOI, or a file path. Repeat once per source; "
-            "a sourced class given none names its host.",
+            help="An entity ref, URL or DOI, or a file path (a relative one is read from "
+            "the workspace root). Repeat once per source; a sourced class given none "
+            "names its host.",
         ),
     ] = None,
     fields: Annotated[

@@ -10,11 +10,13 @@ cycle. Every such import therefore sits in a function body (or an
 from __future__ import annotations
 
 import os
+import posixpath
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from .concept import Knowledge, append_link, link_target
 from .edges import validate_role
+from .knowledge_item import SourceRef
 
 if TYPE_CHECKING:
     from molab.fs import FileSystem, PathArg
@@ -25,7 +27,6 @@ if TYPE_CHECKING:
     from .concept import Concept
     from .concepts import _SourcedKnowledge
     from .edges import EdgeRole
-    from .knowledge_item import SourceRef
     from .naming import KnowledgeFormat
 
 
@@ -64,6 +65,8 @@ def write_knowledge(
         name: Human document name.
         of: The Knowledge class to write.
         sources: Source list. Required for Finding, Report, Plan, Observation.
+            A relative file path, here or in *cite*, is read from the
+            workspace root (:func:`_relative_base`).
         created_by: Author (a person or tool identifier).
         text: Narrative. ``""`` on an existing document leaves the body.
         cite: ``(target, role)`` pairs, each written as one edge through
@@ -97,8 +100,17 @@ def write_knowledge(
     from .mutation import mutation
 
     disk = fs if fs is not None else _host_fs(host)
-    edges = [(link_target(target), validate_role(role)) for target, role in cite]
     path = _landed_path(host, name, of, format, disk)
+    targets = [(link_target(target), validate_role(role)) for target, role in cite]
+    relative = [t for t, _role in targets if _is_relative(t)] + [
+        s.ref
+        for s in sources
+        if isinstance(s, SourceRef) and s.kind == "file" and _is_relative(s.ref)
+    ]
+    # The root walk is paid only when there is a relative path to read from it.
+    base = _relative_base(path, disk) if relative else ""
+    edges = [(_from_base(target, base), role) for target, role in targets]
+    sources = [_rooted_source(source, base) for source in sources]
     sourced = _sourced_class(of)
     if sourced is not None:
         # A dummy source lets an existing file answer ``exists`` before the
@@ -137,6 +149,44 @@ def write_knowledge(
             change.touched.extend([old, *relinked])
         refresh_section(item.path, fs=disk, root=change.root, known_root=True)
     return item
+
+
+def _relative_base(path: str, disk: FileSystem) -> str:
+    """What a relative path a writer is handed names a file from.
+
+    The one rule for a relative source or cite target (``--source
+    projects/p/knowledges/spec.md``): it is read from the root of the
+    workspace the document lands in, wherever the document lands, so the
+    same spelling works from a project, an experiment or a run. Outside a
+    workspace it is read from the document's own directory. The writer turns
+    it into a link relative to the document, which is how every reader and
+    the ``knowledge.local_source`` check resolve a link.
+    """
+    from molab.workspace import Workspace
+
+    root = Workspace.enclosing_root(path, fs=disk)
+    return str(root) if root is not None else disk.dirname(path)
+
+
+def _is_relative(target: str) -> bool:
+    """Whether *target* is a relative local path (not a ref, a URL or an anchor)."""
+    from .concept import _skip_link
+
+    return not _skip_link(target) and not posixpath.isabs(target)
+
+
+def _from_base(target: str, base: str) -> str:
+    """*target* read from *base* when it is a relative local path; else itself."""
+    if not _is_relative(target):
+        return target
+    return posixpath.normpath(posixpath.join(base, target))
+
+
+def _rooted_source(source: object, base: str) -> object:
+    """A relative ``file`` :class:`SourceRef` read from *base*; any other source as given."""
+    if not isinstance(source, SourceRef) or source.kind != "file":
+        return source
+    return source.model_copy(update={"ref": _from_base(source.ref, base)})
 
 
 def _landed_path(
@@ -217,7 +267,6 @@ def normalize_sources(
     A folder becomes :meth:`SourceRef.of` and a string :meth:`SourceRef.parse`.
     ``Note`` and ``Literature`` given none get none.
     """
-    from .knowledge_item import SourceRef
 
     if not sources and _sourced_class(of) is None:
         return []

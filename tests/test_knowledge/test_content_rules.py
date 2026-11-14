@@ -302,3 +302,31 @@ class TestTheWriteGate:
         target.rename("Moved")
 
         assert "(moved.md)" in old.read_text(encoding="utf-8")
+
+
+class TestWorkspaceRelativeSources:
+    """A relative source path names a file from the workspace root, when written and read."""
+
+    def test_an_experiment_document_citing_a_project_document_is_clean(
+        self, lab: Any, experiment: Any
+    ) -> None:
+        from molab.knowledge.concepts import Note, Observation
+        from molab.knowledge.write import normalize_sources, write_knowledge
+
+        project = lab.get_project("p")
+        spec = write_knowledge(project, name="spec", of=Note, created_by="t", text="The spec.")
+        rel = Path(str(spec.path)).relative_to(Path(str(lab.root))).as_posix()
+
+        seen = write_knowledge(
+            experiment,
+            name="seen",
+            of=Observation,
+            sources=normalize_sources([rel], default_host=experiment, of=Observation),
+            cite=[(rel, "cites")],
+            created_by="t",
+            text="Observed.",
+        )
+
+        assert {Path(edge.target) for edge in seen.links()} == {Path(str(spec.path))}
+        found = [i for i in validate_knowledge(lab) if i["rule"] == "knowledge.local_source"]
+        assert found == []
