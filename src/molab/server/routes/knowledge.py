@@ -318,12 +318,17 @@ def _host_rel(workspace: Workspace, doc_path: object) -> str:
 def _host_folder(workspace: Workspace, host_path: str | None) -> Folder:
     """The workspace, project, experiment, or run *host_path* names.
 
+    An omitted or empty *host_path* is the served node itself (a served
+    project when ``molab serve <project>``), never its wrapper.
+
     Raises:
         HTTPException: 404 when *host_path* is not one of those folders.
     """
+    from molab.workspace.scope import as_folder
+
     wanted = host_path or ""
     if wanted == "":
-        return workspace
+        return as_folder(workspace)
     root = _StdPath(str(workspace.root))
     folders: list[Folder] = []
     for project in workspace.list_projects():

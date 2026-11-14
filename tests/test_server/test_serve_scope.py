@@ -401,6 +401,19 @@ class TestScopedFind:
                 )
                 assert response.status_code == 201, response.text
 
+    @pytest.mark.parametrize("cls", ["Plan", "Observation", "Note"])
+    def test_an_omitted_host_is_the_served_node(self, client_at: tuple, cls: str) -> None:
+        _ws, alpha, _experiment, _run, _beta, open_at = client_at
+        with open_at(Path(str(alpha.resolve()))) as client:
+            omitted = client.post("/api/knowledge/doc", json={"name": "Omitted", "cls": cls})
+            dot = client.post(
+                "/api/knowledge/doc", json={"name": "Dot", "cls": cls, "hostPath": "."}
+            )
+        assert omitted.status_code == 201, omitted.text
+        assert dot.status_code == 201, dot.text
+        assert omitted.json()["hostPath"] == dot.json()["hostPath"]
+        assert omitted.json()["relPath"] == "knowledges/omitted.md"
+
     def test_refs_outside_the_served_node_are_not_found(self, client_at: tuple) -> None:
         from molab.server.deps.scope_root import ScopeRoot
         from molab.workspace.errors import RefNotFoundError
