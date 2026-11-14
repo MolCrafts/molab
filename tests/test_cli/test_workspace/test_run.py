@@ -1289,9 +1289,9 @@ def _install_fake_molq(monkeypatch: pytest.MonkeyPatch, run: Run) -> SubmitSpy:
 
     class _FakeCluster:
         def submit(
-            self, spec: object, *, argv: object = None, request_key: object = None
+            self, spec: object, *, project_root: str, request_key: object = None
         ) -> _FakeJob:
-            del argv, request_key
+            del project_root, request_key
             env = dict(getattr(getattr(spec, "execution", None), "env", None) or {})
             spy.submits += 1
             spy.execution_id = env.get("MOLAB_EXECUTION_ID")
@@ -1649,6 +1649,8 @@ class TestRunHelpText:
 @dataclass
 class _ExecSpy:
     specs: list[object] = field(default_factory=list)
+    project_roots: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
 
 
 def _fake_exec_client(monkeypatch: pytest.MonkeyPatch, *, reject: str | None = None) -> _ExecSpy:
@@ -1667,7 +1669,11 @@ def _fake_exec_client(monkeypatch: pytest.MonkeyPatch, *, reject: str | None = N
             return {"text": text, "next_offset": offset + len(text), "bytes_read": len(text)}
 
     class _Cluster:
-        def submit(self, spec: object) -> _Job:
+        def definition(self) -> dict[str, object]:
+            return {"id": "hpc", "name": "hpc", "scheduler": "slurm"}
+
+        def submit(self, spec: object, *, project_root: str) -> _Job:
+            spy.project_roots.append(project_root)
             if reject is not None:
                 raise MolqError(
                     "SUBMISSION_REJECTED",
@@ -1682,7 +1688,16 @@ def _fake_exec_client(monkeypatch: pytest.MonkeyPatch, *, reject: str | None = N
         def cluster(self, _name: str) -> _Cluster:
             return _Cluster()
 
+    class _TargetFS:
+        def mkdir(self, path: str, *, parents: bool, exist_ok: bool) -> None:
+            del path, parents, exist_ok
+
+        def rm(self, path: str, *, recursive: bool) -> None:
+            del recursive
+            spy.removed.append(path)
+
     monkeypatch.setattr("molab.workspace.connection.get_client", lambda _r=None: _Client())
+    monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _target: _TargetFS())
     return spy
 
 

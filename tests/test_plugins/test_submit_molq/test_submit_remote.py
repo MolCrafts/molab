@@ -153,8 +153,9 @@ def _install_fake_session(monkeypatch: pytest.MonkeyPatch, run, captured: dict[s
         def __init__(self, name: str) -> None:
             captured["cluster"] = name
 
-        def submit(self, spec, *, argv=None, request_key=None):
-            del argv, request_key
+        def submit(self, spec, *, project_root, request_key=None):
+            del request_key
+            captured["project_root"] = project_root
             unit = spec.execution.units[0]
             captured["submit_argv"] = list(unit.command.get("argv") or [])
             captured["submit_cwd"] = unit.cwd

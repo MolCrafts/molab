@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import traceback
+import uuid
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ from molab.profile.loader import find_default_config
 from molab.workflow import default_binding_registry
 from molab.workspace.domain import ExecutionMode
 from molab.workspace.execution_context import profile_config_hash
+from molab.workspace.history import MOLAB_DIR
 from molab.workspace.run import RunStatus
 from molab.workspace.source_snapshot import SourceCaptureError
 from molab.workspace.target import LocalTarget, RemoteTarget
@@ -1651,16 +1653,28 @@ def exec_cmd(
 
             from molab.plugins.submit_molq.submit import job_resources, job_scheduling
             from molab.workspace.connection import get_client
+            from molab.workspace.targets import target_definition, to_filesystem
 
             assert target.cluster_id is not None
+            # molq keeps the job's logs and receipts under its project root; a
+            # directory this exec owns, removed once the output is printed.
+            target_fs = to_filesystem(target)
+            project_root = f"{target.path.rstrip('/')}/{MOLAB_DIR}/exec/{uuid.uuid4().hex}"
+            target_fs.mkdir(project_root, parents=True, exist_ok=True)
             spec = JobSpec(
                 execution=Execution((ExecutionUnit.argv("main", cmd),), cwd=remote_cwd),
                 resources=job_resources({"time": time} if time is not None else {}),
                 scheduling=job_scheduling(
-                    {"queue": partition, "account": account, "qos": qos}, "molab-exec"
+                    {"queue": partition, "account": account, "qos": qos},
+                    "molab-exec",
+                    scheduler=str(target_definition(target)["scheduler"]),
                 ),
             )
-            job = get_client(target.registry_id).cluster(target.cluster_id).submit(spec)
+            job = (
+                get_client(target.registry_id)
+                .cluster(target.cluster_id)
+                .submit(spec, project_root=project_root)
+            )
             observation = job.wait(timeout=timeout or 3600)
             for stream in ("stdout", "stderr"):
                 offset = 0
@@ -1671,6 +1685,7 @@ def exec_cmd(
                     if not chunk["bytes_read"]:
                         break
                     offset = chunk["next_offset"]
+            target_fs.rm(project_root, recursive=True)
             if observation["snapshots"][0]["state"] != "succeeded":
                 raise typer.Exit(1)
         else:

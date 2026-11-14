@@ -56,6 +56,7 @@ class SubmitSpy:
     metadata: dict[str, str] | None = None
     record_at_submit: Execution | None = None
     record_error: str | None = None
+    project_root: str | None = None
     spec: Any = None
 
 
@@ -92,10 +93,12 @@ def _install_fake_molq(
 
     class _FakeCluster:
         def submit(
-            self, spec: Any, *, argv: list[str] | None = None, request_key: str | None = None
+            self, spec: Any, *, project_root: str, request_key: str | None = None
         ) -> _FakeJob:
-            del argv, request_key
+            # molq's Cluster.submit: a project root is required.
+            del request_key
             spy.submits += 1
+            spy.project_root = project_root
             spy.spec = spec
             unit = spec.execution.units[0]
             command = unit.command

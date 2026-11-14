@@ -28,8 +28,9 @@ The local↔remote contract is intentionally narrow:
   earlier attempt of this run registered, so a later attempt re-registers
   into that slot under the same id.
 * **Stage-out** pulls the remote ``executions/<id>/`` back **without** its
-  ``execution.json`` and **without its bulk tiers** (the attempt directories
-  declared not ``versioned``: ``out/``, ``work/``), and the run's ``values/``
+  ``execution.json``, **without its bulk tiers** (the attempt directories
+  declared not ``versioned``: ``out/``, ``work/``) and without molq's own job
+  files (:data:`MOLQ_JOB_FILES`), and the run's ``values/``
   store (the content-addressed values the pulled journal cites; rsync adds
   only the new files), then reads the remote ``execution.json`` and hands it
   to
@@ -80,7 +81,7 @@ from molab.workspace import Workspace
 from molab.workspace.asset_repository import asset_by_id
 from molab.workspace.domain import Asset, ExecutionMode, ExecutionOrigin, ExecutionStatus
 from molab.workspace.entity_record import ENTITY_FILENAME
-from molab.workspace.execution_dirs import scratch_dirs
+from molab.workspace.execution_dirs import JOBS, scratch_dirs
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.naming import ASSET_CONTAINER, VALUE_CONTAINER
 from molab.workspace.source_snapshot import SourceCaptureError, copy_sources, source_manifest
@@ -91,6 +92,18 @@ if TYPE_CHECKING:
 
 
 _RSYNC_EXCLUDES = ("__pycache__", "*.pyc", "*.pyo", ".DS_Store")
+
+MOLQ_JOB_FILES = ".molq"
+"""Where molq keeps a job's own files under the project root it was given.
+
+molq puts a job's default logs and (Shell) receipts in
+``<project_root>/.molq/jobs/<run_id>`` on the target and never deletes them;
+the project owner does. molab gives each attempt's job the attempt's ``jobs/``
+as its project root, so these files are that attempt's alone. They are molq's
+layout, not a molab record: stage-out leaves them on the target, molab keeps
+what it reads from them through molq (the job's stdout / stderr, flat as
+``jobs/<job>.out`` / ``.err``), and then removes them
+(:func:`~molab.plugins.submit_molq.submit.reconcile_submission`)."""
 
 
 class StagingFiles(Protocol):
@@ -366,13 +379,7 @@ def stage_out(
             creation-time environment key.
     """
     workspace = mol_run.experiment.project.workspace
-    record = next((item for item in mol_run.executions if item.id == execution_id), None)
-    frozen_path = record.executor.get("remote_run_dir") if record is not None else None
-    if frozen_path is not None and not isinstance(frozen_path, str):
-        raise ValueError("Execution remote_run_dir must be a path string")
-    remote_run = (
-        frozen_path if frozen_path is not None else target_run_dir(target, workspace, mol_run)
-    )
+    remote_run = remote_run_dir(mol_run, target, execution_id)
     local_run = str(Path(mol_run.run_dir).resolve())
     if remote_run == local_run:
         return True
@@ -387,7 +394,12 @@ def stage_out(
             local_exec,
             recursive=True,
             # ``/name`` is anchored at the attempt directory (rsync semantics).
-            exclude=(*_RSYNC_EXCLUDES, "execution.json", *(f"/{name}" for name in bulk)),
+            exclude=(
+                *_RSYNC_EXCLUDES,
+                "execution.json",
+                *(f"/{name}" for name in bulk),
+                f"/{JOBS.name}/{MOLQ_JOB_FILES}",
+            ),
         )
         _pull_values(transport, remote_run, local_run)
         text = transport.read_text(f"{remote_exec}/execution.json")
@@ -412,6 +424,24 @@ def stage_out(
         fs=workspace.fs,
     ).merge_remote(execution_id, json.loads(text))
     return True
+
+
+def remote_run_dir(mol_run: Run, target: ComputeTarget, execution_id: str) -> str:
+    """Where attempt *execution_id* of *mol_run* was staged on *target*.
+
+    The path recorded at submit (``executor["remote_run_dir"]``) wins, so a
+    later change of the target's scratch root does not lose the attempt.
+
+    Raises:
+        ValueError: The recorded path is not a string.
+    """
+    record = next((item for item in mol_run.executions if item.id == execution_id), None)
+    frozen_path = record.executor.get("remote_run_dir") if record is not None else None
+    if frozen_path is not None and not isinstance(frozen_path, str):
+        raise ValueError("Execution remote_run_dir must be a path string")
+    if frozen_path is not None:
+        return frozen_path
+    return target_run_dir(target, mol_run.experiment.project.workspace, mol_run)
 
 
 def _pull_bulk(

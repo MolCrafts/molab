@@ -146,7 +146,8 @@ def _demo(monkeypatch: pytest.MonkeyPatch, snaps: list[dict]) -> None:
     _install(
         monkeypatch,
         _Molq(
-            [{"name": "demo", "id": "demo-id", "scheduler": "shell"}],
+            # A queue is a scheduler's: molq lists a Shell destination per project only.
+            [{"name": "demo", "id": "demo-id", "scheduler": "slurm"}],
             {"demo": snaps},
         ),
     )
@@ -161,7 +162,7 @@ class TestListTargets:
         assert len(targets) == 1
         target = targets[0]
         assert target.name == "demo"
-        assert target.scheduler == "shell"
+        assert target.scheduler == "slurm"
         assert target.cluster_name == "demo-id"
         assert target.healthy is True
 
