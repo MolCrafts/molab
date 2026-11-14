@@ -11,6 +11,7 @@ import { KnowledgeHistory } from "./KnowledgeHistory";
 import { KnowledgeRelationEditor } from "./KnowledgeRelationEditor";
 import { knowledgeChangeImpact } from "./knowledge-audit";
 import type { knowledgeLineage } from "./knowledge-map";
+import { isAboveServed } from "./knowledgeDocTree";
 import { useKnowledgeNoteQuery } from "./queries";
 import workflowIcon from "./research-assets/workflow.svg";
 import type { MapNode, ResearchMap } from "./research-map";
@@ -358,7 +359,9 @@ export function DocumentPanel({
           <p className="tw-muted">No downstream dependants in the current knowledge graph.</p>
         )}
       </details>
-      {!node.id.endsWith(".tex") && <KnowledgeRelationEditor key={node.id} path={node.id} />}
+      {!node.id.endsWith(".tex") && !isAboveServed(node.id) && (
+        <KnowledgeRelationEditor key={node.id} path={node.id} />
+      )}
       <KnowledgeHistory key={`history:${node.id}`} path={node.id} />
       {error ? (
         <p className="tw-red" role="alert">

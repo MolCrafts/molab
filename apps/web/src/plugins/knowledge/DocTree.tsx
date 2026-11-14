@@ -18,6 +18,7 @@ import {
   Check,
   Filter,
   FlaskConical,
+  Lock,
   PlayCircle,
   Plus,
   Search,
@@ -163,6 +164,10 @@ const groupPresentation = (
   if (run) return { label: runLabel(run), icon: PlayCircle };
   return { label: hostPath.split("/").pop() || hostLabel(snapshot, hostPath), icon: BookOpen };
 };
+
+const ReadOnlyMark = (): JSX.Element => (
+  <Lock aria-label="read-only" className="size-icon-sm text-muted-foreground" />
+);
 
 const collectExpandIds = (nodes: DocTreeNode[], acc: string[]): string[] => {
   for (const node of nodes) {
@@ -351,7 +356,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
   };
 
   const docActions = (node: DocTreeNode): TreeNodeAction[] => {
-    if (node.relPath === null || isTexDocument(node.relPath)) return [];
+    if (node.relPath === null || node.readOnly || isTexDocument(node.relPath)) return [];
     const path = node.relPath;
     return [
       {
@@ -387,6 +392,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
           knowledgeClassOf(notes.find((note) => note.relPath === path) ?? { cls: "" }),
         ),
         iconClassName: "text-muted-foreground",
+        ...(node.readOnly ? { right: <ReadOnlyMark /> } : {}),
         onPrefetch: () => {
           void import("./KnowledgeViewer");
           void queryClient.prefetchQuery(knowledgeNoteQueryOptions(path));
@@ -394,6 +400,18 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
         onSelect: () => onSelect({ objectType: "knowledge", objectId: path }),
         preview: { kind: "knowledge", path },
         actions: docActions(node),
+      };
+    }
+    if (node.readOnly) {
+      // The workspace's own Notes above a served project: opened, never written here.
+      return {
+        id: node.id,
+        label: node.name,
+        hoverTitle: "The workspace's Notes. Serve the workspace to change them.",
+        icon: Lock,
+        iconClassName: "text-muted-foreground",
+        labelClassName: "font-semibold",
+        children: node.children.map(toTreeNode),
       };
     }
     const presented =

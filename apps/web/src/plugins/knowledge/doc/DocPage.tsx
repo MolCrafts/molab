@@ -9,12 +9,14 @@ import { ArrowLeft, ArrowRight, CircleX, X } from "lucide-react";
 import { type JSX, useMemo, useRef } from "react";
 import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
+import { knowledgePath } from "@/app/entities/paths";
 import { EditorActions } from "@/app/shell/editorActions";
 import { useUnsavedEdits } from "@/app/shell/useUnsavedEdits";
 import type { RendererSnapshot } from "@/app/types";
 import { WorkbenchIconAction } from "@/components/workbench";
 import { buildMolabRefIndex } from "@/lib/entity-linkify";
 import { type KnowledgeClass, knowledgeClassOf } from "../knowledgeClass";
+import { isAboveServed } from "../knowledgeDocTree";
 import { useHostExpansion, useRefExpansion } from "../useKnowledgeEntities";
 import { docHeadings, parseDocBlocks } from "./blocks";
 import { LinksSections } from "./components/Links";
@@ -128,14 +130,15 @@ export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps
     snapshot,
   );
   const { prev, next } = siblings(notes, note.relPath, hostPath);
-  const writable = true;
+  // A workspace Note a project serve lists above itself is read-only here.
+  const writable = !isAboveServed(note.relPath);
 
   const leave = useUnsavedEdits({
     dirty: draft.dirty,
     saving: draft.saving,
     onSave: draft.save,
     subject: note.name,
-    markPath: `/knowledge/${note.relPath.split("/").map(encodeURIComponent).join("/")}`,
+    markPath: knowledgePath(note.relPath),
   });
 
   const context: DocContextValue = {

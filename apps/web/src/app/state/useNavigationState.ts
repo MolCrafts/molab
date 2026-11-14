@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { experimentPath, legacyCompareRedirect, projectPath, runPath } from "@/app/entities/paths";
+import {
+  experimentPath,
+  knowledgePath,
+  legacyCompareRedirect,
+  projectPath,
+  runPath,
+} from "@/app/entities/paths";
 import { getNavigationContribution, leftPanelViewFromPath } from "@/app/navigation/sections";
 import type {
   ExperimentView,
@@ -306,9 +312,7 @@ export const getSelectionPath = (
     case "knowledge":
       // objectId is a bundle-relative path (may contain "/"); keep the slashes
       // readable in the URL by encoding each segment, not the whole string.
-      return selection.objectId
-        ? `/knowledge/${selection.objectId.split("/").map(encodeURIComponent).join("/")}`
-        : "/knowledge";
+      return knowledgePath(selection.objectId);
     case "workspace-file": {
       const params = new URLSearchParams({
         file: selection.filePath,
