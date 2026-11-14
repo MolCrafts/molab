@@ -289,6 +289,17 @@ def _bind_healing(tmp_path: Path) -> tuple[Project, Experiment, Run, Path, Path]
     return project, exp, run, flag, result
 
 
+def _bind_one(exp: Experiment) -> None:
+    """Bind a one-task workflow, as ``molab run`` has bound every experiment it dispatches."""
+    wf = Workflow(name="one")
+
+    @wf.task
+    def only(seed: int) -> int:
+        return seed
+
+    default_binding_registry.bind(exp, (wf).compile())
+
+
 def _fail_then_succeed(run: Run) -> None:
     """e01 failed, e02 succeeded — retryable, but the latest attempt is done."""
     run._create_execution()
@@ -296,6 +307,34 @@ def _fail_then_succeed(run: Run) -> None:
     run._create_execution(mode=ExecutionMode.RERUN, predecessor="e01")
     _seal(run, "e02", ExecutionStatus.SUCCEEDED)
 
+
+# stage_a fails until FLAG exists, so its first attempt records no output for it.
+_UPSTREAM_FAILS_SCRIPT = """\
+from pathlib import Path
+
+import molab as me
+from molab.workflow import Workflow
+
+FLAG = Path({flag!r})
+
+wf = Workflow(name="upstream")
+
+
+@wf.task
+def stage_a(seed: int) -> int:
+    if not FLAG.exists():
+        raise RuntimeError("FLAG missing")
+    return seed + 1
+
+
+@wf.task(depends_on=["stage_a"])
+def stage_b(stage_a: int) -> int:
+    return stage_a * 100
+
+
+ws = me.Workspace(name="lab")
+ws.add_project("p").add_experiment("e").define(wf, params={{"seed": [1]}})
+"""
 
 # seed 2 fails, seed 1 succeeds — one ``molab run`` with a mixed outcome.
 _SPLIT_SCRIPT = """\
@@ -517,6 +556,7 @@ class TestExecuteSelected:
         from molab.cli.workspace.run import _execute_selected
 
         _ws, project, exp, [run] = _declared(tmp_path)
+        _bind_one(exp)
         _fail_then_succeed(run)
         handler = _SpyHandler()
         printed = _capture_prints(monkeypatch)
@@ -541,6 +581,7 @@ class TestExecuteSelected:
         from molab.cli.workspace.run import _execute_selected
 
         _ws, project, exp, [skipped, failed] = _declared(tmp_path, n_runs=2)
+        _bind_one(exp)
         _fail_then_succeed(skipped)
         failed._create_execution()
         _seal(failed, "e01", ExecutionStatus.FAILED)
@@ -988,8 +1029,10 @@ class TestRun:
         assert exit_code == 1, output
         assert "--rerun" in output
 
-    def test_rerun_task_with_an_unknown_task_fails_the_attempt(self, tmp_path: Path) -> None:
+    def test_rerun_task_with_an_unknown_task_creates_no_attempt(self, tmp_path: Path) -> None:
+        """A refusal known before start leaves the run as it was (no failed eNN)."""
         script = _write_script(tmp_path)
+        _heal(tmp_path)
         _molab("run", str(script), "--local", "-ws", str(tmp_path))
 
         exit_code, output = _molab(
@@ -998,9 +1041,27 @@ class TestRun:
 
         assert exit_code == 1, output
         assert "nope" in output
-        second = _only_run(tmp_path).execution("e02")
-        assert second.status.value == "failed"
-        assert "nope" in second.error["message"]
+        run = _only_run(tmp_path)
+        assert [item.id for item in run.executions] == ["e01"]
+        assert run.status_label == "succeeded"
+
+    def test_rerun_task_whose_upstream_has_no_recorded_output_creates_no_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        script = tmp_path / "s.py"
+        script.write_text(_UPSTREAM_FAILS_SCRIPT.format(flag=str(tmp_path / "healed")))
+        exit_code, output = _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        assert exit_code == 1, output
+
+        exit_code, output = _molab(
+            "run", str(script), "--rerun", "--task", "stage_b", "--local", "-ws", str(tmp_path)
+        )
+
+        assert exit_code == 1, output
+        assert "stage_a" in output
+        assert "skipped" in output
+        run = _only_run(tmp_path)
+        assert [item.id for item in run.executions] == ["e01"]
 
     def test_one_failed_run_of_two_exits_1(self, tmp_path: Path) -> None:
         script = tmp_path / "split.py"
@@ -1295,6 +1356,32 @@ class TestSubmitToScheduler:
         assert stopped.value.exit_code == 1
         assert "half a day" in capsys.readouterr().out
         assert fx.spy.execution_id is None
+        assert sorted(p.name for p in (Path(fx.run.run_dir) / "executions").iterdir()) == ["e01"]
+
+    def test_a_refused_partial_rerun_submits_and_creates_nothing(
+        self, scheduler_fixture: SchedulerFixture, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fx = scheduler_fixture
+
+        with pytest.raises(typer.Exit) as stopped:
+            _submit_to_scheduler(
+                script=fx.script,
+                profile_cfg=ProfileConfig({}, name=None),
+                continue_verb="rerun",
+                target_path=fx.ws.root,
+                explicit_ws=True,
+                selected_target=None,
+                selected_scheduler="local",
+                cluster="registered-local",
+                resources={},
+                scheduling={},
+                block=False,
+                selected_tasks=("nope",),
+            )
+
+        assert stopped.value.exit_code == 1
+        assert "nope" in capsys.readouterr().out
+        assert fx.spy.submits == 0
         assert sorted(p.name for p in (Path(fx.run.run_dir) / "executions").iterdir()) == ["e01"]
 
     def test_resume_hands_a_queued_resume_record(

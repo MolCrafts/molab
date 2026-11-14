@@ -370,6 +370,8 @@ def _create_dispatch_execution(
     Returns:
         The new attempt's id (``e01``, ``e02``, …).
 
+    The dispatcher admits the attempt first (:func:`_admit`).
+
     Raises:
         ValueError: The workspace refuses this mode for this run (for
             example a RESUME based on an attempt that already succeeded).
@@ -410,6 +412,40 @@ def _create_dispatch_execution(
     return record.id
 
 
+def _admit(
+    mol_run: Run,
+    exp: Experiment,
+    *,
+    continue_verb: str | None,
+    selected_tasks: tuple[str, ...],
+    profile_cfg: ProfileConfig,
+) -> None:
+    """Refuse, before its record exists, a resume or rerun that could not start.
+
+    :func:`molab.workflow.execute.admit_attempt` applies the seed rules the
+    start would apply: a ``--task`` the workflow lacks, or one whose upstream
+    has no usable recorded output, is refused here, so no attempt is created
+    and the run keeps its latest attempt. A plain run has nothing to admit.
+
+    Raises:
+        ValueError: The selection names a task the workflow does not have.
+        RunNotExecutableError: The predecessor's records cannot supply the
+            attempt.
+    """
+    if continue_verb is None:
+        return
+    from molab.workflow import compiled_workflow_for_experiment
+    from molab.workflow.execute import admit_attempt
+
+    admit_attempt(
+        mol_run,
+        compiled_workflow_for_experiment(exp),
+        mode=ExecutionMode.RESUME if continue_verb == "resume" else ExecutionMode.RERUN,
+        selected_tasks=selected_tasks,
+        profile_config=profile_cfg,
+    )
+
+
 def _execute_selected(
     all_replicas: list[tuple[Run, Experiment, Project]],
     run_handler: RunHandler,
@@ -427,8 +463,9 @@ def _execute_selected(
 
     Each run's Execution record is created on the line right before its
     handler call, so a batch interrupted part-way leaves no QUEUED record on
-    the runs it never reached. A ``ValueError`` from creation (the workspace
-    refuses the mode) prints a skip line and does not call the handler; the
+    the runs it never reached. An attempt that is not admitted
+    (:func:`_admit`), or whose mode the workspace refuses, prints a skip line
+    with the reason, creates nothing and does not call the handler; the
     progress bar still advances. A source-capture ``RuntimeError`` is not
     caught and still aborts the batch.
 
@@ -446,9 +483,29 @@ def _execute_selected(
 
     Returns:
         The runs that were handed to *run_handler*, in order.
+
+    Raises:
+        typer.Exit: Exit code 1 when an attempt was not admitted and none was
+            dispatched.
     """
+    from molab.workflow import RunNotExecutableError
+
+    refused = 0
 
     def _dispatch_one(mol_run: Run, exp: Experiment, project: Project) -> bool:
+        nonlocal refused
+        try:
+            _admit(
+                mol_run,
+                exp,
+                continue_verb=continue_verb,
+                selected_tasks=selected_tasks,
+                profile_cfg=profile_cfg,
+            )
+        except (ValueError, RunNotExecutableError) as exc:
+            refused += 1
+            rprint(f"  [yellow]-[/yellow] {exp.name}  {mol_run.name} (skipped — {exc})")
+            return False
         try:
             execution_id = _create_dispatch_execution(
                 mol_run,
@@ -487,6 +544,9 @@ def _execute_selected(
             if _dispatch_one(mol_run, exp, project):
                 dispatched_runs.append(mol_run)
                 rprint(f"  [cyan]>[/cyan] dispatched {exp.name}  {mol_run.name}")
+    if refused and not dispatched_runs:
+        rprint(f"\n[red]Error:[/red] nothing ran — {refused} run(s) refused; no attempt created.")
+        raise typer.Exit(1)
     return dispatched_runs
 
 
@@ -617,8 +677,9 @@ def _make_local_inprocess_handler() -> RunHandler:
     selection and, for a RESUME or partial RERUN record, the predecessor's
     recorded values. A failed attempt is persisted and swallowed here so the
     rest of the batch still runs; the result report reads the record
-    afterwards. An attempt that cannot start (for example a partial rerun
-    whose upstream has no recorded output) is sealed failed with the reason.
+    afterwards. A refusal known before the start was made before the record
+    was created; an attempt that still cannot start (its records changed
+    after it was admitted) is sealed failed with the reason.
 
     Returns:
         A :class:`RunHandler`.
@@ -1237,8 +1298,8 @@ def run(
                 "With --rerun: re-execute only this task (repeatable) with the inputs "
                 "the latest attempt recorded; every other completed task is seeded "
                 "from its record and every task downstream of a selected one is "
-                "skipped. Refused when an upstream the task needs has no usable "
-                "recorded output."
+                "skipped. Refused, before any attempt is created, when the workflow "
+                "has no such task or an upstream it needs has no usable recorded output."
             ),
         ),
     ] = None,
