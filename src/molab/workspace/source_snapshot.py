@@ -60,7 +60,37 @@ class SourceCaptureError(RuntimeError):
     """
 
 
-def _module_files(base: Path, dotted: str, names: list[str]) -> list[Path]:
+class _Tree:
+    """The files the closure reads: the disk, or the disk after one pending write.
+
+    ``pending`` is ``(path, text)``: the file a caller is about to write and
+    its text (``None`` when unknown: the file's text on disk when it has one,
+    else it exists with no imports followed). It lets a pre-write check ask
+    the closure the same question validation asks after the write.
+    """
+
+    def __init__(self, pending: tuple[Path, str | None] | None = None) -> None:
+        self._path = pending[0].resolve() if pending is not None else None
+        self._text = pending[1] if pending is not None else None
+
+    def is_file(self, path: Path) -> bool:
+        return path.resolve() == self._path or path.is_file()
+
+    def is_dir(self, path: Path) -> bool:
+        resolved = path.resolve()
+        return (self._path is not None and resolved in self._path.parents) or path.is_dir()
+
+    def read(self, path: Path) -> str | None:
+        """*path*'s text (``None``: the pending file's unknown text)."""
+        if path.resolve() == self._path and (self._text is not None or not path.is_file()):
+            return self._text
+        return path.read_text(encoding="utf-8")
+
+
+_DISK = _Tree()
+
+
+def _module_files(base: Path, dotted: str, names: list[str], tree: _Tree = _DISK) -> list[Path]:
     """First-party files a module path names under *base*, and its submodules.
 
     Walks ``a.b.c`` one segment at a time: a package contributes its
@@ -77,13 +107,13 @@ def _module_files(base: Path, dotted: str, names: list[str]) -> list[Path]:
             break
         package = directory / part / "__init__.py"
         module = directory / f"{part}.py"
-        if package.is_file():
+        if tree.is_file(package):
             found.append(package.resolve())
             directory = directory / part
-        elif module.is_file():
+        elif tree.is_file(module):
             found.append(module.resolve())
             directory = None
-        elif (directory / part).is_dir():
+        elif tree.is_dir(directory / part):
             # A namespace package has no __init__.py, but its submodules
             # are still first-party source and contribute to the digest.
             directory = directory / part
@@ -95,14 +125,14 @@ def _module_files(base: Path, dotted: str, names: list[str]) -> list[Path]:
                 continue
             package = directory / name / "__init__.py"
             module = directory / f"{name}.py"
-            if package.is_file():
+            if tree.is_file(package):
                 found.append(package.resolve())
-            elif module.is_file():
+            elif tree.is_file(module):
                 found.append(module.resolve())
     return found
 
 
-def _import_files(current: Path, root: Path, node: ast.AST) -> list[Path]:
+def _import_files(current: Path, root: Path, node: ast.AST, tree: _Tree = _DISK) -> list[Path]:
     """First-party files one ``import`` statement in *current* names.
 
     Absolute imports resolve from *root* (the entrypoint's directory); a
@@ -112,16 +142,16 @@ def _import_files(current: Path, root: Path, node: ast.AST) -> list[Path]:
     submodule, ``a/b.py``.
     """
     if isinstance(node, ast.Import):
-        return [f for alias in node.names for f in _module_files(root, alias.name, [])]
+        return [f for alias in node.names for f in _module_files(root, alias.name, [], tree)]
     if not isinstance(node, ast.ImportFrom):
         return []
     names = [alias.name for alias in node.names]
     if node.level == 0:
-        return _module_files(root, node.module or "", names) if node.module else []
+        return _module_files(root, node.module or "", names, tree) if node.module else []
     base = current.parent
     for _ in range(node.level - 1):
         base = base.parent
-    return _module_files(base, node.module or "", names)
+    return _module_files(base, node.module or "", names, tree)
 
 
 def _capture_name(root: Path, src: Path) -> str:
@@ -140,7 +170,7 @@ def _capture_name(root: Path, src: Path) -> str:
     return rel.as_posix()
 
 
-def _local_import_closure(entrypoint: Path) -> list[Path]:
+def _local_import_closure(entrypoint: Path, tree: _Tree = _DISK) -> list[Path]:
     """Entrypoint + transitively-imported first-party modules.
 
     A module is first-party when its file is under ``root`` (the entrypoint's
@@ -157,15 +187,18 @@ def _local_import_closure(entrypoint: Path) -> list[Path]:
     stack = [entrypoint]
     while stack:
         current = stack.pop().resolve()
-        if current in seen or not current.is_file():
+        if current in seen or not tree.is_file(current):
             continue
         seen[current] = None
         try:
-            tree = ast.parse(current.read_text(encoding="utf-8"), filename=str(current))
+            text = tree.read(current)
+            parsed = ast.parse(text, filename=str(current)) if text is not None else None
         except (SyntaxError, UnicodeDecodeError, OSError):
             continue
-        for node in ast.walk(tree):
-            for candidate in _import_files(current, root, node):
+        if parsed is None:
+            continue
+        for node in ast.walk(parsed):
+            for candidate in _import_files(current, root, node, tree):
                 if candidate not in seen:
                     stack.append(candidate)
     rest = sorted((p for p in seen if p != entrypoint), key=lambda p: str(p))
@@ -272,7 +305,7 @@ def _vcs_state(directory: Path) -> tuple[str | None, bool | None]:
     return commit, dirty
 
 
-def _captured(path: Path) -> list[tuple[str, Path]]:
+def _captured(path: Path, tree: _Tree = _DISK) -> list[tuple[str, Path]]:
     """``(name under source/, original)`` for each file an attempt of *path* captures.
 
     Raises:
@@ -282,7 +315,7 @@ def _captured(path: Path) -> list[tuple[str, Path]]:
     root = path.parent
     captured: list[tuple[str, Path]] = []
     seen: set[str] = set()
-    for src in _local_import_closure(path):
+    for src in _local_import_closure(path, tree):
         name = _capture_name(root, src)
         if name in seen:
             raise SourceCaptureError(f"two source files would be stored as {name!r}")
@@ -291,15 +324,21 @@ def _captured(path: Path) -> list[tuple[str, Path]]:
     return captured
 
 
-def captured_names(entrypoint: PathArg) -> tuple[str, ...]:
+def captured_names(
+    entrypoint: PathArg, *, pending: tuple[PathArg, str | None] | None = None
+) -> tuple[str, ...]:
     """The names, relative to its directory, of the files an attempt of *entrypoint* captures.
 
     The one rule for "which files beside a workflow script belong to it":
-    :func:`source_manifest` stores exactly these, and the layout validator
-    holds them legal beside an experiment's ``workflow.py``.
+    :func:`source_manifest` stores exactly these, the layout validator holds
+    them legal beside an experiment's ``workflow.py``, and the pre-write
+    path check asks it about the tree as it will be after the write.
 
     Args:
-        entrypoint: The workflow script; it must be a file.
+        entrypoint: The workflow script; it must be a file (or the pending one).
+        pending: ``(path, text)`` of a file about to be written: the closure
+            is read as if it were already there (``text`` ``None``: present,
+            imports unknown).
 
     Returns:
         POSIX paths (``workflow.py``, ``helper.py``, ``pkg/units.py``), the
@@ -309,10 +348,11 @@ def captured_names(entrypoint: PathArg) -> tuple[str, ...]:
         FileNotFoundError: *entrypoint* is not a file.
         SourceCaptureError: The closure cannot be stored under ``source/``.
     """
+    tree = _Tree((Path(pending[0]), pending[1])) if pending is not None else _DISK
     path = Path(entrypoint).resolve()
-    if not path.is_file():
+    if not tree.is_file(path):
         raise FileNotFoundError(f"source entrypoint {str(entrypoint)!r} is not a file")
-    return tuple(name for name, _src in _captured(path))
+    return tuple(name for name, _src in _captured(path, tree))
 
 
 def source_manifest(entrypoint: PathArg, *, now: datetime | None = None) -> SourceManifest:

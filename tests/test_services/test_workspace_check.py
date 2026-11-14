@@ -260,6 +260,42 @@ class TestCheckPathAllow:
             check_path(lab["root"] / "x", "delete", None)
 
 
+class TestCheckPathAgreesWithValidateOnSource:
+    """A file beside workflow.py is legal exactly when an attempt would capture it.
+
+    check_path judges the tree as it will be after the write, so its verdict is
+    what ``validate`` says once the file is there.
+    """
+
+    SCRIPT = "from helper import k\nfrom pkg import units\nwf = None\n"
+
+    @pytest.mark.parametrize(
+        ("rel", "content"),
+        [
+            ("helper.py", "k = 1\n"),
+            ("pkg/__init__.py", ""),
+            ("pkg/units.py", "KB = 1.0\n"),
+            ("notes.py", "print('not imported')\n"),
+            ("loose/data.py", "X = 1\n"),
+        ],
+    )
+    def test_check_path_says_what_validate_says_after_the_write(
+        self, lab: dict[str, Any], rel: str, content: str
+    ) -> None:
+        exp = lab["exp"]
+        (exp / "workflow.py").write_text(self.SCRIPT)
+        target = exp / rel
+
+        verdict = _verdict(target, content)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+        top = (exp / rel.split("/")[0]).relative_to(lab["root"]).as_posix()
+        stray = any(v.rule == "layout.stray" and v.path == top for v in lab["ws"].validate().errors)
+
+        assert verdict.allowed is not stray, verdict
+        assert stray is (rel.split("/")[0] in {"notes.py", "loose"})
+
+
 class TestSnapshots:
     def test_since_reports_only_errors_added_after_the_snapshot(self, lab: dict[str, Any]) -> None:
         (lab["exp"] / "old.txt").write_text("debt")

@@ -798,6 +798,22 @@ class _PathCheck:
             )
         return self.allow("a knowledge document with a known class")
 
+    def _shipped(self, experiment: str) -> frozenset[str]:
+        """What an attempt of *experiment* captures once this file is written.
+
+        :func:`~molab.workspace.validate.experiment_source_names` with this
+        write pending, the names validation holds legal after it.
+        """
+        from molab.workspace.entity_record import read_record
+        from molab.workspace.validate import experiment_source_names
+
+        record = read_record(self.fs, experiment)
+        canonical = record.canonical if record is not None else {}
+        target = self.fs.join(self.root, self.rel)
+        return experiment_source_names(
+            self.fs, experiment, canonical, pending=(target, self.content)
+        )
+
     def run(self) -> Verdict:
         """Walk the path level by level; the first rule that decides, decides."""
         from molab.knowledge.naming import KNOWLEDGE_CONTAINER
@@ -866,7 +882,8 @@ class _PathCheck:
                     "workflow.",
                     self._adopt(),
                 )
-            rule = classify_entry(level, name, is_dir, extra=extra)
+            shipped = self._shipped(here) if level == "experiment" else frozenset()
+            rule = classify_entry(level, name, is_dir, extra=extra, shipped=shipped)
             if rule is not None:
                 if self.exists:
                     return self.allow("an existing stray; old debt, not a new one")

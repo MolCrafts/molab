@@ -247,7 +247,11 @@ def _legal_names(level: str) -> tuple[frozenset[str], frozenset[str]]:
 
 
 def experiment_source_names(
-    fs: FileSystem, directory: str, canonical: Mapping[str, object]
+    fs: FileSystem,
+    directory: str,
+    canonical: Mapping[str, object],
+    *,
+    pending: tuple[str, str | None] | None = None,
 ) -> frozenset[str]:
     """The entries of an experiment directory that its attempts capture as source.
 
@@ -263,6 +267,9 @@ def experiment_source_names(
         fs: The tree's filesystem.
         directory: The experiment directory.
         canonical: The canonical zone of its ``index.md`` record.
+        pending: ``(path, text)`` of a file about to be written: the names
+            are those of the tree after the write (the pre-write path check
+            asks this, so it and validation cannot disagree).
 
     Returns:
         Top-level names (``nacl_model.py``, ``helpers``) under *directory*.
@@ -278,10 +285,13 @@ def experiment_source_names(
         entrypoint_of(directory, canonical) if canonical.get("workflow_kind") == "code" else None
     )
     script = Path(directory, bound or WORKFLOW_SCRIPT_FILENAME)
-    if script.parent.resolve() != Path(directory).resolve() or not script.is_file():
+    written = pending is not None and Path(pending[0]).resolve() == script.resolve()
+    if script.parent.resolve() != Path(directory).resolve():
+        return frozenset()
+    if not (written or script.is_file()):
         return frozenset()
     try:
-        names = captured_names(script)
+        names = captured_names(script, pending=pending)
     except SourceCaptureError:
         # The script's closure cannot be captured (an import climbs out of
         # the experiment); nothing beside it is shipped.
