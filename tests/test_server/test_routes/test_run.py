@@ -423,6 +423,30 @@ class TestCreateExecution:
         assert response.status_code == 422, response.text
         assert [e.id for e in run.executions] == ["e01"]
 
+    @pytest.mark.parametrize(
+        ("tasks", "reason"),
+        [(["nope"], "nope"), (["c"], "a")],
+        ids=["unknown-task", "upstream-without-records"],
+    )
+    def test_a_refused_partial_rerun_creates_nothing(
+        self,
+        served: ServedFactory,
+        failed_run: RunFixture,
+        tasks: list[str],
+        reason: str,
+    ) -> None:
+        """The admission ``molab run --rerun --task`` applies: refused before any record exists."""
+        ws, exp, run = failed_run
+        exp.bind_workflow("document", document=_CONSTANT_ADD)
+        with served(ws) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"mode": "rerun", "basedOnExecutionId": "e01", "tasks": tasks},
+            )
+        assert response.status_code == 422, response.text
+        assert reason in response.json()["detail"]
+        assert [e.id for e in run.executions] == ["e01"]
+
     def test_task_executor_is_recorded(self, served: ServedFactory, failed_run: RunFixture) -> None:
         ws, exp, run = failed_run
         with served(ws) as client:

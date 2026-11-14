@@ -254,11 +254,14 @@ def admit_attempt(
     mode: ExecutionMode,
     selected_tasks: Sequence[str] = (),
     profile_config: ProfileConfig | None = None,
+    based_on: str | None = None,
 ) -> None:
     """Refuse, before its record exists, an attempt that could not start.
 
-    The attempt a creator is about to record — *mode* based on the run's
-    latest attempt, *selected_tasks*, the ``config_hash`` of *profile_config*
+    The one admission every creator applies (``molab run`` and the server's
+    ``POST .../executions``). The attempt a creator is about to record —
+    *mode* based on *based_on* (the run's latest attempt when ``None``),
+    *selected_tasks*, the ``config_hash`` of *profile_config*
     (or of the predecessor it inherits when ``None``) — goes through the same
     seed rules its start applies (:func:`_attempt_seeds`). Only a partial
     rerun can be refused by them (a resume drops what it cannot seed and
@@ -276,8 +279,11 @@ def admit_attempt(
         selected_tasks: The tasks a partial rerun would re-execute.
         profile_config: The profile it would be created with; ``None``
             inherits the predecessor's.
+        based_on: The predecessor it would be created on; ``None`` is the
+            latest attempt.
 
     Raises:
+        KeyError: *based_on* names no attempt of *run*.
         ValueError: The selection names a task the workflow does not have.
         RunNotExecutableError: The predecessor's records cannot supply the
             attempt (see :func:`_attempt_seeds`).
@@ -285,7 +291,7 @@ def admit_attempt(
     executions = run.executions
     if mode is not ExecutionMode.RERUN or not selected_tasks or not executions:
         return
-    prior = executions[-1]
+    prior = executions[-1] if based_on is None else run.execution(based_on)
     environment = (
         prior.environment
         if profile_config is None

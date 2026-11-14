@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from molab.fs.window import iter_file_chunks
 from molab.plugins.submit_molq.submit import SubmitHandler, reconcile_latest
-from molab.workflow import read_journal
+from molab.workflow import RunNotExecutableError, read_journal
 from molab.workspace import (
     ExperimentNotFoundError as WorkspaceExperimentNotFoundError,
 )
@@ -126,6 +126,7 @@ def _create_attempt(run, body: ExecutionAttemptCreateRequest, target: ComputeTar
     if body.max_workers is not None:
         executor["task_max_workers"] = body.max_workers
     try:
+        _admit(run, body)
         return run._create_execution(
             mode=ExecutionMode(body.mode),
             created_by=created_by,
@@ -135,8 +136,29 @@ def _create_attempt(run, body: ExecutionAttemptCreateRequest, target: ComputeTar
             environment={"submit_cwd": str(Path.cwd().resolve())},
             selected_tasks=tuple(body.tasks or ()),
         )
-    except (KeyError, ValueError) as exc:
+    except (KeyError, ValueError, RunNotExecutableError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _admit(run, body: ExecutionAttemptCreateRequest) -> None:  # noqa: ANN001
+    """Refuse a partial rerun that could not start, before its record exists.
+
+    :func:`molab.workflow.execute.admit_attempt`, the admission ``molab run``
+    applies. A run whose workflow a worker cannot recover is not admitted
+    here: it is refused when it is started.
+    """
+    from molab.workflow import can_recover_workflow, compiled_workflow_for_run
+    from molab.workflow.execute import admit_attempt
+
+    if not body.tasks or not can_recover_workflow(run):
+        return
+    admit_attempt(
+        run,
+        compiled_workflow_for_run(run),
+        mode=ExecutionMode(body.mode),
+        selected_tasks=tuple(body.tasks),
+        based_on=body.based_on_execution_id,
+    )
 
 
 def _attempt_with_request_key(run, key: str):  # noqa: ANN001, ANN202
