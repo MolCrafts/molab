@@ -478,7 +478,9 @@ class SubmitHandler:
         self.submitted_runs.append(mol_run)
 
 
-def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
+def reconcile_submission(
+    mol_run: Run, execution_id: str, *, cancelled_away: bool = False
+) -> ReconcileOutcome:
     """Check a QUEUED molq-submitted attempt against its job and seal it if it never started.
 
     Level-triggered: every call asks molq for the job's state now
@@ -498,6 +500,11 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
     attempt's ``jobs/``, :data:`~molab.plugins.submit_molq.staging.MOLQ_JOB_FILES`)
     are removed; its stdout / stderr were kept as ``jobs/<job>.out`` / ``.err``.
 
+    With *cancelled_away*, a remote attempt an older molab sealed CANCELLED at
+    the cancel takes the same path once its job has ended: its files come
+    home, its job files go, its record stays. No status reader can tell it
+    from one already home, so only ``molab runs reconcile`` asks for it.
+
     Idempotent. An expected failure — ``MolqError``, staging
     ``TransportError``, ``ValueError``, ``OSError``, ``KeyError`` — comes
     back as :attr:`ReconcileOutcome.error`. Anything else propagates.
@@ -505,9 +512,11 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
     Args:
         mol_run: The run the attempt belongs to.
         execution_id: The attempt to check (``e01``).
+        cancelled_away: Also bring home a sealed CANCELLED remote attempt.
 
     Returns:
-        The attempt's record after the check, and the failure, if any.
+        The attempt's record after the check, and the failure, if any (for a
+        *cancelled_away* attempt, a job that has not ended).
 
     Raises:
         KeyError: No attempt ``execution_id`` exists under *mol_run*.
@@ -530,9 +539,11 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
         fs=workspace.fs,
     )
     record = repo.get(execution_id)
-    if record.status is not ExecutionStatus.QUEUED:
-        return ReconcileOutcome(record=record)
     executor = record.executor
+    remote = isinstance(executor.get("target"), str)
+    away = cancelled_away and remote and record.status is ExecutionStatus.CANCELLED
+    if record.status is not ExecutionStatus.QUEUED and not away:
+        return ReconcileOutcome(record=record)
     if executor.get("transfer_outcome") == "unknown":
         return ReconcileOutcome(
             record=record,
@@ -584,12 +595,13 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
             raise MolqError("JOB_NOT_FOUND", f"job {job_id} returned no snapshot")
         snapshot = snapshots[0]
         state = str(snapshot.get("state") or "unknown")
-        # molq ``absent``: not listed and no accounting. After a cancel the
-        # scheduler accepted, that is the cancel's end; otherwise it proves nothing.
-        forgotten = snapshot.get("source") == "absent" and CANCEL_REQUESTED in executor
+        # molq ``absent`` (not listed, no accounting) ends a cancelled job only.
+        forgotten = snapshot.get("source") == "absent" and (CANCEL_REQUESTED in executor or away)
         if forgotten:
             state = "cancelled"
         elif not snapshot.get("terminal") and state not in _TERMINAL_STATES:
+            if away:
+                raise ValueError(f"its job is still {state}; cancel it before bringing it home")
             return ReconcileOutcome(record=record)
         _keep_scheduler_output(job, mol_run, execution_id, ref)
 
@@ -638,6 +650,8 @@ def _release_job_files(fs: FileSystem, jobs_dir: str, mol_run: Run, execution_id
     from .staging import MOLQ_JOB_FILES
 
     path = f"{jobs_dir}/{MOLQ_JOB_FILES}"
+    if not fs.exists(path):  # released by an earlier reconcile
+        return
     try:
         fs.rm(path, recursive=True)
     except (MolqError, OSError) as exc:
@@ -727,6 +741,7 @@ def _seal_if_open(
 
     current = repo.get(execution_id)
     if current.status not in ACTIVE_EXECUTION_STATUSES:
+        unlink_alive(mol_run, execution_id)  # a sealed attempt has no live owner
         return
     if current.status is ExecutionStatus.QUEUED:
         kind, when = "SchedulerJobEndedBeforeStart", "before the worker started"

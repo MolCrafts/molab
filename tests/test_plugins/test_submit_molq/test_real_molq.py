@@ -275,6 +275,69 @@ class TestCancelTheSchedulerForgot:
         lab.hold.unlink()
 
 
+class TestCancelledBeforeItCameHome:
+    """An attempt an older molab sealed CANCELLED at the cancel, left on the target."""
+
+    def _sealed_away(self, lab: Lab, *, signal: bool) -> tuple[Run, Path]:
+        from molab.plugins.submit_molq.cancel import try_cancel
+
+        lab.hold.write_text("")
+        run = _submit(lab, seed=1)
+        job = _running(lab, run)
+        if signal:
+            assert try_cancel(run) is None
+            deadline = time.monotonic() + 30
+            while job.status()["snapshots"][0]["state"] != "cancelled":
+                assert time.monotonic() < deadline, job.status()
+                time.sleep(0.2)
+        run.cancel(run.executions[-1].id)  # the old cancel: sealed here at once
+        remote = _remote_attempt(lab, run)
+        assert (remote / "jobs" / ".molq").is_dir()
+        return run, remote
+
+    def test_runs_reconcile_brings_it_home_and_removes_its_job_files(self, lab: Lab) -> None:
+        run, remote = self._sealed_away(lab, signal=True)
+        assert _settle(run) is ExecutionStatus.CANCELLED  # a status read cannot know
+
+        code, output = _molab("runs", "reconcile", "p", "e", run.id, "-ws", str(lab.root))
+
+        assert code == 0, output
+        attempt = Path(str(run.execution_dir(run.executions[-1].id)))
+        native = _job_ref(run)["native_id"]
+        assert (attempt / "run.log").is_file()
+        assert "probe stdout" in (attempt / "jobs" / f"{native}.out").read_text()
+        assert not list(attempt.rglob("data.txt")), "a cancelled attempt's output stays remote"
+        assert not (attempt / "alive").exists(), "the dead worker's heartbeat is not kept"
+        assert not (remote / "jobs" / ".molq").exists()
+        assert run.executions[-1].status is ExecutionStatus.CANCELLED
+
+    def test_an_older_attempt_is_named_with_execution(self, lab: Lab) -> None:
+        run, remote = self._sealed_away(lab, signal=True)
+        away = run.executions[-1].id
+        from molab.workspace.domain import ExecutionMode
+
+        run._create_execution(mode=ExecutionMode.RERUN)  # a newer attempt, never submitted
+
+        code, output = _molab(
+            "runs", "reconcile", "p", "e", run.id, "-x", away, "-ws", str(lab.root)
+        )
+
+        assert code == 0, output
+        assert (Path(str(run.execution_dir(away))) / "run.log").is_file()
+        assert not (remote / "jobs" / ".molq").exists()
+
+    def test_a_job_still_running_is_not_touched(self, lab: Lab) -> None:
+        run, remote = self._sealed_away(lab, signal=False)
+
+        code, output = _molab("runs", "reconcile", "p", "e", run.id, "-ws", str(lab.root))
+
+        assert code == 1, output
+        assert "still running" in output
+        assert (remote / "jobs" / ".molq").is_dir()
+        assert not (Path(str(run.execution_dir(run.executions[-1].id))) / "run.log").exists()
+        lab.hold.unlink()
+
+
 class TestExec:
     def test_exec_prints_the_command_output_and_leaves_no_job_files(self, lab: Lab) -> None:
         code, output = _molab("exec", "-t", "@here", "--", "echo", "molq-exec-ok")

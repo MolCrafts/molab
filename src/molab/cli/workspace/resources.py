@@ -849,6 +849,48 @@ def run_ingest_metrics(
         rprint(f"  [dim]skip[/dim] {skip.format}: {skip.path.name} — {skip.reason}")
 
 
+@run_app.command("reconcile")
+def run_reconcile(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    execution_id: Annotated[
+        str | None,
+        typer.Option("--execution", "-x", help="The attempt (eNN); default: the newest."),
+    ] = None,
+    target_spec: TargetOption = ".",
+) -> None:
+    """Bring one of the run's remote attempts home now (default: the newest).
+
+    Every status read does this for a queued attempt. This also brings home a
+    cancelled attempt an older molab sealed before it came home, once its job
+    has ended, and removes its job files from the target.
+    """
+    from molab.plugins.submit_molq.submit import reconcile_submission
+    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molab.workspace import ProjectNotFoundError as _ProjNotFound
+    from molab.workspace import RunNotFoundError as _RunNotFound
+
+    ws = _open_ws(target_spec)
+    try:
+        r = ws.get_project(project_id).get_experiment(experiment_id).get_run(run_id)
+    except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if not r.executions:
+        rprint(f"[yellow]Run {r.id} has no attempt — nothing to bring home.[/yellow]")
+        return
+    try:
+        outcome = reconcile_submission(r, execution_id or r.executions[-1].id, cancelled_away=True)
+    except KeyError as exc:
+        rprint(f"[red]Error:[/red] run {r.id} has no attempt {exc}")
+        raise typer.Exit(1) from None
+    if outcome.error is not None:
+        rprint(f"[red]Error:[/red] {outcome.error}")
+        raise typer.Exit(1)
+    rprint(f"[green]OK[/green] {r.id} {outcome.record.id}: {outcome.record.status.value}")
+
+
 @run_app.command("info")
 def run_info(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
