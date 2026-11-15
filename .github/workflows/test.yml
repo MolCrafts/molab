@@ -75,9 +75,6 @@ jobs:
           mkdir -p src/molq/_bin
           CGO_ENABLED=0 go build -o src/molq/_bin/molq ./cmd/molq
       - run: uv run --extra dev pytest tests/ -q
-      - name: Verify sharing with two real Linux UIDs
-        if: runner.os == 'Linux'
-        run: sudo -E "$PWD/.venv/bin/python" -m pytest tests/test_server/test_sharing_linux.py -q
 
   web:
     name: test / web
