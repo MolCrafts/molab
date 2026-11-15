@@ -147,6 +147,16 @@ class FolderMoveCollisionError(ValueError):
         self.dst = dst
 
 
+class AttemptNotHomeError(ValueError):
+    """Raised when a folder is deleted while an attempt under it is still away.
+
+    An attempt dispatched to a compute target is open here until its files
+    come home; deleting its run then would leave the attempt on the target
+    with nothing to bring it back. The message names the run, the attempt
+    and the target.
+    """
+
+
 class UnmigratedAssetError(RuntimeError):
     """An on-disk asset record predates the unified schema.
 
@@ -177,6 +187,7 @@ class UnmigratedLayoutError(RuntimeError):
 
 __all__ = [
     "AmbiguousRefError",
+    "AttemptNotHomeError",
     "ExperimentExistsError",
     "ExperimentNotFoundError",
     "FolderMoveCollisionError",

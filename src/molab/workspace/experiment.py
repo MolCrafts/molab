@@ -1103,7 +1103,15 @@ class Experiment(Folder):
         )
 
     def del_run(self, run_id: str) -> None:
-        """Delete a run directory."""
+        """Delete a run directory.
+
+        Raises:
+            AttemptNotHomeError: An attempt of the run is still away on a
+                compute target (:func:`~molab.workspace.lifecycle_ops.refuse_attempts_away`).
+        """
+        from .lifecycle_ops import refuse_attempts_away
+
+        refuse_attempts_away([self.get_folder(run_id, cls=Run)])
         self.remove_folder(run_id, cls=Run)
 
     def has_run(self, run_id: str) -> bool:

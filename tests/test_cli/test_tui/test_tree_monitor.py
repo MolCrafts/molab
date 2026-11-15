@@ -132,3 +132,45 @@ class TestDeleteGatesOnActiveAttempts:
         _execute_delete(_prepare_dialog([node]))
 
         assert calls == [run.id]
+
+
+class TestDeleteWaitsForARemoteAttemptToComeHome:
+    """A run whose attempt is still open on a compute target is not deleted."""
+
+    def _run_away(self, root: Path) -> Run:
+        ws = Workspace(root=root, name="tui-lab")
+        exp = ws.add_project("proj-a").add_experiment("exp-x", params={})
+        run = exp.add_run(params={"seed": 1})
+        run._create_execution(created_by=_TEST_AGENT, executor={"target": "hpc"})
+        return run
+
+    def test_a_run_whose_attempt_has_not_come_home_is_kept_with_the_reason(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run = self._run_away(tmp_path)
+        monkeypatch.setattr("molab.cli.tui.tree_monitor.try_cancel", lambda _run: None)
+        node = TreeNode(
+            kind="run",
+            node_id=("run", run.id),
+            display_label=run.id[:6],
+            status=run.status_label,
+            ref=run,
+        )
+
+        warnings = _execute_delete(_prepare_dialog([node]))
+
+        assert Path(str(run.resolve())).is_dir()  # resolve(): run_dir would recreate it
+        assert any("not home" in warning and "hpc" in warning for warning in warnings), warnings
+
+    def test_its_experiment_and_project_are_kept_too(self, tmp_path: Path) -> None:
+        from molab.workspace.errors import AttemptNotHomeError
+
+        run = self._run_away(tmp_path)
+        experiment = run.experiment
+        project = experiment.project
+
+        with pytest.raises(AttemptNotHomeError, match="hpc"):
+            project.remove_experiment(experiment.id)
+        with pytest.raises(AttemptNotHomeError, match="hpc"):
+            project.workspace.remove_project(project.id)
+        assert Path(str(run.resolve())).is_dir()

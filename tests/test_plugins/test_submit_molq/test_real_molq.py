@@ -338,6 +338,25 @@ class TestCancelledBeforeItCameHome:
         lab.hold.unlink()
 
 
+class TestDeleteBringsTheAttemptHomeFirst:
+    def test_a_run_whose_job_ended_is_brought_home_then_deleted(self, lab: Lab) -> None:
+        from molab.cli.tui.tree_model import TreeNode
+        from molab.cli.tui.tree_monitor import _execute_delete, _prepare_dialog
+
+        run = _submit(lab, seed=1)
+        lab.client.job(_job_ref(run)).wait(timeout=60, interval=0.2)
+        remote = _remote_attempt(lab, run)
+        assert run.executions[-1].status is ExecutionStatus.QUEUED
+        node = TreeNode(
+            kind="run", node_id=("run", run.id), display_label=run.id[:6], status="queued", ref=run
+        )
+
+        warnings = _execute_delete(_prepare_dialog([node]))
+
+        assert not Path(str(run.resolve())).exists(), warnings
+        assert not (remote / "jobs" / ".molq").exists(), "it came home before the delete"
+
+
 class TestExec:
     def test_exec_prints_the_command_output_and_leaves_no_job_files(self, lab: Lab) -> None:
         code, output = _molab("exec", "-t", "@here", "--", "echo", "molq-exec-ok")

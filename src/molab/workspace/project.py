@@ -393,8 +393,17 @@ class Project(Folder):
         return exp
 
     def del_experiment(self, name: str) -> None:
-        """Delete an experiment directory and its runs."""
-        self.remove_folder(self.experiment(name).id, cls=Experiment)
+        """Delete an experiment directory and its runs.
+
+        Raises:
+            AttemptNotHomeError: An attempt of one of its runs is still away on
+                a compute target (:func:`~molab.workspace.lifecycle_ops.refuse_attempts_away`).
+        """
+        from .lifecycle_ops import refuse_attempts_away
+
+        experiment = self.experiment(name)
+        refuse_attempts_away(experiment.list_runs())
+        self.remove_folder(experiment.id, cls=Experiment)
 
     def has_experiment(self, name: str) -> bool:
         try:

@@ -14,12 +14,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from .domain import Execution
     from .run import Run
 
-__all__ = ["CANCEL_REQUESTED", "cancel_run"]
+__all__ = ["CANCEL_REQUESTED", "cancel_run", "refuse_attempts_away"]
 
 #: ``executor`` key on an attempt left open by a cancel the scheduler accepted.
 #: Its reconcile reads it: a job the scheduler then no longer knows (not
@@ -131,3 +131,29 @@ def _seal_cancelled(run: Run, state: Execution, *, signalled: bool) -> None:
         )
         return
     run.cancel(state.id)
+
+
+def refuse_attempts_away(runs: Iterable[Run]) -> None:
+    """Refuse to delete *runs* while one of their attempts is still away.
+
+    The one delete rule, for a run and for the experiment or project that
+    holds it: an attempt dispatched to a compute target and still open here
+    has not come home (its job is running, or ended and not yet reconciled).
+    A caller that can bring it home (the reconcile every status read runs)
+    does so first.
+
+    Raises:
+        AttemptNotHomeError: An attempt of one of *runs* is still away.
+    """
+    from .domain import ACTIVE_EXECUTION_STATUSES
+    from .errors import AttemptNotHomeError
+
+    for run in runs:
+        for state in run.executions:
+            target = state.executor.get("target")
+            if target is not None and state.status in ACTIVE_EXECUTION_STATUSES:
+                raise AttemptNotHomeError(
+                    f"run {run.id} is not deleted: attempt {state.id} is not home from "
+                    f"compute target {target!r} yet ({state.status.value}). It comes home "
+                    "once its job has ended (any status read brings it); delete it then."
+                )
