@@ -1657,9 +1657,10 @@ def exec_cmd(
 
             assert target.cluster_id is not None
             # molq keeps the job's logs and receipts under its project root; a
-            # directory this exec owns, removed once the output is printed.
+            # directory this exec owns, removed once the output is printed. It
+            # sits directly in the target root, so removing it leaves nothing.
             target_fs = to_filesystem(target)
-            project_root = f"{target.path.rstrip('/')}/{MOLAB_DIR}/exec/{uuid.uuid4().hex}"
+            project_root = f"{target.path.rstrip('/')}/{MOLAB_DIR}-exec-{uuid.uuid4().hex}"
             target_fs.mkdir(project_root, parents=True, exist_ok=True)
             spec = JobSpec(
                 execution=Execution((ExecutionUnit.argv("main", cmd),), cwd=remote_cwd),

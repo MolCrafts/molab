@@ -222,6 +222,7 @@ class TestExec:
         assert code == 0, output
         assert "molq-exec-ok" in output
         assert not list(lab.scratch.rglob(".molq")), "exec cleans up the job it owned"
+        assert not list(lab.scratch.rglob("*")), "nothing of the exec is left in the scratch"
 
 
 class TestDashboard:
