@@ -58,6 +58,9 @@ dev = [
     # tests/test_workflow/test_codec.py validates the link schema; it used to
     # arrive only transitively, through the removed agent extra.
     "jsonschema>=4.0",
+    # tests/test_build_backend.py loads setup.py, which imports setuptools; a
+    # uv venv has no setuptools unless something asks for it.
+    "setuptools>=69",
     # Match .pre-commit-config.yaml's ruff-pre-commit rev, so `uv run ruff`
     # agrees with the commit hooks. Keep both at latest.
     "ruff==0.16.10",
