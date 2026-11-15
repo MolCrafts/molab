@@ -165,3 +165,34 @@ def test_server_renders_on_each_request_and_serves_assets(tmp_path: Path) -> Non
 
         servers[0].shutdown()  # ty: ignore[unresolved-attribute]
         thread.join(5)
+
+
+def test_the_server_starts_without_a_reverse_dns_lookup(tmp_path: Path) -> None:
+    # http.server.HTTPServer.server_bind asks socket.getfqdn(host), which can
+    # stall for seconds where reverse DNS is slow (a macOS CI runner).
+    import http.server
+    import socket
+
+    ws, _asset_id, doc = _workspace(tmp_path)
+    started = threading.Event()
+    servers: list[http.server.ThreadingHTTPServer] = []
+    original = http.server.ThreadingHTTPServer.serve_forever
+
+    def capture(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        servers.append(self)
+        return original(self, *args, **kwargs)
+
+    def refuse(name: str = "") -> str:
+        raise AssertionError(f"reverse DNS lookup of {name!r}")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(http.server.ThreadingHTTPServer, "serve_forever", capture)
+        mp.setattr(socket, "getfqdn", refuse)
+        thread = threading.Thread(
+            target=lambda: serve(doc, ws, port=0, on_ready=lambda _url: started.set()),
+            daemon=True,
+        )
+        thread.start()
+        assert started.wait(5)
+        servers[0].shutdown()
+        thread.join(5)

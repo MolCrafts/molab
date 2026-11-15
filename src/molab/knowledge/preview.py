@@ -391,6 +391,7 @@ def serve(
     """
     from http import HTTPStatus
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from socketserver import TCPServer
     from urllib.parse import quote, unquote
 
     root = Path(str(workspace.root)).resolve()
@@ -448,7 +449,17 @@ def serve(
                 return
             self._send(HTTPStatus.NOT_FOUND, b"not found", "text/plain")
 
-    server = ThreadingHTTPServer((host, port), Handler)
+    class Server(ThreadingHTTPServer):
+        def server_bind(self) -> None:
+            """Bind without ``HTTPServer``'s ``socket.getfqdn(host)``.
+
+            That reverse DNS lookup can stall for seconds (a macOS CI runner),
+            and nothing here reads the name it finds.
+            """
+            TCPServer.server_bind(self)
+            self.server_name, self.server_port = host, self.server_address[1]
+
+    server = Server((host, port), Handler)
     url = f"http://{host}:{server.server_address[1]}/view/{quote(start)}"
     if on_ready:
         on_ready(url)
