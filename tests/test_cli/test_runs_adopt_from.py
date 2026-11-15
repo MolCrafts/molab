@@ -99,7 +99,9 @@ def test_from_dir_gives_a_sealed_attempt_and_validates_clean(lab: Path, tracked:
 
     validate = runner.invoke(app, ["validate", "-ws", str(lab)])
     assert validate.exit_code == 0, validate.output
-    assert "conforms" in validate.output
+    # No error; the one warning says the result came from a job molab did not see run.
+    assert "0 error(s), 1 warning(s)" in validate.output
+    assert "experiment.adopted_results" in validate.output
 
 
 def test_explicit_times_win_over_track_json(lab: Path, tracked: Path) -> None:

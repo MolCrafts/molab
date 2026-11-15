@@ -83,7 +83,9 @@ class TestRunsAdopt:
 
         validate = runner.invoke(app, ["validate", "-ws", str(lab)])
         assert validate.exit_code == 0, validate.output
-        assert "conforms" in validate.output
+        # No error; the one warning says the result came from a job molab did not see run.
+        assert "0 error(s), 1 warning(s)" in validate.output
+        assert "experiment.adopted_results" in validate.output
 
     def test_params_create_the_run_first(self, lab: Path, job: Path) -> None:
         result = _invoke(
@@ -114,6 +116,8 @@ class TestRunsAdopt:
                 "nope",
                 "--log",
                 str(job / "md.log"),
+                "--source",
+                str(job / "md.py"),
                 "-ws",
                 str(lab),
             ],
@@ -122,11 +126,46 @@ class TestRunsAdopt:
         assert "--params" in result.output
         assert (job / "md.log").exists()
 
+    def test_a_succeeded_job_without_its_script_is_refused(self, lab: Path, job: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "runs",
+                "adopt",
+                "alpha",
+                "sweep",
+                "t=1",
+                "--log",
+                str(job / "md.log"),
+                "-ws",
+                str(lab),
+            ],
+        )
+        assert result.exit_code == 2
+        assert "--source" in result.output
+        assert (job / "md.log").exists()
+        assert not (lab / "projects/alpha/experiments/sweep/runs/t=1/executions/e01").exists()
+
+    def test_an_adopted_attempt_is_recorded_as_not_observed(self, lab: Path, job: Path) -> None:
+        result = _invoke(
+            "runs", "adopt", "alpha", "sweep", "t=1",
+            "--log", str(job / "md.log"),
+            "--source", str(job / "md.py"),
+            "--json",
+            "-ws", str(lab),
+        )  # fmt: skip
+        payload = json.loads(result.stdout)
+        assert payload["observed"] is False
+        record = json.loads((lab / payload["path"] / "execution.json").read_text())
+        assert record["observed"] is False
+
     def test_a_later_attempt_needs_a_mode(self, lab: Path, tmp_path: Path) -> None:
         first = tmp_path / "first.log"
         first.write_text("one\n")
         second = tmp_path / "second.log"
         second.write_text("two\n")
+        for name in ("first.py", "second.py", "third.py"):
+            (tmp_path / name).write_text("print('md')\n")
         adopted = _invoke(
             "runs",
             "adopt",
@@ -135,6 +174,8 @@ class TestRunsAdopt:
             "t=1",
             "--log",
             str(first),
+            "--source",
+            str(tmp_path / "first.py"),
             "--json",
             "-ws",
             str(lab),
@@ -143,8 +184,13 @@ class TestRunsAdopt:
 
         refused = runner.invoke(
             app,
-            ["runs", "adopt", "alpha", "sweep", "t=1", "--log", str(second), "-ws", str(lab)],
-        )
+            [
+                "runs", "adopt", "alpha", "sweep", "t=1",
+                "--log", str(second),
+                "--source", str(tmp_path / "second.py"),
+                "-ws", str(lab),
+            ],
+        )  # fmt: skip
         assert refused.exit_code == 1
         assert second.exists()
 
@@ -156,6 +202,8 @@ class TestRunsAdopt:
             "t=1",
             "--log",
             str(second),
+            "--source",
+            str(tmp_path / "third.py"),
             "--mode",
             "rerun",
             "--json",

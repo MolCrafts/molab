@@ -60,7 +60,7 @@ import json
 import os
 import posixpath
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -69,6 +69,7 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from molab.workspace import Workspace
+    from molab.workspace.domain import Execution
     from molab.workspace.fs import DirEntry, FileSystem
     from molab.workspace.validate import ValidationReport, Violation
 
@@ -178,7 +179,10 @@ def check_workspace(
     knowledge = validate_knowledge(ws, fs=ws.fs, errors_only=errors_only, scope=wanted)
     folded = tuple(Violation.model_validate(item) for item in knowledge)
     hygiene = (*_guide_issues(ws), *_asset_issues(ws, wanted))
-    return ValidationReport(root=report.root, violations=(*report.violations, *folded, *hygiene))
+    compared = () if errors_only else _workflow_issues(ws, wanted)
+    return ValidationReport(
+        root=report.root, violations=(*report.violations, *folded, *hygiene, *compared)
+    )
 
 
 _HYGIENE_HINTS: dict[str, str] = {
@@ -229,6 +233,129 @@ def _guide_issues(ws: Workspace) -> list[Violation]:
     ]
 
 
+def _in_scope(rel: str, scope: frozenset[str] | None) -> bool:
+    """Whether the directory *rel* is one *scope* names, holds, or lies under."""
+    return scope is None or any(
+        rel == item or item.startswith(rel + "/") or rel.startswith(item + "/") for item in scope
+    )
+
+
+_MIXED_WORKFLOW_HINT: Final = (
+    "Runs of one experiment are compared with each other, so the code that ran them "
+    "must not be one of the differences. Re-run the older runs with the current workflow "
+    "(`molab run WORKFLOW --rerun`), or state in the Report which runs each version "
+    "executed and why the comparison still holds."
+)
+
+
+_ADOPTED_RESULTS_HINT: Final = (
+    "molab did not see an adopted job run: its record holds the files that were handed "
+    "over. Produce the results with `molab run WORKFLOW --rerun`, or say in the Report "
+    "which results come from adopted jobs. No Milestone check is measured from them."
+)
+#: How many run names an ``experiment.adopted_results`` detail spells out.
+_ADOPTED_SHOWN: Final = 5
+
+
+def _workflow_issues(ws: Workspace, scope: frozenset[str] | None) -> list[Violation]:
+    """What stands between the runs of one experiment and a fair comparison.
+
+    ``experiment.mixed_workflow``: its runs ran different code. Each run
+    counts once, by the hash of the latest succeeded attempt that recorded
+    one, so an adopted attempt on top does not hide the workflow that built
+    the run. A run no workflow ever executed is a version of its own.
+
+    ``experiment.adopted_results``: runs whose latest succeeded attempt was
+    adopted, so their results are files molab was handed, not ones it saw
+    made.
+
+    Both are warnings, so the errors-only report never computes them.
+    """
+    root = str(ws.resolve()).rstrip("/") + "/"
+    found: list[Violation] = []
+    try:
+        experiments = [
+            item for project in ws.list_projects() for item in project.list_experiments()
+        ]
+    except (RuntimeError, ValueError, OSError):
+        # An unmigrated or unreadable tree: the layout rules report it.
+        return found
+    for experiment in experiments:
+        rel = str(experiment.resolve())[len(root) :]
+        if not _in_scope(rel, scope):
+            continue
+        try:
+            attempts = [
+                (posixpath.basename(str(run.resolve())), run.executions)
+                for run in experiment.list_runs()
+            ]
+        except (RuntimeError, ValueError, OSError):
+            continue
+        found.extend(_comparison_issues(rel, attempts))
+    return found
+
+
+def _comparison_issues(
+    rel: str, attempts: Sequence[tuple[str, Sequence[Execution]]]
+) -> list[Violation]:
+    """The two findings of :func:`_workflow_issues` for one experiment at *rel*.
+
+    *attempts* holds each run's directory name and its attempts.
+    """
+    from molab.workspace.domain import ExecutionStatus
+    from molab.workspace.validate import Violation
+
+    found: list[Violation] = []
+    versions: dict[str | None, int] = {}
+    adopted: list[str] = []
+    settled = 0
+    for name, executions in attempts:
+        succeeded = sorted(
+            (attempt for attempt in executions if attempt.status == ExecutionStatus.SUCCEEDED),
+            key=lambda attempt: attempt.seq,
+        )
+        if not succeeded:
+            continue
+        settled += 1
+        hashed = [item.workflow_hash for item in succeeded if item.workflow_hash]
+        version = hashed[-1] if hashed else None
+        versions[version] = versions.get(version, 0) + 1
+        if not succeeded[-1].observed:
+            adopted.append(name)
+    if len(versions) > 1:
+        listed = ", ".join(
+            f"{_version_label(digest)} ({count} run{'' if count == 1 else 's'})"
+            for digest, count in sorted(versions.items(), key=lambda item: item[0] or "")
+        )
+        found.append(
+            Violation(
+                path=rel,
+                rule="experiment.mixed_workflow",
+                detail=f"its runs were executed by {len(versions)} workflow versions: {listed}",
+                severity="warning",
+                hint=_MIXED_WORKFLOW_HINT,
+            )
+        )
+    if adopted:
+        shown = ", ".join(sorted(adopted)[:_ADOPTED_SHOWN])
+        more = len(adopted) - _ADOPTED_SHOWN
+        found.append(
+            Violation(
+                path=rel,
+                rule="experiment.adopted_results",
+                detail=f"{len(adopted)} of {settled} runs take their results from an "
+                f"adopted attempt: {shown}{f' and {more} more' if more > 0 else ''}",
+                severity="warning",
+                hint=_ADOPTED_RESULTS_HINT,
+            )
+        )
+    return found
+
+
+def _version_label(digest: str | None) -> str:
+    return "no recorded workflow" if digest is None else digest.rsplit(":", 1)[-1][:8]
+
+
 def _asset_issues(ws: Workspace, scope: frozenset[str] | None) -> list[Violation]:
     """``asset.slot`` / ``asset.evidence`` / ``asset.legacy`` for every asset host in scope."""
     from molab.workspace.asset_repository import scan_asset_repositories
@@ -238,14 +365,7 @@ def _asset_issues(ws: Workspace, scope: frozenset[str] | None) -> list[Violation
     found: list[Violation] = []
     for repository in scan_asset_repositories(ws):
         rel = repository.scope_dir[len(root) :] if repository.scope_dir.startswith(root) else ""
-        if (
-            scope is not None
-            and rel
-            and not any(
-                rel == item or item.startswith(rel + "/") or rel.startswith(item + "/")
-                for item in scope
-            )
-        ):
+        if rel and not _in_scope(rel, scope):
             continue
         try:
             assets = repository.list()
@@ -688,9 +808,20 @@ class _PathCheck:
                 return f"molab asset replace {slot} SRC"
         return self._fill("molab asset import NAME SRC --project {project}")
 
+    def _sealed(self, record: str) -> bool:
+        """Whether the attempt record at *record* is sealed; unreadable reads as not."""
+        from molab.workspace.schema_version import read_versioned_json
+
+        try:
+            stored = read_versioned_json(record, fs=self.fs)
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
+        return isinstance(stored, dict) and stored.get("sealed_at") is not None
+
     def _adopt(self) -> str:
         return self._fill(
-            "molab runs adopt {project} {experiment} {run} --product TASK=PATH --log FILE"
+            "molab runs adopt {project} {experiment} {run} --product TASK=PATH --log FILE "
+            "--source FILE"
         )
 
     def _scratch_hint(self) -> str:
@@ -856,6 +987,14 @@ class _PathCheck:
             if level == "experiment" and last and name == WORKFLOW_SCRIPT_FILENAME:
                 return self.allow("the experiment's workflow script")
             if level == "execution" and name in (OUT.name, WORK.name) and not last:
+                if self._sealed(self.fs.join(here, EXECUTION_RECORD_FILENAME)):
+                    return self.deny(
+                        "execution.sealed",
+                        f"Attempt {self.names.get('execution')!r} is sealed: its {name}/ is the "
+                        "record of what ran, and results are read from it. Write analysis in "
+                        f"{self._scratch_hint()}; to produce new output, run a new attempt.",
+                        "molab run WORKFLOW --rerun",
+                    )
                 return self.allow(f"{name}/ is where a task writes")
             if level in HOST_LEVELS:
                 if last and name == INDEX_FILENAME:

@@ -81,7 +81,7 @@ frontmatter 标出是哪一个：
 | `Plan` | 我们在问什么，范围多大，受哪些约束？ | 无 | 阶段、工作项、验收标准（Roadmap、Todo、Milestone）；待检验的断言（Hypothesis） |
 | `Roadmap` | 工作按什么顺序做？ | `stages`：每项 `id`、`title`、可选的 `experiment`、`depends_on`（id 不重复，依赖都是已有阶段，无环） | 工作项、验收标准 |
 | `Todo` | 还剩哪些工作？ | `items`：每项 `id`、`title`、`status` `open` \| `done` \| `blocked`（默认 `open`）、可选的 `stage`（id 不重复） | 阶段顺序 |
-| `Milestone` | 工作什么时候算验收通过？ | `criterion`（必填）、`status` `open` \| `met` \| `missed`（默认 `open`）、可选的所关闭的 `stage` | 达成它的工作本身 |
+| `Milestone` | 工作什么时候算验收通过？ | `criterion`（必填）、`status` `open` \| `met` \| `missed`（默认 `open`）、可选的所关闭的 `stage`、可选的 `checks` 及其 `measurements` | 达成它的工作本身 |
 | `Hypothesis` | 我们断言什么会成立？ | `verdict`：`open` \| `supported` \| `refuted` \| `unsettled`（默认 `open`） | 证据本身（那是 Finding） |
 | `Observation` | 在做任何解释之前，观察到了什么、给定了什么？ | 无 | 结论（Finding） |
 | `Finding` | 证据确立了什么？ | 无 | 选择、计划 |
@@ -128,6 +128,39 @@ HTTP 上为 422，消息写明每条规则和出问题的文本。唯一一条�
 写的阶段，必须出现在引用同一份 Plan 的某个 `Roadmap` 上（`knowledge.stage`）；不引用任何 Plan 的文档
 不做这项检查。Milestone 的 `stage` 可以不写：复现检查点不关闭任何阶段。Plan 要检验的断言是
 `Hypothesis` 文档。
+
+### 定了的状态要有证据
+
+判据是一个数的 Milestone，把它写成 check，算术由 molab 来做：
+
+```yaml
+checks:
+  - id: ffv            # 在这份 Milestone 内唯一
+    span: /ffv         # 这个数在已登记的 JSON 文件里的位置
+    expected: 0.29
+    tolerance: 0.01    # 绝对容差；`relative: true` 时按 `expected` 缩放
+    compare: within    # 或 at_most / at_least
+    critical: true     # 非关键 check 不通过，不会让 Milestone 变成 missed
+```
+
+`molab knowledge evaluate DOC --measure ffv=molab:asset/<id>` 从该资产读出这个位置的值，把值连同
+资产的引用和内容摘要记到 `measurements` 下，链接这份资产，并写入状态：关键 check 全部通过为 `met`，
+有已测的关键 check 不通过为 `missed`，还有没测的则保持 `open`。字节必须是 run 自己的：由 molab
+自己运行的 attempt 登记，所在的 run 被 molab 跑成功过，并且之后没有被 `molab asset replace` 换掉。
+导入的文件、adopt 进来的 attempt 的文件、从未成功过的 run 的文件都不能用来测量。手填的 `met` 或 `missed`
+必须与旁边的测量一致，否则写入被拒绝（`knowledge.fields`）；对不一致的文档，`evaluate` 会重新测量并覆盖它。
+
+下面这些规则要读的不止一份文档，所以由 `molab validate` 报告，不拒绝写入：
+
+| 规则 | 报告什么 |
+|---|---|
+| `knowledge.milestone_evidence` | 测量所引用的资产不存在、不再是其 run 自己的（即 `evaluate` 所要求的）、读取之后被改过，或该位置的值与记录不同；没有 check 的 `met` / `missed` Milestone 既不链接 `Finding`、也没有 `Finding` 链接它 |
+| `knowledge.stage_order` | 一份 `met` 的 Milestone 关闭了某个阶段，而它所依赖阶段的 Milestone 还不是 `met` |
+| `knowledge.verdict_evidence` | `supported` 的 Hypothesis 没有 `Finding` 以 `supports` 链接它，或 `refuted` 的没有以 `contradicts` 链接它 |
+| `knowledge.dangling_ref` | `Report` 或 `Finding` 链接的 `molab:` 引用什么都不指向 |
+| `knowledge.source_text`（警告） | 被 Plan 链接的 `Literature` 没有指向 PDF（`pdf_asset_id` / `pdf_path`），或指向的 PDF 不存在 |
+| `experiment.mixed_workflow`（警告） | 同一个实验的 run 由不同版本的 workflow 执行（按每个 run 最近一次记录了 `workflow_hash` 的成功 attempt），于是代码本身成了它们之间的差别之一 |
+| `experiment.adopted_results`（警告） | 最近一次成功 attempt 是 adopt 进来的 run：它们的结果是交给 molab 的文件，不是 molab 看着产生的 |
 
 ### 控制流在链接和字段里
 

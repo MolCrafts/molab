@@ -252,3 +252,36 @@ def test_a_sealed_attempt_commits_its_products_and_leaves_a_clean_tree(run) -> N
     assert f"assets/{slug}/asset.json" in tracked, tracked
     assert "alive" not in tracked
     assert asset.title == "network.pdb"
+
+
+class TestObserved:
+    """Whether molab ran the attempt itself, as the record says and as an older record reads."""
+
+    @staticmethod
+    def _record(run, attempt_id: str) -> dict:
+        path = Path(str(run.resolve())) / "executions" / attempt_id / "execution.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def test_an_adopted_attempt_says_it_was_not_observed(self, run, arm) -> None:
+        adopted = run.adopt_execution(started_at=T0, finished_at=T1, log=arm / "run.log")
+        assert adopted.observed is False
+        assert self._record(run, adopted.id)["observed"] is False
+
+    def test_an_attempt_molab_ran_writes_no_key_an_older_reader_would_refuse(self, run) -> None:
+        with run.start():
+            pass
+        (attempt,) = run.executions
+        assert attempt.observed is True
+        assert "observed" not in self._record(run, attempt.id)
+
+    def test_a_record_adopted_before_the_field_reads_as_not_observed(self, run, arm) -> None:
+        # ``--log`` alone leaves no adopted evidence: only the record's shape says it.
+        adopted = run.adopt_execution(started_at=T0, finished_at=T1, log=arm / "run.log")
+        path = Path(str(run.resolve())) / "executions" / adopted.id / "execution.json"
+        record = json.loads(path.read_text(encoding="utf-8"))
+        assert not any(item["kind"] == "adopted" for item in record["evidence"])
+        del record["observed"]
+        path.write_text(json.dumps(record), encoding="utf-8")
+
+        (attempt,) = run.executions
+        assert attempt.observed is False

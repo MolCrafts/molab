@@ -30,6 +30,26 @@ one (:class:`ContentRuleError`). The rules:
   than one document, so a write is not refused for it (writing the Todo before
   its Roadmap is legal); ``molab validate`` and the end-of-session check report it.
 
+The rules below also read more than the document, so they too are reported
+and never refuse a write:
+
+* ``knowledge.milestone_evidence`` (error) — a Milestone's status rests on
+  nothing: a measurement that no longer agrees with the asset it cites (the
+  ref names nothing, the bytes are no longer its run's own as
+  ``evaluate_milestone`` requires, they changed, or they hold another value
+  at the span), or a ``met`` / ``missed`` Milestone with no checks that
+  neither links a Finding nor is linked by one.
+* ``knowledge.stage_order`` (error) — a ``met`` Milestone closes a stage while
+  a Milestone of a stage it depends on is not ``met``.
+* ``knowledge.verdict_evidence`` (error) — a Hypothesis is ``supported`` with
+  no Finding that links it as ``supports``, or ``refuted`` with none that
+  links it as ``contradicts``.
+* ``knowledge.dangling_ref`` (error) — a Report or Finding links a ``molab:``
+  ref that names nothing in the workspace.
+* ``knowledge.source_text`` (warning) — a Literature that a Plan links points
+  at no PDF, or at one that is not there: the Plan cannot be checked against
+  the text it reproduces.
+
 ``molab.workspace`` is imported only inside function bodies.
 """
 
@@ -37,7 +57,7 @@ from __future__ import annotations
 
 import posixpath
 import re
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -45,8 +65,12 @@ from .fields import check_fields, own_fields
 
 if TYPE_CHECKING:
     from molab.fs import FileSystem
+    from molab.workspace import Workspace
 
     from .concept import Concept
+
+    #: Every document of the workspace, read at most once per report.
+    type _Walk = Callable[[], Sequence[Concept]]
 
 __all__ = [
     "CONTENT_RULE_HINTS",
@@ -92,6 +116,28 @@ CONTENT_RULE_HINTS: dict[str, str] = {
         "Name a stage the Roadmap of the same Plan declares, or add the stage to that "
         "Roadmap (`molab knowledge write NAME --class Roadmap --fields '{\"stages\": [...]}'`)."
     ),
+    "knowledge.milestone_evidence": (
+        "Measure the checks from a run's registered files with `molab knowledge evaluate "
+        "DOC --measure CHECK=molab:asset/<id>`. A Milestone with no checks links the "
+        "Finding that settles it."
+    ),
+    "knowledge.stage_order": (
+        "Settle the Milestones of the stages this one depends on first, or set this "
+        "Milestone back to open."
+    ),
+    "knowledge.verdict_evidence": (
+        "Link the Hypothesis from the Finding that settles it, with role `supports` "
+        "or `contradicts`, or set the verdict to `open` / `unsettled`."
+    ),
+    "knowledge.source_text": (
+        "Import the paper and point the Literature at it: `molab asset import paper.pdf "
+        "-p PROJECT`, then set `pdf_asset_id` in its fields. A Plan is checked against "
+        "the text of what it reproduces."
+    ),
+    "knowledge.dangling_ref": (
+        "Cite a ref that exists: `molab index show --frontmatter` lists the runs, and "
+        "`molab asset list` the assets."
+    ),
 }
 
 _EPHEMERAL_RE = re.compile(
@@ -99,6 +145,8 @@ _EPHEMERAL_RE = re.compile(
 )
 _VERSIONED_RE = re.compile(r"[-_ ]v\d+$", re.I)
 _HTML_PAGE_RE = re.compile(r"<\s*(?:!doctype|html|head|body|iframe|script|style)\b", re.I)
+#: The role a Finding links a Hypothesis with to back each settled verdict.
+_VERDICT_ROLES = {"supported": "supports", "refuted": "contradicts"}
 #: The ref kinds that tie a claim to registered bytes.
 _ANCHOR_KINDS = frozenset({"asset", "run", "execution"})
 
@@ -298,7 +346,7 @@ def _local_targets(doc: Concept) -> set[str]:
     return found
 
 
-def _stage_issues(docs: Sequence[Concept], root: str, fs: FileSystem) -> Iterator[ContentIssue]:
+def _stage_issues(docs: Sequence[Concept], everything: _Walk) -> Iterator[ContentIssue]:
     """``knowledge.stage`` for each stage a Todo item or Milestone names that its Plan lacks.
 
     The Plans a document cites are the Plan documents it links. Their stages
@@ -308,13 +356,12 @@ def _stage_issues(docs: Sequence[Concept], root: str, fs: FileSystem) -> Iterato
     named = [(doc, stages) for doc in docs if (stages := _named_stages(doc))]
     if not named:
         return
-    from .concept import Knowledge
     from .concepts import Plan, Roadmap
 
-    everything = list(Knowledge(root, fs=fs).walk())
-    plans = {posixpath.normpath(str(doc.path)) for doc in everything if isinstance(doc, Plan)}
+    walked = everything()
+    plans = {posixpath.normpath(str(doc.path)) for doc in walked if isinstance(doc, Plan)}
     staged: dict[str, set[str]] = {plan: set() for plan in plans}
-    for roadmap in (doc for doc in everything if isinstance(doc, Roadmap)):
+    for roadmap in (doc for doc in walked if isinstance(doc, Roadmap)):
         try:
             ids = {stage.id for stage in roadmap.fields().stages}
         except ValueError:
@@ -335,6 +382,234 @@ def _stage_issues(docs: Sequence[Concept], root: str, fs: FileSystem) -> Iterato
                     f"names stage {stage!r}, which no Roadmap citing its Plan declares",
                     "error",
                 )
+
+
+def _milestone_stage_issues(
+    milestones: Sequence[Concept], everything: Sequence[Concept]
+) -> Iterator[ContentIssue]:
+    """``knowledge.stage_order`` for each met Milestone ahead of a stage it depends on.
+
+    The order is the Roadmap's that cites the Milestone's Plan. A dependency
+    that no Milestone of that Plan names is not checked.
+    """
+    from .concepts import Milestone, Plan, Roadmap
+
+    plans = {posixpath.normpath(str(doc.path)) for doc in everything if isinstance(doc, Plan)}
+    depends: dict[str, dict[str, tuple[str, ...]]] = {plan: {} for plan in plans}
+    for roadmap in (doc for doc in everything if isinstance(doc, Roadmap)):
+        try:
+            stages = {stage.id: stage.depends_on for stage in roadmap.fields().stages}
+        except ValueError:
+            continue
+        for plan in _local_targets(roadmap) & plans:
+            depends[plan].update(stages)
+    closing: dict[tuple[str, str], list[Milestone]] = {}
+    for doc in (doc for doc in everything if isinstance(doc, Milestone)):
+        try:
+            stage = doc.fields().stage
+        except ValueError:
+            continue
+        if stage is None:
+            continue
+        for plan in _local_targets(doc) & plans:
+            closing.setdefault((plan, stage), []).append(doc)
+    for doc in milestones:
+        assert isinstance(doc, Milestone)
+        fields = doc.fields()
+        if fields.status != "met" or fields.stage is None:
+            continue
+        for plan in sorted(_local_targets(doc) & plans):
+            for needed in depends[plan].get(fields.stage, ()):
+                behind = [
+                    other.name
+                    for other in closing.get((plan, needed), [])
+                    if other.fields().status != "met"
+                ]
+                if behind:
+                    yield ContentIssue(
+                        str(doc.path),
+                        "knowledge.stage_order",
+                        f"is met, but stage {needed!r}, which {fields.stage!r} depends on, "
+                        f"is not: {', '.join(sorted(behind))}",
+                        "error",
+                    )
+
+
+def _evidence_issues(docs: Sequence[Concept], walk: _Walk) -> Iterator[ContentIssue]:
+    """The rules that hold a settled status to the documents and bytes behind it."""
+    from .acceptance import evidence_problems
+    from .concepts import Finding, Hypothesis, Milestone
+
+    judged = [doc for doc in docs if isinstance(doc, (Milestone, Hypothesis))]
+    if not judged:
+        return
+    everything = walk()
+    #: Finding path -> {(target path, role)}: who a Finding links, and how.
+    findings = {
+        posixpath.normpath(str(doc.path)): {
+            (posixpath.normpath(edge.target.split("#", 1)[0]), edge.role) for edge in doc.links()
+        }
+        for doc in everything
+        if isinstance(doc, Finding)
+    }
+
+    def linked_by_finding(path: str, roles: frozenset[str] | None = None) -> bool:
+        return any(
+            target == path and (roles is None or role in roles)
+            for edges in findings.values()
+            for target, role in edges
+        )
+
+    milestones = [doc for doc in judged if isinstance(doc, Milestone)]
+    for doc in milestones:
+        fields = doc.fields()
+        path = posixpath.normpath(str(doc.path))
+        for problem in evidence_problems(doc):
+            yield ContentIssue(str(doc.path), "knowledge.milestone_evidence", problem, "error")
+        if fields.checks or fields.status == "open":
+            continue
+        if not (_local_targets(doc) & set(findings) or linked_by_finding(path)):
+            yield ContentIssue(
+                str(doc.path),
+                "knowledge.milestone_evidence",
+                f"is {fields.status} with no checks and no Finding that settles it",
+                "error",
+            )
+    yield from _milestone_stage_issues(milestones, everything)
+    for doc in (doc for doc in judged if isinstance(doc, Hypothesis)):
+        role = _VERDICT_ROLES.get(doc.fields().verdict)
+        if role is None:
+            continue
+        if not linked_by_finding(posixpath.normpath(str(doc.path)), frozenset({role})):
+            yield ContentIssue(
+                str(doc.path),
+                "knowledge.verdict_evidence",
+                f"is {doc.fields().verdict} with no Finding that links it as @{role}",
+                "error",
+            )
+
+
+def _dangling_issues(docs: Sequence[Concept], root: str, fs: FileSystem) -> Iterator[ContentIssue]:
+    """``knowledge.dangling_ref`` for each ref a Report or Finding links that names nothing.
+
+    The asset stores are read once for the whole report. A ref whose lookup
+    cannot be finished (an unmigrated store, a record that does not read, an
+    id in two scopes) is not reported here: the workspace rules report why.
+    """
+    from .concepts import Finding, Report
+
+    anchored = [doc for doc in docs if isinstance(doc, (Report, Finding))]
+    if not anchored:
+        return
+    from molab.workspace import Workspace
+    from molab.workspace.errors import RefNotFoundError
+    from molab.workspace.refs import InvalidRefError, parse_ref
+
+    workspace = Workspace(root, fs=fs)
+    asset_ids: frozenset[str] | None = None
+    scanned = False
+    known: dict[str, bool] = {}
+    for doc in anchored:
+        for edge in doc.links():
+            ref = edge.target.split("#", 1)[0]
+            if not edge.is_ref:
+                continue
+            if ref not in known:
+                try:
+                    parsed = parse_ref(ref)
+                    if parsed.asset_id is not None:
+                        if not scanned:
+                            asset_ids, scanned = _asset_ids(workspace), True
+                        known[ref] = asset_ids is None or parsed.asset_id in asset_ids
+                    else:
+                        workspace.find(parsed)
+                        known[ref] = True
+                except (RefNotFoundError, InvalidRefError):
+                    known[ref] = False
+                except (LookupError, RuntimeError, ValueError, OSError):
+                    known[ref] = True
+            if not known[ref]:
+                yield ContentIssue(
+                    str(doc.path),
+                    "knowledge.dangling_ref",
+                    f"links {ref}, which names nothing in this workspace",
+                    "error",
+                )
+
+
+def _asset_ids(workspace: Workspace) -> frozenset[str] | None:
+    """The id of every asset in *workspace*; ``None`` when a store cannot be listed."""
+    from molab.workspace.asset_repository import scan_asset_repositories
+
+    try:
+        return frozenset(
+            asset.id
+            for repository in scan_asset_repositories(workspace)
+            for asset in repository.list()
+        )
+    except (RuntimeError, ValueError, OSError):
+        return None
+
+
+def _source_text_issues(
+    docs: Sequence[Concept], root: str, fs: FileSystem
+) -> Iterator[ContentIssue]:
+    """``knowledge.source_text`` for each Literature a Plan links whose text is not at hand.
+
+    The text is the asset ``pdf_asset_id`` names, or the file at ``pdf_path``.
+    """
+    from .concepts import Literature, Plan
+
+    cited = {target for doc in docs if isinstance(doc, Plan) for target in _local_targets(doc)}
+    papers = [
+        doc
+        for doc in docs
+        if isinstance(doc, Literature) and posixpath.normpath(str(doc.path)) in cited
+    ]
+    if not papers:
+        return
+    from molab.workspace import Workspace
+    from molab.workspace.errors import RefNotFoundError
+    from molab.workspace.refs import MolabRef
+
+    workspace = Workspace(root, fs=fs)
+    for doc in papers:
+        try:
+            fields = doc.fields()
+        except ValueError:
+            continue
+        problem: str | None = None
+        if fields.pdf_asset_id is not None:
+            try:
+                workspace.find(MolabRef(asset_id=fields.pdf_asset_id))
+            except (RefNotFoundError, ValueError):
+                # ValueError: the field does not hold an asset id at all.
+                problem = f"pdf_asset_id {fields.pdf_asset_id!r} names no asset in this workspace"
+            except (LookupError, RuntimeError, OSError):
+                # The store cannot be searched; the workspace rules report why.
+                problem = None
+        elif fields.pdf_path is not None:
+            located = posixpath.join(posixpath.dirname(str(doc.path)), fields.pdf_path)
+            if not fs.exists(located):
+                problem = f"pdf_path {fields.pdf_path!r} names a file that does not exist"
+        else:
+            problem = "a Plan cites it, but it points at no PDF (pdf_asset_id or pdf_path)"
+        if problem is not None:
+            yield ContentIssue(str(doc.path), "knowledge.source_text", problem, "warning")
+
+
+def _walk_once(root: str, fs: FileSystem) -> _Walk:
+    """Every document under *root*, walked on the first call and kept for the rest."""
+    walked: list[Concept] = []
+
+    def walk() -> Sequence[Concept]:
+        if not walked:
+            from .concept import Knowledge
+
+            walked.extend(Knowledge(root, fs=fs).walk())
+        return walked
+
+    return walk
 
 
 def content_issues(
@@ -365,9 +640,14 @@ def content_issues(
     for doc in docs:
         found.extend(error_issues(type(doc), str(doc.path), doc.frontmatter(), doc.read()))
     refused = {issue.path for issue in found if issue.rule == "knowledge.fields"}
-    found.extend(_stage_issues([doc for doc in docs if str(doc.path) not in refused], root, fs))
+    sound = [doc for doc in docs if str(doc.path) not in refused]
+    walk = _walk_once(root, fs)
+    found.extend(_stage_issues(sound, walk))
+    found.extend(_evidence_issues(sound, walk))
+    found.extend(_dangling_issues(sound, root, fs))
     if errors_only:
         return found
+    found.extend(_source_text_issues(sound, root, fs))
     for doc in docs:
         found.extend(_source_issues(doc, root, fs))
         if isinstance(doc, Literature):

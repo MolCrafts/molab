@@ -22,7 +22,7 @@ import shutil
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from molab.ids import generate_uuid7
 
@@ -207,6 +207,14 @@ def migrate_legacy_assets(workspace: Workspace) -> builtins.list[Asset]:
     return migrated
 
 
+def _asset_record(asset: Asset) -> dict[str, Any]:
+    """*asset* as ``asset.json`` stores it: ``replaced_at`` only when set."""
+    record = asset.model_dump(mode="json")
+    if asset.replaced_at is None:
+        del record["replaced_at"]
+    return versioned_payload(record)
+
+
 def asset_by_digest(workspace: Workspace, digest: str) -> Asset | None:
     """The one asset in *workspace* whose content digest is *digest*."""
     found: list[Asset] = []
@@ -385,11 +393,17 @@ class AssetRepository:
         slug = self.find_slug(asset.id)
         assert slug is not None
         updated = asset.model_copy(
-            update={"origin": origin, "created_by": created_by, "created_at": datetime.now(UTC)}
+            update={
+                "origin": origin,
+                "created_by": created_by,
+                "created_at": datetime.now(UTC),
+                # The attempt registered these very bytes: they are its own again.
+                "replaced_at": None,
+            }
         )
         self.fs.atomic_write_json(
             self.fs.join(self.assets_dir, slug, "asset.json"),
-            versioned_payload(updated.model_dump(mode="json")),
+            _asset_record(updated),
         )
         return updated
 
@@ -493,6 +507,9 @@ class AssetRepository:
     ) -> Asset:
         """Put *source* into asset *asset_id*. The id, title, origin, and tags stay.
 
+        ``replaced_at`` is stamped: the origin names who first filled the
+        slot, and these bytes are no longer what it produced.
+
         The same bytes are a no-op. A log is refused. Bytes that already belong
         to a different asset are refused: one digest is one asset.
 
@@ -533,6 +550,7 @@ class AssetRepository:
                     "content": content,
                     "file": filename,
                     "media_type": guessed if guessed is not None else asset.media_type,
+                    "replaced_at": datetime.now(UTC),
                 }
             )
             staging = self.fs.join(self.root, MOLAB_DIR, "asset-replacements", generate_uuid7())
@@ -550,7 +568,7 @@ class AssetRepository:
                     )
                 self.fs.atomic_write_json(
                     self.fs.join(prepared, "asset.json"),
-                    versioned_payload(updated.model_dump(mode="json")),
+                    _asset_record(updated),
                 )
                 # Switch the complete slot, not the payload and record separately.
                 # Keep the old slot until the new one has been installed.
@@ -686,7 +704,7 @@ class AssetRepository:
         )
         self.fs.atomic_write_json(
             self.fs.join(asset_root, "asset.json"),
-            versioned_payload(asset.model_dump(mode="json")),
+            _asset_record(asset),
         )
         return asset
 
@@ -756,7 +774,7 @@ class AssetRepository:
             created_by=created_by,
             tags=dict(stub.get("tags") or {}),
         )
-        self.fs.atomic_write_json(record_path, versioned_payload(asset.model_dump(mode="json")))
+        self.fs.atomic_write_json(record_path, _asset_record(asset))
         if versions.is_dir():
             shutil.rmtree(versions)
         return self._read_asset(directory)

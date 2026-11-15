@@ -374,6 +374,10 @@ def run_adopt(
 ) -> None:
     """Record a finished job that ran outside molab as a sealed attempt, moving its files in.
 
+    The record says ``observed: false``: molab holds what was handed over, not
+    what it saw run, so no Milestone check is measured from it. A succeeded
+    job is adopted with the script that ran it (``--source``, or ``--from``).
+
     The files are moved (renamed, same filesystem) into the run's next
     ``executions/eNN/``: products into ``out/<task>/``, scheduler files into
     ``jobs/``, the log as ``run.log``, scripts into ``source/``. ``--from DIR``
@@ -392,6 +396,12 @@ def run_adopt(
     except ValueError:
         rprint(f"[red]Error:[/red] unknown status {status!r}")
         raise typer.Exit(2) from None
+    if state == ExecutionStatus.SUCCEEDED and not source and tracked is None:
+        rprint(
+            "[red]Error:[/red] a succeeded job is adopted with the script that ran it: "
+            "pass --source FILE (repeatable), or --from a molab.track() directory"
+        )
+        raise typer.Exit(2)
     products: dict[str, list[str]] = {}
     for spec in product or []:
         task, sep, path = spec.partition("=")
@@ -489,6 +499,7 @@ def run_adopt(
         "path": f"{run_rel}/executions/{execution.id}",
         "status": execution.status.value,
         "mode": execution.mode.value,
+        "observed": execution.observed,
         "started_at": execution.started_at.isoformat() if execution.started_at else None,
         "finished_at": execution.finished_at.isoformat() if execution.finished_at else None,
     }

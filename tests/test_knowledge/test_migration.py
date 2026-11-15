@@ -63,10 +63,11 @@ def _write(lab: Any, name: str, meta: dict[str, object], body: str, suffix: str 
 
 
 def _knowledge_errors(lab: Any) -> list[tuple[str, str]]:
+    """The errors migration answers for; ``ANCHOR`` names an asset no test registers."""
     return [
         (issue["rule"], issue["path"])
         for issue in validate_knowledge(lab, errors_only=True)
-        if issue["severity"] == "error"
+        if issue["severity"] == "error" and issue["rule"] != "knowledge.dangling_ref"
     ]
 
 

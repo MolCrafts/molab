@@ -68,6 +68,10 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
         "molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --fields JSON --created-by AGENT",
     ),
     (
+        "Settle a Milestone from a run's registered numbers",
+        "molab knowledge evaluate DOC --measure CHECK=molab:asset/ID",
+    ),
+    (
         "Preview a knowledge document as a reader sees it (or export one HTML file)",
         "molab knowledge serve DOC [--export FILE]",
     ),

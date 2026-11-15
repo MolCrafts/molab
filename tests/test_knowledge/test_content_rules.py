@@ -15,6 +15,17 @@ import pytest
 from molab.knowledge.validate import RULE_HINTS, validate_knowledge
 
 PLAN = "---\nclass: Plan\nname: Plan\n---\n# Plan\n"
+#: The rules that read more than the document they report on: ``molab validate``
+#: reports them, and a write is never refused for one.
+REPORTED_ONLY_RULES = frozenset(
+    {
+        "knowledge.stage",
+        "knowledge.milestone_evidence",
+        "knowledge.stage_order",
+        "knowledge.verdict_evidence",
+        "knowledge.dangling_ref",
+    }
+)
 
 
 def _doc(lab: Any, name: str, text: str, host: str = "") -> Path:
@@ -233,7 +244,7 @@ class TestTheWriteGate:
         errors = {
             issue["rule"]
             for issue in validate_knowledge(lab, errors_only=True)
-            if issue["path"] == f"knowledges/{slug}.md"
+            if issue["path"] == f"knowledges/{slug}.md" and issue["rule"] not in REPORTED_ONLY_RULES
         }
 
         host = lab.get_project("p")

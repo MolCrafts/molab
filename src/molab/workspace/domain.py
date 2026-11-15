@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
@@ -78,6 +78,33 @@ class RunStatusSummary(BaseModel):
             not_started=not executions,
             by_status=counts,
         )
+
+
+#: The ``EvidenceRef.kind`` of a file ``adopt`` moved into an attempt.
+ADOPTED_EVIDENCE_KIND: Final = "adopted"
+
+
+def _evidence_kind(item: object) -> object:
+    """The ``kind`` of one evidence entry, as stored (a mapping) or as a model."""
+    return item.get("kind") if isinstance(item, Mapping) else getattr(item, "kind", None)
+
+
+def _reads_as_adopted(record: Mapping[str, object]) -> bool:
+    """Whether a stored attempt record with no ``observed`` key is an adopted one."""
+    evidence = record.get("evidence")
+    if isinstance(evidence, Sequence) and any(
+        _evidence_kind(item) == ADOPTED_EVIDENCE_KIND for item in evidence
+    ):
+        return True
+    # ``adopt`` writes one sealed record whose creation is its start, with no
+    # environment and no workflow; an attempt molab starts is created first.
+    return (
+        record.get("sealed_at") is not None
+        and not record.get("environment")
+        and record.get("workflow_hash") is None
+        and record.get("created_at") is not None
+        and record.get("created_at") == record.get("started_at")
+    )
 
 
 class EvidenceRef(BaseModel):
@@ -223,9 +250,22 @@ class Execution(BaseModel):
         migrated.pop("workflow_digest", None)
         for key in ("artifacts", "checkpoint_artifact_id", "observed_input_ids", "sealed_commit"):
             migrated.pop(key, None)
+        if "observed" not in migrated and _reads_as_adopted(migrated):
+            migrated["observed"] = False
         return migrated
 
     evidence: tuple[EvidenceRef, ...] = ()
+    observed: bool = True
+    """Whether molab ran this attempt itself.
+
+    ``False`` for an attempt ``adopt`` recorded: the job ran outside molab,
+    and the record holds what a person handed over, not what molab saw run.
+    Only ``False`` is written to ``execution.json``, so a record of an
+    attempt molab ran stays readable by a molab that predates the field. A
+    record without the key is read as adopted when it holds adopted evidence
+    or has the shape ``adopt`` writes: sealed, created at the moment it
+    started, with no environment and no workflow. A creation-time fact.
+    """
     declaration_diff: dict[str, JSONValue] = Field(default_factory=dict)
     error: dict[str, JSONValue] | None = None
     sealed_at: datetime | None = None
@@ -424,6 +464,9 @@ class Asset(BaseModel):
         created_at: When the asset was registered. A naive value is read as UTC.
         created_by: Who registered it.
         tags: Free-form string tags.
+        replaced_at: When ``replace_bytes`` put bytes here that *origin* did
+            not produce; ``None`` while the bytes are the origin's own. Written
+            to ``asset.json`` only when set.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -438,6 +481,7 @@ class Asset(BaseModel):
     created_at: datetime
     created_by: AgentRef
     tags: dict[str, str] = Field(default_factory=dict)
+    replaced_at: datetime | None = None
 
     @property
     def project_id(self) -> str | None:
@@ -449,7 +493,7 @@ class Asset(BaseModel):
         """``molab:asset/<id>``, composed by :mod:`molab.workspace.refs`."""
         return str(MolabRef(asset_id=self.id))
 
-    @field_validator("created_at", mode="after")
+    @field_validator("created_at", "replaced_at", mode="after")
     @classmethod
     def _utc(cls, value: datetime | None) -> datetime | None:
         return _as_utc(value)
@@ -457,6 +501,7 @@ class Asset(BaseModel):
 
 __all__ = [
     "ACTIVE_EXECUTION_STATUSES",
+    "ADOPTED_EVIDENCE_KIND",
     "FAILED_EXECUTION_STATUSES",
     "TERMINAL_EXECUTION_STATUSES",
     "Asset",

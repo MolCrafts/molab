@@ -66,6 +66,7 @@ from ._file_lock import file_lock
 from .asset_repository import content_ref
 from .domain import (
     ACTIVE_EXECUTION_STATUSES,
+    ADOPTED_EVIDENCE_KIND,
     TERMINAL_EXECUTION_STATUSES,
     EvidenceRef,
     Execution,
@@ -535,7 +536,7 @@ class ExecutionRepository:
                         content = content_ref(self.fs, target)
                         adopted.append(
                             EvidenceRef(
-                                kind="adopted",
+                                kind=ADOPTED_EVIDENCE_KIND,
                                 rel_path=dest,
                                 digest=content.digest,
                                 size=content.size,
@@ -557,6 +558,7 @@ class ExecutionRepository:
                     executor=executor or {},
                     environment=environment or {},
                     evidence=(*self._collect_evidence(slug), *adopted),
+                    observed=False,
                     error=error,
                     sealed_at=now,
                 )
@@ -1313,7 +1315,11 @@ def _write_execution(fs: FileSystem, path: str | Path, state: Execution) -> None
         state: The validated record; stamped with ``MOLAB_SCHEMA_VERSION``.
     """
     fs.mkdir(fs.dirname(path), parents=True, exist_ok=True)
-    write_versioned_json(path, state.model_dump(mode="json"), fs=fs)
+    record = state.model_dump(mode="json")
+    if state.observed:
+        # Only an adopted attempt says so; see ``Execution.observed``.
+        del record["observed"]
+    write_versioned_json(path, record, fs=fs)
 
 
 __all__ = [

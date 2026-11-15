@@ -173,6 +173,23 @@ class TestCheckPathDeny:
         _deny(verdict, "execution.owned")
         assert "molab runs adopt" in verdict.command
 
+    @pytest.mark.parametrize("rel", ["out/nve/log.lammps", "out/new.json", "work/tmp.txt"])
+    def test_the_task_tier_of_a_sealed_attempt(self, lab: dict[str, Any], rel: str) -> None:
+        # What a finished attempt wrote is the evidence of what ran.
+        target = lab["attempt"] / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _deny(_verdict(target), "execution.sealed")
+        target.write_text("old")
+        verdict = _verdict(target, "new", "edit")
+        _deny(verdict, "execution.sealed")
+        assert "--rerun" in verdict.command
+
+    def test_an_attempt_record_that_is_not_a_record_reads_as_unsealed(
+        self, lab: dict[str, Any]
+    ) -> None:
+        (lab["attempt"] / "execution.json").write_text("[]", encoding="utf-8")
+        assert _verdict(lab["attempt"] / "out" / "x.dat").allowed
+
     def test_a_new_attempt_by_hand(self, lab: dict[str, Any]) -> None:
         _deny(_verdict(lab["run"] / "executions" / "e02" / "out" / "x.dat"), "execution.owned")
 
@@ -216,9 +233,11 @@ class TestCheckPathAllow:
     @pytest.mark.parametrize(
         "rel", ["out/nve/meta.json", "out/nve/run.json", "out/nve/log.lammps", "work/tmp.txt"]
     )
-    def test_a_task_tier_of_an_attempt(self, lab: dict[str, Any], rel: str) -> None:
+    def test_a_task_tier_of_a_running_attempt(self, lab: dict[str, Any], rel: str) -> None:
         # A solver's own meta.json / run.json is science payload, not a record.
-        assert _verdict(lab["attempt"] / rel).allowed
+        run = lab["ws"].get_project("alpha").get_experiment("sweep").add_run(params={"t": 2})
+        with run.start():
+            assert _verdict(Path(str(run.resolve())) / "executions" / "e01" / rel).allowed
 
     def test_a_body_only_change_of_a_record(self, lab: dict[str, Any]) -> None:
         index = lab["exp"] / "index.md"
@@ -506,3 +525,147 @@ class TestHygiene:
         found = [v for v in check_workspace(ws).errors if v.rule == "asset.slot"]
         assert [v.path for v in found] == ["projects/p/experiments/e/assets/networkdata-2"]
         assert asset.id
+
+
+class TestMixedWorkflow:
+    """Runs of one experiment are compared; code that differs between them is a variable."""
+
+    @pytest.fixture
+    def exp(self, lab: dict[str, Any]) -> Any:
+        return lab["ws"].get_project("alpha").add_experiment("fresh")
+
+    @staticmethod
+    def _ran(exp: Any, t: int, digest: str | None, **start: Any) -> Any:
+        run = exp.add_run(params={"t": t})
+        with run.start(workflow_hash=digest, **start):
+            pass
+        return run
+
+    @staticmethod
+    def _mixed(lab: dict[str, Any], **kwargs: Any) -> list[Any]:
+        report = check_workspace(lab["ws"], **kwargs)
+        assert report.ok, report.errors
+        return [item for item in report.warnings if item.rule == "experiment.mixed_workflow"]
+
+    def test_runs_that_two_workflow_versions_executed_warn(
+        self, lab: dict[str, Any], exp: Any
+    ) -> None:
+        self._ran(exp, 1, "sha256:" + "a" * 64)
+        self._ran(exp, 2, "sha256:" + "a" * 64)
+        self._ran(exp, 3, "sha256:" + "b" * 64)
+
+        (found,) = self._mixed(lab)
+
+        assert found.path == "projects/alpha/experiments/fresh"
+        assert "2 workflow versions" in found.detail
+        assert "aaaaaaaa (2 runs)" in found.detail
+        assert "bbbbbbbb (1 run)" in found.detail
+        assert found.hint
+
+    def test_one_version_is_clean(self, lab: dict[str, Any], exp: Any) -> None:
+        self._ran(exp, 1, "sha256:" + "a" * 64)
+        self._ran(exp, 2, "sha256:" + "a" * 64)
+        assert self._mixed(lab) == []
+
+    def test_a_run_no_workflow_executed_counts_as_its_own_version(
+        self, lab: dict[str, Any], exp: Any
+    ) -> None:
+        self._ran(exp, 1, "sha256:" + "a" * 64)
+        self._ran(exp, 2, None)
+        (found,) = self._mixed(lab)
+        assert "no recorded workflow (1 run)" in found.detail
+
+    def test_the_latest_succeeded_attempt_of_a_run_decides(
+        self, lab: dict[str, Any], exp: Any
+    ) -> None:
+        from molab.workspace.domain import ExecutionMode
+
+        first = self._ran(exp, 1, "sha256:" + "a" * 64)
+        with first.start(mode=ExecutionMode.RERUN, workflow_hash="sha256:" + "b" * 64):
+            pass
+        self._ran(exp, 2, "sha256:" + "b" * 64)
+        assert self._mixed(lab) == []
+
+    @staticmethod
+    def _adopt(run: Any, tmp_path: Path, **kwargs: Any) -> None:
+        from datetime import UTC, datetime
+
+        from molab.workspace.domain import ExecutionStatus
+
+        log = tmp_path / f"{run.id}.log"
+        log.write_text("done\n", encoding="utf-8")
+        now = datetime.now(UTC)
+        run.adopt_execution(
+            status=ExecutionStatus.SUCCEEDED,
+            started_at=now,
+            finished_at=now,
+            log=str(log),
+            **kwargs,
+        )
+
+    def test_an_adopted_attempt_does_not_hide_the_workflow_that_built_the_run(
+        self, lab: dict[str, Any], exp: Any, tmp_path: Path
+    ) -> None:
+        from molab.workspace.domain import ExecutionMode
+
+        for t, digest in ((1, "a"), (2, "b")):
+            run = self._ran(exp, t, "sha256:" + digest * 64)
+            self._adopt(run, tmp_path, mode=ExecutionMode.RERUN)
+
+        (found,) = self._mixed(lab)
+
+        assert "aaaaaaaa (1 run)" in found.detail
+        assert "bbbbbbbb (1 run)" in found.detail
+
+    def test_results_taken_from_adopted_attempts_warn(
+        self, lab: dict[str, Any], exp: Any, tmp_path: Path
+    ) -> None:
+        from molab.workspace.domain import ExecutionMode
+
+        self._ran(exp, 1, "sha256:" + "a" * 64)
+        self._adopt(self._ran(exp, 2, "sha256:" + "a" * 64), tmp_path, mode=ExecutionMode.RERUN)
+        self._adopt(exp.add_run(params={"t": 3}), tmp_path)
+
+        report = check_workspace(lab["ws"])
+        (found,) = [item for item in report.warnings if item.rule == "experiment.adopted_results"]
+
+        assert found.path == "projects/alpha/experiments/fresh"
+        assert "2 of 3 runs" in found.detail
+        assert "t=2" in found.detail and "t=3" in found.detail
+        assert found.hint
+        assert report.ok
+
+    def test_runs_molab_ran_itself_raise_no_adopted_warning(
+        self, lab: dict[str, Any], exp: Any
+    ) -> None:
+        self._ran(exp, 1, "sha256:" + "a" * 64)
+        report = check_workspace(lab["ws"])
+        assert [item for item in report.warnings if item.rule == "experiment.adopted_results"] == []
+
+    def test_a_failed_attempt_is_not_compared(self, lab: dict[str, Any], exp: Any) -> None:
+        self._ran(exp, 1, "sha256:" + "a" * 64)
+        run = exp.add_run(params={"t": 2})
+        with run.start(workflow_hash="sha256:" + "b" * 64) as ctx:
+            ctx.mark_failed("diverged")
+        assert self._mixed(lab) == []
+
+    def test_an_unmigrated_experiment_is_left_to_the_layout_rules(
+        self, lab: dict[str, Any], exp: Any
+    ) -> None:
+        self._ran(exp, 1, "sha256:" + "a" * 64)
+        (lab["exp"] / "meta.json").write_text("{}", encoding="utf-8")
+
+        report = check_workspace(lab["ws"])
+
+        assert "layout.legacy_record" in {item.rule for item in report.errors}
+
+    def test_the_errors_only_report_skips_it(self, lab: dict[str, Any], exp: Any) -> None:
+        self._ran(exp, 1, "sha256:" + "a" * 64)
+        self._ran(exp, 2, "sha256:" + "b" * 64)
+        assert self._mixed(lab, errors_only=True) == []
+
+    def test_an_experiment_out_of_scope_is_skipped(self, lab: dict[str, Any], exp: Any) -> None:
+        self._ran(exp, 1, "sha256:" + "a" * 64)
+        self._ran(exp, 2, "sha256:" + "b" * 64)
+        assert self._mixed(lab, scope=["projects/alpha/experiments/sweep"]) == []
+        assert len(self._mixed(lab, scope=["projects/alpha"])) == 1

@@ -10,12 +10,13 @@ handles it.
 from __future__ import annotations
 
 import logging
+import math
 from collections import Counter
 from graphlib import TopologicalSorter
 from types import MappingProxyType
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from molab.fs import FileSystem, LocalFS, PathArg
 
@@ -23,7 +24,7 @@ from .concept import Concept
 from .knowledge_item import SourceRef
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from molab._typing import JSONValue
     from molab.workspace.run import Run
@@ -173,10 +174,103 @@ class RoadmapFields(BaseModel):
         return self
 
 
+CheckComparison = Literal["within", "at_most", "at_least"]
+
+
+class MilestoneCheck(BaseModel):
+    """One number a Milestone is held to, and where a run's file holds it.
+
+    Attributes:
+        id: The stable id a measurement names.
+        span: Where the measured value sits in a registered asset: a JSON
+            pointer (``/ffv``) or a series point (``loss@10000``), the
+            spellings :meth:`_SourcedKnowledge.read_cited` reads.
+        expected: The value the measurement is compared with.
+        tolerance: How far a ``within`` measurement may sit from *expected*.
+        relative: Whether *tolerance* is a fraction of ``|expected|``.
+        compare: ``within`` (the default), or a one-sided bound: ``at_most`` /
+            ``at_least`` *expected*, where *tolerance* is not used.
+        critical: Whether a failure misses the Milestone.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str = Field(min_length=1)
+    span: str = Field(min_length=1)
+    expected: float = Field(allow_inf_nan=False)
+    tolerance: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    relative: bool = False
+    compare: CheckComparison = "within"
+    critical: bool = True
+
+    @model_validator(mode="after")
+    def _relative_needs_a_scale(self) -> MilestoneCheck:
+        if self.relative and self.expected == 0:
+            raise ValueError(
+                f"check {self.id!r}: a relative tolerance is a fraction of expected, which is 0"
+            )
+        return self
+
+    def passes(self, value: float) -> bool:
+        """Whether a measured *value* meets this check.
+
+        A value that sits on the bound passes: the comparison allows for the
+        last bits a decimal bound loses in binary (0.4 against 0.3 ± 0.1). A
+        value that is not finite never passes.
+        """
+        if not math.isfinite(value):
+            return False
+        if self.compare == "at_most":
+            return value <= self.expected or _same(value, self.expected)
+        if self.compare == "at_least":
+            return value >= self.expected or _same(value, self.expected)
+        bound = self.tolerance * abs(self.expected) if self.relative else self.tolerance
+        distance = abs(value - self.expected)
+        return distance <= bound or _same(distance, bound, scale=abs(self.expected))
+
+
+def _same(left: float, right: float, *, scale: float = 0.0) -> bool:
+    """Whether two numbers differ only by floating-point rounding at their scale."""
+    return abs(left - right) <= _ROUNDING * max(abs(left), abs(right), scale)
+
+
+#: The relative slack a comparison at a bound allows for binary rounding.
+_ROUNDING: Final = 1e-9
+
+
+class MilestoneMeasurement(BaseModel):
+    """What one check measured, and the bytes it was read from.
+
+    Attributes:
+        check: The :class:`MilestoneCheck` id this answers.
+        ref: The ``molab:asset/<id>`` the value was read from.
+        digest: The content digest of that asset when it was read.
+        value: The number at the check's span.
+        passed: Whether *value* met the check.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    check: str
+    ref: str
+    digest: str
+    value: float = Field(allow_inf_nan=False)
+    passed: bool
+
+
 class MilestoneFields(BaseModel):
     """When the work is accepted: the criterion, where it stands, the stage it closes.
 
     ``stage`` is optional: a reproduction checkpoint closes no Roadmap stage.
+
+    ``checks`` are the numbers the criterion comes down to, when it comes down
+    to numbers. A Milestone that declares them takes its status from
+    ``measurements``: ``met`` needs every critical check measured and passed,
+    ``missed`` needs a critical check measured and failed, and each
+    measurement's ``passed`` is what its check computes from the value.
+    :func:`molab.knowledge.acceptance.evaluate_milestone` writes both from the
+    registered files; fields typed by hand are held to the same arithmetic.
+    A Milestone with no checks is judged by reading, and stores no measurement.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -184,6 +278,51 @@ class MilestoneFields(BaseModel):
     criterion: str
     status: MilestoneStatus = "open"
     stage: str | None = None
+    checks: tuple[MilestoneCheck, ...] = ()
+    measurements: tuple[MilestoneMeasurement, ...] = ()
+
+    @model_validator(mode="after")
+    def _status_follows_measurements(self) -> MilestoneFields:
+        _require_unique("milestone check", [check.id for check in self.checks])
+        _require_unique("measured check", [item.check for item in self.measurements])
+        checks = {check.id: check for check in self.checks}
+        if not checks:
+            if self.measurements:
+                raise ValueError("a Milestone with no checks stores no measurement")
+            return self
+        if not any(check.critical for check in self.checks):
+            raise ValueError("a Milestone's checks need at least one critical check")
+        for item in self.measurements:
+            check = checks.get(item.check)
+            if check is None:
+                raise ValueError(f"measurement names check {item.check!r}, which is not declared")
+            if item.passed != check.passes(item.value):
+                raise ValueError(
+                    f"check {item.check!r}: passed={item.passed} disagrees with value {item.value}"
+                )
+        settled = settled_status(self.checks, self.measurements)
+        if self.status != "open" and self.status != settled:
+            raise ValueError(
+                f"status {self.status!r} disagrees with the measurements, which give {settled!r}"
+            )
+        return self
+
+
+def settled_status(
+    checks: Sequence[MilestoneCheck], measurements: Sequence[MilestoneMeasurement]
+) -> MilestoneStatus:
+    """The status *measurements* give a Milestone that declares *checks*.
+
+    ``missed`` when a critical check failed, ``met`` when every critical
+    check was measured and passed, ``open`` while one is still unmeasured.
+    """
+    passed = {item.check: item.passed for item in measurements}
+    critical = [check.id for check in checks if check.critical]
+    if any(passed.get(check) is False for check in critical):
+        return "missed"
+    if all(passed.get(check) for check in critical):
+        return "met"
+    return "open"
 
 
 class Note(Concept):
@@ -592,7 +731,9 @@ __all__ = [
     "Literature",
     "LiteratureFields",
     "Milestone",
+    "MilestoneCheck",
     "MilestoneFields",
+    "MilestoneMeasurement",
     "Note",
     "NoteFields",
     "Observation",
@@ -604,4 +745,5 @@ __all__ = [
     "Todo",
     "TodoFields",
     "TodoItem",
+    "settled_status",
 ]

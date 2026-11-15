@@ -775,6 +775,62 @@ def knowledge_delete(
     rprint(f"[green]OK[/green] deleted {ref}")
 
 
+@knowledge_app.command("evaluate")
+def knowledge_evaluate(
+    ref: Annotated[str, typer.Argument(help="Workspace-relative path of a Milestone.")],
+    measure: Annotated[
+        list[str],
+        typer.Option(
+            "--measure",
+            help="CHECK=molab:asset/<id>: the registered file that holds a check's value. Repeatable.",
+        ),
+    ],
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Print the fields as JSON.")] = False,
+) -> None:
+    """Measure a Milestone's checks from registered files and write its status.
+
+    Each check's value is read at its span from the asset given for it. The
+    bytes must be a run's own: registered by an attempt molab ran, in a run
+    molab ran to success, and not swapped since by ``asset replace``. ``met`` needs
+    every critical check measured and passed; a failed critical check is
+    ``missed``. The same verb as ``molab.knowledge.acceptance.evaluate_milestone``.
+    """
+    from molab.knowledge import Milestone
+    from molab.knowledge.acceptance import AcceptanceError, evaluate_milestone
+    from molab.knowledge.fields import DigestConflictError
+
+    workspace = _require_workspace(path)
+    doc = _document(workspace, ref)
+    if not isinstance(doc, Milestone):
+        rprint(f"[red]Error:[/red] {ref!r} is a {type(doc).__name__}, not a Milestone.")
+        raise typer.Exit(1)
+    measures: dict[str, str] = {}
+    for item in measure:
+        check, sep, source = item.partition("=")
+        if not sep or not check or not source:
+            rprint(f"[red]Error:[/red] --measure takes CHECK=molab:asset/<id>, got {item!r}")
+            raise typer.Exit(1)
+        if check in measures:
+            rprint(f"[red]Error:[/red] check {check!r} is given two sources; name one")
+            raise typer.Exit(1)
+        measures[check] = source
+    try:
+        fields = evaluate_milestone(doc, measures)
+    except (AcceptanceError, DigestConflictError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if json_out:
+        print(json.dumps(fields.model_dump(mode="json"), ensure_ascii=False))
+        return
+    for item in fields.measurements:
+        mark = "[green]pass[/green]" if item.passed else "[red]fail[/red]"
+        rprint(f"{mark} {item.check} = {item.value}  ({item.ref})")
+    rprint(f"[bold]{fields.status}[/bold] {ref}")
+
+
 def _load_run(run_id: str, path: Path | None) -> object:
     """Resolve a bare run id or a ``molab:`` ref inside the workspace at *path*."""
     from molab.workspace import Workspace

@@ -85,7 +85,7 @@ author. Every class lands one file; the `class:` frontmatter names which one:
 | `Plan` | What are we asking, in what scope, under what constraints? | none | stages, work items, criteria (Roadmap, Todo, Milestone); the claims to test (Hypotheses) |
 | `Roadmap` | In what order is the work done? | `stages`: each `id`, `title`, optional `experiment`, `depends_on` (ids unique, every dependency a stage, no cycle) | work items, criteria |
 | `Todo` | What work remains? | `items`: each `id`, `title`, `status` `open` \| `done` \| `blocked` (default `open`), optional `stage` (ids unique) | the stage order |
-| `Milestone` | When is the work accepted? | `criterion` (required), `status` `open` \| `met` \| `missed` (default `open`), optional `stage` it closes | the work that meets it |
+| `Milestone` | When is the work accepted? | `criterion` (required), `status` `open` \| `met` \| `missed` (default `open`), optional `stage` it closes, optional `checks` and their `measurements` | the work that meets it |
 | `Hypothesis` | What do we claim will turn out to be true? | `verdict`: `open` \| `supported` \| `refuted` \| `unsettled` (default `open`) | the evidence itself (that is a Finding) |
 | `Observation` | What was observed or given, before any interpretation? | none | a conclusion (Finding) |
 | `Finding` | What does the evidence establish? | none | a choice, a plan |
@@ -148,6 +148,45 @@ stage a `Todo` item or a `Milestone` names must be on a `Roadmap` that cites
 the same Plan (`knowledge.stage`); a document that cites no Plan is not
 checked. A Milestone's `stage` is optional: a reproduction checkpoint closes no
 stage. The claims a Plan sets out to test are `Hypothesis` documents.
+
+### A settled status rests on evidence
+
+A Milestone whose criterion is a number declares it as a check, and molab does
+the arithmetic:
+
+```yaml
+checks:
+  - id: ffv            # unique in the Milestone
+    span: /ffv         # where the number sits in a registered JSON file
+    expected: 0.29
+    tolerance: 0.01    # absolute; `relative: true` scales it by `expected`
+    compare: within    # or at_most / at_least
+    critical: true     # a failed non-critical check does not miss the Milestone
+```
+
+`molab knowledge evaluate DOC --measure ffv=molab:asset/<id>` reads the span
+from that asset, records the value with the asset's ref and content digest
+under `measurements`, links the asset, and writes the status: `met` when every
+critical check passes, `missed` when a measured critical check fails, `open`
+while one is unmeasured. The bytes must be a run's own: registered by an
+attempt molab ran itself, in a run molab ran to success, and not swapped since
+by `molab asset replace`. An imported file, an adopted attempt's file and the
+file of a run that never succeeded measure nothing. A `met` or `missed`
+typed by hand must agree with the measurements beside it, or the write is
+refused (`knowledge.fields`); `evaluate` measures over one that does not.
+
+`molab validate` then reads more than the document, so these rules are
+reported and refuse no write:
+
+| Rule | What it reports |
+|---|---|
+| `knowledge.milestone_evidence` | a measurement whose asset is gone, is no longer its run's own (as `evaluate` requires), changed since it was read, or holds another value at the span; a `met` / `missed` Milestone with no checks that neither links a `Finding` nor is linked by one |
+| `knowledge.stage_order` | a `met` Milestone closes a stage while a Milestone of a stage it depends on is not `met` |
+| `knowledge.verdict_evidence` | a `supported` Hypothesis that no `Finding` links as `supports`, or a `refuted` one that none links as `contradicts` |
+| `knowledge.dangling_ref` | a `Report` or `Finding` links a `molab:` ref that names nothing |
+| `knowledge.source_text` (warning) | a `Literature` that a Plan links points at no PDF (`pdf_asset_id` / `pdf_path`), or at one that is not there |
+| `experiment.mixed_workflow` (warning) | the runs of one experiment were executed by different workflow versions (by the `workflow_hash` of each run's latest succeeded attempt that recorded one), so the code is one of the differences between them |
+| `experiment.adopted_results` (warning) | runs whose latest succeeded attempt was adopted: their results are files molab was handed, not ones it saw made |
 
 ### Control flow lives in the links and the fields
 
