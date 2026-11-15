@@ -215,6 +215,66 @@ class TestCancel:
         assert not (remote / "jobs" / ".molq").exists()
 
 
+def _running(lab: Lab, run: Run) -> object:
+    """The molq job of *run*, once its worker has started the attempt and written."""
+    job = lab.client.job(_job_ref(run))
+    remote = _remote_attempt(lab, run)
+    deadline = time.monotonic() + 60
+    while not list(remote.rglob("data.txt")):
+        assert time.monotonic() < deadline, job.status()
+        time.sleep(0.2)
+    return job
+
+
+def _forget(remote: Path) -> None:
+    """Make the scheduler forget the job: no listing, no accounting (molq ``absent``)."""
+    import shutil
+
+    shutil.rmtree(remote / "jobs" / ".molq")
+
+
+class TestCancelTheSchedulerForgot:
+    def test_a_cancelled_job_the_scheduler_no_longer_knows_is_sealed_cancelled(
+        self, lab: Lab
+    ) -> None:
+        from molab.plugins.submit_molq.cancel import try_cancel
+        from molab.workspace.lifecycle_ops import cancel_run
+
+        lab.hold.write_text("")
+        run = _submit(lab, seed=1)
+        job = _running(lab, run)
+        remote = _remote_attempt(lab, run)
+
+        assert cancel_run(run, signal_executor=try_cancel) is None
+        deadline = time.monotonic() + 30
+        while job.status()["snapshots"][0]["state"] != "cancelled":
+            assert time.monotonic() < deadline, job.status()
+            time.sleep(0.2)
+        _forget(remote)
+        assert job.status()["snapshots"][0]["source"] == "absent"
+
+        assert _settle(run) is ExecutionStatus.CANCELLED
+        record = run.executions[-1]
+        assert record.error is not None
+        assert "no longer knows the job" in str(record.error["message"])
+        assert "host" in record.executor, "the worker's record came home"
+
+    def test_an_unknown_job_nobody_cancelled_stays_queued(self, lab: Lab) -> None:
+        from molab.plugins.submit_molq.submit import reconcile_latest
+
+        lab.hold.write_text("")
+        run = _submit(lab, seed=1)
+        job = _running(lab, run)
+        _forget(_remote_attempt(lab, run))
+        assert job.status()["snapshots"][0]["source"] == "absent"
+
+        outcome = reconcile_latest(run)
+
+        assert outcome is not None and outcome.error is None, outcome
+        assert run.executions[-1].status is ExecutionStatus.QUEUED
+        lab.hold.unlink()
+
+
 class TestExec:
     def test_exec_prints_the_command_output_and_leaves_no_job_files(self, lab: Lab) -> None:
         code, output = _molab("exec", "-t", "@here", "--", "echo", "molq-exec-ok")

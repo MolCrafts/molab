@@ -19,7 +19,12 @@ if TYPE_CHECKING:
     from .domain import Execution
     from .run import Run
 
-__all__ = ["cancel_run"]
+__all__ = ["CANCEL_REQUESTED", "cancel_run"]
+
+#: ``executor`` key on an attempt left open by a cancel the scheduler accepted.
+#: Its reconcile reads it: a job the scheduler then no longer knows (not
+#: listed, no accounting) ended by that cancel.
+CANCEL_REQUESTED = "cancel_requested_at"
 
 
 def cancel_run(
@@ -113,9 +118,16 @@ def _seal_cancelled(run: Run, state: Execution, *, signalled: bool) -> None:
     once the scheduler reports the job ended, merges the worker's record and
     seals it CANCELLED, so a cancelled attempt's records, logs and job files
     take the path of every other ended job. A local seal now would make that
-    merge a no-op and leave the attempt on the target. When the signal failed
-    nothing will end the job, and the local seal records the user's intent.
+    merge a no-op and leave the attempt on the target. The open record says
+    the cancel was accepted (:data:`CANCEL_REQUESTED`), so a job the scheduler
+    then forgets is still sealed CANCELLED. When the signal failed nothing
+    will end the job, and the local seal records the user's intent.
     """
+    from .timestamps import utc_now
+
     if signalled and state.executor.get("target") is not None:
+        run._execution_repository().update_operational(
+            state.id, executor={CANCEL_REQUESTED: utc_now().isoformat()}
+        )
         return
     run.cancel(state.id)

@@ -28,6 +28,7 @@ from molq import MolqError
 
 from molab._typing import JSONValue
 from molab.workspace.execution_dirs import JOBS
+from molab.workspace.lifecycle_ops import CANCEL_REQUESTED
 from molab.workspace.models import ComputeTarget
 
 from .metadata import build_executor_info
@@ -583,7 +584,12 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
             raise MolqError("JOB_NOT_FOUND", f"job {job_id} returned no snapshot")
         snapshot = snapshots[0]
         state = str(snapshot.get("state") or "unknown")
-        if not snapshot.get("terminal") and state not in _TERMINAL_STATES:
+        # molq ``absent``: not listed and no accounting. After a cancel the
+        # scheduler accepted, that is the cancel's end; otherwise it proves nothing.
+        forgotten = snapshot.get("source") == "absent" and CANCEL_REQUESTED in executor
+        if forgotten:
+            state = "cancelled"
+        elif not snapshot.get("terminal") and state not in _TERMINAL_STATES:
             return ReconcileOutcome(record=record)
         _keep_scheduler_output(job, mol_run, execution_id, ref)
 
@@ -592,7 +598,18 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
         else:
             authoritative = staging.stage_out(transport, mol_run, target, execution_id)
         if authoritative:
-            _seal_if_open(mol_run, repo, execution_id, state)
+            _seal_if_open(
+                mol_run,
+                repo,
+                execution_id,
+                state,
+                observed=(
+                    "the scheduler no longer knows the job after its cancel "
+                    "(not listed, no accounting)"
+                    if forgotten
+                    else f"scheduler reported {state}"
+                ),
+            )
             if "project_root" in ref:
                 # A job submitted before molq took a project root left no files here.
                 _release_job_files(job_fs, f"{attempt_dir}/{JOBS.name}", mol_run, execution_id)
@@ -694,13 +711,16 @@ def reconcile_latest(mol_run: Run) -> ReconcileOutcome | None:
     return reconcile_submission(mol_run, latest.id)
 
 
-def _seal_if_open(mol_run: Run, repo: ExecutionRepository, execution_id: str, state: str) -> None:
+def _seal_if_open(
+    mol_run: Run, repo: ExecutionRepository, execution_id: str, state: str, *, observed: str
+) -> None:
     """Seal an attempt whose job has ended while its record is still open.
 
     Still QUEUED, the worker never claimed it (``SchedulerJobEndedBeforeStart``).
     Claimed and not sealed, the scheduler ended the job under the worker — a
     time limit, a cancel, a lost node (``SchedulerJobEnded``); the heartbeat
-    the dead worker left behind is removed with the seal.
+    the dead worker left behind is removed with the seal. *observed* says how
+    the end was seen and leads the error message.
     """
     from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES, ExecutionStatus
     from molab.workspace.run_heartbeat import unlink_alive
@@ -715,7 +735,7 @@ def _seal_if_open(mol_run: Run, repo: ExecutionRepository, execution_id: str, st
     repo.seal(
         execution_id,
         ExecutionStatus.CANCELLED if state == "cancelled" else ExecutionStatus.FAILED,
-        error={"type": kind, "message": f"scheduler reported {state} {when}"},
+        error={"type": kind, "message": f"{observed} {when}"},
     )
     unlink_alive(mol_run, execution_id)
 
