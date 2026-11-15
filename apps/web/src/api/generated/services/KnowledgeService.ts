@@ -88,7 +88,7 @@ export class KnowledgeService {
      */
     public static searchKnowledge(
         q: string,
-        cls?: ('Note' | 'Literature' | 'Report' | 'Finding' | 'Plan' | 'Roadmap' | 'Todo' | 'Milestone' | 'Observation' | 'Hypothesis' | 'Decision' | null),
+        cls?: ('Note' | 'Literature' | 'Report' | 'Finding' | 'Plan' | 'Roadmap' | 'Todo' | 'Milestone' | 'Observation' | 'Hypothesis' | 'Decision' | 'Manuscript' | null),
         tag?: (string | null),
         molabSession?: (string | null),
     ): CancelablePromise<KnowledgeSearchResponse> {
@@ -110,7 +110,7 @@ export class KnowledgeService {
     }
     /**
      * List Knowledge
-     * List every Knowledge document, plus each host's TeX manuscripts.
+     * List every Knowledge document.
      * @param tag Only notes carrying this tag.
      * @param status Only notes with this lifecycle status.
      * @param molabSession
@@ -141,8 +141,7 @@ export class KnowledgeService {
      * Get Knowledge Graph
      * The whole knowledge graph: the unfiltered listing as nodes, typed links as edges.
      *
-     * Pure derived read. Nothing is indexed, and a TeX manuscript is a node with
-     * no out-links.
+     * Pure derived read. Nothing is indexed.
      * @param molabSession
      * @returns KnowledgeGraphResponse Successful Response
      * @throws ApiError
@@ -164,8 +163,6 @@ export class KnowledgeService {
     /**
      * Get Note
      * Return one document's full body.
-     *
-     * A ``.tex`` / ``.ltx`` path is the file bytes, not a Knowledge document.
      * @param path The document's workspace-relative path (its identity).
      * @param molabSession
      * @returns NoteDetailResponse Successful Response
@@ -508,7 +505,7 @@ export class KnowledgeService {
     }
     /**
      * Export Doc
-     * Export a document: a markdown narrative, the HTML document, or the TeX file itself.
+     * Export a document: a markdown narrative, or the HTML or TeX document whole.
      * @param path The note Concept's workspace-relative document path (its identity).
      * @param molabSession
      * @returns any Successful Response
@@ -521,6 +518,36 @@ export class KnowledgeService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/knowledge/doc/export',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Get Doc Bibliography
+     * A Manuscript's bibliography: one BibTeX entry per Literature it cites.
+     *
+     * The same verb as ``molab knowledge bib`` (``Manuscript.bibliography``).
+     * 422 when the document is not a Manuscript or a ``\cite`` key names no
+     * Literature document.
+     * @param path The Manuscript's workspace-relative document path.
+     * @param molabSession
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static getDocBibliography(
+        path: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/doc/bib',
             cookies: {
                 'molab_session': molabSession,
             },

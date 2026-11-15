@@ -30,7 +30,7 @@ export interface UseKnowledgeDocs {
     name: string,
     hostPath?: string | null,
     options?: {
-      format?: "md" | "html";
+      format?: "md" | "html" | "tex";
       body?: string;
       cls?: DocCreateRequest.cls;
       sources?: string[];

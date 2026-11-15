@@ -16,7 +16,7 @@ export type TexInputFile = {
 export type TexCompileRequest = {
   input: string;
   mainTexPath: string;
-  bibtex: false;
+  bibtex: boolean;
   biber: false;
   makeindex: false;
   rerun: true;
@@ -26,14 +26,20 @@ export type TexCompileRequest = {
   additionalFiles: TexInputFile[];
 };
 
-/** One buffer, pdfLaTeX, no shell escape. Extra packages come from the remote endpoint. */
+/** A live (uncommented) `\\bibliography{…}`: the source needs a BibTeX pass. */
+const NEEDS_BIBTEX = /^[^%\n]*\\bibliography\{/m;
+
+/**
+ * One buffer, pdfLaTeX, no shell escape. Extra packages come from the remote
+ * endpoint. A source that names a `\\bibliography` gets a BibTeX pass.
+ */
 export const compileRequest = (
   source: string,
   additionalFiles: TexInputFile[] = [],
 ): TexCompileRequest => ({
   input: source,
   mainTexPath: MAIN_TEX_PATH,
-  bibtex: false,
+  bibtex: NEEDS_BIBTEX.test(source),
   biber: false,
   makeindex: false,
   rerun: true,

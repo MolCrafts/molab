@@ -11,9 +11,14 @@ import {
   WorkbenchOperationState,
   WorkbenchRetryAction,
 } from "@/components/workbench";
-import { useKnowledgeListQuery, useKnowledgeNoteQuery } from "@/plugins/knowledge/queries";
+import { KNOWLEDGE_CLASS_ICON } from "@/plugins/knowledge/knowledgeClassIcon";
+import {
+  useKnowledgeBibliographyQuery,
+  useKnowledgeListQuery,
+  useKnowledgeNoteQuery,
+} from "@/plugins/knowledge/queries";
 import { TexDocumentView } from "@/plugins/knowledge/TexDocumentView";
-import { isTexDocument } from "@/plugins/knowledge/texDocument";
+import { bibliographyName, isTexDocument, withBibliography } from "@/plugins/knowledge/texDocument";
 import { DocPage } from "./doc/DocPage";
 
 const formatReference = (ref: ReferenceSummary): string => {
@@ -54,6 +59,11 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
   );
   const noteQuery = useKnowledgeNoteQuery(relPath, isNotePath);
   const note = noteQuery.data ?? null;
+  const isManuscript = relPath !== "" && isNotePath && isTexDocument(relPath);
+  const bibliographyQuery = useKnowledgeBibliographyQuery(
+    relPath,
+    isManuscript && note !== null && bibliographyName(note.body) !== null,
+  );
   const noteError = shouldShowFailure(noteQuery.error, {
     fetching: noteQuery.isFetching,
     needsAuth,
@@ -66,13 +76,13 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
   const open = (path: string): void =>
     nav.setSelection({ objectType: "knowledge", objectId: path });
 
-  // --- TeX manuscript ----------------------------------------------------
-  // Listed beside notes, opened with the file-preview plugin. Not a markdown note.
+  // --- Manuscript ----------------------------------------------------------
+  // A LaTeX document: opened with the file-preview plugin, not the markdown page.
   if (relPath && isNotePath && isTexDocument(relPath)) {
     const fileName = relPath.split("/").pop() ?? relPath;
     return (
       <EntityPage
-        icon={FileText}
+        icon={KNOWLEDGE_CLASS_ICON.Manuscript}
         title={note?.name ?? fileName}
         actions={
           <WorkbenchIconAction label="Download TeX" asChild>
@@ -88,7 +98,15 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
           ) : noteQuery.isPending || !note ? (
             <p className="px-4 py-6 text-body-lg italic text-muted-foreground">Loading…</p>
           ) : (
-            <TexDocumentView content={note.body} name={fileName} path={relPath} />
+            <TexDocumentView
+              content={
+                bibliographyQuery.data === undefined
+                  ? note.body
+                  : withBibliography(note.body, bibliographyQuery.data)
+              }
+              name={fileName}
+              path={relPath}
+            />
           )}
         </div>
       </EntityPage>

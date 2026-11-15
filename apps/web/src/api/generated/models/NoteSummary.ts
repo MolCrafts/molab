@@ -14,7 +14,7 @@ export type NoteSummary = {
     tags?: Array<string>;
     status?: (string | null);
     /**
-     * The knowledge class, or `Tex` for a TeX file.
+     * The knowledge class.
      */
     cls: string;
     format?: NoteSummary.format;

@@ -8,9 +8,9 @@ export type DocCreateRequest = {
     body?: string;
     hostPath?: (string | null);
     /**
-     * `md` lands `<slug>.md`; `html` lands `<slug>.html` (body stored verbatim).
+     * `md` lands `<slug>.md`; `html` lands `<slug>.html` and `tex` lands `<slug>.tex` (body stored verbatim). Omitted, the class's own format: `tex` for a Manuscript, `md` for every other class. A format the class does not take is refused with 422.
      */
-    format?: DocCreateRequest.format;
+    format?: ('md' | 'html' | 'tex' | null);
     cls?: DocCreateRequest.cls;
     /**
      * What the document rests on: entity refs, http(s) URLs or DOIs, and workspace-relative files. A sourced class given none names its host.
@@ -27,13 +27,6 @@ export type DocCreateRequest = {
     createdBy?: string;
 };
 export namespace DocCreateRequest {
-    /**
-     * `md` lands `<slug>.md`; `html` lands `<slug>.html` (body stored verbatim).
-     */
-    export enum format {
-        MD = 'md',
-        HTML = 'html',
-    }
     export enum cls {
         NOTE = 'Note',
         LITERATURE = 'Literature',
@@ -46,6 +39,7 @@ export namespace DocCreateRequest {
         OBSERVATION = 'Observation',
         HYPOTHESIS = 'Hypothesis',
         DECISION = 'Decision',
+        MANUSCRIPT = 'Manuscript',
     }
 }
 

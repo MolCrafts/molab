@@ -7,7 +7,7 @@ export type NoteDetailResponse = {
     name: string;
     relPath: string;
     /**
-     * The knowledge class, or `Tex` for a TeX file.
+     * The knowledge class.
      */
     cls: string;
     body: string;

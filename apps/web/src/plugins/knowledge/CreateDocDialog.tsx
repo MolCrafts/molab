@@ -21,11 +21,11 @@ import {
 } from "./docTemplates";
 import { KNOWLEDGE_CLASSES, type KnowledgeClass } from "./knowledgeClass";
 
-export type DocFormat = "md" | "html";
+export type DocFormat = "md" | "html" | "tex";
 
 export interface CreateDocInput {
   name: string;
-  /** Stored as `<slug>.md` (frontmatter + markdown) or `<slug>.html` (L10). */
+  /** Stored as `<slug>.md` (frontmatter + markdown), `<slug>.html` (L10), or `<slug>.tex` (a Manuscript). */
   format: DocFormat;
   cls: DocCreateRequest.cls;
   body: string;
@@ -185,6 +185,9 @@ export const CreateDocDialog = ({
             onValueChange={(value) => {
               const next = value as KnowledgeClass;
               setCls(next);
+              // A Manuscript is LaTeX and nothing else is.
+              if (next === "Manuscript") setFormat("tex");
+              else if (format === "tex") setFormat("md");
               setBody(DOC_SKELETON[next]);
               setLocalError(null);
             }}
@@ -201,18 +204,20 @@ export const CreateDocDialog = ({
             </SelectContent>
           </Select>
         </div>
-        <div className="grid gap-2">
-          <Label>Format</Label>
-          <ChoiceToggle
-            label="Format"
-            value={format}
-            choices={[
-              { value: "md", label: "Markdown" },
-              { value: "html", label: "HTML" },
-            ]}
-            onChange={setFormat}
-          />
-        </div>
+        {cls !== "Manuscript" && (
+          <div className="grid gap-2">
+            <Label>Format</Label>
+            <ChoiceToggle
+              label="Format"
+              value={format}
+              choices={[
+                { value: "md", label: "Markdown" },
+                { value: "html", label: "HTML" },
+              ]}
+              onChange={setFormat}
+            />
+          </div>
+        )}
         <div className="grid gap-2">
           <Label htmlFor="doc-name">Name</Label>
           <Input

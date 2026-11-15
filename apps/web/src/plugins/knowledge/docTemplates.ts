@@ -97,6 +97,17 @@ export const DOC_SKELETON: Record<KnowledgeClass, string> = {
   ].join("\n"),
   Todo: ["## Notes", ""].join("\n"),
   Milestone: ["## Evidence so far", "", "## Builds on", ""].join("\n"),
+  Manuscript: [
+    "\\documentclass{article}",
+    "\\begin{document}",
+    "",
+    "\\section{Introduction}",
+    "",
+    "\\bibliographystyle{unsrt}",
+    "\\bibliography{references}",
+    "\\end{document}",
+    "",
+  ].join("\n"),
   Decision: [
     '!!! note "Decision"',
     "    What was chosen, as one sentence.",

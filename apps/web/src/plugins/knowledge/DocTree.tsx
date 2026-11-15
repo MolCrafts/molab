@@ -50,7 +50,6 @@ import { knowledgeClassOf } from "./knowledgeClass";
 import { knowledgeClassIcon } from "./knowledgeClassIcon";
 import { buildDocTree, type DocTreeNode, KB_GROUP_ID, listHostOptions } from "./knowledgeDocTree";
 import { knowledgeNoteQueryOptions } from "./queries";
-import { isTexDocument } from "./texDocument";
 import { useKnowledgeDocs, useKnowledgeFacets } from "./useKnowledgeDocs";
 
 interface KnowledgeFilterProps {
@@ -356,7 +355,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
   };
 
   const docActions = (node: DocTreeNode): TreeNodeAction[] => {
-    if (node.relPath === null || node.readOnly || isTexDocument(node.relPath)) return [];
+    if (node.relPath === null || node.readOnly) return [];
     const path = node.relPath;
     return [
       {

@@ -79,7 +79,7 @@ export const knowledgeApi = {
     name: string,
     options: {
       hostPath?: string | null;
-      format?: "md" | "html";
+      format?: "md" | "html" | "tex";
       body?: string;
       cls?: DocCreateRequest.cls;
       /** Entity refs, URLs or DOIs, workspace files; a sourced class given none names its host. */
@@ -90,7 +90,7 @@ export const knowledgeApi = {
     KnowledgeService.createDoc({
       name,
       hostPath: options.hostPath ?? null,
-      ...(options.format ? { format: options.format as DocCreateRequest.format } : {}),
+      ...(options.format ? { format: options.format } : {}),
       body: options.body ?? "",
       cls: options.cls,
       sources: options.sources,
@@ -118,6 +118,9 @@ export const knowledgeApi = {
     await KnowledgeService.deleteDoc(path);
   },
   getBacklinks: (path: string) => KnowledgeService.getBacklinks(path),
+  /** A Manuscript's BibTeX, written by molab from the Literature it cites. */
+  docBibliography: async (path: string): Promise<string> =>
+    String(await KnowledgeService.getDocBibliography(path)),
   docExportUrl: (path: string): string =>
     `/api/knowledge/doc/export?path=${encodeURIComponent(path)}`,
 };

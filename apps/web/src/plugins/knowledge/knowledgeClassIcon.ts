@@ -11,6 +11,7 @@ import {
   ListChecks,
   type LucideIcon,
   Scale,
+  ScrollText,
   SquareCheck,
   Workflow,
 } from "lucide-react";
@@ -28,8 +29,9 @@ export const KNOWLEDGE_CLASS_ICON: Record<KnowledgeClass, LucideIcon> = {
   Todo: SquareCheck,
   Milestone: Flag,
   Decision: Scale,
+  Manuscript: ScrollText,
 };
 
-/** The class's icon; a file with no knowledge class (a TeX manuscript) is a plain file. */
+/** The class's icon; a row with no knowledge class is a plain file. */
 export const knowledgeClassIcon = (cls: KnowledgeClass | null): LucideIcon =>
   cls === null ? FileText : KNOWLEDGE_CLASS_ICON[cls];
