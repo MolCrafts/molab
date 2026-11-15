@@ -775,6 +775,51 @@ def knowledge_delete(
     rprint(f"[green]OK[/green] deleted {ref}")
 
 
+@knowledge_app.command("fields")
+def knowledge_fields(
+    ref: Annotated[str, typer.Argument(help="Workspace-relative document path.")],
+    set_fields: Annotated[
+        str | None,
+        typer.Option(
+            "--set",
+            help="The complete new fields: a JSON object, or a path to one. An omitted key "
+            "is removed.",
+        ),
+    ] = None,
+    if_match: Annotated[
+        str | None,
+        typer.Option("--if-match", help="The digest you read; refused if the file changed."),
+    ] = None,
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+) -> None:
+    """Print a document's class fields and digest as JSON, or replace them whole with --set.
+
+    The same operation as ``GET`` / ``PATCH /api/knowledge/doc/fields``
+    (``replace_fields``): the class checks the new fields before anything is
+    written, and the change is one ``knowledge.fields_replaced`` history commit.
+    """
+    from molab.knowledge.fields import DigestConflictError, digest_of, own_fields, replace_fields
+
+    workspace = _require_workspace(path)
+    doc = _document(workspace, ref)
+    digest = digest_of(doc)  # ty: ignore[invalid-argument-type]
+    if set_fields is not None:
+        try:
+            digest = replace_fields(doc, _load_fields(set_fields), if_match=if_match)  # ty: ignore[invalid-argument-type]
+        except (OSError, json.JSONDecodeError, DigestConflictError, ValueError) as exc:
+            rprint(f"[red]Error:[/red] {exc}")
+            raise typer.Exit(1) from None
+    payload = {
+        "relPath": ref,
+        "cls": type(doc).__name__,
+        "fields": own_fields(doc.frontmatter()),  # ty: ignore[unresolved-attribute]
+        "digest": digest,
+    }
+    print(json.dumps(payload, ensure_ascii=False, default=str))
+
+
 @knowledge_app.command("evaluate")
 def knowledge_evaluate(
     ref: Annotated[str, typer.Argument(help="Workspace-relative path of a Milestone.")],

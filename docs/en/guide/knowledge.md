@@ -372,12 +372,20 @@ A knowledge document is `<host>/knowledges/<slug>.md`. Old directory layouts and
 
 A document's fields are validated against its class on every write
 (`molab knowledge write --fields JSON`, `fields` on `POST /api/knowledge/doc`,
-and the route below). They can be replaced whole over HTTP:
+and the verb below). They can be replaced whole, from the CLI or over HTTP;
+both call `replace_fields`:
 
-- `GET /api/knowledge/doc/fields?path=…` returns `{fields, digest}`.
-- `PATCH /api/knowledge/doc/fields?path=…` with `{fields, ifMatch, body?}`
-  replaces them; a stale `ifMatch` answers 409, an undeclared key or a refused
-  value 422. Each replacement is a `knowledge.fields_replaced` history commit.
+- `molab knowledge fields DOC` prints `{relPath, cls, fields, digest}` as JSON;
+  `GET /api/knowledge/doc/fields?path=…` returns the same.
+- `molab knowledge fields DOC --set JSON [--if-match DIGEST]` replaces them
+  (`--set` also takes a path to a JSON file; a key it omits is removed), as
+  `PATCH /api/knowledge/doc/fields?path=…` does with `{fields, ifMatch, body?}`.
+  A stale digest is refused (409 over HTTP), and so is an undeclared key or a
+  refused value (422); the CLI exits 1 with the class's message and writes
+  nothing. Each replacement is a `knowledge.fields_replaced` history commit.
+
+A reviewer accepts a Note with
+`molab knowledge fields knowledges/<slug>.md --set '{"status": "active"}'`.
 
 `POST …/runs/{run}/executions` accepts `requestKey` (idempotency: the same key
 returns the attempt already created) and `requestedBy` (the software agent

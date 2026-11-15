@@ -306,6 +306,23 @@ for hit in wiki.search("cooling").hits:
 
 知识文档是 `<host>/knowledges/<slug>.md`。旧的目录形态和 `references/` 布局不再导入。
 
+## 类字段
+
+文档的字段在每次写入时都按它的类校验（`molab knowledge write --fields JSON`、
+`POST /api/knowledge/doc` 的 `fields`，以及下面的命令）。字段可以整体替换，CLI 与 HTTP
+都调用同一个 `replace_fields`：
+
+- `molab knowledge fields DOC` 以 JSON 打印 `{relPath, cls, fields, digest}`；
+  `GET /api/knowledge/doc/fields?path=…` 返回同样的内容。
+- `molab knowledge fields DOC --set JSON [--if-match DIGEST]` 替换字段（`--set` 也接受
+  JSON 文件路径；省略的键会被删除），与 `PATCH /api/knowledge/doc/fields?path=…` 携带
+  `{fields, ifMatch, body?}` 相同。摘要过期会被拒绝（HTTP 为 409），未声明的键或被拒绝的值
+  同样会被拒绝（422）；CLI 以类给出的错误信息退出 1，且什么都不写。每次替换是一条
+  `knowledge.fields_replaced` 历史提交。
+
+评审者把一份 Note 设为 active：
+`molab knowledge fields knowledges/<slug>.md --set '{"status": "active"}'`。
+
 ## 下一步
 
 - 知识所落的工作区，见 [工作区模型](../concept/workspace.md)。
