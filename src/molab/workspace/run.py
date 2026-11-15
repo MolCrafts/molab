@@ -1085,7 +1085,7 @@ class Run(Folder):
             predecessor = inherited.id
         profile_environment = _creation_environment(profile_config, inherit_from=inherited)
         entrypoint = self.experiment.entrypoint_file
-        manifest = source_manifest(entrypoint) if entrypoint is not None else None
+        manifest = source_manifest(entrypoint, fs=repo.fs) if entrypoint is not None else None
         state = repo.create(
             mode=mode,
             created_by=created_by or _system_agent(),

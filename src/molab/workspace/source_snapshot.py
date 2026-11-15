@@ -17,6 +17,12 @@ directory, transitively), per attempt, in two steps:
 creating the record, so each attempt's manifest is on its Execution record and
 its copies are under ``executions/eNN/source/``.
 
+Every read goes through the workspace's filesystem (``fs``), local or remote,
+with that filesystem's own path rules (``FileSystem.resolve``): a remote path
+is never resolved, read or handed to ``git`` on this machine, where it can name
+another directory (macOS resolves ``/home/...`` to
+``/System/Volumes/Data/home/...``). A remote tree's git state is unknown.
+
 The workspace layer must not import upstream molab layers (see the layer DAG in
 CLAUDE.md / ``test_import_guard``); this module uses only the stdlib and
 workspace-local types.
@@ -61,30 +67,49 @@ class SourceCaptureError(RuntimeError):
 
 
 class _Tree:
-    """The files the closure reads: the disk, or the disk after one pending write.
+    """The files the closure reads: a filesystem, or it after one pending write.
 
+    ``fs`` is the workspace filesystem (local by default); every path is
+    resolved and read through it, so a remote path keeps its own meaning.
     ``pending`` is ``(path, text)``: the file a caller is about to write and
     its text (``None`` when unknown: the file's text on disk when it has one,
     else it exists with no imports followed). It lets a pre-write check ask
     the closure the same question validation asks after the write.
     """
 
-    def __init__(self, pending: tuple[Path, str | None] | None = None) -> None:
-        self._path = pending[0].resolve() if pending is not None else None
+    def __init__(
+        self, fs: FileSystem | None = None, pending: tuple[Path, str | None] | None = None
+    ) -> None:
+        self.fs: FileSystem = fs if fs is not None else LocalFS()
+        self._path = self.resolve(pending[0]) if pending is not None else None
         self._text = pending[1] if pending is not None else None
 
+    @property
+    def local(self) -> bool:
+        return isinstance(self.fs, LocalFS)
+
+    def resolve(self, path: Path) -> Path:
+        """*path* by the filesystem's rules: symlinks on a local disk, lexical remotely."""
+        return Path(self.fs.resolve(path))
+
     def is_file(self, path: Path) -> bool:
-        return path.resolve() == self._path or path.is_file()
+        return self.resolve(path) == self._path or self.fs.is_file(path)
 
     def is_dir(self, path: Path) -> bool:
-        resolved = path.resolve()
-        return (self._path is not None and resolved in self._path.parents) or path.is_dir()
+        resolved = self.resolve(path)
+        return (self._path is not None and resolved in self._path.parents) or self.fs.is_dir(path)
 
     def read(self, path: Path) -> str | None:
         """*path*'s text (``None``: the pending file's unknown text)."""
-        if path.resolve() == self._path and (self._text is not None or not path.is_file()):
+        if self.resolve(path) == self._path and (
+            self._text is not None or not self.fs.is_file(path)
+        ):
             return self._text
-        return path.read_text(encoding="utf-8")
+        return self.fs.read_text(path, encoding="utf-8")
+
+    def digest(self, path: Path) -> str:
+        """*path*'s content digest; streamed (and memoized) on a local disk."""
+        return compute_content_hash(path) if self.local else hash_bytes(self.fs.read_bytes(path))
 
 
 _DISK = _Tree()
@@ -108,10 +133,10 @@ def _module_files(base: Path, dotted: str, names: list[str], tree: _Tree = _DISK
         package = directory / part / "__init__.py"
         module = directory / f"{part}.py"
         if tree.is_file(package):
-            found.append(package.resolve())
+            found.append(tree.resolve(package))
             directory = directory / part
         elif tree.is_file(module):
-            found.append(module.resolve())
+            found.append(tree.resolve(module))
             directory = None
         elif tree.is_dir(directory / part):
             # A namespace package has no __init__.py, but its submodules
@@ -126,9 +151,9 @@ def _module_files(base: Path, dotted: str, names: list[str], tree: _Tree = _DISK
             package = directory / name / "__init__.py"
             module = directory / f"{name}.py"
             if tree.is_file(package):
-                found.append(package.resolve())
+                found.append(tree.resolve(package))
             elif tree.is_file(module):
-                found.append(module.resolve())
+                found.append(tree.resolve(module))
     return found
 
 
@@ -154,14 +179,14 @@ def _import_files(current: Path, root: Path, node: ast.AST, tree: _Tree = _DISK)
     return _module_files(base, node.module or "", names, tree)
 
 
-def _capture_name(root: Path, src: Path) -> str:
+def _capture_name(root: Path, src: Path, tree: _Tree = _DISK) -> str:
     """*src* relative to the entrypoint directory, as a POSIX path.
 
     ``helper.py`` stays ``helper.py``. A relative import of ``pkg/utils.py``
     stays ``pkg/utils.py``. A file outside that directory cannot be stored:
     the copy lives under ``source/`` and must not escape it.
     """
-    rel = Path(os.path.relpath(src.resolve(), root.resolve()))
+    rel = Path(os.path.relpath(tree.resolve(src), tree.resolve(root)))
     if rel.is_absolute() or ".." in rel.parts:
         raise SourceCaptureError(
             f"source {src} is outside the entrypoint directory {root}; "
@@ -181,12 +206,12 @@ def _local_import_closure(entrypoint: Path, tree: _Tree = _DISK) -> list[Path]:
     third-party imports resolve to no file and are skipped. Returns the
     entrypoint first, then the rest sorted by path.
     """
-    entrypoint = entrypoint.resolve()
+    entrypoint = tree.resolve(entrypoint)
     root = entrypoint.parent
     seen: dict[Path, None] = {}
     stack = [entrypoint]
     while stack:
-        current = stack.pop().resolve()
+        current = tree.resolve(stack.pop())
         if current in seen or not tree.is_file(current):
             continue
         seen[current] = None
@@ -316,7 +341,7 @@ def _captured(path: Path, tree: _Tree = _DISK) -> list[tuple[str, Path]]:
     captured: list[tuple[str, Path]] = []
     seen: set[str] = set()
     for src in _local_import_closure(path, tree):
-        name = _capture_name(root, src)
+        name = _capture_name(root, src, tree)
         if name in seen:
             raise SourceCaptureError(f"two source files would be stored as {name!r}")
         seen.add(name)
@@ -325,7 +350,10 @@ def _captured(path: Path, tree: _Tree = _DISK) -> list[tuple[str, Path]]:
 
 
 def captured_names(
-    entrypoint: PathArg, *, pending: tuple[PathArg, str | None] | None = None
+    entrypoint: PathArg,
+    *,
+    pending: tuple[PathArg, str | None] | None = None,
+    fs: FileSystem | None = None,
 ) -> tuple[str, ...]:
     """The names, relative to its directory, of the files an attempt of *entrypoint* captures.
 
@@ -339,6 +367,7 @@ def captured_names(
         pending: ``(path, text)`` of a file about to be written: the closure
             is read as if it were already there (``text`` ``None``: present,
             imports unknown).
+        fs: The filesystem the tree is read through; defaults to the local one.
 
     Returns:
         POSIX paths (``workflow.py``, ``helper.py``, ``pkg/units.py``), the
@@ -348,14 +377,16 @@ def captured_names(
         FileNotFoundError: *entrypoint* is not a file.
         SourceCaptureError: The closure cannot be stored under ``source/``.
     """
-    tree = _Tree((Path(pending[0]), pending[1])) if pending is not None else _DISK
-    path = Path(entrypoint).resolve()
+    tree = _Tree(fs, (Path(pending[0]), pending[1]) if pending is not None else None)
+    path = tree.resolve(Path(entrypoint))
     if not tree.is_file(path):
         raise FileNotFoundError(f"source entrypoint {str(entrypoint)!r} is not a file")
     return tuple(name for name, _src in _captured(path, tree))
 
 
-def source_manifest(entrypoint: PathArg, *, now: datetime | None = None) -> SourceManifest:
+def source_manifest(
+    entrypoint: PathArg, *, now: datetime | None = None, fs: FileSystem | None = None
+) -> SourceManifest:
     """Describe the source an attempt would capture, without copying anything.
 
     A pure read: it hashes the **originals** (the entrypoint and its
@@ -367,29 +398,34 @@ def source_manifest(entrypoint: PathArg, *, now: datetime | None = None) -> Sour
         entrypoint: The defining script (the file molab re-imports to execute).
         now: Capture timestamp (injectable for deterministic tests); defaults
             to the current UTC time.
+        fs: The workspace filesystem the originals are read through; defaults
+            to the local one.
 
     Returns:
         The manifest: ``entrypoint`` is the basename, ``locator`` the resolved
         absolute path (never hashed; used only to locate the originals at
         capture time),
         ``files`` the closure with the entrypoint first and the rest sorted by
-        name, plus ``vcs_commit`` / ``vcs_dirty`` and ``captured_at``.
+        name, plus ``vcs_commit`` / ``vcs_dirty`` (both ``None``, unknown, for
+        a tree read through a remote filesystem: ``git`` runs on this machine
+        only) and ``captured_at``.
 
     Raises:
         FileNotFoundError: *entrypoint* is not a file.
         SourceCaptureError: A file in the closure (the entrypoint included)
             exists but cannot be read.
     """
-    path = Path(entrypoint).resolve()
-    if not path.is_file():
+    tree = _Tree(fs)
+    path = tree.resolve(Path(entrypoint))
+    if not tree.fs.is_file(path):
         raise FileNotFoundError(f"source entrypoint {str(entrypoint)!r} is not a file")
     files: list[SourceFile] = []
-    for name, src in _captured(path):
+    for name, src in _captured(path, tree):
         try:
-            files.append(SourceFile(name=name, sha256=_sha256(src)))
+            files.append(SourceFile(name=name, sha256=tree.digest(src)))
         except OSError as exc:
             raise SourceCaptureError(f"cannot read source {name!r}: {exc}") from exc
-    commit, dirty = _vcs_state(path.parent)
+    commit, dirty = _vcs_state(path.parent) if tree.local else (None, None)
     return SourceManifest(
         entrypoint=path.name,
         locator=str(path),
@@ -405,17 +441,19 @@ def copy_sources(
 ) -> None:
     """Copy the manifest's files into ``<execution_dir>/source/`` and verify them.
 
-    Each original is read from ``Path(manifest.locator).parent / name``,
-    where *name* is the path relative to the entrypoint directory, and
-    written through ``FileStore(execution_dir, fs=fs).put("source/<name>")``
-    — so a local script reaches a remote workspace, and every write under a
-    run goes through one FileStore — then read back and checked against the
-    manifest's digest. Calling it again overwrites the copies.
+    Each original is read through *fs* from ``Path(manifest.locator).parent
+    / name``, where *name* is the path relative to the entrypoint directory —
+    the originals live with the workspace, as :func:`source_manifest` read
+    them — and written through ``FileStore(execution_dir, fs=fs).put("source/<name>")``,
+    so every write under a run goes through one FileStore; each copy is then
+    read back and checked against the manifest's digest. Calling it again
+    overwrites the copies.
 
     Args:
         manifest: What to copy, from :func:`source_manifest`.
         execution_dir: The attempt's directory (``.../executions/e01``).
-        fs: The workspace filesystem; defaults to the local one.
+        fs: The workspace filesystem, for the originals and the copies;
+            defaults to the local one.
 
     Raises:
         SourceCaptureError: An original is missing or unreadable, a copy
@@ -428,7 +466,7 @@ def copy_sources(
     for entry in manifest.files:
         relpath = f"source/{entry.name}"
         try:
-            original = (origin / entry.name).read_bytes()
+            original = disk.read_bytes(origin / entry.name)
         except OSError as exc:
             raise SourceCaptureError(f"cannot read source {entry.name!r}: {exc}") from exc
         try:

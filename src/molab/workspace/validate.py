@@ -259,9 +259,10 @@ def experiment_source_names(
     ``workflow.py``; its first-party import closure is
     :func:`~molab.workspace.source_snapshot.captured_names`, the same rule
     source capture stores by, so a module the script imports (``helper.py``,
-    a ``pkg/`` package) is legal exactly when an attempt ships it. Empty for
-    a script outside the experiment directory, a document workflow, or a tree
-    read through a remote filesystem (the closure is read from local files).
+    a ``pkg/`` package) is legal exactly when an attempt ships it. The closure
+    is read through *fs*, as source capture reads it, so a tree on a remote
+    filesystem gets the same answer. Empty for a script outside the
+    experiment directory or a document workflow.
 
     Args:
         fs: The tree's filesystem.
@@ -279,19 +280,17 @@ def experiment_source_names(
     from .index_projection import entrypoint_of
     from .source_snapshot import SourceCaptureError, captured_names
 
-    if not isinstance(fs, LocalFS):
-        return frozenset()
     bound = (
         entrypoint_of(directory, canonical) if canonical.get("workflow_kind") == "code" else None
     )
     script = Path(directory, bound or WORKFLOW_SCRIPT_FILENAME)
-    written = pending is not None and Path(pending[0]).resolve() == script.resolve()
-    if script.parent.resolve() != Path(directory).resolve():
+    written = pending is not None and fs.resolve(pending[0]) == fs.resolve(script)
+    if fs.resolve(script.parent) != fs.resolve(directory):
         return frozenset()
-    if not (written or script.is_file()):
+    if not (written or fs.is_file(script)):
         return frozenset()
     try:
-        names = captured_names(script, pending=pending)
+        names = captured_names(script, pending=pending, fs=fs)
     except SourceCaptureError:
         # The script's closure cannot be captured (an import climbs out of
         # the experiment); nothing beside it is shipped.

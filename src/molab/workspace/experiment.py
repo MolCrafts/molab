@@ -426,19 +426,37 @@ class Experiment(Folder):
         """The file this experiment's code workflow is imported from.
 
         Every attempt captures it, with its first-party imports, as its
-        source (``Run._create_execution``). ``None`` for a document or
-        unbound experiment, a package (directory) locator, and a workspace
-        this machine reaches only through a remote filesystem, whose files
-        cannot be read here. A missing file is still returned: its capture
-        fails rather than recording no source.
+        source (``Run._create_execution``), read through the workspace
+        filesystem; on a remote one the path is the remote path, never
+        resolved here. ``None`` for a document or unbound experiment and a
+        package (directory) locator. A missing file is still returned: its
+        capture fails rather than recording no source.
+
+        Raises:
+            SourceCaptureError: The workspace is reached through a remote
+                filesystem and the script lies outside it. A local workspace
+                reads such a script from its own disk, the one its attempts
+                import from; for a remote workspace an absolute path recorded
+                at bind names no file of that tree, so it is refused rather
+                than read from either machine.
         """
         locator = self.entrypoint
         if self.workflow_kind != "code" or not locator or ":" not in locator:
             return None
-        if not isinstance(self._disk(), LocalFS):
-            return None
+        disk = self._disk()
+        stored = self._entity_metadata.workflow_entrypoint or ""
+        if not isinstance(disk, LocalFS) and posixpath.isabs(
+            (self._portable_locator(stored) or "").rsplit(":", 1)[0]
+        ):
+            from .source_snapshot import SourceCaptureError
+
+            raise SourceCaptureError(
+                f"workflow script {locator.rsplit(':', 1)[0]} is outside the workspace, which "
+                "is reached through a remote filesystem; move the script into the experiment "
+                "directory and bind it there"
+            )
         path = Path(locator.rsplit(":", 1)[0])
-        return None if path.is_dir() else path
+        return None if disk.is_dir(path) else path
 
     def _portable_locator(self, locator: str | None) -> str | None:
         """*locator* with a file inside the workspace made relative to this experiment.
