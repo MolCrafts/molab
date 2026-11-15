@@ -18,6 +18,13 @@ const link = (source: string, target: string, role = "derived_from", kind = "doc
   kind: kind as KnowledgeGraph["edges"][number]["kind"],
 });
 
+/** The entry with *id*; a missing one fails the test that asked for it. */
+const byId = <T extends { id: string }>(entries: readonly T[], id: string): T => {
+  const entry = entries.find((candidate) => candidate.id === id);
+  if (entry === undefined) throw new Error(`no entry ${id}`);
+  return entry;
+};
+
 const PLAN = "knowledges/plan.md";
 const HYP = "knowledges/hypothesis.md";
 const OBS = "knowledges/observation.md";
@@ -55,7 +62,7 @@ const graph: KnowledgeGraph = {
 };
 describe("research map", () => {
   const map = buildResearchMap(graph);
-  const at = (id: string) => map.nodes.find((entry) => entry.id === id)!;
+  const at = (id: string) => byId(map.nodes, id);
   const has = (from: string, to: string, role: string) =>
     map.edges.some((edge) => edge.from === from && edge.to === to && edge.role === role);
 
@@ -108,7 +115,7 @@ describe("research map", () => {
         .concat([link("finding.md", "h0.md", "supports"), link("finding.md", "o0.md")]),
     });
     const laid = layoutKnowledgeMap(wide);
-    const x = (id: string) => laid.find((entry) => entry.id === id)!.x;
+    const x = (id: string) => byId(laid, id).x;
     const perColumn = new Map<number, number>();
     for (const entry of laid) perColumn.set(entry.x, (perColumn.get(entry.x) ?? 0) + 1);
     expect(Math.max(...perColumn.values())).toBeLessThanOrEqual(6);
@@ -158,7 +165,7 @@ describe("research map", () => {
       },
       { [H]: { verdict: "refuted" }, [H_BARE]: {} },
     );
-    const state = (id: string) => reasoned.nodes.find((entry) => entry.id === id)!.state;
+    const state = (id: string) => byId(reasoned.nodes, id).state;
     expect(state(H)).toBe("refuted");
     // Fields that do not say are the class's default, as Molab reads it.
     expect(state(H_BARE)).toBe("open");
@@ -166,7 +173,7 @@ describe("research map", () => {
     expect(reasoned.edges).toContainEqual({ from: FFV, to: H, role: "contradicts" });
     // Evidence sits to the right of the claim it judges.
     const laid = layoutKnowledgeMap(reasoned);
-    const x = (id: string) => laid.find((entry) => entry.id === id)!.x;
+    const x = (id: string) => byId(laid, id).x;
     expect(x(PLAN)).toBeLessThan(x(H));
     expect(x(H)).toBeLessThan(x(FFV));
     expect(foldedReferences(reasoned)).toEqual([false, false, false]);
@@ -185,7 +192,7 @@ describe("research map", () => {
 describe("research map layout", () => {
   const map = buildResearchMap(graph);
   const placed = layoutKnowledgeMap(map);
-  const at = (id: string) => placed.find((entry) => entry.id === id)!;
+  const at = (id: string) => byId(placed, id);
 
   it("places every node once, each to the right of everything it rests on", () => {
     expect(placed.map((entry) => entry.id).sort()).toEqual(
@@ -213,7 +220,7 @@ describe("research map layout", () => {
       ],
     });
     const laid = layoutKnowledgeMap(cited);
-    const x = (id: string) => laid.find((entry) => entry.id === id)!.x;
+    const x = (id: string) => byId(laid, id).x;
     expect(x("plan.md")).toBe(0);
     expect(x("finding.md")).toBeGreaterThan(x("plan.md"));
     // A document nothing rests on, and that rests on nothing, sits in the first column.

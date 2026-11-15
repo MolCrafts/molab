@@ -30,7 +30,6 @@
         "./src/vendor/ui-file-tree.ts"
       ],
       "@molcrafts/ui-markdown": [
-        "../../../molcrafts-ui/packages/markdown/src/index.ts",
         "./src/vendor/ui-markdown.tsx"
       ],
       "@molcrafts/ui-vega-lite": [
@@ -38,6 +37,18 @@
       ],
       "@molcrafts/ui-vega": [
         "../../../molcrafts-ui/packages/vega/src/index.tsx"
+      ],
+      "react": [
+        "../../node_modules/@types/react"
+      ],
+      "react/*": [
+        "../../node_modules/@types/react/*"
+      ],
+      "vega": [
+        "../../node_modules/vega"
+      ],
+      "vega-lite": [
+        "../../node_modules/vega-lite/build/index"
       ],
       "@schemas/*": [
         "../src/molab/workflow/schema/*"
