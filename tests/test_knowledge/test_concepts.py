@@ -16,6 +16,7 @@ from molab.knowledge import (
     Finding,
     Hypothesis,
     Literature,
+    Manuscript,
     Milestone,
     Note,
     Observation,
@@ -38,6 +39,7 @@ _EXPECTED: tuple[tuple[str, type], ...] = (
     ("Observation", Observation),
     ("Hypothesis", Hypothesis),
     ("Decision", Decision),
+    ("Manuscript", Manuscript),
 )
 
 

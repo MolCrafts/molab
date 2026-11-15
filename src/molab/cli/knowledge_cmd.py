@@ -654,8 +654,9 @@ def knowledge_write(
         typer.Option(
             "--format",
             help=(
-                "md (<slug>.md, YAML frontmatter + markdown) or html (<slug>.html). "
-                "Default: md, or an existing document's own format."
+                "md (<slug>.md, YAML frontmatter + markdown), html (<slug>.html) or tex "
+                "(<slug>.tex, a Manuscript's only format). Default: the class's own format "
+                "(tex for a Manuscript, md otherwise), or an existing document's."
             ),
         ),
     ] = None,
@@ -706,21 +707,57 @@ def knowledge_list(
         Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
     ] = None,
 ) -> None:
-    """List knowledge documents and TeX manuscripts. The same walk as ``GET /knowledge``."""
+    """List knowledge documents. The same walk as ``GET /knowledge``."""
     from molab.knowledge import Knowledge
-    from molab.knowledge.tex_docs import TEX_CLASS, iter_tex_documents
 
     workspace = _require_workspace(path)
-    rows: list[tuple[str, str]] = []
-    for item in Knowledge(workspace.root, fs=workspace.fs).walk():
-        rows.append((type(item).__name__, _rel_to_workspace(workspace, item.path)))
-    for absolute in iter_tex_documents(workspace.root, workspace.fs):
-        rows.append((TEX_CLASS, _rel_to_workspace(workspace, absolute)))
+    rows = [
+        (type(item).__name__, _rel_to_workspace(workspace, item.path))
+        for item in Knowledge(workspace.root, fs=workspace.fs).walk()
+    ]
     if not rows:
         rprint("[dim]No knowledge documents.[/dim]")
         return
     for kind, rel in sorted(rows, key=lambda row: row[1]):
         print(f"{kind}\t{rel}")
+
+
+@knowledge_app.command("bib")
+def knowledge_bib(
+    ref: Annotated[str, typer.Argument(help="Workspace-relative path of a Manuscript.")],
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Write the BibTeX to this file instead of stdout."),
+    ] = None,
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+) -> None:
+    """Print a Manuscript's bibliography: one BibTeX entry per Literature it cites.
+
+    Each ``\\cite`` key is the name of a Literature document in the
+    manuscript's host or a host above it (``Manuscript.bibliography``). A key
+    no Literature answers is refused, so a build never runs on a partial
+    bibliography.
+    """
+    from molab.knowledge import Manuscript
+
+    workspace = _require_workspace(path)
+    doc = _document(workspace, ref)
+    if not isinstance(doc, Manuscript):
+        rprint(f"[red]Error:[/red] {ref!r} is a {type(doc).__name__}, not a Manuscript.")
+        raise typer.Exit(1)
+    try:
+        bibliography = doc.bibliography()
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if out is None:
+        print(bibliography)
+        return
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(bibliography + "\n", encoding="utf-8")
+    rprint(f"[green]OK[/green] wrote {out}")
 
 
 @knowledge_app.command("rename")

@@ -72,6 +72,10 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
         "molab knowledge evaluate DOC --measure CHECK=molab:asset/ID",
     ),
     (
+        "Write a Manuscript's bibliography from the Literature it cites",
+        "molab knowledge bib DOC [--out FILE]",
+    ),
+    (
         "Preview a knowledge document as a reader sees it (or export one HTML file)",
         "molab knowledge serve DOC [--export FILE]",
     ),
@@ -287,7 +291,11 @@ def render_agent_guide(ws: Workspace) -> str:
         'or `<slug>.html` (the record as JSON in `<script id="molab-record">`, a body of '
         "`<molab-markdown>` blocks and `<molab-…>` elements); its record names one class "
         "(`class:`). The table is the set. Write them with `molab knowledge write` "
-        "(`--format html` for the HTML form).",
+        "(`--format html` for the HTML form). A `Manuscript` is `<slug>.tex`: LaTeX that "
+        "compiles as it stands, its record in a leading `%%` comment block and its sources "
+        "as `% - [@role label](target)` comment lines; each `\\cite{key}` names a "
+        "`Literature` document (its file name) in that level or one above, and "
+        "`molab knowledge bib DOC` writes the bibliography from them.",
         "",
         _knowledge_classes(),
         "",

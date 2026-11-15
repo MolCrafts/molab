@@ -894,7 +894,7 @@ class _PathCheck:
 
         rest = self.parts[index + 1 :]
         on = host_rel or "."
-        write = f"molab knowledge write NAME TEXT --on {on} --class CLASS [--format md|html]"
+        write = f"molab knowledge write NAME TEXT --on {on} --class CLASS [--format md|html|tex]"
         if rest[0] == KNOWLEDGE_MEDIA_DIR and len(rest) == 2:
             return self.allow("a figure a knowledge document cites")
         rule = classify_document(rest[0], len(rest) > 1)

@@ -88,12 +88,30 @@ frontmatter 标出是哪一个：
 | `Report` | 我们要告诉读者什么？它只做汇编，不提出新的断言。 | 无 | 别处没有陈述过的结果 |
 | `Literature` | 一份已发表的文献说了什么？ | `LiteratureFields`：书目字段；PDF 只记路径，从不拷贝 | |
 | `Decision` | 选了什么、由谁选、为什么？ | `status`：`made`（默认）\| `open`（等人来定） | 观察到的事实（Observation）、结果（Finding） |
+| `Manuscript` | 我们投出去的是什么？一篇 LaTeX 论文。 | 无 | 没有 Finding 陈述过的结果；自己的一份参考文献 |
 | `Note` | 以上都不是：对推理不作任何断言的自由文本。 | `status`（默认 `active`） | |
 
 `Report` 由它的目的（告诉读者）界定，而不是由篇幅界定：一个结果写得再长，也仍然是 `Finding`。
 
 `class:` 缺失或不是任何类名的文件不是文档：它不会被列出、检索或打开，`molab validate` 会报告它
 （`knowledge.class`）。
+
+### Manuscript 是 LaTeX
+
+`Manuscript` 是唯一存成 `knowledges/<slug>.tex` 的类，`.tex` 也只存它（两种错配都由
+`knowledge.class` 报告）。文件本身就能编译：记录写在开头一段 `%%` 注释行里，sources
+是整行注释，TeX 都会跳过。
+
+每个 `\cite` 的 key 就是一个 `Literature` 文档的文件名，在该稿件所在层级或其上层（项目，
+再到工作区根）查找。这就是它的 `cites` 边，所以该 Literature 的反向链接里有这篇稿件。
+找不到对应 Literature 的 key 是 `molab validate` 错误（`knowledge.citation`）。参考文献不单独
+存文件：`molab knowledge bib DOC --out references.bib` 由这些文档生成（有 venue 的是
+`@article`，否则 `@misc`），有缺失就拒绝生成；`GET /api/knowledge/doc/bib?path=…` 是同一个
+操作，网页预览就用它编译稿件。注释行里的 markdown 链接才是边，LaTeX 其余位置的链接不是。
+
+key 跟着它指向的 Literature 走：重命名该文档或用 `molab knowledge write … --replaces` 替换它，
+每篇引用它的 Manuscript 里的 key 都会被改写，和改写 markdown 链接一样。移动文档不改名，key
+也不变；若移到稿件不查找的层级（更下层或旁支），key 就解析不到，由 `knowledge.citation` 报出。
 
 `molab init` 会把旧版 molab 写下的知识改成这些类，且不丢任何值：已退役的 `Delegation` 变成 `Plan`；
 类没有声明的 frontmatter 键（委派记录、`holds_under`、Todo 的 `gaps`）挪到正文末尾 `## Moved fields`

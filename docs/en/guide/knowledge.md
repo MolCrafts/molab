@@ -92,6 +92,7 @@ author. Every class lands one file; the `class:` frontmatter names which one:
 | `Report` | What do we tell readers? It compiles; it claims nothing new. | none | a result stated nowhere else |
 | `Literature` | What does a published source say? | `LiteratureFields`: the bibliography; PDFs pointed at, never copied | |
 | `Decision` | What was chosen, by whom, and why? | `status`: `made` (default) \| `open` while it waits for a person | an observed fact (Observation), a result (Finding) |
+| `Manuscript` | What do we submit for publication? A paper, in LaTeX. | none | a result no Finding states; a bibliography of its own |
 | `Note` | None of the above: free text with no claim on the reasoning. | `status`: `proposed` (default) \| `active` (reviewed; set explicitly) \| `retired` | |
 
 A `Report` is defined by its purpose (telling readers), not by its length: a
@@ -99,6 +100,46 @@ result written up at length is still a `Finding`.
 
 A file whose `class:` is absent or names no class is not a document: it is not
 listed, searched or opened, and `molab validate` reports it (`knowledge.class`).
+
+### A Manuscript is LaTeX
+
+A `Manuscript` is the one class stored as `knowledges/<slug>.tex`, and `.tex`
+holds nothing else (`knowledge.class` reports either mismatch). The file
+compiles as it stands: its record is a leading block of `%%` comment lines and
+its sources are whole-line comments, so TeX skips both.
+
+```latex
+%% molab-record
+%% {
+%%   "class": "Manuscript",
+%%   "name": "NaCl NEMD"
+%% }
+%% end molab-record
+\documentclass{revtex4-2}
+\begin{document}
+Shear thinning of molten NaCl~\cite{petravic2003}.
+\bibliography{references}
+\end{document}
+% - [@derived_from outline](outline.md)
+```
+
+Each `\cite` key is the file name of a `Literature` document in the
+manuscript's level or a level above it (the project, then the workspace root).
+That is its `cites` edge, so the Literature lists the Manuscript among its
+backlinks. A key no Literature document answers is a `molab validate` error
+(`knowledge.citation`). The bibliography has no file of its own:
+`molab knowledge bib DOC --out references.bib` writes it from those documents
+(`@article` when the Literature has a venue, `@misc` otherwise) and refuses to
+write a partial one; `GET /api/knowledge/doc/bib?path=…` is the same verb, and
+the web preview compiles the Manuscript with it. A comment line with a
+markdown link is an edge; a link anywhere else in the LaTeX is not.
+
+A key follows the Literature it names: renaming that document, or replacing
+it (`molab knowledge write … --replaces`), rewrites the key in every
+Manuscript that cites it, as it rewrites their markdown links. Moving it keeps
+its name and so its key; moved to a level the Manuscript does not look in
+(below it, or into a sibling), the key is left unresolved and
+`knowledge.citation` names it.
 
 `molab init` brings knowledge an older molab wrote up to these classes without
 losing a value: a `Delegation` (retired) becomes a `Plan`, and a frontmatter

@@ -71,6 +71,7 @@ PINNED_ALL: frozenset[str] = frozenset(
         "Hypothesis",
         "Plan",
         "LiteratureFields",
+        "Manuscript",
         "Milestone",
         "Report",
         "Roadmap",

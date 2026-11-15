@@ -1,6 +1,7 @@
 """Knowledge classes: one file each, and the fields each class declares.
 
-A document is ``knowledges/<name>.md`` (or ``.html``). Its frontmatter names
+A document is ``knowledges/<name>.md`` (or ``.html``; a Manuscript is
+``.tex``). Its frontmatter names
 the class and carries the fields that class declares in ``FIELDS``; the
 narrative holds the links. A new class subclasses an existing one, and its
 fields model extends the parent's, so everything that handles the parent
@@ -20,7 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from molab.fs import FileSystem, LocalFS, PathArg
 
-from .concept import Concept
+from .concept import Concept, LinkScan
+from .edges import Edge
 from .knowledge_item import SourceRef
 
 if TYPE_CHECKING:
@@ -28,6 +30,8 @@ if TYPE_CHECKING:
 
     from molab._typing import JSONValue
     from molab.workspace.run import Run
+
+    from .naming import KnowledgeFormat
 
 _LOG = logging.getLogger(__name__)
 
@@ -605,6 +609,134 @@ class Hypothesis(_SourcedKnowledge):
         return self.fields().verdict
 
 
+class Manuscript(_SourcedKnowledge):
+    """What do we submit for publication? A paper, in LaTeX.
+
+    ``knowledges/<name>.tex``: the record is a leading comment block
+    (:mod:`molab.texdoc`), so the file compiles as it stands, and its sources
+    are whole-line comment links. Each ``\\cite`` key names a
+    :class:`Literature` document in its host or a host above it: that is its
+    ``cites`` edge, and :meth:`bibliography` is written from those documents,
+    so the bibliography has no second home. A result it states is a
+    :class:`Finding` it rests on; it claims nothing new of its own.
+    """
+
+    FORMATS: ClassVar[tuple[KnowledgeFormat, ...]] = ("tex",)
+
+    def citations(self) -> list[tuple[str, Literature | None]]:
+        """Each ``\\cite`` key in first-use order, and the Literature it names.
+
+        ``None`` when no Literature document of that name sits in this
+        manuscript's host or a host above it, up to the workspace root.
+        """
+        from molab.texdoc import cite_keys
+
+        return [(key, self._literature(key)) for key in cite_keys(self.read())]
+
+    def bibliography(self) -> str:
+        """The BibTeX of every cited Literature, keyed by its name, in first-use order.
+
+        Raises:
+            ValueError: A ``\\cite`` key names no Literature document.
+        """
+        cited = self.citations()
+        unknown = [key for key, found in cited if found is None]
+        if unknown:
+            raise ValueError(
+                f"{self.name}: no Literature document answers \\cite key(s) {', '.join(unknown)}"
+            )
+        return "\n\n".join(_bibtex(key, found) for key, found in cited if found is not None)
+
+    def scan_links(self, body: str) -> LinkScan:
+        """The comment links of *body*, plus a ``cites`` edge per resolved ``\\cite`` key."""
+        from molab.texdoc import cite_keys
+
+        scan = super().scan_links(body)
+        for key in cite_keys(body):
+            found = self._literature(key)
+            if found is None:
+                continue
+            target = str(found.path)
+            scan.concepts.append(target)
+            scan.typed_concepts.append(Edge(target=target, role="cites"))
+        return scan
+
+    def _follow_moved(self, old: str, new: str) -> None:
+        """Rename the ``\\cite`` key of a cited Literature that moved from *old* to *new*.
+
+        This manuscript linked the document at *old* (it is one of its
+        backlinks), so the key follows it even when a Literature of the old
+        name sits in a host above. A key is a file name, so only a new name
+        changes it; a Literature moved to a host this manuscript no longer
+        looks in stays unresolved, and ``molab validate`` reports it
+        (``knowledge.citation``).
+        """
+        from pathlib import PurePosixPath
+
+        from molab.texdoc import cite_keys, rename_cite_key
+
+        from .naming import knowledge_stem
+
+        before = knowledge_stem(PurePosixPath(old).name)
+        after = knowledge_stem(PurePosixPath(new).name)
+        body = self.read()
+        if before == after or before not in cite_keys(body):
+            return
+        self._store_relinked(rename_cite_key(body, before, after))
+
+    def _literature(self, key: str) -> Literature | None:
+        """The Literature document named *key* nearest this manuscript's host."""
+        from pathlib import PurePosixPath
+
+        from .location import enclosing_workspace_root
+        from .naming import KNOWLEDGE_CONTAINER, as_knowledge_file
+
+        if not key or "/" in key or key in {".", ".."}:
+            return None
+        host = PurePosixPath(self._path).parent.parent
+        root = enclosing_workspace_root(self.path, fs=self.fs)
+        top = PurePosixPath(str(root)) if root is not None else host
+        for directory in (host, *host.parents):
+            for fmt in Literature.FORMATS:
+                candidate = as_knowledge_file(str(directory / KNOWLEDGE_CONTAINER / key), fmt)
+                if not self.fs.is_file(candidate):
+                    continue
+                try:
+                    found = _open_document(candidate, fs=self.fs)
+                except ValueError:
+                    continue
+                if isinstance(found, Literature):
+                    return found
+            if directory == top:
+                break
+        return None
+
+
+#: The BibTeX special characters a bibliographic field escapes.
+_BIBTEX_ESCAPES = str.maketrans({"&": "\\&", "%": "\\%", "#": "\\#", "_": "\\_"})
+
+
+def _bibtex(key: str, literature: Literature) -> str:
+    """One BibTeX entry for *literature* under *key*: ``@article`` with a venue, else ``@misc``."""
+    fields = literature.fields()
+    rows: list[tuple[str, str]] = []
+    if fields.authors:
+        rows.append(("author", " and ".join(fields.authors).translate(_BIBTEX_ESCAPES)))
+    if fields.title:
+        rows.append(("title", "{" + fields.title.translate(_BIBTEX_ESCAPES) + "}"))
+    if fields.venue:
+        rows.append(("journal", fields.venue.translate(_BIBTEX_ESCAPES)))
+    if fields.year is not None:
+        rows.append(("year", str(fields.year)))
+    if fields.doi:
+        rows.append(("doi", fields.doi))
+    if fields.url:
+        rows.append(("url", fields.url))
+    kind = "article" if fields.venue else "misc"
+    lines = [f"@{kind}{{{key},", *(f"  {name} = {{{value}}}," for name, value in rows), "}"]
+    return "\n".join(lines)
+
+
 class Decision(_SourcedKnowledge):
     """What was chosen, by whom, and why?
 
@@ -635,6 +767,7 @@ _PRODUCTS: dict[str, type[Concept]] = {
     "Observation": Observation,
     "Hypothesis": Hypothesis,
     "Decision": Decision,
+    "Manuscript": Manuscript,
 }
 
 

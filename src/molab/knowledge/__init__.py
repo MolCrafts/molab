@@ -15,7 +15,8 @@ the class (``class: Finding``), the rest is the narrative. Path is identity::
 
 The subclasses are ``Note``, ``Literature``, ``Report``, ``Finding``,
 ``Plan``, ``Roadmap``, ``Todo``, ``Milestone``, ``Observation``,
-``Hypothesis``, and ``Decision``. Each answers one question (the first line
+``Hypothesis``, ``Decision``, and ``Manuscript`` (a LaTeX paper,
+``knowledges/<name>.tex``). Each answers one question (the first line
 of its docstring). A Plan is the question, scope and constraints; the
 Roadmap, Todo and Milestone that cite it hold its stage order, its work items
 and its acceptance criteria. Failure analysis is a Report; harvest of a
@@ -55,6 +56,7 @@ from .concepts import (
     Hypothesis,
     Literature,
     LiteratureFields,
+    Manuscript,
     Milestone,
     Note,
     Observation,
@@ -93,6 +95,7 @@ __all__ = [
     "KnowledgeSourceStore",
     "Literature",
     "LiteratureFields",
+    "Manuscript",
     "Milestone",
     "Note",
     "Observation",

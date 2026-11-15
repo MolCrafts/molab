@@ -12,6 +12,7 @@ from typing import Any, get_args
 import pytest
 from fastapi.testclient import TestClient
 
+from molab import texdoc
 from molab.knowledge import Note
 from molab.server.routes import knowledge as knowledge_routes
 from molab.workspace import Experiment, Run, Workspace
@@ -221,44 +222,97 @@ class TestSearchKnowledge:
         assert "fs=workspace.fs" in inspect.getsource(knowledge_routes.search_knowledge)
 
 
-class TestTexManuscripts:
-    def test_lists_and_reads_manuscript_without_writing_it(
+class TestManuscripts:
+    """A Manuscript is a knowledge document stored as ``knowledges/<slug>.tex``."""
+
+    _BODY = "\\documentclass{article}\n\\begin{document}drift\\end{document}\n"
+
+    def test_creates_lists_opens_edits_and_exports_a_manuscript(
         self, served: ServedFactory, lab: RunFixture
     ) -> None:
-        ws, exp, _run = lab
-        project = Path(str(exp.resolve())).parent.parent
-        tex = project / "manuscript" / "nve-drift.tex"
-        tex.parent.mkdir()
-        tex.write_text(
-            "\\documentclass{article}\n\\begin{document}drift\\end{document}\n",
-            encoding="utf-8",
-        )
-        figures = tex.parent / "figures"
-        figures.mkdir()
-        (figures / "tab_drift.tex").write_text("% fragment\n", encoding="utf-8")
-
+        ws, _exp, _run = lab
+        landed = Path(str(ws.root)) / "knowledges" / "nve-drift.tex"
         with served(ws) as client:
+            created = client.post(
+                "/api/knowledge/doc",
+                json={"name": "nve-drift", "body": self._BODY, "cls": "Manuscript"},
+            )
+            assert created.status_code == 201, created.text
+            assert landed.is_file()
+
             listed = client.get("/api/knowledge")
             assert listed.status_code == 200, listed.text
-            rows = [row for row in listed.json()["notes"] if str(row["relPath"]).endswith(".tex")]
-            assert len(rows) == 1
-            row = rows[0]
-            assert row["name"] == "nve-drift"
-            assert row["cls"] == "Tex"
-            assert row["relPath"].endswith("manuscript/nve-drift.tex")
-            assert row["hostPath"].endswith(project.name)
+            rows = [row for row in listed.json()["notes"] if row["relPath"].endswith(".tex")]
+            assert [(row["cls"], row["format"]) for row in rows] == [("Manuscript", "tex")]
 
-            opened = client.get("/api/knowledge/note", params={"path": row["relPath"]})
+            opened = client.get("/api/knowledge/note", params={"path": "knowledges/nve-drift.tex"})
             assert opened.status_code == 200, opened.text
-            assert "drift" in opened.json()["body"]
+            assert opened.json()["body"].startswith(self._BODY)
 
             edited = client.put(
                 "/api/knowledge/doc",
-                params={"path": row["relPath"]},
-                json={"body": "nope"},
+                params={"path": "knowledges/nve-drift.tex"},
+                json={"body": self._BODY.replace("drift", "no drift")},
             )
-            assert edited.status_code == 405, edited.text
-        assert tex.read_text(encoding="utf-8").startswith("\\documentclass")
+            assert edited.status_code == 200, edited.text
+
+            exported = client.get(
+                "/api/knowledge/doc/export", params={"path": "knowledges/nve-drift.tex"}
+            )
+        assert exported.status_code == 200, exported.text
+        assert exported.headers["content-type"].startswith("text/x-tex")
+        assert 'filename="nve-drift.tex"' in exported.headers["content-disposition"]
+        text = landed.read_text(encoding="utf-8")
+        assert text.startswith("%% molab-record\n")
+        assert exported.text == texdoc.split(text)[1]
+        assert exported.text.startswith(self._BODY.replace("drift", "no drift"))
+
+    def test_bibliography_is_written_from_the_cited_literature(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        ws, _exp, _run = lab
+        body = self._BODY.replace("drift", "drift~\\cite{evans1990}")
+        with served(ws) as client:
+            client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "evans1990",
+                    "body": "abstract",
+                    "cls": "Literature",
+                    "fields": {"title": "NEMD", "authors": ["D. J. Evans"], "year": 1990},
+                },
+            )
+            client.post(
+                "/api/knowledge/doc",
+                json={"name": "nve-drift", "body": body, "cls": "Manuscript"},
+            )
+            bib = client.get("/api/knowledge/doc/bib", params={"path": "knowledges/nve-drift.tex"})
+            client.put(
+                "/api/knowledge/doc",
+                params={"path": "knowledges/nve-drift.tex"},
+                json={"body": body.replace("evans1990", "nobody")},
+            )
+            unknown = client.get(
+                "/api/knowledge/doc/bib", params={"path": "knowledges/nve-drift.tex"}
+            )
+            not_manuscript = client.get(
+                "/api/knowledge/doc/bib", params={"path": "knowledges/evans1990.md"}
+            )
+        assert bib.status_code == 200, bib.text
+        assert bib.headers["content-type"].startswith("text/x-bibtex")
+        assert bib.text.startswith("@misc{evans1990,\n")
+        assert unknown.status_code == 422, unknown.text
+        assert "nobody" in unknown.text
+        assert not_manuscript.status_code == 422, not_manuscript.text
+
+    def test_a_note_is_not_stored_as_tex(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            refused = client.post(
+                "/api/knowledge/doc", json={"name": "loose", "body": "x", "format": "tex"}
+            )
+        assert refused.status_code == 422, refused.text
+        assert not (Path(str(ws.root)) / "knowledges" / "loose.tex").exists()
 
 
 class TestGetNote:

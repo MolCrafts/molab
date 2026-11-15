@@ -38,10 +38,10 @@ def relation_links(doc: Concept, body: str | None = None) -> list[RelationLink]:
     """
     narrative = doc.read() if body is None else body
     found = []
-    for match in markdown_links(narrative):
+    for match in markdown_links(narrative, path=doc.path):
         if match.start() > 0 and narrative[match.start() - 1] == "!":
             continue
-        scan = doc.scan_links(match.group(0))
+        scan = doc._classify_links([match])
         if scan.typed_concepts:
             target, role = scan.typed_concepts[0]
         elif scan.external:

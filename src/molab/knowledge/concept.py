@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, ClassVar, NamedTuple
 from pydantic import BaseModel
 
 from molab.fs import FileSystem, LocalFS, PathArg
+from molab.texdoc import link_text
 
 from .edges import (
     DEFAULT_EDGE_ROLE,
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
 
     from .concepts import Literature
     from .edges import Backlink
+    from .naming import KnowledgeFormat
     from .search import SearchResult
 
 #: ``[label](target)`` — both halves captured; the label carries the edge role.
@@ -72,9 +74,16 @@ def _mask_code(text: str) -> str:
     return _CODE_SPAN.sub(_blank, _CODE_FENCE.sub(_blank, text))
 
 
-def markdown_links(text: str) -> list[re.Match[str]]:
-    """Every markdown link in *text* outside code, as matches against *text*."""
-    masked = _mask_code(text)
+def markdown_links(text: str, *, path: object = None) -> list[re.Match[str]]:
+    """Every markdown link in *text* outside code, as matches against *text*.
+
+    *text* is the body of the document at *path*. A TeX body carries links
+    only in whole-line ``%`` comments (:func:`molab.texdoc.link_text`): a
+    bracket followed by a parenthesis in LaTeX is mathematics, not a link.
+    """
+    from .naming import is_tex_document
+
+    masked = link_text(text) if path is not None and is_tex_document(path) else _mask_code(text)
     return [
         match
         for match in _MD_LINK.finditer(text)
@@ -113,6 +122,10 @@ class Concept:
 
     #: Product documents are markdown files, not directories.
     FILE_DOCUMENT: ClassVar[bool] = False
+    #: The storage formats this class's documents may take, the default first
+    #: (:data:`~molab.knowledge.naming.KnowledgeFormat`). A write in another
+    #: format is refused, and ``molab validate`` reports a file in one.
+    FORMATS: ClassVar[tuple[KnowledgeFormat, ...]] = ("md", "html")
     #: The frontmatter fields this class owns beyond the keys every document
     #: carries (:data:`~molab.knowledge.fields.COMMON_KEYS`): a pydantic model
     #: that refuses an unknown key. ``None`` owns none, so no other key is
@@ -601,9 +614,10 @@ class Concept:
     def export(self) -> str:
         """This document as a file to hand out.
 
-        A markdown document exports its narrative, without frontmatter. An
-        HTML document exports the whole file: it is already a standalone page,
-        and its frontmatter is an inert script element.
+        A markdown document exports its narrative, without frontmatter, and a
+        TeX document its LaTeX, without the record block. An HTML document
+        exports the whole file: it is already a standalone page, and its
+        frontmatter is an inert script element.
         """
         from .naming import is_html_document
 
@@ -730,6 +744,14 @@ class Concept:
                 f"{self.path} already holds a {stored.get('class')}, not a {type(self).__name__}"
             )
 
+    def _follow_moved(self, old: str, new: str) -> None:
+        """Re-point an edge this document holds outside its markdown links at *new*.
+
+        :func:`_rewrite_inbound` calls it on each document that linked the
+        moved document at *old*, after the markdown links are rewritten. A
+        class whose edges are all markdown links holds no other kind.
+        """
+
     def _store_relinked(self, body: str) -> None:
         """Store *body*, in which only link targets changed, under the stored frontmatter.
 
@@ -759,6 +781,10 @@ class Concept:
         Args:
             body: The narrative to scan.
         """
+        return self._classify_links(markdown_links(body, path=self._path))
+
+    def _classify_links(self, links: Iterable[re.Match[str]]) -> LinkScan:
+        """Resolve each matched markdown link against this document's directory."""
         from molab.workspace.refs import is_ref
 
         base = PurePosixPath(self._path).parent
@@ -768,7 +794,7 @@ class Concept:
         typed_concepts: list[Edge] = []
         refs: list[str] = []
         missing: list[str] = []
-        for link in markdown_links(body):
+        for link in links:
             raw_label, target = link.group(1), link.group(2)
             role, _human = parse_role(raw_label)
             if target.startswith(("http://", "https://")):
@@ -953,11 +979,14 @@ def _rewrite_inbound(inbound: Sequence[Backlink], old: str, new: str) -> None:
     for link in inbound:
         doc = link.source
         _retarget_links(doc, lambda target, doc=doc: _rewrite(doc, target))
+        doc._follow_moved(old, new)
 
 
 def retarget_links(
     text: str,
     rewrite: Callable[[str, bool], str | None],
+    *,
+    path: object = None,
 ) -> tuple[str, int]:
     """Replace markdown link targets in *text*. Pure: no I/O.
 
@@ -970,6 +999,7 @@ def retarget_links(
     Args:
         text: Markdown to scan.
         rewrite: Maps ``(target, image)`` to a new target, or ``None`` to keep it.
+        path: The document *text* belongs to (:func:`markdown_links`).
 
     Returns:
         The new text and how many targets actually changed.
@@ -977,7 +1007,7 @@ def retarget_links(
     count = 0
     pieces: list[str] = []
     cursor = 0
-    for match in markdown_links(text):
+    for match in markdown_links(text, path=path):
         label, target = match.group(1), match.group(2)
         image = match.start() > 0 and text[match.start() - 1] == "!"
         updated = rewrite(target, image)
@@ -1001,7 +1031,7 @@ def _retarget_links(doc: Concept, rewrite: Callable[[str], str | None]) -> bool:
     Returns:
         Whether the narrative changed.
     """
-    new, count = retarget_links(doc.read(), lambda target, _image: rewrite(target))
+    new, count = retarget_links(doc.read(), lambda target, _image: rewrite(target), path=doc.path)
     if count > 0:
         doc._store_relinked(new)
     return count > 0
@@ -1038,7 +1068,7 @@ def append_source_links(
         return body, 0
     have = {
         (parse_role(label)[0], posixpath.normpath(target))
-        for label, target in (link.groups() for link in markdown_links(body))
+        for label, target in (link.groups() for link in markdown_links(body, path=path))
     }
     lines: list[str] = []
     for source in sources:

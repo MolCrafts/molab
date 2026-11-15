@@ -46,6 +46,8 @@ and never refuse a write:
   links it as ``contradicts``.
 * ``knowledge.dangling_ref`` (error) — a Report or Finding links a ``molab:``
   ref that names nothing in the workspace.
+* ``knowledge.citation`` (error) — a Manuscript ``\\cite``s a key that no
+  Literature document in its host or a host above it is named.
 * ``knowledge.source_text`` (warning) — a Literature that a Plan links points
   at no PDF, or at one that is not there: the Plan cannot be checked against
   the text it reproduces.
@@ -133,6 +135,11 @@ CONTENT_RULE_HINTS: dict[str, str] = {
         "Import the paper and point the Literature at it: `molab asset import paper.pdf "
         "-p PROJECT`, then set `pdf_asset_id` in its fields. A Plan is checked against "
         "the text of what it reproduces."
+    ),
+    "knowledge.citation": (
+        "Cite a work by the name of its Literature document (`\\cite{<name>}`), or write "
+        "that Literature first: `molab knowledge write NAME --class Literature --fields "
+        '\'{"title": ..., "authors": [...], "year": ..., "doi": ...}\'`.'
     ),
     "knowledge.dangling_ref": (
         "Cite a ref that exists: `molab index show --frontmatter` lists the runs, and "
@@ -537,6 +544,23 @@ def _dangling_issues(docs: Sequence[Concept], root: str, fs: FileSystem) -> Iter
                 )
 
 
+def _citation_issues(docs: Sequence[Concept]) -> Iterator[ContentIssue]:
+    """``knowledge.citation`` for each Manuscript key no Literature document answers."""
+    from .concepts import Manuscript
+
+    for doc in docs:
+        if not isinstance(doc, Manuscript):
+            continue
+        unknown = [key for key, found in doc.citations() if found is None]
+        if unknown:
+            yield ContentIssue(
+                str(doc.path),
+                "knowledge.citation",
+                f"\\cite key(s) {', '.join(unknown)} name no Literature document",
+                "error",
+            )
+
+
 def _asset_ids(workspace: Workspace) -> frozenset[str] | None:
     """The id of every asset in *workspace*; ``None`` when a store cannot be listed."""
     from molab.workspace.asset_repository import scan_asset_repositories
@@ -645,6 +669,7 @@ def content_issues(
     found.extend(_stage_issues(sound, walk))
     found.extend(_evidence_issues(sound, walk))
     found.extend(_dangling_issues(sound, root, fs))
+    found.extend(_citation_issues(sound))
     if errors_only:
         return found
     found.extend(_source_text_issues(sound, root, fs))

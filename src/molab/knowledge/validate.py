@@ -5,10 +5,11 @@ The workspace validator holds the tree to the layout law and does not know
 checks what lives inside it, at every host (the root, each project,
 experiment and run):
 
-* ``knowledge.class`` (error) — a document whose frontmatter has no ``class:``
-  or names a class that is not a knowledge class.
+* ``knowledge.class`` (error) — a document whose frontmatter has no ``class:``,
+  names a class that is not a knowledge class, or names one that is not
+  stored in the file's format (a Manuscript is ``.tex``, and only it is).
 * ``knowledge.stray`` (error) — an entry of ``knowledges/`` that is not a
-  document (``.md`` / ``.html``) or the ``figs/`` figure directory.
+  document (``.md`` / ``.html`` / ``.tex``) or the ``figs/`` figure directory.
 * ``knowledge.duplicate`` (error) — two documents with one stem (``a.md``
   beside ``a.html``): one name, one file.
 * the content rules of :mod:`molab.knowledge.content_rules` — fields the
@@ -50,11 +51,11 @@ __all__ = [
 #: Stable rule id -> remediation hint naming the molab command to use.
 RULE_HINTS: dict[str, str] = {
     "knowledge.class": (
-        "A knowledge document names its class in frontmatter. Write it with "
-        "`molab knowledge write NAME TEXT --on HOST --class CLASS`."
+        "A knowledge document names its class in frontmatter, in a format that class "
+        "takes. Write it with `molab knowledge write NAME TEXT --on HOST --class CLASS`."
     ),
     "knowledge.stray": (
-        "knowledges/ holds documents (<slug>.md or <slug>.html) and figs/ only. Keep data "
+        "knowledges/ holds documents (<slug>.md, .html or .tex) and figs/ only. Keep data "
         "with the run that made it (`molab runs adopt`) or import it as an asset "
         "(`molab asset import`)."
     ),
@@ -113,10 +114,17 @@ def class_problem(text: str, *, path: object = None) -> str | None:
     """Why *text* (the document at *path*) is not of a known class, or ``None``."""
     from . import concepts
     from .frontmatter import split_frontmatter
+    from .naming import document_format
 
     meta, _body = split_frontmatter(text, path=path)
     problem = concepts.class_problem(meta)
-    return None if problem is None else f"frontmatter {problem}"
+    if problem is not None:
+        return f"frontmatter {problem}"
+    klass = concepts.class_of(meta)
+    stored = document_format(path) if path is not None else "md"
+    if klass is not None and stored not in klass.FORMATS:
+        return f"a {klass.__name__} is stored as {' or '.join(klass.FORMATS)}, not {stored}"
+    return None
 
 
 def _check_section(

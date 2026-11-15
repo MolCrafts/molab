@@ -80,9 +80,11 @@ def write_knowledge(
         fs: Disk to write through. Defaults to the host's own disk.
         replaces: Documents this one supersedes. Each is deleted after the
             write; git keeps its text.
-        format: ``"md"`` (``<slug>.md``, YAML frontmatter + markdown) or
-            ``"html"`` (``<slug>.html``). ``None`` keeps an existing
-            document's format and writes markdown for a new one.
+        format: ``"md"`` (``<slug>.md``, YAML frontmatter + markdown),
+            ``"html"`` (``<slug>.html``) or ``"tex"`` (``<slug>.tex``), one of
+            *of*'s :attr:`~molab.knowledge.concept.Concept.FORMATS`. ``None``
+            keeps an existing document's format and writes a new one in the
+            class's first format.
 
     Returns:
         The written document.
@@ -92,8 +94,8 @@ def write_knowledge(
             names nothing :func:`~molab.knowledge.concept.link_target` accepts.
         ValueError: If a *cite* role is not an ``EdgeRole``, *of* requires sources and *sources* is empty, *fields*
             break *of*'s fields, a *replaces* entry is not a knowledge document
-            or is the written one, or the name already exists in the other
-            *format*.
+            or is the written one, the name already exists in another
+            *format*, or *of* is not stored in *format*.
     """
     from .index_section import refresh_section
     from .location import _host_fs
@@ -199,11 +201,14 @@ def _landed_path(
     """Where the *of* document *name* lands under *host*, in one format only.
 
     Raises:
-        ValueError: *format* is given and the name exists in the other format.
+        ValueError: *of* is not stored in *format*, or *format* is given and
+            the name exists in another format.
     """
     from .location import _folder
     from .naming import KNOWLEDGE_FORMATS
 
+    if format is not None and format not in of.FORMATS:
+        raise ValueError(f"a {of.__name__} is stored as {' or '.join(of.FORMATS)}, not {format}")
     paths = {fmt: str(_folder(host, name, of, format=fmt)) for fmt in KNOWLEDGE_FORMATS}
     on_disk = [fmt for fmt in KNOWLEDGE_FORMATS if disk.is_file(paths[fmt])]
     if not on_disk:
@@ -225,7 +230,7 @@ def _landed_path(
                 paths[fmt] = candidate
                 on_disk.append(fmt)
     if format is None:
-        return paths[on_disk[0] if on_disk else "md"]
+        return paths[on_disk[0] if on_disk else of.FORMATS[0]]
     clash = [fmt for fmt in on_disk if fmt != format]
     if clash:
         raise ValueError(
