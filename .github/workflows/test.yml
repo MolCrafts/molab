@@ -77,7 +77,11 @@ jobs:
       - run: uv run --extra dev pytest tests/ -q
       - name: Verify sharing with two real Linux UIDs
         if: runner.os == 'Linux'
-        run: sudo -E "$PWD/.venv/bin/python" -m pytest tests/test_server/test_sharing_linux.py -q
+        # Ubuntu homes are 0750: a probe that has dropped to a disposable UID
+        # must still traverse $HOME to import molab from the checkout.
+        run: |
+          chmod o+x "$HOME"
+          sudo -E "$PWD/.venv/bin/python" -m pytest tests/test_server/test_sharing_linux.py -q
 
   web:
     name: test / web
