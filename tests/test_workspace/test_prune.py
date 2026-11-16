@@ -333,3 +333,88 @@ class TestDiscardSuperseded:
         )
         assert discard_superseded_attempts(run) == (ids[0],)
         assert [item.id for item in run.executions] == ids[1:]
+
+
+class TestDiscardFailed:
+    """``--failed``: keep what succeeded; a run with no success keeps its newest attempt."""
+
+    def test_keeps_the_success_when_the_newest_attempt_failed(self, seeded: Run) -> None:
+        from molab.workspace.prune import discard_failed_attempts
+
+        assert discard_failed_attempts(seeded) == ("e02", "e03")
+        assert [item.id for item in seeded.executions] == ["e01"]
+        assert not _exec_dir(seeded, "e02").exists()
+        assert not _exec_dir(seeded, "e03").exists()
+        assert discard_failed_attempts(seeded) == ()
+
+    def test_planning_is_read_only(self, seeded: Run) -> None:
+        from molab.workspace.prune import plan_failed_discard
+
+        before = _snapshot(seeded)
+        assert plan_failed_discard(seeded) == ("e02", "e03")
+        assert _snapshot(seeded) == before
+
+    def test_a_run_without_success_keeps_its_newest_attempt(self, tmp_path: Path) -> None:
+        from molab.workspace.prune import discard_failed_attempts
+
+        ws = Workspace(root=tmp_path, name="prune-lab")
+        run = ws.add_project("p").add_experiment("e", params={}).add_run(params={"seed": 2})
+        assert _seed_executions(run, ("failed", "cancelled", "interrupted")) == [
+            "e01",
+            "e02",
+            "e03",
+        ]
+        assert discard_failed_attempts(run) == ("e01", "e02")
+        assert [item.id for item in run.executions] == ["e03"]
+
+    def test_every_success_is_kept(self, tmp_path: Path) -> None:
+        from molab.workspace.prune import discard_failed_attempts
+
+        ws = Workspace(root=tmp_path, name="prune-lab")
+        run = ws.add_project("p").add_experiment("e", params={}).add_run(params={"seed": 3})
+        _seed_executions(run, ("succeeded", "failed", "succeeded"))
+        assert discard_failed_attempts(run) == ("e02",)
+        assert [item.id for item in run.executions] == ["e01", "e03"]
+
+    def test_a_failed_attempt_a_success_was_seeded_from_is_kept(self, tmp_path: Path) -> None:
+        import json
+
+        from molab.workspace.prune import discard_failed_attempts
+
+        ws = Workspace(root=tmp_path, name="prune-lab")
+        run = ws.add_project("p").add_experiment("e", params={}).add_run(params={"seed": 4})
+        _seed_executions(run, ("failed", "failed", "succeeded"))
+        (_exec_dir(run, "e03") / "workflow.json").write_text(
+            json.dumps({"seeded_from": {"simulate": {"execution_id": "e02", "ref": "sha256:x"}}}),
+            encoding="utf-8",
+        )
+        assert discard_failed_attempts(run) == ("e01",)
+        assert [item.id for item in run.executions] == ["e02", "e03"]
+
+    def test_assets_only_a_failed_attempt_registered_go(self, tmp_path: Path) -> None:
+        from molab.workspace.domain import ExecutionMode
+        from molab.workspace.prune import discard_failed_attempts
+
+        ws = Workspace(root=tmp_path / "ws", name="W")
+        run = ws.add_project("p").add_experiment("e").add_run(params={"m": "a"})
+        with run.start() as ctx:
+            kept = ctx.register(b"good", title="result.txt")
+        repo = run._execution_repository()
+        with pytest.raises(RuntimeError), run.start(mode=ExecutionMode.RERUN) as ctx:
+            ctx.register(b"partial", title="partial.txt")
+            failed = ctx.id
+            raise RuntimeError("boom")
+        assert repo.get(failed).status is ExecutionStatus.FAILED
+        assert discard_failed_attempts(run) == (failed,)
+        assert [asset.id for asset in run.experiment.assets.list()] == [kept.id]
+
+    def test_an_active_attempt_refuses(self, seeded: Run) -> None:
+        from molab.workspace.prune import discard_failed_attempts, plan_failed_discard
+
+        _live(seeded, ExecutionStatus.RUNNING)
+        before = _snapshot(seeded)
+        with pytest.raises(LivePruneRefusedError):
+            plan_failed_discard(seeded)
+        assert _snapshot(seeded) == before
+        with pytest.raises(LivePruneRefusedError):
+            discard_failed_attempts(seeded)

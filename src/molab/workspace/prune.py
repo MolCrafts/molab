@@ -59,8 +59,11 @@ __all__ = [
     "ExecutionPrunePlan",
     "LivePruneRefusedError",
     "apply_execution_prune",
+    "discard_failed_attempts",
     "discard_superseded_attempts",
     "plan_execution_prune",
+    "plan_failed_discard",
+    "plan_superseded_discard",
 ]
 
 
@@ -288,6 +291,60 @@ def _seeding_closure(repo: object, execution_id: str) -> set[str]:
     return kept
 
 
+def _refuse_active(run: Run) -> None:
+    active = [item.id for item in run.executions if item.status in ACTIVE_EXECUTION_STATUSES]
+    if active:
+        raise LivePruneRefusedError(
+            f"run {run.id!r} has active attempt(s) {', '.join(active)}; cancel or finish them first"
+        )
+
+
+def _not_kept(run: Run, anchors: list[str]) -> tuple[str, ...]:
+    """Every attempt of *run* outside *anchors* and the attempts they were seeded from."""
+    repo = run._execution_repository()
+    kept: set[str] = set()
+    for anchor in anchors:
+        kept |= _seeding_closure(repo, anchor)
+    return tuple(item.id for item in run.executions if item.id not in kept)
+
+
+def plan_failed_discard(run: Run) -> tuple[str, ...]:
+    """The attempts :func:`discard_failed_attempts` would delete. Read-only.
+
+    Every succeeded attempt is kept, with every attempt it reused task results
+    from (``seeded_from``), transitively. A run with no succeeded attempt keeps
+    its newest attempt as the evidence of why it has no result.
+
+    Raises:
+        LivePruneRefusedError: An attempt of *run* is still active.
+    """
+    from .domain import ExecutionStatus
+
+    _refuse_active(run)
+    executions = run.executions
+    anchors = [item.id for item in executions if item.status is ExecutionStatus.SUCCEEDED]
+    if not anchors and executions:
+        anchors = [executions[-1].id]
+    return _not_kept(run, anchors)
+
+
+def discard_failed_attempts(run: Run) -> tuple[str, ...]:
+    """Delete the attempts :func:`plan_failed_discard` names; return their ids.
+
+    Zombie attempts are reaped first. What goes is what
+    :func:`discard_superseded_attempts` removes: record, logs, bulk
+    directories and the assets only that attempt registered, in one history
+    commit.
+
+    Raises:
+        LivePruneRefusedError: An attempt of *run* is still active.
+    """
+    from .run_reaper import reap_zombie_run
+
+    reap_zombie_run(run)
+    return _discard_attempts(run, plan_failed_discard(run))
+
+
 def discard_superseded_attempts(run: Run) -> tuple[str, ...]:
     """Delete every attempt of *run* the newest one does not stand on; return their ids.
 
@@ -303,23 +360,32 @@ def discard_superseded_attempts(run: Run) -> tuple[str, ...]:
     Raises:
         LivePruneRefusedError: An attempt of *run* is still active.
     """
-    from .asset_repository import assets_produced_by
-    from .domain import ExecutionOrigin
-    from .history import EntityRef
     from .run_reaper import reap_zombie_run
 
     reap_zombie_run(run)
+    return _discard_attempts(run, plan_superseded_discard(run))
+
+
+def plan_superseded_discard(run: Run) -> tuple[str, ...]:
+    """The attempts :func:`discard_superseded_attempts` would delete. Read-only.
+
+    Raises:
+        LivePruneRefusedError: An attempt of *run* is still active.
+    """
+    _refuse_active(run)
     executions = run.executions
-    active = [item.id for item in executions if item.status in ACTIVE_EXECUTION_STATUSES]
-    if active:
-        raise LivePruneRefusedError(
-            f"run {run.id!r} has active attempt(s) {', '.join(active)}; cancel or finish them first"
-        )
-    repo = run._execution_repository()
-    kept = _seeding_closure(repo, executions[-1].id) if executions else set()
-    stale = tuple(item.id for item in executions if item.id not in kept)
+    return _not_kept(run, [executions[-1].id] if executions else [])
+
+
+def _discard_attempts(run: Run, stale: tuple[str, ...]) -> tuple[str, ...]:
+    """Delete the sealed attempts *stale* of *run* in one history commit."""
+    from .asset_repository import assets_produced_by
+    from .domain import ExecutionOrigin
+    from .history import EntityRef
+
     if not stale:
         return ()
+    repo = run._execution_repository()
     workspace = run.experiment.project.workspace
     touched: list[str] = [str(repo.run_dir)]
     for execution_id in stale:

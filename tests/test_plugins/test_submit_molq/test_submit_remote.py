@@ -505,3 +505,60 @@ class TestReconcileAfterAPrecreatedSubmission:
         assert outcome.error is None
         assert staged == ["e01"]
         assert run.execution("e01").status.value == "queued"
+
+
+class TestReconcileReleasesTheStagedRun:
+    """Once a succeeded remote attempt is home and sealed, its namespace goes."""
+
+    def _reconcile(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, worker_status: str
+    ) -> list[str]:
+        from molab.plugins.submit_molq import staging
+        from molab.plugins.submit_molq.submit import reconcile_submission
+        from molab.workspace.domain import ExecutionStatus
+
+        ws, project, experiment, run = _make_run(tmp_path)
+        _precreate_e01(ws, project, run)
+        monkeypatch.setattr(
+            "molab.workspace.targets.to_filesystem", lambda _t: RecordingTransport()
+        )
+        _install_fake_session(monkeypatch, run, {})
+        _remote_handler()(None, run, experiment, project, execution_id="e01")
+
+        class _EndedJob:
+            def status(self) -> dict[str, Any]:
+                return {"snapshots": [{"state": worker_status, "terminal": True}]}
+
+            def logs(self, *, stream: str, offset: int) -> dict[str, Any]:
+                return {"text": "", "next_offset": offset, "bytes_read": 0}
+
+        class _Client:
+            def job(self, _ref: object) -> _EndedJob:
+                return _EndedJob()
+
+        def _stage_out(_transport: object, mol_run: Any, _target: object, eid: str) -> bool:
+            repo = mol_run._execution_repository()
+            repo.start(eid)
+            repo.seal(eid, ExecutionStatus(worker_status))
+            return True
+
+        released: list[str] = []
+        monkeypatch.setattr("molab.workspace.connection.get_client", lambda _r=None: _Client())
+        monkeypatch.setattr(staging, "stage_out", _stage_out)
+        monkeypatch.setattr(
+            staging,
+            "release_staged_run",
+            lambda _fs, _run, _target, eid: released.append(eid) or True,
+        )
+        assert reconcile_submission(run, "e01").error is None
+        return released
+
+    def test_a_succeeded_attempt_releases_its_namespace(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        assert self._reconcile(monkeypatch, tmp_path, "succeeded") == ["e01"]
+
+    def test_a_failed_attempt_keeps_its_namespace(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        assert self._reconcile(monkeypatch, tmp_path, "failed") == []

@@ -70,9 +70,9 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from molq import MolqError
 
@@ -89,6 +89,7 @@ from molab.workspace.targets import target_run_dir
 
 if TYPE_CHECKING:
     from molab.workspace import ComputeTarget, Run
+    from molab.workspace.fs import FileSystem
 
 
 _RSYNC_EXCLUDES = ("__pycache__", "*.pyc", "*.pyo", ".DS_Store")
@@ -423,6 +424,137 @@ def stage_out(
         project_id=mol_run.experiment.project.id,
         fs=workspace.fs,
     ).merge_remote(execution_id, json.loads(text))
+    return True
+
+
+def staged_target(executor: Mapping[str, object]) -> ComputeTarget | None:
+    """The remote target an attempt's ``executor`` names; ``None`` for a local attempt.
+
+    Raises:
+        pydantic.ValidationError: The executor names a target with a broken address.
+    """
+    from molab.workspace import ComputeTarget
+
+    name = executor.get("target")
+    if not isinstance(name, str):
+        return None
+    target = ComputeTarget.model_validate(
+        {
+            "name": name,
+            "registry_id": executor.get("registry_id"),
+            "cluster_id": executor.get("cluster_id"),
+            "scratch_root": executor.get("scratch_root"),
+        }
+    )
+    return target if target.is_remote else None
+
+
+def bring_home_staged_run(mol_run: Run) -> bool:
+    """Pull every bulk tier still on a target for *mol_run*, then release its namespace.
+
+    Reconcile leaves a failed attempt's ``out/`` and ``work/`` on the target
+    (:func:`stage_out`). This brings them home for every attempt that has a
+    local record, except a tier its record says was pruned, and then deletes
+    the run's namespace through :func:`release_staged_run`, so nothing of the
+    run is left on the target. Nothing happens while an attempt of the run is
+    active.
+
+    Returns:
+        Whether a namespace was deleted.
+
+    Raises:
+        MolqError: The target could not be reached.
+        OSError: A transfer failed; the namespace is then kept.
+    """
+    from molab.workspace import targets
+    from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES
+
+    executions = mol_run.executions
+    if any(item.status in ACTIVE_EXECUTION_STATUSES for item in executions):
+        return False
+    by_target: dict[str, tuple[ComputeTarget, list[str]]] = {}
+    for item in executions:
+        target = staged_target(item.executor)
+        if target is not None:
+            by_target.setdefault(target.name, (target, []))[1].append(item.id)
+    bulk = [directory.name for directory in scratch_dirs()]
+    released = False
+    for target, execution_ids in by_target.values():
+        fs = targets.to_filesystem(target)
+        transport = cast("StagingFiles", fs)
+        for execution_id in execution_ids:
+            record = mol_run.execution(execution_id)
+            remote_exec = (
+                f"{remote_run_dir(mol_run, target, execution_id)}/executions/{execution_id}"
+            )
+            names = [name for name in bulk if name not in record.pruned_dirs]
+            _pull_bulk(transport, remote_exec, str(mol_run.execution_dir(execution_id)), names)
+        released = release_staged_run(fs, mol_run, target, execution_ids[-1]) or released
+    return released
+
+
+def release_staged_run(
+    fs: FileSystem, mol_run: Run, target: ComputeTarget, execution_id: str
+) -> bool:
+    """Delete *mol_run*'s namespace on *target* once attempt *execution_id* is home.
+
+    Call it only after a succeeded attempt was staged out and sealed: its
+    files, values and registered assets are then local, so the namespace
+    (``<scratch_root>/<workspace>/<project>/<experiment>/<run>``) holds only
+    copies, among them every input asset uploaded for the run. Earlier
+    attempts of the run staged there go with it, and so do the experiment,
+    project and workspace directories above it once they are empty.
+
+    Nothing is deleted, and ``False`` comes back, when another attempt of the
+    run is still active (it shares the namespace), when the attempt ran in the
+    workspace itself, or when the path is not a run namespace strictly inside
+    the target's scratch root. A removal that fails is logged and leaves the
+    namespace for a later call.
+
+    Returns:
+        Whether the namespace was deleted.
+    """
+    from mollog import get_logger
+
+    from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES
+
+    logger = get_logger(__name__)
+    if any(
+        item.id != execution_id and item.status in ACTIVE_EXECUTION_STATUSES
+        for item in mol_run.executions
+    ):
+        return False
+    remote_run = remote_run_dir(mol_run, target, execution_id)
+    if not target.is_remote or remote_run == str(Path(mol_run.run_dir).resolve()):
+        return False
+    namespace = _staged_root(remote_run, mol_run)
+    root = PurePosixPath(target.scratch_root)
+    if namespace.name != mol_run.id or root not in namespace.parents:
+        logger.warning(
+            f"run {mol_run.id} attempt {execution_id}: {namespace} is not a run namespace "
+            f"under {root}; it is not removed"
+        )
+        return False
+    try:
+        if not fs.exists(str(namespace)):  # released earlier
+            return False
+        fs.rm(str(namespace), recursive=True)
+    except (MolqError, OSError) as exc:
+        logger.warning(
+            f"run {mol_run.id} attempt {execution_id}: staged namespace {namespace} "
+            f"is not removed: {exc}"
+        )
+        return False
+    # The experiment, project and workspace levels above it go once empty. A
+    # non-recursive ``rm`` of a directory is ``rmdir``: one another run is
+    # staging into right now is not empty, refuses, and stays.
+    for parent in namespace.parents:
+        if parent == root:
+            break
+        try:
+            fs.rm(str(parent))
+        except (MolqError, OSError):
+            break
     return True
 
 

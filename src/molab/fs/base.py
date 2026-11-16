@@ -201,7 +201,11 @@ class FileSystem(Protocol):
     def mv(self, src: PathArg, dst: PathArg) -> None: ...
 
     def rm(self, path: PathArg, *, recursive: bool = False) -> None:
-        """Remove *path*. ``recursive=True`` is ``rm -r``."""
+        """Remove *path*. ``recursive=True`` is ``rm -r``.
+
+        Without it a directory is removed only when empty (``rmdir``); one
+        with content raises ``OSError`` and is kept. A missing *path* is no-op.
+        """
         ...
 
     def cp(
