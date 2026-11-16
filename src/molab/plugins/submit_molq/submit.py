@@ -499,6 +499,9 @@ def reconcile_submission(
     attempt is home and sealed, molq's own files for the job (in the
     attempt's ``jobs/``, :data:`~molab.plugins.submit_molq.staging.MOLQ_JOB_FILES`)
     are removed; its stdout / stderr were kept as ``jobs/<job>.out`` / ``.err``.
+    A remote attempt that succeeded also releases the run's staged namespace
+    (:func:`~molab.plugins.submit_molq.staging.release_staged_run`); a failed
+    one keeps it, since its bulk output stays only there.
 
     With *cancelled_away*, a remote attempt an older molab sealed CANCELLED at
     the cancel takes the same path once its job has ended: its files come
@@ -563,16 +566,8 @@ def reconcile_submission(
         )
 
     try:
-        target_name = executor.get("target")
-        if isinstance(target_name, str):
-            target = ComputeTarget.model_validate(
-                {
-                    "name": target_name,
-                    "registry_id": executor.get("registry_id"),
-                    "cluster_id": executor.get("cluster_id"),
-                    "scratch_root": executor.get("scratch_root"),
-                }
-            )
+        target = staging.staged_target(executor)
+        if target is not None:
             if target.cluster_id != ref["cluster_id"] or target.registry_id != ref["registry_id"]:
                 raise ValueError("Execution destination differs from its molq job reference")
             job_fs = targets.to_filesystem(target)
@@ -625,6 +620,9 @@ def reconcile_submission(
             if "project_root" in ref:
                 # A job submitted before molq took a project root left no files here.
                 _release_job_files(job_fs, f"{attempt_dir}/{JOBS.name}", mol_run, execution_id)
+            if target is not None and repo.get(execution_id).status is ExecutionStatus.SUCCEEDED:
+                # Its files, values and assets are home: the namespace holds only copies.
+                staging.release_staged_run(job_fs, mol_run, target, execution_id)
     except (MolqError, ValueError, OSError, KeyError) as exc:
         if isinstance(exc, MolqError) and exc.outcome == "unknown":
             repo.update_operational(execution_id, executor={"transfer_outcome": "unknown"})

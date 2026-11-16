@@ -144,12 +144,13 @@ class TestSubmitStatusLogsStageOut:
         native = _job_ref(run)["native_id"]
         assert "probe stdout" in (attempt / "jobs" / f"{native}.out").read_text()
         assert list(attempt.rglob("data.txt")), "the succeeded attempt's output came home"
-        # molq kept the job's files in the attempt's jobs/ on the target; once
-        # what molab keeps is home, they are gone from both sides.
-        remote = _remote_attempt(lab, run)
-        assert _job_ref(run)["project_root"] == str(remote / "jobs")
+        # Everything molab keeps is home, so the run's staged namespace on the
+        # target goes, and molq's job files in the attempt's jobs/ with it.
+        remote = Path(_job_ref(run)["project_root"]).parent
+        assert remote.name == run.executions[-1].id
+        assert not remote.exists()
+        assert not list(lab.scratch.rglob(f"runs/*/executions/{run.executions[-1].id}"))
         assert not (attempt / "jobs" / ".molq").exists()
-        assert not (remote / "jobs" / ".molq").exists()
 
     def test_a_failed_job_brings_records_and_logs_but_leaves_its_output(self, lab: Lab) -> None:
         run = _submit(lab, seed=2)

@@ -196,8 +196,11 @@ class LocalFS:
         p = Path(path)
         if not p.exists():
             return
-        if recursive and p.is_dir():
-            shutil.rmtree(p)
+        if p.is_dir() and not p.is_symlink():
+            if recursive:
+                shutil.rmtree(p)
+            else:
+                p.rmdir()  # an empty directory only, as RemoteFS does
         else:
             p.unlink()
 

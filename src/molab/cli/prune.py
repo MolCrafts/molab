@@ -153,11 +153,56 @@ def prune_runs(
             ),
         ),
     ] = False,
+    failed: Annotated[
+        bool,
+        typer.Option(
+            "--failed",
+            help=(
+                "Non-interactive: in every run, delete each attempt that did not succeed, "
+                "with its record, logs and the assets only it registered. Every succeeded "
+                "attempt and what it was seeded from stay; a run with no success keeps its "
+                "newest attempt. One commit per run."
+            ),
+        ),
+    ] = False,
+    scratch: Annotated[
+        bool,
+        typer.Option(
+            "--scratch",
+            help=(
+                "Non-interactive: bring home what each run left on a remote target (a failed "
+                "attempt's out/ and work/), delete the run's staged namespace there, and "
+                "empty every experiment's scratch/."
+            ),
+        ),
+    ] = False,
+    env: Annotated[
+        bool,
+        typer.Option(
+            "--env",
+            help=(
+                "Non-interactive: delete the environment directories in the workspace "
+                "(.venv, .venv-*, __pycache__ and tool caches); the experiment stays."
+            ),
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            "-n",
+            help="With a sweep (--superseded, --failed, --scratch, --env): list, delete nothing.",
+        ),
+    ] = False,
 ) -> None:
     """Interactively prune bulk directories of a run's executions; records are kept.
 
-    With ``--superseded`` the walk is replaced by one sweep of the workspace:
-    every run keeps only its newest attempt.
+    With a sweep flag the walk is replaced by sweeps of the whole workspace,
+    run in this order: ``--superseded`` or ``--failed`` (every run keeps only
+    its newest attempt, or only its succeeded ones), ``--scratch`` (nothing of
+    a run stays on a remote target, experiment ``scratch/`` is emptied) and
+    ``--env`` (environment directories go). ``--dry-run`` lists them without
+    deleting.
 
     Descends project → experiment → run → executions, letting the user
     pick at each step. After the run is picked, its zombie attempts are
@@ -175,9 +220,25 @@ def prune_runs(
     """
     from . import _common
 
+    if superseded and failed:
+        rprint("[red]--failed and --superseded are exclusive: pick one sweep.[/red]")
+        raise typer.Exit(2)
+    if dry_run and not (superseded or failed or scratch or env):
+        rprint(
+            "[red]--dry-run lists a sweep: add --superseded, --failed, --scratch or --env.[/red]"
+        )
+        raise typer.Exit(2)
     ws = _common.get_workspace(path)
-    if superseded:
-        _discard_superseded(ws)
+    if superseded or failed or scratch or env:
+        refused = 0
+        if superseded or failed:
+            refused += _sweep(ws, failed=failed, dry_run=dry_run)
+        if scratch:
+            refused += _sweep_scratch(ws, dry_run=dry_run)
+        if env:
+            _sweep_env(ws, dry_run=dry_run)
+        if refused:
+            raise typer.Exit(1)
         return
 
     # Layer 1: project
@@ -301,25 +362,106 @@ def prune_runs(
     )
 
 
-def _discard_superseded(ws: object) -> None:
+def _sweep(ws: object, *, failed: bool, dry_run: bool) -> int:
+    """One pass over every run: discard (or, dry, list) what the sweep does not keep.
+
+    Returns:
+        How many runs were refused because an attempt is still active.
+    """
     from molab.workspace import LivePruneRefusedError
-    from molab.workspace.prune import discard_superseded_attempts
+    from molab.workspace.prune import (
+        discard_failed_attempts,
+        discard_superseded_attempts,
+        plan_failed_discard,
+        plan_superseded_discard,
+    )
 
     refused = 0
+    total = 0
     for project in ws.list_projects():  # ty: ignore[unresolved-attribute]
         for experiment in project.list_experiments():
             for run in experiment.list_runs():
                 label = f"{experiment.metadata.name}/{run.path.name}"
                 try:
-                    dropped = discard_superseded_attempts(run)
+                    if dry_run:
+                        dropped = (plan_failed_discard if failed else plan_superseded_discard)(run)
+                    elif failed:
+                        dropped = discard_failed_attempts(run)
+                    else:
+                        dropped = discard_superseded_attempts(run)
                 except LivePruneRefusedError as exc:
                     refused += 1
                     rprint(f"  [yellow]skip[/yellow]  {label}: {exc}")
                     continue
                 if dropped:
-                    rprint(f"  [green]OK[/green] {label}: discarded {', '.join(dropped)}")
-    if refused:
-        raise typer.Exit(1)
+                    total += len(dropped)
+                    verb = "would discard" if dry_run else "discarded"
+                    rprint(f"  [green]OK[/green] {label}: {verb} {', '.join(dropped)}")
+    verb = "Would discard" if dry_run else "Discarded"
+    rprint(f"{verb} {total} attempt(s).")
+    return refused
+
+
+def _sweep_scratch(ws: object, *, dry_run: bool) -> int:
+    """Bring each run home from its remote target, release it there, empty experiment scratch.
+
+    Returns:
+        How many runs were refused: an attempt is active, or the target failed.
+    """
+    from datetime import timedelta
+
+    from molq import MolqError
+
+    from molab.plugins.submit_molq.staging import bring_home_staged_run, staged_target
+    from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES
+    from molab.workspace.scratch import apply_scratch_clean, plan_scratch_clean
+
+    refused = 0
+    released = 0
+    for project in ws.list_projects():  # ty: ignore[unresolved-attribute]
+        for experiment in project.list_experiments():
+            for run in experiment.list_runs():
+                executions = run.executions
+                if not any(staged_target(item.executor) for item in executions):
+                    continue
+                label = f"{experiment.metadata.name}/{run.path.name}"
+                if any(item.status in ACTIVE_EXECUTION_STATUSES for item in executions):
+                    refused += 1
+                    rprint(f"  [yellow]skip[/yellow]  {label}: an attempt is still active")
+                    continue
+                if dry_run:
+                    rprint(f"  [green]OK[/green] {label}: would bring home and release")
+                    continue
+                try:
+                    if bring_home_staged_run(run):
+                        released += 1
+                        rprint(f"  [green]OK[/green] {label}: brought home and released")
+                except (MolqError, OSError, ValueError) as exc:
+                    refused += 1
+                    rprint(f"  [yellow]skip[/yellow]  {label}: {exc}")
+    if not dry_run:
+        rprint(f"Released {released} run namespace(s) on remote targets.")
+    plan = plan_scratch_clean(ws, older_than=timedelta(0))  # ty: ignore[invalid-argument-type]
+    if dry_run:
+        for entry in plan.entries:
+            rprint(f"  would remove {entry.path}")
+        return refused
+    removed = apply_scratch_clean(ws, plan)  # ty: ignore[invalid-argument-type]
+    rprint(f"Removed {removed} scratch entr{'y' if removed == 1 else 'ies'}.")
+    return refused
+
+
+def _sweep_env(ws: object, *, dry_run: bool) -> None:
+    """Delete (or, dry, list) the environment directories of the workspace."""
+    from molab.workspace.env_clean import apply_env_clean, plan_env_clean
+
+    plan = plan_env_clean(ws)  # ty: ignore[invalid-argument-type]
+    if dry_run:
+        for rel in plan:
+            rprint(f"  would remove {rel}")
+        return
+    removed = apply_env_clean(ws, plan)  # ty: ignore[invalid-argument-type]
+    rprint(f"Removed {removed} environment director{'y' if removed == 1 else 'ies'}.")
 
 
 def register(run_app: typer.Typer) -> None:

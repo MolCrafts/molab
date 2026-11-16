@@ -107,3 +107,104 @@ class TestPruneRuns:
         assert "records are kept" in output
         assert (exec_dir / "execution.json").is_file()
         assert not (exec_dir / "out").exists()
+
+
+def _seal(run: Run, statuses: tuple[str, ...]) -> None:
+    repo = _repo(run)
+    for i, status in enumerate(statuses):
+        mode = ExecutionMode.INITIAL if i == 0 else ExecutionMode.RERUN
+        state = repo.create(mode=mode, created_by=_TEST_AGENT)
+        repo.start(state.id)
+        repo.seal(state.id, ExecutionStatus(status))
+
+
+def _flags(root: Path, *flags: str) -> tuple[int, str]:
+    result = CliRunner().invoke(molab.cli.app, ["runs", "prune", "--path", str(root), *flags])
+    return result.exit_code, " ".join(result.output.split())
+
+
+class TestPruneFailed:
+    def test_dry_run_lists_and_keeps_everything(self, tmp_path: Path) -> None:
+        run = _single_run(tmp_path)
+        _seal(run, ("succeeded", "failed"))
+
+        exit_code, output = _flags(tmp_path, "--failed", "--dry-run")
+
+        assert exit_code == 0, output
+        assert "would discard e02" in output
+        assert [item.id for item in run.executions] == ["e01", "e02"]
+
+    def test_failed_keeps_the_success(self, tmp_path: Path) -> None:
+        run = _single_run(tmp_path)
+        _seal(run, ("succeeded", "failed"))
+
+        exit_code, output = _flags(tmp_path, "--failed")
+
+        assert exit_code == 0, output
+        assert "discarded e02" in output
+        assert [item.id for item in run.executions] == ["e01"]
+
+    def test_failed_and_superseded_are_exclusive(self, tmp_path: Path) -> None:
+        _single_run(tmp_path)
+
+        exit_code, output = _flags(tmp_path, "--failed", "--superseded")
+
+        assert exit_code != 0
+        assert "--failed" in output and "--superseded" in output
+
+    def test_dry_run_needs_a_sweep(self, tmp_path: Path) -> None:
+        _single_run(tmp_path)
+
+        exit_code, output = _flags(tmp_path, "--dry-run")
+
+        assert exit_code != 0
+        assert "--dry-run" in output
+
+
+class TestPruneScratchAndEnv:
+    def test_env_removes_environment_directories(self, tmp_path: Path) -> None:
+        _single_run(tmp_path)
+        (tmp_path / ".venv" / "bin").mkdir(parents=True)
+        (tmp_path / "projects" / "proj-a" / "experiments" / "exp-x" / "__pycache__").mkdir()
+
+        exit_code, output = _flags(tmp_path, "--env")
+
+        assert exit_code == 0, output
+        assert "Removed 2 environment" in output
+        assert not (tmp_path / ".venv").exists()
+
+    def test_scratch_empties_every_experiment_scratch(self, tmp_path: Path) -> None:
+        _single_run(tmp_path)
+        entry = tmp_path / "projects" / "proj-a" / "experiments" / "exp-x" / "scratch" / "probe"
+        entry.mkdir(parents=True)
+        (entry / "t.py").write_text("x")
+
+        exit_code, output = _flags(tmp_path, "--scratch")
+
+        assert exit_code == 0, output
+        assert "Removed 1 scratch" in output
+        assert not entry.exists()
+
+    def test_dry_run_lists_and_keeps_everything(self, tmp_path: Path) -> None:
+        _single_run(tmp_path)
+        (tmp_path / ".venv").mkdir()
+        entry = tmp_path / "projects" / "proj-a" / "experiments" / "exp-x" / "scratch" / "probe"
+        entry.mkdir(parents=True)
+
+        exit_code, output = _flags(tmp_path, "--scratch", "--env", "--dry-run")
+
+        assert exit_code == 0, output
+        assert "would remove .venv" in output
+        assert "would remove projects/proj-a/experiments/exp-x/scratch/probe" in output
+        assert (tmp_path / ".venv").exists() and entry.exists()
+
+    def test_sweeps_combine(self, tmp_path: Path) -> None:
+        run = _single_run(tmp_path)
+        _seal(run, ("succeeded", "failed"))
+        (tmp_path / ".venv").mkdir()
+
+        exit_code, output = _flags(tmp_path, "--failed", "--env")
+
+        assert exit_code == 0, output
+        assert [item.id for item in run.executions] == ["e01"]
+        assert not (tmp_path / ".venv").exists()
