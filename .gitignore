@@ -192,3 +192,6 @@ var/
 venv.bak/
 venv/
 wheels/
+
+# Impeccable design-tool output (screenshots, critiques, design state)
+.impeccable/
