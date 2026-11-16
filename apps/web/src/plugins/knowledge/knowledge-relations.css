@@ -162,9 +162,7 @@
 .tw-evidence-content {height:240px;overflow:hidden;border:1px solid var(--tw-line);border-radius:8px;background:var(--tw-bg)}
 .tw-evidence-plot {height:420px;min-height:0;overflow:auto;border:1px solid var(--tw-line);border-radius:8px}
 .tw-history {display:flex;flex-direction:column;gap:10px;margin-top:10px;min-width:0}
-.tw-history select,.tw-relation-editor select,.tw-relation-editor input {max-width:100%;min-width:0;background:var(--tw-surface);border:1px solid var(--tw-line);padding:6px;border-radius:6px;color:var(--tw-ink);font:inherit}
-.tw-history-diff {max-height:400px;overflow:auto}
-.tw-history-diff span {white-space:pre-wrap;overflow-wrap:anywhere}
+.tw-relation-editor select,.tw-relation-editor input {max-width:100%;min-width:0;background:var(--tw-surface);border:1px solid var(--tw-line);padding:6px;border-radius:6px;color:var(--tw-ink);font:inherit}
 @media(max-width:900px){.tw-map-search {left:12px;width:calc(100% - 24px)}}
 .tw-relation-editor {align-self:stretch}
 .tw-relation-fields {display:flex;flex-direction:column;gap:8px;width:100%}
@@ -173,7 +171,6 @@
 .tw-relation-input {max-width:100%;font:inherit;color:var(--tw-ink);background:var(--tw-surface);border:1px solid var(--tw-line);border-radius:8px;padding:6px 8px}
 .tw-panel summary {cursor:pointer}
 .tw-panel .tw-section {min-width:0;max-width:100%}
-.tw-history select {width:100%;text-overflow:ellipsis}
 
 /* View edits three independent dimensions in a compact, two-level popover. */
 .tw-map-node.is-hidden {visibility:hidden;pointer-events:none}

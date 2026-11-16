@@ -213,11 +213,17 @@ class HistoryEntry(BaseModel):
 
 
 class FileRevision(BaseModel):
-    """A Git file revision, including edits made outside Molab."""
+    """One commit that changed a file's content, including commits made outside Molab."""
 
     commit: str
+    path: str
+    """The file's repository-relative path in that commit (renames are followed)."""
     occurred_at: str
     summary: str
+    event: str | None = None
+    """The ``Molab-Event`` trailer; ``None`` for a commit made outside Molab."""
+    agent: AgentRef | None = None
+    """The ``Molab-Agent`` trailer; ``None`` for a commit made outside Molab."""
 
 
 def _git_available() -> bool:
@@ -375,25 +381,58 @@ class GitHistory:
         """Return a file's bytes as of *commit* (git is the content store)."""
         return self._git("show", f"{commit}:{rel_path}", strip_output=False)
 
-    def file_revisions(self, path: PathArg, *, limit: int = 50) -> list[FileRevision]:
-        """Changes to one literal file path, newest first; no commit-trailer requirement."""
+    def file_revisions(self, path: PathArg) -> list[FileRevision]:
+        """Commits that changed one file's content, newest first.
+
+        Renames and moves are followed (``git log --follow``), so each revision
+        names the path the file had in that commit. A commit that leaves the
+        content as it was (a pure rename) or deletes the file is not a
+        revision. Commit trailers are optional: a manual commit is a revision
+        with no ``event`` and no ``agent``.
+        """
         if not self.enabled():
             return []
         _, spec = self._pathspec(path)
         output = self._git(
+            "-c",
+            "core.quotePath=false",
             "--literal-pathspecs",
             "log",
-            f"--max-count={limit}",
-            "--format=%H%x1f%cI%x1f%s",
+            "--follow",
+            "--no-abbrev",
+            "--raw",
+            "--format=%x1e%H%x1f%cI%x1f%B%x1f",
             "--",
             spec,
         )
-        return [
-            FileRevision(commit=commit, occurred_at=at, summary=summary)
-            for line in (output or "").splitlines()
-            if len(parts := line.split("\x1f", 2)) == 3
-            for commit, at, summary in [parts]
-        ]
+        revisions: list[FileRevision] = []
+        previous_blob: str | None = None
+        for chunk in reversed((output or "").split("\x1e")):
+            parts = chunk.split("\x1f", 3)
+            if len(parts) != 4:
+                continue
+            commit, at, body, raw = parts
+            change = _raw_change(raw)
+            if change is None:
+                continue
+            blob, changed_path = change
+            if blob == previous_blob:
+                continue
+            previous_blob = blob
+            entry = _parse(commit, body)
+            first = body.strip().splitlines()[0] if body.strip() else ""
+            revisions.append(
+                FileRevision(
+                    commit=commit,
+                    path=changed_path,
+                    occurred_at=at,
+                    summary=entry.summary if entry is not None else first,
+                    event=entry.event if entry is not None else None,
+                    agent=entry.agent if entry is not None else None,
+                )
+            )
+        revisions.reverse()
+        return revisions
 
     # ── internals ────────────────────────────────────────────────────────
 
@@ -564,6 +603,24 @@ class GitHistory:
             logger.debug(f"git {args[0]} exited {proc.returncode}: {proc.stderr.strip()}")
             return None
         return proc.stdout.strip() if strip_output else proc.stdout
+
+
+def _raw_change(raw: str) -> tuple[str, str] | None:
+    """``(new blob, path)`` from one commit's ``--raw`` line, or ``None`` for a deletion.
+
+    A raw line reads ``:old_mode new_mode old_blob new_blob STATUS\tpath``, or
+    ``...\told_path\tnew_path`` for a rename or copy; the last path is the
+    file's path in that commit.
+    """
+    for line in raw.splitlines():
+        if not line.startswith(":"):
+            continue
+        meta, _, paths = line.partition("\t")
+        fields = meta.split()
+        if len(fields) < 5 or not paths or fields[4].startswith("D"):
+            return None
+        return fields[3], paths.split("\t")[-1]
+    return None
 
 
 def _parse(sha: str, body: str) -> HistoryEntry | None:

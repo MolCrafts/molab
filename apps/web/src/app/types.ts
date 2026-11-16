@@ -386,6 +386,8 @@ export interface TaskSelection {
 export interface KnowledgeSelection {
   objectType: "knowledge";
   objectId: string; // the concept's bundle-relative path, or "" for the browse overview
+  /** The git version the page shows (`?version=2`, v1 the oldest); absent means the live file. */
+  version?: number;
 }
 
 export type Selection =

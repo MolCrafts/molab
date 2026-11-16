@@ -12,18 +12,19 @@ import { request as __request } from '../core/request';
 export class HistoryService {
     /**
      * Read Document History
-     * Read one knowledge file's Git revisions and compare with its working copy.
+     * List one knowledge document's versions; with *version*, compare it with the working copy.
+     *
+     * The same read as ``molab knowledge versions``. Read a version itself with
+     * ``GET /knowledge/note?version=N``.
      * @param document
-     * @param commit
-     * @param limit
+     * @param version Diff this version against the working copy.
      * @param molabSession
      * @returns DocumentHistory Successful Response
      * @throws ApiError
      */
     public static readDocumentHistory(
         document: string,
-        commit?: (string | null),
-        limit: number = 50,
+        version?: (number | null),
         molabSession?: (string | null),
     ): CancelablePromise<DocumentHistory> {
         return __request(OpenAPI, {
@@ -34,8 +35,7 @@ export class HistoryService {
             },
             query: {
                 'document': document,
-                'commit': commit,
-                'limit': limit,
+                'version': version,
             },
             errors: {
                 422: `Validation Error`,
@@ -122,11 +122,13 @@ export class HistoryService {
     }
     /**
      * Read Document History
-     * Read one knowledge file's Git revisions and compare with its working copy.
+     * List one knowledge document's versions; with *version*, compare it with the working copy.
+     *
+     * The same read as ``molab knowledge versions``. Read a version itself with
+     * ``GET /knowledge/note?version=N``.
      * @param ws
      * @param document
-     * @param commit
-     * @param limit
+     * @param version Diff this version against the working copy.
      * @param molabSession
      * @returns DocumentHistory Successful Response
      * @throws ApiError
@@ -134,8 +136,7 @@ export class HistoryService {
     public static readDocumentHistoryWs(
         ws: string,
         document: string,
-        commit?: (string | null),
-        limit: number = 50,
+        version?: (number | null),
         molabSession?: (string | null),
     ): CancelablePromise<DocumentHistory> {
         return __request(OpenAPI, {
@@ -149,8 +150,7 @@ export class HistoryService {
             },
             query: {
                 'document': document,
-                'commit': commit,
-                'limit': limit,
+                'version': version,
             },
             errors: {
                 422: `Validation Error`,

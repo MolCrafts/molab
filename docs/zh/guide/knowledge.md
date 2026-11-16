@@ -324,6 +324,24 @@ for hit in wiki.search("cooling").hits:
 
 知识文档是 `<host>/knowledges/<slug>.md`。旧的目录形态和 `references/` 布局不再导入。
 
+## 版本
+
+文档的版本就是它的 git 历史。每个改变了文件内容的提交是一个版本，从 `v1`（最早）编号到
+`vN`（最新）；重命名和移动会被跟踪，移动过的文档保留原有版本。每个版本带有提交的
+`Molab-Event`（`knowledge.created`、`knowledge.rewritten` 等；手工提交没有）和 agent。
+工作文件与 `vN` 不同时，它是未提交的工作副本，而不是一个版本。
+
+```console
+$ molab knowledge versions projects/p/knowledges/report.md
+$ molab knowledge versions projects/p/knowledges/report.md --diff 1   # v1 与工作副本的差异
+$ molab knowledge read projects/p/knowledges/report.md --version 1
+```
+
+服务端提供同样的读取：`GET /api/history/document` 列出版本（带 `version=N` 时返回它与工作副本的
+diff），`GET /api/knowledge/note?version=N` 以与实时读取相同的形状返回该版本。文档页标题处可以切换版本，
+旧版本以只读方式打开。以 `molab:asset/<id>` 引用的图显示资产的当前字节，而不是该版本当时的字节。
+版本需要带 git 的本地工作区；没有时文档照常可读，只是没有版本。
+
 ## 类字段
 
 文档的字段在每次写入时都按它的类校验（`molab knowledge write --fields JSON`、

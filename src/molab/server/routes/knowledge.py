@@ -48,6 +48,7 @@ from ..schemas._wire import KnowledgeClassName
 
 if TYPE_CHECKING:
     from molab.knowledge.concept import Concept
+    from molab.knowledge.edges import Edge
     from molab.workspace.domain import Asset
     from molab.workspace.folder import Folder
     from molab.workspace.refs import MolabRef
@@ -116,6 +117,7 @@ class NoteDetailResponse(BaseModel):
     relPath: str
     cls: str = Field(description="The knowledge class.")
     body: str
+    tags: list[str] = []
     links: list[str]
     cards: list[EntityCard] = []
     fields: dict[str, Any] = Field(
@@ -124,7 +126,8 @@ class NoteDetailResponse(BaseModel):
     )
     format: DocFormat = "md"
     updatedAt: str | None = Field(
-        default=None, description="ISO-8601 UTC time the file was last modified."
+        default=None,
+        description="ISO-8601 time the file was last modified; a version's commit time.",
     )
     createdAt: str | None = Field(
         default=None,
@@ -567,29 +570,78 @@ def _note_summary(workspace: Workspace, note: Concept) -> NoteSummary:
     )
 
 
-def _note_detail(workspace: Workspace, note: Concept, path: str) -> NoteDetailResponse:
-    """Build a :class:`NoteDetailResponse` for *note* at its identity *path*."""
+def _note_detail(
+    workspace: Workspace,
+    note: Concept,
+    path: str,
+    *,
+    text: str | None = None,
+    updated_at: str | None = None,
+) -> NoteDetailResponse:
+    """Build a :class:`NoteDetailResponse` for *note* at its identity *path*.
+
+    *text* is the file to describe: the live file when omitted, else a past
+    version's text (with *updated_at*, its commit time). *note* is the handle
+    the file's links resolve against — for a version, the path it had then.
+    """
+    from molab.knowledge.concept import read_text_or_none
     from molab.knowledge.fields import own_fields
+    from molab.knowledge.frontmatter import split_frontmatter
     from molab.knowledge.naming import document_format
 
+    if text is None:
+        text = read_text_or_none(note.path, fs=note.fs) or ""
+        updated_at = _updated_at(workspace, note.path)
+    meta, body = split_frontmatter(text, path=note.path)
+    scan = note.scan_links(body)
+    tags = meta.get("tags")
+    created = meta.get("created_at")
     return NoteDetailResponse(
         name=note.name,
         relPath=path,
         cls=type(note).__name__,
-        body=note.read(),
-        links=list(note.out_edges()),
-        cards=_resolve_cards(workspace, note),
-        fields=own_fields(note.frontmatter()),
+        body=body,
+        tags=[str(tag) for tag in tags] if isinstance(tags, list) else [],
+        links=scan.concepts,
+        cards=_resolve_cards(workspace, scan.typed_concepts),
+        fields=own_fields(meta),
         format=document_format(note.path),
-        updatedAt=_updated_at(workspace, note.path),
-        createdAt=_created_at(note),
+        updatedAt=updated_at,
+        createdAt=created if isinstance(created, str) and created else None,
     )
 
 
-def _resolve_cards(workspace: Workspace, note: Concept) -> list[EntityCard]:
-    """Resolve *note*'s typed out-edges to :class:`EntityCard` summary cards."""
+def _version_detail(
+    workspace: Workspace, note: Concept, path: str, version: int
+) -> NoteDetailResponse:
+    """Version *version* of *note*, in the shape of the live read (:func:`_note_detail`).
+
+    Its links resolve against the path the file had in that commit, and its
+    class is the one that version declared (the current class when it
+    declared none).
+    """
+    from molab.knowledge.concepts import class_of
+    from molab.knowledge.frontmatter import split_frontmatter
+    from molab.services.document_history import document_version
+
+    try:
+        read = document_version(workspace, path, version)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    meta, _body = split_frontmatter(read.text, path=read.file)
+    klass = class_of(meta) or type(note)
+    handle = klass(read.file, fs=workspace.fs)
+    return _note_detail(
+        workspace, handle, path, text=read.text, updated_at=read.version.occurred_at
+    )
+
+
+def _resolve_cards(workspace: Workspace, edges: list[Edge]) -> list[EntityCard]:
+    """Resolve typed out-*edges* to :class:`EntityCard` summary cards."""
     cards: list[EntityCard] = []
-    for edge in note.links():
+    for edge in edges:
         card = _resolve_edge_entity(workspace, edge)
         if card is not None:
             cards.append(card)
@@ -1018,11 +1070,16 @@ def get_knowledge_graph(
 @router.get("/note", response_model=NoteDetailResponse)
 def get_note(
     path: str = Query(..., description="The document's workspace-relative path (its identity)."),
+    version: int | None = Query(
+        None, ge=1, description="Read this git version (v1 is the oldest) instead of the file."
+    ),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteDetailResponse:
-    """Return one document's full body."""
+    """Return one document's full body, or one of its git versions in the same shape."""
     concept = _open_doc(workspace, path)
-    return _note_detail(workspace, concept, path)
+    if version is None:
+        return _note_detail(workspace, concept, path)
+    return _version_detail(workspace, concept, path, version)
 
 
 # ── Document authoring — knowledge verbs, one host per document ───────────────
@@ -1491,7 +1548,9 @@ def export_notebook(
             embeds.append(
                 {
                     "path": rel,
-                    "cards": [card.model_dump() for card in _resolve_cards(workspace, item)],
+                    "cards": [
+                        card.model_dump() for card in _resolve_cards(workspace, item.links())
+                    ],
                 }
             )
             sources = [match.group(2) for match in _IMAGE_LINK.finditer(text)]

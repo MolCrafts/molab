@@ -45,7 +45,8 @@ export const knowledgeApi = {
     KnowledgeService.updateDocRelation(path, body as ApiDocRelationUpdate),
   listKnowledge: (options: { tag?: string | null; status?: string | null } = {}) =>
     KnowledgeService.listKnowledge(options.tag ?? undefined, options.status ?? undefined),
-  getNote: (path: string) => KnowledgeService.getNote(path),
+  /** One document; with *version*, that git version in the same shape. */
+  getNote: (path: string, version: number | null = null) => KnowledgeService.getNote(path, version),
   searchKnowledge: (
     q: string,
     options: { cls?: `${DocCreateRequest.cls}` | null; tag?: string | null } = {},

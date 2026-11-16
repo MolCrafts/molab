@@ -2,15 +2,15 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { FileRevision } from './FileRevision';
+import type { DocumentVersion } from './DocumentVersion';
 /**
- * Git versions of one served knowledge file and an optional working-copy comparison.
+ * A knowledge file's versions, newest first, and an optional comparison with its working copy.
  */
 export type DocumentHistory = {
     available: boolean;
-    revisions: Array<FileRevision>;
-    commit?: (string | null);
-    body?: (string | null);
+    versions: Array<DocumentVersion>;
+    uncommitted?: boolean;
+    version?: (number | null);
     diff?: (string | null);
 };
 

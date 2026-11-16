@@ -362,7 +362,7 @@ export function DocumentPanel({
       {!node.id.endsWith(".tex") && !isAboveServed(node.id) && (
         <KnowledgeRelationEditor key={node.id} path={node.id} />
       )}
-      <KnowledgeHistory key={`history:${node.id}`} path={node.id} />
+      <KnowledgeHistory key={`history:${node.id}`} path={node.id} snapshot={snapshot} />
       {error ? (
         <p className="tw-red" role="alert">
           {error}

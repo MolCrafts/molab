@@ -6,7 +6,7 @@
  */
 
 import { ArrowLeft, ArrowRight, CircleX, X } from "lucide-react";
-import { type JSX, useMemo, useRef } from "react";
+import { type JSX, useMemo, useRef, useState } from "react";
 import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
 import { knowledgePath } from "@/app/entities/paths";
@@ -17,6 +17,7 @@ import { WorkbenchIconAction } from "@/components/workbench";
 import { buildMolabRefIndex } from "@/lib/entity-linkify";
 import { type KnowledgeClass, knowledgeClassOf } from "../knowledgeClass";
 import { isAboveServed } from "../knowledgeDocTree";
+import { useKnowledgeVersionsQuery } from "../queries";
 import { useHostExpansion, useRefExpansion } from "../useKnowledgeEntities";
 import { docHeadings, parseDocBlocks } from "./blocks";
 import { LinksSections } from "./components/Links";
@@ -25,6 +26,7 @@ import { DocActions } from "./DocActions";
 import { DocBody } from "./DocBody";
 import { DocHeader } from "./DocHeader";
 import { DocToc, DocTocDisclosure } from "./DocToc";
+import { VersionBanner, VersionDiff, VersionSwitcher } from "./DocVersions";
 import { useDocDraft } from "./useDocDraft";
 
 /** The body's leading `# Title` line (it becomes the page title), or null. */
@@ -107,7 +109,15 @@ export interface DocPageProps {
   notes: readonly NoteSummary[];
   snapshot: RendererSnapshot;
   onOpen: (path: string) => void;
+  /** The git version *note* is (read-only); null is the live file. */
+  version?: number | null;
+  /** Show another version; null is the live file. */
+  onVersion?: (version: number | null) => void;
 }
+
+/** A Note's `status` as an old version stored it. */
+const storedStatus = (note: NoteDetailResponse): string | null =>
+  typeof note.fields?.status === "string" ? note.fields.status : null;
 
 /** The page's class. The server opens only a knowledge document, so a detail without one is a broken invariant. */
 const documentClass = (note: NoteDetailResponse): KnowledgeClass => {
@@ -116,7 +126,15 @@ const documentClass = (note: NoteDetailResponse): KnowledgeClass => {
   return cls;
 };
 
-export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps): JSX.Element => {
+export const DocPage = ({
+  note,
+  summary,
+  notes,
+  snapshot,
+  onOpen,
+  version = null,
+  onVersion,
+}: DocPageProps): JSX.Element => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const draft = useDocDraft(note);
   const cls = documentClass(note);
@@ -130,8 +148,23 @@ export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps
     snapshot,
   );
   const { prev, next } = siblings(notes, note.relPath, hostPath);
-  // A workspace Note a project serve lists above itself is read-only here.
-  const writable = !isAboveServed(note.relPath);
+  const aboveServed = isAboveServed(note.relPath);
+  const versionsQuery = useKnowledgeVersionsQuery(note.relPath, !aboveServed);
+  const history = versionsQuery.data?.available ? versionsQuery.data : null;
+  const [comparing, setComparing] = useState(false);
+  // A workspace Note a project serve lists above itself is read-only here, and so is an old version.
+  const writable = !aboveServed && version === null;
+  const status = version === null ? (summary?.status ?? null) : storedStatus(note);
+  const tags = version === null ? (summary?.tags ?? []) : (note.tags ?? []);
+  const switcher =
+    history && history.versions.length > 0 && onVersion ? (
+      <VersionSwitcher
+        history={history}
+        viewing={version}
+        disabledReason={draft.dirty ? "Save your edits before switching versions" : null}
+        onSelect={onVersion}
+      />
+    ) : null;
 
   const leave = useUnsavedEdits({
     dirty: draft.dirty,
@@ -160,7 +193,7 @@ export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps
           cls={cls}
           name={note.name}
           hostPath={hostPath}
-          status={summary?.status ?? null}
+          status={status}
           dirty={draft.dirty}
           saving={draft.saving}
           onSave={draft.save}
@@ -192,25 +225,41 @@ export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps
         >
           <div className="flex items-start gap-12 px-6 pt-8 pb-12 @3xl:px-12">
             <article className="w-full max-w-doc-article min-w-0 text-foreground">
+              {version !== null && onVersion ? (
+                <VersionBanner
+                  history={history}
+                  version={version}
+                  comparing={comparing}
+                  onCompare={setComparing}
+                  onLatest={() => onVersion(null)}
+                />
+              ) : null}
               <DocHeader
                 relPath={note.relPath}
                 title={title?.text ?? note.name}
                 cls={cls}
-                status={summary?.status ?? null}
-                tags={summary?.tags ?? []}
+                status={status}
+                tags={tags}
                 writable={writable}
+                versions={switcher}
               />
               <div className="@5xl:hidden">
                 <DocTocDisclosure headings={headings} />
               </div>
-              <DocBody
-                relPath={note.relPath}
-                body={draft.body}
-                titleLine={title?.line ?? null}
-                writable={writable}
-                update={draft.update}
-              />
-              {/molab-links/.test(draft.body) ? null : <LinksSections />}
+              {version !== null && comparing ? (
+                <VersionDiff relPath={note.relPath} version={version} />
+              ) : (
+                <>
+                  <DocBody
+                    relPath={note.relPath}
+                    body={draft.body}
+                    titleLine={title?.line ?? null}
+                    writable={writable}
+                    update={draft.update}
+                  />
+                  {/molab-links/.test(draft.body) ? null : <LinksSections />}
+                </>
+              )}
               <DocDates updatedAt={note.updatedAt ?? null} createdAt={note.createdAt ?? null} />
               <PrevNext prev={prev} next={next} onOpen={onOpen} />
             </article>

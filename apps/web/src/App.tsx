@@ -12,6 +12,7 @@ import { prefetchPrimaryNavigationOnIdle } from "@/app/navigation/prefetch";
 import { navigationVisibleAtScope } from "@/app/navigation/sections";
 import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
+import { isSharingPath, SharingApp } from "@/app/sharing/SharingApp";
 import {
   getLeftPanelViewFromPath,
   hierarchyRouteContextFromPath,
@@ -205,6 +206,9 @@ const WorkspaceRoot = (): JSX.Element => {
   return <RouteProfiler id={location.pathname}>{content}</RouteProfiler>;
 };
 
-const App = (): JSX.Element => <WorkspaceRoot />;
+const App = (): JSX.Element => {
+  const location = useLocation();
+  return isSharingPath(location.pathname) ? <SharingApp /> : <WorkspaceRoot />;
+};
 
 export default App;

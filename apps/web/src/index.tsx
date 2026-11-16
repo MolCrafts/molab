@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { RouteErrorBoundary } from "@/app/layout/RouteErrorBoundary";
 import { installRemoteAuthFetch } from "@/app/layout/remoteAuthPrompt";
+import { isSharingPath } from "@/app/sharing/SharingApp";
 import { onWorkspaceSwitching } from "@/app/state/workspaceSwitchEvents";
 import { ToastProvider } from "@/components/ui/toast";
 import { createAppQueryClient } from "@/lib/query-client";
@@ -63,7 +64,7 @@ enableMocking().then(async () => {
   // safe to fire plugin discovery without racing MSW activation.
   // Shared views consume published data only, without plugin discovery or
   // background workspace requests. Workspace links perform a full navigation.
-  await bootPlugins();
+  if (!isSharingPath(window.location.pathname)) await bootPlugins();
 
   const root = ReactDOM.createRoot(rootElement);
   // No <React.StrictMode>: its dev-only double-mount re-initializes

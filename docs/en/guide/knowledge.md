@@ -403,6 +403,29 @@ as the source root: `molab knowledge sources remove <name>`, then
 
 A knowledge document is `<host>/knowledges/<slug>.md`. Old directory layouts and `references/` trees are not imported.
 
+## Versions
+
+A document's versions are its git history. Each commit that changed the file's
+content is a version, numbered `v1` (the first) to `vN` (the newest); renames
+and moves are followed, so a moved document keeps its versions. Each version
+carries the commit's `Molab-Event` (`knowledge.created`, `knowledge.rewritten`,
+…; none for a commit made by hand) and agent. A working file that differs from
+`vN` is the uncommitted working copy, not a version.
+
+```console
+$ molab knowledge versions projects/p/knowledges/report.md
+$ molab knowledge versions projects/p/knowledges/report.md --diff 1   # v1 against the working copy
+$ molab knowledge read projects/p/knowledges/report.md --version 1
+```
+
+The server answers the same reads: `GET /api/history/document` lists the
+versions (with `version=N`, the diff against the working copy), and
+`GET /api/knowledge/note?version=N` returns a version in the shape of the live
+read. The document page's header switches between them; an old version opens
+read-only. A figure cited as `molab:asset/<id>` shows the asset's current
+bytes, not the bytes at that version. Versions need a local workspace with git;
+without one the document still reads, it simply has no versions.
+
 ## Next
 
 - For the workspace the knowledge lands in, see [Workspace Model](../concept/workspace.md).

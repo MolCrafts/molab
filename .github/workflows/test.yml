@@ -75,6 +75,13 @@ jobs:
           mkdir -p src/molq/_bin
           CGO_ENABLED=0 go build -o src/molq/_bin/molq ./cmd/molq
       - run: uv run --extra dev pytest tests/ -q
+      - name: Verify sharing with two real Linux UIDs
+        if: runner.os == 'Linux'
+        # Ubuntu homes are 0750: a probe that has dropped to a disposable UID
+        # must still traverse $HOME to import molab from the checkout.
+        run: |
+          chmod o+x "$HOME"
+          sudo -E "$PWD/.venv/bin/python" -m pytest tests/test_server/test_sharing_linux.py -q
 
   web:
     name: test / web
