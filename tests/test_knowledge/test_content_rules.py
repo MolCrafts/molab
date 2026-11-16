@@ -6,12 +6,26 @@ tool would, so it never passed ``write_knowledge``'s gate.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from molab.knowledge.validate import RULE_HINTS, validate_knowledge
 
 PLAN = "---\nclass: Plan\nname: Plan\n---\n# Plan\n"
+#: The rules that read more than the document they report on: ``molab validate``
+#: reports them, and a write is never refused for one.
+REPORTED_ONLY_RULES = frozenset(
+    {
+        "knowledge.stage",
+        "knowledge.milestone_evidence",
+        "knowledge.stage_order",
+        "knowledge.verdict_evidence",
+        "knowledge.dangling_ref",
+    }
+)
 
 
 def _doc(lab: Any, name: str, text: str, host: str = "") -> Path:
@@ -30,55 +44,23 @@ def _issues(lab: Any) -> list[tuple[str, str, str]]:
     ]
 
 
-def _roadmap(experiment: str = "e") -> str:
+def _hypothesis(verdict: str) -> str:
     return (
-        "---\nclass: Roadmap\nname: Roadmap\nstages:\n"
-        f"  - id: s1\n    title: one\n    experiment: {experiment}\n"
+        f"---\nclass: Hypothesis\nname: Claim\nverdict: {verdict}\n"
         "---\n- [@derived_from plan.md](plan.md)\n"
     )
 
 
 class TestContentRules:
-    def test_a_consistent_campaign_is_clean(self, lab: Any) -> None:
+    def test_a_plan_and_its_hypothesis_are_clean(self, lab: Any) -> None:
         _doc(lab, "plan", PLAN)
-        _doc(lab, "roadmap", _roadmap())
-        _doc(
-            lab,
-            "todo",
-            "---\nclass: Todo\nname: Todo\nitems:\n  - id: t1\n    title: do\n    stage: s1\n"
-            "---\n- [@derived_from plan.md](plan.md)\n",
-        )
+        _doc(lab, "claim", _hypothesis("open"))
         assert _issues(lab) == []
 
     def test_a_malformed_record_is_an_error(self, lab: Any) -> None:
         _doc(lab, "plan", PLAN)
-        _doc(lab, "todo", "---\nclass: Todo\nname: Todo\n---\n- [@derived_from plan.md](plan.md)\n")
-        assert ("knowledge.record", "knowledges/todo.md", "error") in _issues(lab)
-
-    def test_an_invalid_delegation_is_an_error(self, lab: Any) -> None:
-        _doc(lab, "work", "---\nclass: Delegation\nname: Work\ngoal: g\n---\n")
-        assert ("knowledge.record", "knowledges/work.md", "error") in _issues(lab)
-
-    def test_a_todo_naming_an_unknown_stage_breaks_the_campaign(self, lab: Any) -> None:
-        _doc(lab, "plan", PLAN)
-        _doc(lab, "roadmap", _roadmap())
-        _doc(
-            lab,
-            "todo",
-            "---\nclass: Todo\nname: Todo\nitems:\n  - id: t1\n    title: do\n    stage: nope\n"
-            "---\n- [@derived_from plan.md](plan.md)\n",
-        )
-        assert ("knowledge.campaign", "knowledges/plan.md", "error") in _issues(lab)
-
-    def test_planning_without_a_plan_link_is_uncited(self, lab: Any) -> None:
-        _doc(lab, "plan", PLAN)
-        _doc(lab, "roadmap", _roadmap().replace("- [@derived_from plan.md](plan.md)\n", ""))
-        assert ("knowledge.uncited_planning", "knowledges/roadmap.md", "warning") in _issues(lab)
-
-    def test_a_stage_naming_a_missing_experiment_warns(self, lab: Any) -> None:
-        _doc(lab, "plan", PLAN)
-        _doc(lab, "roadmap", _roadmap("ghost"))
-        assert ("knowledge.stage_experiment", "knowledges/roadmap.md", "warning") in _issues(lab)
+        _doc(lab, "claim", _hypothesis("likely"))
+        assert ("knowledge.fields", "knowledges/claim.md", "error") in _issues(lab)
 
     def test_a_link_outside_the_workspace_or_missing_warns(self, lab: Any) -> None:
         _doc(
@@ -106,31 +88,18 @@ class TestContentRules:
 
     def test_errors_only_skips_warnings(self, lab: Any) -> None:
         _doc(lab, "paper", "---\nclass: Literature\nname: Paper\n---\n")
-        _doc(lab, "work", "---\nclass: Delegation\nname: Work\n---\n")
+        _doc(lab, "plan", PLAN)
+        _doc(lab, "claim", _hypothesis("likely"))
         rules = {i["rule"] for i in validate_knowledge(lab, errors_only=True)}
-        assert rules == {"knowledge.record"}
+        assert rules == {"knowledge.fields"}
 
     def test_every_content_rule_has_a_hint(self) -> None:
         for rule in (
-            "knowledge.record",
-            "knowledge.campaign",
-            "knowledge.uncited_planning",
-            "knowledge.stage_experiment",
+            "knowledge.fields",
             "knowledge.local_source",
             "knowledge.literature_metadata",
         ):
             assert rule in RULE_HINTS
-
-
-class TestCampaignPaths:
-    def test_a_relative_plan_path_finds_its_campaign(self, lab: Any, monkeypatch: Any) -> None:
-        from molab.knowledge import Plan, campaign_of
-
-        _doc(lab, "plan", PLAN)
-        _doc(lab, "roadmap", _roadmap())
-        monkeypatch.chdir(str(lab.root))
-        assert len(campaign_of(Plan("knowledges/plan.md")).roadmaps) == 1
-        assert len(campaign_of(Plan(str(Path(str(lab.root)) / "knowledges/plan.md"))).roadmaps) == 1
 
 
 class TestLinksInCode:
@@ -159,9 +128,53 @@ class TestHygieneRules:
         _doc(lab, "fragments-v3", "---\nclass: Note\nname: Fragments v3\n---\nbody\n")
         assert ("knowledge.versioned_name", "knowledges/fragments-v3.md", "error") in _issues(lab)
 
-    def test_a_report_without_a_molab_ref_is_an_error(self, lab: Any) -> None:
-        _doc(lab, "boxes", "---\nclass: Report\nname: Boxes\n---\nfiles in out/export/\n")
-        assert ("knowledge.report_unanchored", "knowledges/boxes.md", "error") in _issues(lab)
+    @pytest.mark.parametrize("cls", ["Report", "Finding"])
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "files in out/export/\n",
+            "- [@derived_from e](molab:experiment/e1)\n",
+            "- [@derived_from bad](molab:asset/)\n",
+        ],
+    )
+    def test_an_evidence_class_without_an_asset_run_or_execution_is_an_error(
+        self, lab: Any, cls: str, body: str
+    ) -> None:
+        _doc(lab, "boxes", f"---\nclass: {cls}\nname: Boxes\n---\n{body}")
+        assert ("knowledge.unanchored", "knowledges/boxes.md", "error") in _issues(lab)
+
+    @pytest.mark.parametrize(
+        "ref",
+        [
+            "molab:asset/01a1ac09-072e-7f27-9d1e-3c964b52c345",
+            "molab:experiment/e1/run/r1",
+            "molab:experiment/e1/run/r1/execution/e01",
+        ],
+    )
+    def test_a_finding_citing_an_asset_run_or_execution_is_anchored(
+        self, lab: Any, ref: str
+    ) -> None:
+        _doc(lab, "boxes", f"---\nclass: Finding\nname: Boxes\n---\n- [@derived_from x]({ref})\n")
+        assert "knowledge.unanchored" not in {rule for rule, _path, _sev in _issues(lab)}
+
+    @pytest.mark.parametrize("cls", ["Report", "Finding"])
+    def test_writing_an_unanchored_evidence_document_is_refused(self, lab: Any, cls: str) -> None:
+        from molab.knowledge import Finding, Report
+        from molab.knowledge.knowledge_item import SourceRef
+        from molab.knowledge.write import write_knowledge
+
+        klass = {"Report": Report, "Finding": Finding}[cls]
+        experiment = lab.get_project("p").get_experiment("e")
+        with pytest.raises(ValueError, match="asset, run or execution"):
+            write_knowledge(
+                experiment,
+                name="Loose",
+                of=klass,
+                sources=[SourceRef.of(experiment)],
+                created_by="t",
+                text="# Loose\n",
+            )
+        assert not list(Path(str(experiment.resolve())).glob("knowledges/loose.*"))
 
     def test_a_report_citing_an_asset_is_anchored(self, lab: Any) -> None:
         _doc(
@@ -171,4 +184,160 @@ class TestHygieneRules:
             "![box](molab:asset/01a1ac09-072e-7f27-9d1e-3c964b52c345)\n",
         )
         rules = {rule for rule, _path, _sev in _issues(lab)}
-        assert "knowledge.report_unanchored" not in rules
+        assert "knowledge.unanchored" not in rules
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "<!doctype html>\n<p>x</p>\n",
+            "<html lang='en'><p>x</p></html>\n",
+            "<HEAD><title>x</title></HEAD>\n",
+            "<body>x</body>\n",
+            "<iframe src='https://example.org/x'></iframe>\n",
+            "< script>run()</script>\n",
+            "<style>p { color: red }</style>\n",
+        ],
+    )
+    def test_an_html_page_in_a_markdown_document_is_an_error(self, lab: Any, body: str) -> None:
+        _doc(lab, "page", f"---\nclass: Note\nname: Page\n---\n# Page\n\n{body}")
+        assert ("knowledge.html_page", "knowledges/page.md", "error") in _issues(lab)
+
+    def test_page_markup_in_code_or_a_header_tag_is_not_a_page(self, lab: Any) -> None:
+        _doc(
+            lab,
+            "embedding",
+            "---\nclass: Note\nname: Embedding\n---\nEmbed with `<iframe>`, not a\n"
+            "<header>.\n\n```html\n<script>run()</script>\n```\n",
+        )
+        assert "knowledge.html_page" not in {rule for rule, _path, _sev in _issues(lab)}
+
+
+#: ``(name, class, body)`` written once by hand and once through ``write_knowledge``.
+_WRITES: dict[str, tuple[str, str, str]] = {
+    "clean": ("Clean", "Note", "# Clean\n"),
+    "ephemeral": ("Seen", "Note", "[view](http://localhost:8771/x.html)\n"),
+    "versioned": ("Fragments v3", "Note", "# Fragments\n"),
+    "html_page": ("Page", "Note", "<!doctype html>\n<html><body>x</body></html>\n"),
+    "markup_in_code": ("Code", "Note", "Embed with `<iframe>`.\n"),
+    "unanchored": ("Boxes", "Report", "files in out/\n"),
+    "anchored": ("Boxes", "Report", "![b](molab:asset/01a1ac09-072e-7f27-9d1e-3c964b52c345)\n"),
+    "bad_fields": ("Claim", "Hypothesis", "# Claim\n"),
+}
+
+
+class TestTheWriteGate:
+    """A write is refused exactly when validate reports an error for what it would leave."""
+
+    @pytest.mark.parametrize("case", sorted(_WRITES))
+    def test_a_write_is_refused_exactly_when_validate_reports_an_error(
+        self, lab: Any, case: str
+    ) -> None:
+        from molab.ids import slugify
+        from molab.knowledge.concepts import _product
+        from molab.knowledge.write import normalize_sources, write_knowledge
+
+        name, cls, body = _WRITES[case]
+        fields = {"verdict": "likely"} if case == "bad_fields" else {}
+        head = "".join(f"{key}: {value}\n" for key, value in fields.items())
+        slug = slugify(name)
+        _doc(lab, slug, f"---\nclass: {cls}\nname: {name}\n{head}---\n{body}")
+        errors = {
+            issue["rule"]
+            for issue in validate_knowledge(lab, errors_only=True)
+            if issue["path"] == f"knowledges/{slug}.md" and issue["rule"] not in REPORTED_ONLY_RULES
+        }
+
+        host = lab.get_project("p")
+        klass = _product(cls)
+        sources = normalize_sources([], default_host=host, of=klass)
+        try:
+            write_knowledge(
+                host,
+                name=name,
+                of=klass,
+                sources=sources,
+                created_by="t",
+                text=body,
+                fields=fields,
+            )
+        except ValueError as exc:
+            refusal: str | None = str(exc)
+        else:
+            refusal = None
+
+        assert (refusal is not None) == bool(errors), (errors, refusal)
+        for rule in errors:
+            assert rule in (refusal or "")
+        landed = list(Path(str(host.resolve())).glob(f"knowledges/{slug}.*"))
+        assert bool(landed) == (refusal is None)
+
+    @pytest.mark.parametrize(
+        ("body", "offending"),
+        [
+            ("[view](http://localhost:8771/x.html)\n", "http://localhost:8771"),
+            ("<iframe src='https://example.org/x'></iframe>\n", "<iframe"),
+        ],
+    )
+    def test_the_refusal_names_the_offending_text(
+        self, lab: Any, body: str, offending: str
+    ) -> None:
+        from molab.knowledge import Note
+        from molab.knowledge.write import write_knowledge
+
+        with pytest.raises(ValueError, match=re.escape(offending)):
+            write_knowledge(lab, name="Seen", of=Note, created_by="t", text=body)
+
+    def test_an_html_document_may_be_a_page(self, lab: Any) -> None:
+        from molab.knowledge import Note
+        from molab.knowledge.write import write_knowledge
+
+        page = "<!doctype html>\n<html><head><style>p{}</style></head><body>x</body></html>\n"
+        doc = write_knowledge(lab, name="Page", of=Note, created_by="t", text=page, format="html")
+
+        assert doc.exists()
+        assert "knowledge.html_page" not in {rule for rule, _path, _sev in _issues(lab)}
+
+    def test_relinking_a_document_that_breaks_a_rule_does_not_block_a_rename(
+        self, lab: Any
+    ) -> None:
+        from molab.knowledge import Note
+
+        target = Note(Path(str(lab.root)) / "knowledges" / "target")
+        target.write("# Target\n")
+        old = _doc(
+            lab,
+            "notes-v2",
+            "---\nclass: Note\nname: Notes v2\n---\n- [@cites target](target.md)\n",
+        )
+
+        target.rename("Moved")
+
+        assert "(moved.md)" in old.read_text(encoding="utf-8")
+
+
+class TestWorkspaceRelativeSources:
+    """A relative source path names a file from the workspace root, when written and read."""
+
+    def test_an_experiment_document_citing_a_project_document_is_clean(
+        self, lab: Any, experiment: Any
+    ) -> None:
+        from molab.knowledge.concepts import Note, Observation
+        from molab.knowledge.write import normalize_sources, write_knowledge
+
+        project = lab.get_project("p")
+        spec = write_knowledge(project, name="spec", of=Note, created_by="t", text="The spec.")
+        rel = Path(str(spec.path)).relative_to(Path(str(lab.root))).as_posix()
+
+        seen = write_knowledge(
+            experiment,
+            name="seen",
+            of=Observation,
+            sources=normalize_sources([rel], default_host=experiment, of=Observation),
+            cite=[(rel, "cites")],
+            created_by="t",
+            text="Observed.",
+        )
+
+        assert {Path(edge.target) for edge in seen.links()} == {Path(str(spec.path))}
+        found = [i for i in validate_knowledge(lab) if i["rule"] == "knowledge.local_source"]
+        assert found == []

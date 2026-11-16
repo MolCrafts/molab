@@ -23,9 +23,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from mollog import get_logger
 from molq import MolqError
 
 from molab._typing import JSONValue
+from molab.workspace.execution_dirs import JOBS
+from molab.workspace.lifecycle_ops import CANCEL_REQUESTED
 from molab.workspace.models import ComputeTarget
 
 from .metadata import build_executor_info
@@ -36,6 +39,7 @@ if TYPE_CHECKING:
     from molab.workspace.domain import Execution
     from molab.workspace.execution_repository import ExecutionRepository
     from molab.workspace.experiment import Experiment
+    from molab.workspace.fs import FileSystem
     from molab.workspace.project import Project
     from molab.workspace.run import Run
 
@@ -44,11 +48,18 @@ __all__ = [
     "SubmitHandler",
     "decode_job_ref",
     "encode_job_ref",
+    "job_resources",
+    "job_scheduling",
     "make_submit_handler",
+    "reconcile_latest",
     "reconcile_submission",
 ]
 
+logger = get_logger(__name__)
+
 _REF_KEYS = ("cluster_id", "incarnation", "native_id", "registry_id")
+"""The keys every molq ``JobRef`` carries; ``project_root`` / ``run_id`` are optional."""
+_OPTIONAL_REF_KEYS = ("project_root", "run_id")
 _EXECUTION_ENV = "MOLAB_EXECUTION_ID"
 
 _MEM_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*([kmgt]i?b?)?$", re.IGNORECASE)
@@ -75,12 +86,17 @@ _DUR_RE = re.compile(
     r"^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$",
     re.IGNORECASE,
 )
+_CLOCK_RE = re.compile(r"^(?:(\d+)-)?(\d+):(\d{2}):(\d{2})$")
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "timed_out"})
 
 
 def encode_job_ref(ref: dict[str, Any]) -> str:
-    """Serialize a molq ``JobRef`` for ``executor["job_id"]``."""
-    payload = {key: str(ref[key]) for key in _REF_KEYS}
+    """Serialize a molq ``JobRef`` for ``executor["job_id"]``, every key it carries.
+
+    A Shell job is found again only through its ``project_root`` and
+    ``run_id``, so nothing molq put in the reference is dropped.
+    """
+    payload = {key: str(ref[key]) for key in (*_REF_KEYS, *_OPTIONAL_REF_KEYS) if key in ref}
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
@@ -96,7 +112,8 @@ def decode_job_ref(text: str | None) -> dict[str, str] | None:
         return None
     if any(not isinstance(value.get(key), str) or not value[key] for key in _REF_KEYS):
         return None
-    return {key: value[key] for key in _REF_KEYS}
+    optional = [key for key in _OPTIONAL_REF_KEYS if isinstance(value.get(key), str)]
+    return {key: value[key] for key in (*_REF_KEYS, *optional)}
 
 
 def _strip_none(d: dict[str, JSONValue]) -> dict[str, JSONValue]:
@@ -123,36 +140,49 @@ def _as_str(value: JSONValue) -> str | None:
 
 
 def _memory_bytes(value: JSONValue) -> str | None:
-    """Parse ``8GB`` / ``1024MB`` / ``8GiB`` into a decimal byte string."""
-    text = _as_str(value)
-    if text is None:
+    """Parse ``8GB`` / ``1024MB`` / ``8GiB`` into a decimal byte string.
+
+    Raises:
+        ValueError: *value* is given and is not such a size.
+    """
+    if value is None:
         return None
-    match = _MEM_RE.match(text.strip())
+    match = _MEM_RE.match(value.strip()) if isinstance(value, str) else None
     if match is None:
-        return None
-    unit = (match.group(2) or "b").lower()
-    scale = _MEM_SCALE.get(unit)
-    if scale is None:
-        return None
-    return str(int(float(match.group(1)) * scale))
+        raise ValueError(f"cannot read memory {value!r}: write a size such as 8GB, 512MB or 8GiB")
+    return str(int(float(match.group(1)) * _MEM_SCALE[(match.group(2) or "b").lower()]))
 
 
 def _duration_seconds(value: JSONValue) -> int | None:
-    """Parse ``90s`` / ``30m`` / ``1h`` / ``2d`` / ``1h30m`` into seconds."""
-    text = _as_str(value)
-    if text is None:
+    """Parse a time limit into seconds.
+
+    Read are ``90s`` / ``30m`` / ``1h`` / ``2d`` / ``1h30m``, the clock form
+    ``HH:MM:SS`` / ``D-HH:MM:SS``, and bare seconds.
+
+    Raises:
+        ValueError: *value* is given and is none of these. Dropping it would
+            submit the job under the scheduler's default limit.
+    """
+    if value is None:
         return None
-    stripped = text.strip()
+    stripped = value.strip() if isinstance(value, str) else ""
     if stripped.isdigit():
         return int(stripped)
-    match = _DUR_RE.match(stripped)
+    match = _CLOCK_RE.match(stripped) or _DUR_RE.match(stripped)
     if match is None or not any(match.groups()):
-        return None
+        raise ValueError(
+            f"cannot read time limit {value!r}: write 12:00:00, 1-12:00:00, 12h, 1h30m or 3600"
+        )
     days, hours, minutes, seconds = (int(part or 0) for part in match.groups())
     return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
-def _resources(res: dict[str, JSONValue]) -> Resources | None:
+def job_resources(res: dict[str, JSONValue]) -> Resources | None:
+    """The molq ``Resources`` of the CLI's resource flags (``cpus`` / ``mem`` / ``time`` / …).
+
+    Raises:
+        ValueError: A ``mem`` or ``time`` value cannot be read.
+    """
     from molq import Accelerator, Resources
 
     gpus = _as_int(res.get("gpus"))
@@ -170,11 +200,25 @@ def _resources(res: dict[str, JSONValue]) -> Resources | None:
     return built
 
 
-def _scheduling(sched: dict[str, JSONValue], job_name: str) -> Scheduling | None:
+SHELL_SCHEDULER = "shell"
+"""molq's Shell scheduler: commands run directly on the target. It takes no
+allocation resources and no scheduling (molq refuses a job that carries
+either), and it lists jobs only per project root."""
+
+
+def job_scheduling(
+    sched: dict[str, JSONValue], job_name: str, *, scheduler: str
+) -> Scheduling | None:
+    """The molq ``Scheduling`` of the CLI's ``queue`` / ``account`` / ``qos`` flags.
+
+    *job_name* names the job on a scheduler's queue; a Shell destination has
+    no queue, so it gets no name (a flag the user passed still reaches molq,
+    which refuses it).
+    """
     from molq import Scheduling
 
     built = Scheduling(
-        name=job_name,
+        name=None if scheduler == SHELL_SCHEDULER else job_name,
         partition=_as_str(sched.get("queue")),
         account=_as_str(sched.get("account")),
         qos=_as_str(sched.get("qos")),
@@ -248,7 +292,7 @@ class SubmitHandler:
         if not destination:
             raise ValueError("Submission requires an explicit molq destination")
         self._cluster: str = destination
-        self._res = _strip_none(resources)
+        self._resources = job_resources(_strip_none(resources))
         self._sched = _strip_none(scheduling)
         self._block = block
         self._target = target
@@ -302,7 +346,6 @@ class SubmitHandler:
         from molab.workspace.domain import ExecutionMode, ExecutionStatus
         from molab.workspace.execution_repository import ExecutionRepository
 
-        res = self._res
         sched = self._sched
         target = self._target
 
@@ -343,6 +386,8 @@ class SubmitHandler:
                 scheduler_name = self._scheduler
                 target_run_dir_ = str(run_dir)
                 target_exec_dir = str(local_exec_dir)
+                project_root = local_exec_dir / JOBS.name
+                project_root.mkdir(exist_ok=True)
             else:
                 from molab.workspace.targets import target_definition, target_run_dir, to_filesystem
 
@@ -354,6 +399,7 @@ class SubmitHandler:
                 repo.update_operational(
                     attempt_id,
                     executor={
+                        "target": target.name,
                         "registry_id": target.registry_id,
                         "cluster_id": cluster_id,
                         "scratch_root": target.scratch_root,
@@ -365,6 +411,8 @@ class SubmitHandler:
                 repo.update_operational(attempt_id, executor={"remote_run_dir": target_run_dir_})
                 target_exec_dir = f"{target_run_dir_}/executions/{attempt_id}"
                 stage_in(remote_transport, mol_run, target, attempt_id, destination=target_run_dir_)
+                project_root = f"{target_exec_dir}/{JOBS.name}"
+                remote_transport.mkdir(project_root, parents=True, exist_ok=True)
 
             worker_argv = [
                 self._python,
@@ -385,15 +433,16 @@ class SubmitHandler:
                 unit = ExecutionUnit.argv("main", worker_argv, cwd=target_exec_dir, env=env)
             spec = JobSpec(
                 execution=Execution(units=(unit,), cwd=target_exec_dir, env=env),
-                resources=_resources(res),
-                scheduling=_scheduling(sched, job_name),
+                resources=self._resources,
+                scheduling=job_scheduling(sched, job_name, scheduler=scheduler_name),
             )
             from molab.workspace.connection import get_client
 
+            # The attempt's jobs/ owns molq's files for this job (MOLQ_JOB_FILES).
             job = (
                 get_client(target.registry_id if target is not None else None)
                 .cluster(cluster_id)
-                .submit(spec)
+                .submit(spec, project_root=str(project_root))
             )
         except BaseException as exc:
             if job is None and isinstance(exc, MolqError) and exc.outcome == "unknown":
@@ -429,21 +478,32 @@ class SubmitHandler:
         self.submitted_runs.append(mol_run)
 
 
-def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
+def reconcile_submission(
+    mol_run: Run, execution_id: str, *, cancelled_away: bool = False
+) -> ReconcileOutcome:
     """Check a QUEUED molq-submitted attempt against its job and seal it if it never started.
 
     Level-triggered: every call asks molq for the job's state now
-    (``Job.status``) instead of waiting for an event. Only a QUEUED record
-    can be sealed here. A RUNNING record whose worker died is left to the
+    (``Job.status``) instead of waiting for an event. Only a record that is
+    QUEUED here is checked; one a local worker is RUNNING is left to the
     reaper.
 
     The stored ``job_id`` is a JSON ``JobRef``. While the snapshot is not
     terminal nothing changes. Once it is, a remote attempt is staged out
-    first; a record still QUEUED is sealed CANCELLED for a cancelled job and
-    FAILED otherwise, with error type ``SchedulerJobEndedBeforeStart``. A
-    remote record that cannot be read is left QUEUED. A molq ``succeeded``
-    snapshot still seals a still-queued attempt FAILED: the worker never
-    claimed the record.
+    first; a record the worker did not seal is then sealed CANCELLED for a
+    cancelled job and FAILED otherwise: ``SchedulerJobEndedBeforeStart`` when
+    it is still QUEUED, ``SchedulerJobEnded`` when the worker had claimed it
+    (the job hit its time limit, say). A remote record that cannot be read is
+    left QUEUED. A molq ``succeeded`` snapshot still seals an unsealed
+    attempt FAILED: the worker never finished the record. Once an ended job's
+    attempt is home and sealed, molq's own files for the job (in the
+    attempt's ``jobs/``, :data:`~molab.plugins.submit_molq.staging.MOLQ_JOB_FILES`)
+    are removed; its stdout / stderr were kept as ``jobs/<job>.out`` / ``.err``.
+
+    With *cancelled_away*, a remote attempt an older molab sealed CANCELLED at
+    the cancel takes the same path once its job has ended: its files come
+    home, its job files go, its record stays. No status reader can tell it
+    from one already home, so only ``molab runs reconcile`` asks for it.
 
     Idempotent. An expected failure — ``MolqError``, staging
     ``TransportError``, ``ValueError``, ``OSError``, ``KeyError`` — comes
@@ -452,9 +512,11 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
     Args:
         mol_run: The run the attempt belongs to.
         execution_id: The attempt to check (``e01``).
+        cancelled_away: Also bring home a sealed CANCELLED remote attempt.
 
     Returns:
-        The attempt's record after the check, and the failure, if any.
+        The attempt's record after the check, and the failure, if any (for a
+        *cancelled_away* attempt, a job that has not ended).
 
     Raises:
         KeyError: No attempt ``execution_id`` exists under *mol_run*.
@@ -477,9 +539,11 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
         fs=workspace.fs,
     )
     record = repo.get(execution_id)
-    if record.status is not ExecutionStatus.QUEUED:
-        return ReconcileOutcome(record=record)
     executor = record.executor
+    remote = isinstance(executor.get("target"), str)
+    away = cancelled_away and remote and record.status is ExecutionStatus.CANCELLED
+    if record.status is not ExecutionStatus.QUEUED and not away:
+        return ReconcileOutcome(record=record)
     if executor.get("transfer_outcome") == "unknown":
         return ReconcileOutcome(
             record=record,
@@ -511,28 +575,56 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
             )
             if target.cluster_id != ref["cluster_id"] or target.registry_id != ref["registry_id"]:
                 raise ValueError("Execution destination differs from its molq job reference")
-            transport = cast(staging.StagingFiles, targets.to_filesystem(target))
+            job_fs = targets.to_filesystem(target)
+            transport = cast(staging.StagingFiles, job_fs)
+            attempt_dir = (
+                f"{staging.remote_run_dir(mol_run, target, execution_id)}/executions/{execution_id}"
+            )
         else:
             target = None
             transport = None
+            job_fs = workspace.fs
+            attempt_dir = str(mol_run.execution_dir(execution_id))
 
         from molab.workspace.connection import get_client
 
-        status = get_client(ref["registry_id"]).job(ref).status()
+        job = get_client(ref["registry_id"]).job(ref)
+        status = job.status()
         snapshots = status.get("snapshots") or []
         if not snapshots:
             raise MolqError("JOB_NOT_FOUND", f"job {job_id} returned no snapshot")
         snapshot = snapshots[0]
         state = str(snapshot.get("state") or "unknown")
-        if not snapshot.get("terminal") and state not in _TERMINAL_STATES:
+        # molq ``absent`` (not listed, no accounting) ends a cancelled job only.
+        forgotten = snapshot.get("source") == "absent" and (CANCEL_REQUESTED in executor or away)
+        if forgotten:
+            state = "cancelled"
+        elif not snapshot.get("terminal") and state not in _TERMINAL_STATES:
+            if away:
+                raise ValueError(f"its job is still {state}; cancel it before bringing it home")
             return ReconcileOutcome(record=record)
+        _keep_scheduler_output(job, mol_run, execution_id, ref)
 
         if target is None or transport is None:
             authoritative = True
         else:
             authoritative = staging.stage_out(transport, mol_run, target, execution_id)
         if authoritative:
-            _seal_if_unstarted(repo, execution_id, state)
+            _seal_if_open(
+                mol_run,
+                repo,
+                execution_id,
+                state,
+                observed=(
+                    "the scheduler no longer knows the job after its cancel "
+                    "(not listed, no accounting)"
+                    if forgotten
+                    else f"scheduler reported {state}"
+                ),
+            )
+            if "project_root" in ref:
+                # A job submitted before molq took a project root left no files here.
+                _release_job_files(job_fs, f"{attempt_dir}/{JOBS.name}", mol_run, execution_id)
     except (MolqError, ValueError, OSError, KeyError) as exc:
         if isinstance(exc, MolqError) and exc.outcome == "unknown":
             repo.update_operational(execution_id, executor={"transfer_outcome": "unknown"})
@@ -546,21 +638,121 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
     return ReconcileOutcome(record=repo.get(execution_id))
 
 
-def _seal_if_unstarted(repo: ExecutionRepository, execution_id: str, state: str) -> None:
-    """Seal an attempt the worker never started, once its job has ended."""
+def _release_job_files(fs: FileSystem, jobs_dir: str, mol_run: Run, execution_id: str) -> None:
+    """Remove molq's files for an ended job once what molab keeps from them is home.
+
+    They sit in the attempt's ``jobs/`` on the filesystem the job ran on
+    (:data:`~molab.plugins.submit_molq.staging.MOLQ_JOB_FILES`); the job's
+    stdout / stderr were already kept flat by :func:`_keep_scheduler_output`,
+    and the attempt is sealed, so nothing reads them again. A removal that
+    fails is logged and retried by nothing: the files stay with the attempt.
+    """
+    from .staging import MOLQ_JOB_FILES
+
+    path = f"{jobs_dir}/{MOLQ_JOB_FILES}"
+    if not fs.exists(path):  # released by an earlier reconcile
+        return
+    try:
+        fs.rm(path, recursive=True)
+    except (MolqError, OSError) as exc:
+        logger.warning(
+            f"run {mol_run.id} attempt {execution_id}: molq job files at {path} "
+            f"are not removed: {exc}"
+        )
+
+
+def _keep_scheduler_output(
+    job: Any,  # noqa: ANN401 — a molq ``Job`` handle; molq ships no protocol for it
+    mol_run: Run,
+    execution_id: str,
+    ref: dict[str, str],
+) -> None:
+    """Copy an ended job's own stdout / stderr into the attempt's ``jobs/``.
+
+    molq leaves a job's logs in its files under the attempt's ``jobs/`` on
+    the target (``staging.MOLQ_JOB_FILES``), and nothing else holds what the
+    job printed before the worker started (a missing interpreter, a failing
+    preamble) or what the scheduler said when it ended it (a time limit). The
+    attempt keeps them as scheduler evidence, flat as every reader expects:
+    ``jobs/<native id>.out`` and ``.err``, read through molq's ``logs.read``
+    rather than its file layout. An output molq cannot read is logged and
+    left out; it never stops the seal.
+    """
+    from molab.workspace.file_store import FileStore
+
+    store = FileStore(
+        mol_run.execution_dir(execution_id), fs=mol_run.experiment.project.workspace.fs
+    )
+    name = ref.get("native_id") or "job"
+    for stream, suffix in (("stdout", "out"), ("stderr", "err")):
+        chunks: list[str] = []
+        offset = 0
+        try:
+            while True:
+                chunk = job.logs(stream=stream, offset=offset)
+                if not chunk["bytes_read"]:
+                    break
+                chunks.append(chunk["text"])
+                offset = chunk["next_offset"]
+        except MolqError as exc:
+            logger.warning(
+                f"run {mol_run.id} attempt {execution_id}: scheduler {stream} of job "
+                f"{name} is not kept: {exc}"
+            )
+            continue
+        store.put(f"{JOBS.name}/{name}.{suffix}", "".join(chunks).encode())
+
+
+def reconcile_latest(mol_run: Run) -> ReconcileOutcome | None:
+    """Reconcile *mol_run*'s newest attempt when it is a QUEUED molq submission.
+
+    Every reader of a run's status calls this first (``molab runs list``, the
+    run routes, the monitor), so an attempt whose job ended elsewhere is
+    staged out and sealed the next time anyone looks.
+
+    Returns:
+        ``None`` when the newest attempt is not a QUEUED molq submission;
+        otherwise what :func:`reconcile_submission` found.
+    """
     from molab.workspace.domain import ExecutionStatus
 
+    executions = mol_run.executions
+    if not executions:
+        return None
+    latest = executions[-1]
+    if latest.status is not ExecutionStatus.QUEUED or latest.executor.get("backend") != "molq":
+        return None
+    return reconcile_submission(mol_run, latest.id)
+
+
+def _seal_if_open(
+    mol_run: Run, repo: ExecutionRepository, execution_id: str, state: str, *, observed: str
+) -> None:
+    """Seal an attempt whose job has ended while its record is still open.
+
+    Still QUEUED, the worker never claimed it (``SchedulerJobEndedBeforeStart``).
+    Claimed and not sealed, the scheduler ended the job under the worker — a
+    time limit, a cancel, a lost node (``SchedulerJobEnded``); the heartbeat
+    the dead worker left behind is removed with the seal. *observed* says how
+    the end was seen and leads the error message.
+    """
+    from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES, ExecutionStatus
+    from molab.workspace.run_heartbeat import unlink_alive
+
     current = repo.get(execution_id)
-    if current.status is not ExecutionStatus.QUEUED:
+    if current.status not in ACTIVE_EXECUTION_STATUSES:
+        unlink_alive(mol_run, execution_id)  # a sealed attempt has no live owner
         return
+    if current.status is ExecutionStatus.QUEUED:
+        kind, when = "SchedulerJobEndedBeforeStart", "before the worker started"
+    else:
+        kind, when = "SchedulerJobEnded", f"while the worker was {current.status.value}"
     repo.seal(
         execution_id,
         ExecutionStatus.CANCELLED if state == "cancelled" else ExecutionStatus.FAILED,
-        error={
-            "type": "SchedulerJobEndedBeforeStart",
-            "message": f"scheduler reported {state} before the worker started",
-        },
+        error={"type": kind, "message": f"{observed} {when}"},
     )
+    unlink_alive(mol_run, execution_id)
 
 
 def make_submit_handler(

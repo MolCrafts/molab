@@ -1,7 +1,9 @@
 """Sidecar-backed dataset preview — host half.
 
 The host finds the same-stem ``.py`` sidecar, imports it under a private
-name, and caps the frames it reads. Science lives in plugins:
+name, checks that it names a reader, and caps the frames it reads. Science
+lives in plugins, which raise plain Python errors; the host turns each into
+its HTTP error (:class:`PreviewReaderError` / :class:`NoReaderInSidecarError`):
 
 * :mod:`molab.plugins.molpy.preview` — the sidecar's reader
   (:class:`~molab.plugins.molpy.preview.FrameReader`, satisfied by molpy's
@@ -89,9 +91,14 @@ def load_preview(dataset_path: str | os.PathLike[str]) -> FrameReader:
     if info is None:
         raise PreviewSidecarNotFoundError(str(dataset_path))
     module = _import_sidecar_module(info.sidecar_path)
-    from molab.plugins.molpy.preview import open_reader
+    from molab.plugins.molpy.preview import SIDECAR_READER, open_reader
 
-    return open_reader(module, info.dataset_path)
+    if getattr(module, SIDECAR_READER, None) is None:
+        raise NoReaderInSidecarError(str(info.sidecar_path))
+    try:
+        return open_reader(module, info.dataset_path)
+    except Exception as exc:
+        raise PreviewReaderError(str(dataset_path), f"opening the reader failed: {exc}") from exc
 
 
 def preview_frames(
@@ -111,7 +118,10 @@ def frames_to_extxyz(frames: list[Frame]) -> bytes:
     """Delegate XYZ encoding to the molpy plugin."""
     from molab.plugins.molpy.preview import frames_to_extxyz as encode
 
-    return encode(frames)
+    try:
+        return encode(frames)
+    except Exception as exc:
+        raise PreviewReaderError("<frames>", f"XYZ encoding failed: {exc}") from exc
 
 
 def snapshot_reader(
@@ -120,4 +130,10 @@ def snapshot_reader(
     """Delegate PNG rendering to the molvis plugin."""
     from molab.plugins.molvis.snapshot import render_png
 
-    return render_png(preview_frames(dataset_path, limit=limit), dataset_path=str(dataset_path))
+    frames = preview_frames(dataset_path, limit=limit)
+    try:
+        return render_png(frames)
+    except ImportError as exc:
+        raise PreviewReaderError(str(dataset_path), "molvis is not installed") from exc
+    except Exception as exc:
+        raise PreviewReaderError(str(dataset_path), f"snapshot failed: {exc}") from exc

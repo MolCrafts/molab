@@ -22,82 +22,14 @@ const codes = (graph: KnowledgeGraphResponse, context = {}) =>
   auditKnowledge(graph, context).issues.map((issue) => issue.code);
 
 describe("knowledge evidence audit", () => {
-  it("distinguishes actual evidence from a plan and ordinary document mentions", () => {
-    const graph = {
-      nodes: [doc("finding", "Finding"), doc("plan", "Plan"), doc("observation", "Observation")],
-      edges: [edge("finding", "plan"), edge("finding", "observation", Edge.role.REFERENCES)],
-    };
-    expect(codes(graph)).toEqual(["ungrounded-finding"]);
-    expect(
-      codes({ ...graph, edges: [...graph.edges, edge("finding", "observation", Edge.role.CITES)] }),
-    ).toEqual([]);
-    expect(
-      codes({
-        ...graph,
-        edges: [edge("finding", "https://source.test", Edge.role.CITES, Edge.kind.EXTERNAL)],
-      }),
-    ).toEqual([]);
-    expect(
-      codes({
-        ...graph,
-        edges: [edge("finding", "https://source.test", Edge.role.REFERENCES, Edge.kind.EXTERNAL)],
-      }),
-    ).toEqual(["ungrounded-finding"]);
-  });
-
-  it("follows provenance through a report to its actual run source", () => {
-    const graph = {
-      nodes: [doc("finding", "Finding"), doc("report", "Report")],
-      edges: [
-        edge("finding", "report"),
-        edge("report", "molab:run/one", Edge.role.RECORDS, Edge.kind.REF),
-      ],
-    };
-    expect(codes(graph, { cardsByPath: { report: [card("molab:run/one", "run")] } })).toEqual([]);
-    expect(codes(graph)).toEqual(["evidence-unverified"]);
-  });
-
-  it("requires a real source anchor in Finding cycles and follows citations to grounded Findings", () => {
-    const graph = {
-      nodes: [doc("a", "Finding"), doc("b", "Finding"), doc("observation", "Observation")],
-      edges: [edge("a", "b", Edge.role.CITES), edge("b", "a")],
-    };
-    expect(codes(graph)).toEqual(["ungrounded-finding", "ungrounded-finding"]);
-    expect(
-      codes({ ...graph, edges: [...graph.edges, edge("b", "observation", Edge.role.RECORDS)] }),
-    ).toEqual([]);
-    expect(
-      codes({ ...graph, edges: [...graph.edges, edge("b", "observation", Edge.role.REFERENCES)] }),
-    ).toEqual(["ungrounded-finding", "ungrounded-finding"]);
-  });
-
-  it("recognizes bare run/asset refs and server-indexed run descendants without guessing ref grammar", () => {
-    const graph = {
-      nodes: [doc("finding", "Finding")],
-      edges: [edge("finding", "molab:run/one/artifact/table", Edge.role.REFERENCES, Edge.kind.REF)],
-    };
-    expect(
-      codes(graph, {
-        refIndex: new Map([["molab:run/one", { kind: "run", label: "one", path: "runs/one" }]]),
-      }),
-    ).toEqual([]);
-    expect(
-      codes(graph, { cardsByPath: { finding: [card(graph.edges[0].target, "asset")] } }),
-    ).toEqual([]);
-    expect(
-      codes(graph, { cardsByPath: { finding: [card(graph.edges[0].target, "experiment")] } }),
-    ).toEqual(["ungrounded-finding"]);
-    expect(codes(graph)).toEqual(["evidence-unverified"]);
-  });
-
   it("only reports server-declared missing refs, deduplicates repeated roles, and ignores absent catalog entries", () => {
     const graph = {
       nodes: [doc("note")],
       edges: [
         edge("note", "lost.md", Edge.role.CITES, Edge.kind.MISSING),
         edge("note", "lost.md", Edge.role.REFERENCES, Edge.kind.MISSING),
-        edge("note", "molab:run/missing", Edge.role.RECORDS, Edge.kind.REF),
-        edge("note", "molab:run/unloaded", Edge.role.RECORDS, Edge.kind.REF),
+        edge("note", "molab:run/missing", Edge.role.DERIVED_FROM, Edge.kind.REF),
+        edge("note", "molab:run/unloaded", Edge.role.DERIVED_FROM, Edge.kind.REF),
       ],
     };
     const result = auditKnowledge(graph, {
@@ -113,20 +45,20 @@ describe("knowledge evidence audit", () => {
       edges: [edge("a", "h", Edge.role.SUPPORTS), edge("b", "h", Edge.role.CONTRADICTS)],
     };
     const supported = { h: { verdict: "supported" } };
-    const issue = auditKnowledge(graph, { records: supported }).issues[0];
+    const issue = auditKnowledge(graph, { fields: supported }).issues[0];
     expect(issue).toMatchObject({ code: "verdict-evidence-review", document: "h", related: ["b"] });
     expect(supported.h.verdict).toBe("supported");
     expect(
-      auditKnowledge(graph, { records: { h: { verdict: "refuted" } } }).issues[0].related,
+      auditKnowledge(graph, { fields: { h: { verdict: "refuted" } } }).issues[0].related,
     ).toEqual(["a"]);
-    expect(codes(graph, { records: { h: { verdict: "open" } } })).toEqual([
+    expect(codes(graph, { fields: { h: { verdict: "open" } } })).toEqual([
       "unresolved-contradiction",
     ]);
-    expect(codes(graph, { records: { h: { verdict: "unsettled" } } })).toEqual([
+    expect(codes(graph, { fields: { h: { verdict: "unsettled" } } })).toEqual([
       "unresolved-contradiction",
     ]);
     expect(
-      codes({ ...graph, edges: [graph.edges[1]] }, { records: { h: { verdict: "refuted" } } }),
+      codes({ ...graph, edges: [graph.edges[1]] }, { fields: { h: { verdict: "refuted" } } }),
     ).toEqual([]);
     expect(auditKnowledge(graph)).toMatchObject({ issues: [], uncheckedHypotheses: ["h"] });
   });
@@ -136,27 +68,7 @@ describe("knowledge evidence audit", () => {
       nodes: [doc("h", "Hypothesis"), doc("note")],
       edges: [edge("note", "h", Edge.role.REFERENCES), edge("h", "note", Edge.role.CONTRADICTS)],
     };
-    expect(codes(graph, { records: { h: { verdict: "supported" } } })).toEqual([]);
-  });
-
-  it("identifies stale readers while preserving replacement provenance and historical citation intent", () => {
-    const graph = {
-      nodes: [doc("old"), doc("new"), doc("reader")],
-      edges: [
-        edge("new", "old", Edge.role.SUPERSEDES),
-        edge("reader", "old", Edge.role.CITES),
-        edge("reader", "old", Edge.role.REFERENCES),
-      ],
-    };
-    const result = auditKnowledge(graph);
-    expect(result.issues).toHaveLength(1);
-    expect(result.issues[0]).toMatchObject({
-      code: "superseded-reference",
-      document: "reader",
-      target: "old",
-      related: ["old", "new"],
-    });
-    expect(result.issues[0].detail).toContain("intentional historical citation");
+    expect(codes(graph, { fields: { h: { verdict: "supported" } } })).toEqual([]);
   });
 });
 
@@ -169,7 +81,7 @@ describe("knowledge change impact", () => {
         doc("reader"),
         doc("leaf"),
         doc("claim", "Hypothesis"),
-        doc("decision", "Decision"),
+        doc("observation", "Observation"),
         doc("unrelated"),
       ],
       edges: [
@@ -177,17 +89,17 @@ describe("knowledge change impact", () => {
         edge("leaf", "report"),
         edge("leaf", "source"),
         edge("reader", "source", Edge.role.CITES),
-        edge("decision", "reader"),
+        edge("observation", "reader"),
         edge("source", "claim", Edge.role.SUPPORTS),
-        edge("decision", "claim"),
+        edge("observation", "claim"),
         edge("source", "leaf"), // cycle cannot return the changed source as its own impact
       ],
     };
     const impact = knowledgeChangeImpact(graph, "source");
     expect(impact.map((entry) => entry.id).sort()).toEqual([
       "claim",
-      "decision",
       "leaf",
+      "observation",
       "reader",
       "report",
     ]);
@@ -204,7 +116,7 @@ describe("knowledge change impact", () => {
       depth: 1,
       reasons: ["citation"],
     });
-    expect(impact.find((entry) => entry.id === "decision")).toMatchObject({
+    expect(impact.find((entry) => entry.id === "observation")).toMatchObject({
       depth: 2,
       reasons: ["citation", "claim"],
     });

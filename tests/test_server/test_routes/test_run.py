@@ -7,7 +7,7 @@ import re
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import ClassVar, get_args
+from typing import ClassVar
 
 import pytest
 from fastapi import HTTPException
@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 import molab as me
 from molab.knowledge import Report
 from molab.server.routes import run as run_routes
-from molab.server.schemas.requests import RunHarvestRequest
 from molab.workflow import Workflow
 from molab.workspace import Experiment, Run, Workspace
 from molab.workspace.domain import Asset, ExecutionMode, ExecutionStatus
@@ -136,13 +135,6 @@ def submit_recorder(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[_SubmitRec
 
 
 class TestHarvestRunRoute:
-    def test_cls_matches_harvest_targets(self) -> None:
-        from molab.knowledge.concepts import HARVEST_TARGETS
-
-        field = RunHarvestRequest.model_fields["cls"]
-        assert set(get_args(field.annotation)) == set(HARVEST_TARGETS)
-        assert "kind" not in RunHarvestRequest.model_fields
-
     def test_plan_is_not_a_harvest_target(
         self, served: ServedFactory, terminal_run: RunFixture
     ) -> None:
@@ -174,6 +166,18 @@ class TestHarvestRunRoute:
             )
         assert response.status_code == 200, response.text
         assert response.json()["name"]
+
+    def test_a_narrative_that_breaks_a_content_rule_is_422(
+        self, served: ServedFactory, terminal_run: RunFixture
+    ) -> None:
+        ws, exp, run = terminal_run
+        with served(ws, raise_server_exceptions=False) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/harvest",
+                json={"cls": "Finding", "narrative": "See [it](http://localhost:8771/x)."},
+            )
+        assert response.status_code == 422, response.text
+        assert "knowledge.ephemeral_link" in response.text
 
 
 class TestHarvestRunRouteRedirect:
@@ -417,6 +421,30 @@ class TestCreateExecution:
                 json={"mode": "resume", "basedOnExecutionId": "e01", "tasks": ["b"]},
             )
         assert response.status_code == 422, response.text
+        assert [e.id for e in run.executions] == ["e01"]
+
+    @pytest.mark.parametrize(
+        ("tasks", "reason"),
+        [(["nope"], "nope"), (["c"], "a")],
+        ids=["unknown-task", "upstream-without-records"],
+    )
+    def test_a_refused_partial_rerun_creates_nothing(
+        self,
+        served: ServedFactory,
+        failed_run: RunFixture,
+        tasks: list[str],
+        reason: str,
+    ) -> None:
+        """The admission ``molab run --rerun --task`` applies: refused before any record exists."""
+        ws, exp, run = failed_run
+        exp.bind_workflow("document", document=_CONSTANT_ADD)
+        with served(ws) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"mode": "rerun", "basedOnExecutionId": "e01", "tasks": tasks},
+            )
+        assert response.status_code == 422, response.text
+        assert reason in response.json()["detail"]
         assert [e.id for e in run.executions] == ["e01"]
 
     def test_task_executor_is_recorded(self, served: ServedFactory, failed_run: RunFixture) -> None:
@@ -744,19 +772,19 @@ class TestExecutionLogs:
         assert "execution started" in body["stdout"]
         assert body["stderr"] is None
 
-    def test_legacy_job_files_answer_when_root_files_are_absent(
+    def test_job_stream_files_answer_when_root_files_are_absent(
         self, served: ServedFactory, fresh_run: RunFixture
     ) -> None:
         ws, exp, run = fresh_run
         with run.start():
             pass
         jobs = run.execution_dir("e01") / "jobs"
-        (jobs / "123").mkdir(parents=True)
-        (jobs / "123" / "stdout.log").write_text("legacy out\n", encoding="utf-8")
-        (jobs / "123.err").write_text("legacy err\n", encoding="utf-8")
+        jobs.mkdir(parents=True, exist_ok=True)
+        (jobs / "123.out").write_text("job out\n", encoding="utf-8")
+        (jobs / "123.err").write_text("job err\n", encoding="utf-8")
         with served(ws) as client:
             body = client.get(f"{_run_url(exp, run)}/executions/e01/logs").json()
-        assert (body["stdout"], body["stderr"]) == ("legacy out\n", "legacy err\n")
+        assert (body["stdout"], body["stderr"]) == ("job out\n", "job err\n")
 
     def test_root_file_wins_over_legacy(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run
@@ -1026,3 +1054,50 @@ class TestLocalAttemptRunsForReal:
                 time.sleep(0.5)
         assert body["status"] == "failed"
         assert "Unknown task_type" in str(body["error"])
+
+
+class TestReadingARunReconcilesItsQueuedSubmission:
+    """A remote attempt stays QUEUED locally until something reconciles it;
+    an agent polling the server is that something."""
+
+    @staticmethod
+    def _queued_on_an_ended_job(monkeypatch: pytest.MonkeyPatch, run: Run) -> None:
+        from molab.plugins.submit_molq.submit import encode_job_ref
+
+        ref = {"cluster_id": "c", "incarnation": "1", "native_id": "7", "registry_id": "r"}
+        run._create_execution(executor={"backend": "molq", "job_id": encode_job_ref(ref)})
+
+        class _EndedJob:
+            def status(self) -> dict[str, object]:
+                return {"snapshots": [{"state": "cancelled", "terminal": True}]}
+
+            def logs(self, *, stream: str, offset: int) -> dict[str, object]:
+                return {"text": "", "next_offset": offset, "bytes_read": 0}
+
+        class _Client:
+            def job(self, _ref: object) -> _EndedJob:
+                return _EndedJob()
+
+        monkeypatch.setattr("molab.workspace.connection.get_client", lambda _r=None: _Client())
+
+    def test_get_run(
+        self, monkeypatch: pytest.MonkeyPatch, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        self._queued_on_an_ended_job(monkeypatch, run)
+
+        with served(ws) as client:
+            body = client.get(_run_url(exp, run)).json()
+
+        assert body["statusSummary"]["byStatus"] == {"cancelled": 1}
+
+    def test_list_runs(
+        self, monkeypatch: pytest.MonkeyPatch, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        self._queued_on_an_ended_job(monkeypatch, run)
+
+        with served(ws) as client:
+            rows = client.get(f"/api/projects/{exp.project.id}/experiments/{exp.id}/runs").json()
+
+        assert [row["statusSummary"]["byStatus"] for row in rows] == [{"cancelled": 1}]

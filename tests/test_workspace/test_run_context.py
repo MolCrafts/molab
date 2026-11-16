@@ -81,7 +81,7 @@ class TestRegister:
         assert isinstance(asset.origin, ExecutionOrigin)
         assert asset.origin.execution_id == execution_id
         assert asset.origin.run_id == run.id
-        produced = assets_produced_by(run.experiment.project.workspace, execution_id)
+        produced = assets_produced_by(run.experiment.project.workspace, execution_id, run_id=run.id)
         assert [item.title for item in produced] == ["nve.pt"]
 
     def test_same_bytes_return_the_existing_asset(self, run):

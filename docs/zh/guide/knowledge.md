@@ -76,49 +76,126 @@ assert Note(experiment, "Analysis Notes").path == doc.path
 既能归到这个类、又能归到那个类，错的是定义，不是作者。每个类都落成一个文件；`class:`
 frontmatter 标出是哪一个：
 
-| 类 | 它回答的唯一问题 | 记录（frontmatter） | 绝不包含 |
+| 类 | 它回答的唯一问题 | 字段（`FIELDS`） | 绝不包含 |
 |---|---|---|---|
-| `Plan` | 我们在问什么，范围多大，受哪些约束？ | 无 | 阶段、工作项、判据、待检验的断言（那些是 Hypothesis） |
+| `Plan` | 我们在问什么，范围多大，受哪些约束？ | 无 | 阶段、工作项、验收标准（Roadmap、Todo、Milestone）；待检验的断言（Hypothesis） |
+| `Roadmap` | 工作按什么顺序做？ | `stages`：每项 `id`、`title`、可选的 `experiment`、`depends_on`（id 不重复，依赖都是已有阶段，无环） | 工作项、验收标准 |
+| `Todo` | 还剩哪些工作？ | `items`：每项 `id`、`title`、`status` `open` \| `done` \| `blocked`（默认 `open`）、可选的 `stage`（id 不重复） | 阶段顺序 |
+| `Milestone` | 工作什么时候算验收通过？ | `criterion`（必填）、`status` `open` \| `met` \| `missed`（默认 `open`）、可选的所关闭的 `stage`、可选的 `checks` 及其 `measurements` | 达成它的工作本身 |
 | `Hypothesis` | 我们断言什么会成立？ | `verdict`：`open` \| `supported` \| `refuted` \| `unsettled`（默认 `open`） | 证据本身（那是 Finding） |
-| `Roadmap` | 工作按什么顺序做？ | `stages` | 工作项、判据、状态 |
-| `Todo` | 还剩哪些工作？ | `items` | 阶段、判据 |
-| `Milestone` | 一个阶段何时算关闭？ | `stage`、`criterion`、`status`（`open` \| `met` \| `missed`） | 阶段、工作项 |
-| `Observation` | 在做任何解释之前，观察到了什么、给定了什么？ | 无 | 选择（Decision）、结论（Finding） |
-| `Decision` | 选了什么，谁选的，为什么？ | `status`：`open` \| `made`（默认 `made`） | 观察到的事实、结果 |
+| `Observation` | 在做任何解释之前，观察到了什么、给定了什么？ | 无 | 结论（Finding） |
 | `Finding` | 证据确立了什么？ | 无 | 选择、计划 |
 | `Report` | 我们要告诉读者什么？它只做汇编，不提出新的断言。 | 无 | 别处没有陈述过的结果 |
-| `Literature` | 一份已发表的文献说了什么？ | 书目字段；PDF 只记路径，从不拷贝 | |
-| `Delegation` | 哪项受监督的工作正在进行？（操作性的） | 委托记录：作用域、目标、授权动作、预算与消耗、验收与停止条件、等待、worker 尝试 | |
-| `Note` | 以上都不是：对推理不作任何断言的自由文本。 | 无 | |
+| `Literature` | 一份已发表的文献说了什么？ | `LiteratureFields`：书目字段；PDF 只记路径，从不拷贝 | |
+| `Decision` | 选了什么、由谁选、为什么？ | `status`：`made`（默认）\| `open`（等人来定） | 观察到的事实（Observation）、结果（Finding） |
+| `Manuscript` | 我们投出去的是什么？一篇 LaTeX 论文。 | 无 | 没有 Finding 陈述过的结果；自己的一份参考文献 |
+| `Note` | 以上都不是：对推理不作任何断言的自由文本。 | `status`（默认 `active`） | |
 
-长期有效的选择是 `Decision`，不是 `Observation`。`Report` 由它的目的（告诉读者）界定，
-而不是由篇幅界定：一个结果写得再长，也仍然是 `Finding`。
+`Report` 由它的目的（告诉读者）界定，而不是由篇幅界定：一个结果写得再长，也仍然是 `Finding`。
 
-`verdict` 或 `status` 的取值超出词表时，写入会被拒绝，`molab validate` 也会报告
-（`knowledge.record`）；它绝不会被默认值悄悄替换。
+`class:` 缺失或不是任何类名的文件不是文档：它不会被列出、检索或打开，`molab validate` 会报告它
+（`knowledge.class`）。
+
+### Manuscript 是 LaTeX
+
+`Manuscript` 是唯一存成 `knowledges/<slug>.tex` 的类，`.tex` 也只存它（两种错配都由
+`knowledge.class` 报告）。文件本身就能编译：记录写在开头一段 `%%` 注释行里，sources
+是整行注释，TeX 都会跳过。
+
+每个 `\cite` 的 key 就是一个 `Literature` 文档的文件名，在该稿件所在层级或其上层（项目，
+再到工作区根）查找。这就是它的 `cites` 边，所以该 Literature 的反向链接里有这篇稿件。
+找不到对应 Literature 的 key 是 `molab validate` 错误（`knowledge.citation`）。参考文献不单独
+存文件：`molab knowledge bib DOC --out references.bib` 由这些文档生成（有 venue 的是
+`@article`，否则 `@misc`），有缺失就拒绝生成；`GET /api/knowledge/doc/bib?path=…` 是同一个
+操作，网页预览就用它编译稿件。注释行里的 markdown 链接才是边，LaTeX 其余位置的链接不是。
+
+key 跟着它指向的 Literature 走：重命名该文档或用 `molab knowledge write … --replaces` 替换它，
+每篇引用它的 Manuscript 里的 key 都会被改写，和改写 markdown 链接一样。移动文档不改名，key
+也不变；若移到稿件不查找的层级（更下层或旁支），key 就解析不到，由 `knowledge.citation` 报出。
+
+`molab init` 会把旧版 molab 写下的知识改成这些类，且不丢任何值：已退役的 `Delegation` 变成 `Plan`；
+类没有声明的 frontmatter 键（委派记录、`holds_under`、Todo 的 `gaps`）挪到正文末尾 `## Moved fields`
+下的一个 YAML 代码块里。指向某次尝试记录文件（`runs/<run>/executions/<x>/execution.json`）的链接改写为
+该 execution 的 `molab:` 引用 —— `Report` 和 `Finding` 正是靠它落在字节上。已声明的键若取值被类拒绝，
+则原样留下，由 `molab validate` 报告。
+
+除各类自己的字段外，每份文档的 frontmatter 都带同一组键：`class`、`name`、`created_by`、
+`created_at`、`tags`。类没有声明的键，或被字段拒绝的取值（超出词表的 `verdict`），写入时会被
+拒绝，`molab validate` 也会报告（`knowledge.fields`）；它绝不会被默认值悄悄替换。类的字段是一个
+pydantic 模型，子类扩展父类的模型。
 
 除 `Note` 与 `Literature` 之外，每个类在构造时都至少需要一个 `SourceRef` —— 它们是有出处
-的文档。
+的文档。来源是 `molab:` 引用（保留实体的种类）、http(s) URL 或 DOI（`reference`），或文件路径。
+`molab knowledge write --source` 与 `POST /api/knowledge/doc` 的 `sources` 都接受纯字符串；
+一个都不给时，有出处的类以其宿主为来源。
 
-Plan、Roadmap、Todo、Milestone 是一次战役的四份文档，各自只做一件事。Plan 不列阶段。Roadmap 不列工作项。Todo 不定义阶段顺序。Milestone 不列具体工作。后三份引用 Plan。`campaign_of(plan)` 读回这一组；`check_campaign` 检查每条 todo 和 milestone 点名的阶段确实在路线图上。
+`Report` 与 `Finding` 必须落在已登记的字节上：至少链接一个 `molab:` 资产、run 或 execution。
+不满足的写入会被拒绝（HTTP 上为 422），手写的则由 `molab validate` 报告（`knowledge.unanchored`）。
 
-### 控制流在链接和记录里
+这是一条通则的一例：一次写入被拒绝，当且仅当 `molab validate` 会对它留下的文档报错。除了没有锚点的
+`Report` 或 `Finding`，还有类不接受的 frontmatter（`knowledge.fields`）、指向 `localhost` 或回环
+地址的链接（`knowledge.ephemeral_link`）、带编号的名字如 `notes-v2`（`knowledge.versioned_name`），
+以及 markdown 文档里代码之外的页面标记 —— `<!doctype`、`<html>`、`<head>`、`<body>`、`<iframe>`、
+`<script>` 或 `<style>`（`knowledge.html_page`；要做成页面的是 `.html` 文档）。什么都不会写入；
+HTTP 上为 422，消息写明每条规则和出问题的文本。唯一一条要读多份文档的规则 `knowledge.stage`（见下）
+由 `molab validate` 和会话结束时的检查报告，但不拒绝写入，所以可以先写 Todo、后写 Roadmap。移动或重命名文档时，指向它的文档照样会被改链，
+即使那份文档本身已经违反某条规则。
 
-没有哪个类是为某种控制结构单独设的。推理过程从带类型的链接和记录字段里读出来：
+`Plan` 提出问题、划定范围和约束。它的阶段顺序是一份 `Roadmap`，工作项是一份 `Todo`，每条验收
+标准是一份 `Milestone`；它们都引用这份 Plan（任何指向 Plan 文件的链接）。`Todo` 条目或 `Milestone`
+写的阶段，必须出现在引用同一份 Plan 的某个 `Roadmap` 上（`knowledge.stage`）；不引用任何 Plan 的文档
+不做这项检查。Milestone 的 `stage` 可以不写：复现检查点不关闭任何阶段。Plan 要检验的断言是
+`Hypothesis` 文档。
+
+### 定了的状态要有证据
+
+判据是一个数的 Milestone，把它写成 check，算术由 molab 来做：
+
+```yaml
+checks:
+  - id: ffv            # 在这份 Milestone 内唯一
+    span: /ffv         # 这个数在已登记的 JSON 文件里的位置
+    expected: 0.29
+    tolerance: 0.01    # 绝对容差；`relative: true` 时按 `expected` 缩放
+    compare: within    # 或 at_most / at_least
+    critical: true     # 非关键 check 不通过，不会让 Milestone 变成 missed
+```
+
+`molab knowledge evaluate DOC --measure ffv=molab:asset/<id>` 从该资产读出这个位置的值，把值连同
+资产的引用和内容摘要记到 `measurements` 下，链接这份资产，并写入状态：关键 check 全部通过为 `met`，
+有已测的关键 check 不通过为 `missed`，还有没测的则保持 `open`。字节必须是 run 自己的：由 molab
+自己运行的 attempt 登记，所在的 run 被 molab 跑成功过，并且之后没有被 `molab asset replace` 换掉。
+导入的文件、adopt 进来的 attempt 的文件、从未成功过的 run 的文件都不能用来测量。手填的 `met` 或 `missed`
+必须与旁边的测量一致，否则写入被拒绝（`knowledge.fields`）；对不一致的文档，`evaluate` 会重新测量并覆盖它。
+
+下面这些规则要读的不止一份文档，所以由 `molab validate` 报告，不拒绝写入：
+
+| 规则 | 报告什么 |
+|---|---|
+| `knowledge.milestone_evidence` | 测量所引用的资产不存在、不再是其 run 自己的（即 `evaluate` 所要求的）、读取之后被改过，或该位置的值与记录不同；没有 check 的 `met` / `missed` Milestone 既不链接 `Finding`、也没有 `Finding` 链接它 |
+| `knowledge.stage_order` | 一份 `met` 的 Milestone 关闭了某个阶段，而它所依赖阶段的 Milestone 还不是 `met` |
+| `knowledge.verdict_evidence` | `supported` 的 Hypothesis 没有 `Finding` 以 `supports` 链接它，或 `refuted` 的没有以 `contradicts` 链接它 |
+| `knowledge.dangling_ref` | `Report` 或 `Finding` 链接的 `molab:` 引用什么都不指向 |
+| `knowledge.source_text`（警告） | 被 Plan 链接的 `Literature` 没有指向 PDF（`pdf_asset_id` / `pdf_path`），或指向的 PDF 不存在 |
+| `experiment.mixed_workflow`（警告） | 同一个实验的 run 由不同版本的 workflow 执行（按每个 run 最近一次记录了 `workflow_hash` 的成功 attempt），于是代码本身成了它们之间的差别之一 |
+| `experiment.adopted_results`（警告） | 最近一次成功 attempt 是 adopt 进来的 run：它们的结果是交给 molab 的文件，不是 molab 看着产生的 |
+
+### 控制流在链接和字段里
+
+没有哪个类是为某种控制结构单独设的。推理过程从带类型的链接和类的字段里读出来：
 
 | 控制流 | 知识怎么表达 |
 |---|---|
 | 条件 / 判断 | 一份 `Hypothesis` 和它的 `verdict` |
 | 支持或反对的证据 | 从 `Finding` 指向 `Hypothesis`、角色为 `supports` 或 `contradicts` 的链接 |
 | 通过 / 无法判断 | `verdict: unsettled` |
-| 迭代 | 一份新文档，用 `supersedes` 取代它所修订的那份 |
-| 决策点 | 一份 `Decision`；`status: open` 表示它在等人来定 |
-| 依赖 | `derived_from` |
-| 提及 | `cites`（文献来源）、`references`（其他任何对象）、`records` |
+| 迭代 | 原地重写那份文档，或用 `replaces` 写一份继任文档（旧的被删除、读它的文档改链；git 保留它） |
+| 依赖 | `derived_from`（产生这些字节的 run、被修订的文档） |
+| 提及 | `cites`（文献来源）、`references`（其他任何对象） |
 
-边的角色有 `derived_from`、`supersedes`、`supports`、`contradicts`、`cites`、`records`
-和 `references`。带类型的链接写作 `- [@supports label](target)`；不带角色的链接就是
-`references`。这些角色只是一套词表：molab 不检查 `supports` 或 `contradicts` 链接连接的
+边的角色有 `derived_from`、`supports`、`contradicts`、`cites` 和 `references`。`molab init`
+会把用已退役角色（`@records`、`@supersedes`）写的链接改标为 `@derived_from`。带类型的链接
+写作 `- [@supports label](target)`；不带角色的链接就是 `references`。这些角色只是一套词表：molab 不检查 `supports` 或 `contradicts` 链接连接的
 是哪两个类。
 
 ## 交叉引用才是粘合机制
@@ -137,8 +214,8 @@ note.ref(finding.path)  # ……或用路径 —— 两种写法写出同一条�
 ```
 
 `.ref` **绝不**接受 project / experiment / run 的坐标：不是 `Folder`、不是 run id、
-不是 params。那些都不是知识，`.ref` 一律以 `TypeError` 拒绝。要指向某个 run 或
-experiment，先找到记录它的那份文档，再 `.ref` 那份文档：
+不是 params。那些都不是知识，`.ref` 一律以 `TypeError` 拒绝。要指向记录某个 run
+的那份文档，就 `.ref` 那份文档：
 
 ```python
 run_record = Note(experiment.resolve() / "knowledges" / "run-0001.md")
@@ -152,16 +229,20 @@ for edge in note.links():
     print(edge.role, edge.target)  # 例如 references …/knowledges/tg-result.md
 ```
 
-`.cite` 是更松的兄弟：知识目标交给 `.ref`；否则按原样把给出的路径链上。
+`append_link(doc, target, role=…)` 是 `.ref` 底下唯一的写边函数。它也接受活的实体：
+project、experiment、run 或资产按其 `molab:` 引用链接，裸路径按原样链接。
+`write_knowledge` 的 `cite=[(target, role)]` 与 `POST /api/knowledge/doc` 的 `cites`
+（`{target, role}` 列表，target 是 workspace 相对的文档路径或 `molab:` 引用，role 省略时为
+`cites`）都经由它。一个什么也指不到的引用会拒绝整个写入（HTTP 上为 422），什么都不落盘。
 
 ## 写进工作区
 
-两个模块级动词把知识写进 workspace 树，宿主都是 `Folder`：
+一个动词把知识写进 workspace 树，宿主是 `Folder`：
 
-- `mount_note(host, name, *, body="")` —— 幂等地挂上一份 `Note`；重复调用绝不截断
-  已有的正文。
 - `write_knowledge(host, *, name, of, sources, created_by, text, cite=(), title="")`
-  —— 写一份有出处的文档，按 `name` 幂等。
+  —— 写一份 `of` 类的文档，按 `name` 幂等。
+
+`Note.mount(host, name, *, body="")` 是这个动词用于 `Note` 的写法：重复调用绝不截断已有的正文。
 
 `Finding.harvest`（`Observation`、`Report` 上是同一个方法）把一个终态 Run 的结果
 收获成它 experiment 之下的知识：
@@ -242,6 +323,23 @@ for hit in wiki.search("cooling").hits:
 ## 当前文档
 
 知识文档是 `<host>/knowledges/<slug>.md`。旧的目录形态和 `references/` 布局不再导入。
+
+## 类字段
+
+文档的字段在每次写入时都按它的类校验（`molab knowledge write --fields JSON`、
+`POST /api/knowledge/doc` 的 `fields`，以及下面的命令）。字段可以整体替换，CLI 与 HTTP
+都调用同一个 `replace_fields`：
+
+- `molab knowledge fields DOC` 以 JSON 打印 `{relPath, cls, fields, digest}`；
+  `GET /api/knowledge/doc/fields?path=…` 返回同样的内容。
+- `molab knowledge fields DOC --set JSON [--if-match DIGEST]` 替换字段（`--set` 也接受
+  JSON 文件路径；省略的键会被删除），与 `PATCH /api/knowledge/doc/fields?path=…` 携带
+  `{fields, ifMatch, body?}` 相同。摘要过期会被拒绝（HTTP 为 409），未声明的键或被拒绝的值
+  同样会被拒绝（422）；CLI 以类给出的错误信息退出 1，且什么都不写。每次替换是一条
+  `knowledge.fields_replaced` 历史提交。
+
+评审者把一份 Note 设为 active：
+`molab knowledge fields knowledges/<slug>.md --set '{"status": "active"}'`。
 
 ## 下一步
 

@@ -30,7 +30,7 @@ class TestAssetsProducedBy:
         execution = run.executions[0]
         produced = [
             asset
-            for asset in assets_produced_by(ws, execution.id)
+            for asset in assets_produced_by(ws, execution.id, run_id=run.id)
             if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
         ]
         assert len(produced) == 1
@@ -45,21 +45,22 @@ class TestAssetsProducedBy:
         for run in ws.project("demo").experiment("baseline").list_runs():
             produced.extend(
                 asset
-                for asset in assets_produced_by(ws, run.executions[0].id)
+                for asset in assets_produced_by(ws, run.executions[0].id, run_id=run.id)
                 if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
             )
         assert len(produced) == 3
 
     def test_unknown_attempt_is_empty(self, tmp_path: Path) -> None:
         ws = _seed(tmp_path / "lab", n_runs=1)
-        assert assets_produced_by(ws, "e99") == []
+        (run,) = ws.project("demo").experiment("baseline").list_runs()
+        assert assets_produced_by(ws, "e99", run_id=run.id) == []
 
 
 class TestAssetById:
     def test_found_or_none(self, tmp_path: Path) -> None:
         ws = _seed(tmp_path / "lab", n_runs=1)
         run = ws.project("demo").experiment("baseline").list_runs()[0]
-        (asset,) = assets_produced_by(ws, run.executions[0].id)
+        (asset,) = assets_produced_by(ws, run.executions[0].id, run_id=run.id)
         assert asset_by_id(ws, asset.id).id == asset.id
         assert asset_by_id(ws, "missing") is None
 

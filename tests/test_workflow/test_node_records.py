@@ -335,7 +335,7 @@ class TestRerunOneTask:
 
         with pytest.raises(RunNotExecutableError, match="'a'"):
             execute_run(_chain(), run, rerun=True, only=("b",))
-        assert [item.id for item in run.executions if item.status.value == "queued"] == []
+        assert [item.id for item in run.executions] == ["e01"]
         assert _CALLS == {"a": 1, "b": 1}
 
     def test_new_task_runs_alone_on_an_unjournalled_predecessor(self, tmp_path: Path) -> None:
@@ -380,6 +380,7 @@ class TestRerunOneTask:
         execute_run(_chain(), run)
         with pytest.raises(ValueError, match="nope"):
             execute_run(_chain(), run, rerun=True, only=("nope",))
+        assert [item.id for item in run.executions] == ["e01"]
 
     def test_only_requires_rerun(self, tmp_path: Path) -> None:
         run = _run(tmp_path)

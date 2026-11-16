@@ -50,10 +50,10 @@ describe("project knowledge relations", () => {
     expect(graph.edges).toHaveLength(7);
   });
 
-  it("includes workspace plans, reverse decisions and their citations without importing other projects", () => {
+  it("includes workspace plans, reverse hypotheses and their citations without importing other projects", () => {
     const shared = "knowledges/plan.md";
-    const roadmap = "knowledges/roadmap.md";
-    const decision = "knowledges/decision.md";
+    const observation = "knowledges/observation.md";
+    const hypothesis = "knowledges/hypothesis.md";
     const literature = "knowledges/literature.md";
     const note = `${root}/knowledges/context.md`;
     const other = "projects/b/knowledges/finding.md";
@@ -61,8 +61,8 @@ describe("project knowledge relations", () => {
       nodes: [
         doc(finding, "Finding"),
         doc(shared, "Plan"),
-        doc(roadmap, "Roadmap"),
-        doc(decision, "Decision"),
+        doc(observation, "Observation"),
+        doc(hypothesis, "Hypothesis"),
         doc(literature, "Literature"),
         doc(note),
         doc(other, "Finding"),
@@ -70,8 +70,8 @@ describe("project knowledge relations", () => {
       ],
       edges: [
         link(finding, shared),
-        link(roadmap, shared),
-        link(decision, finding),
+        link(observation, shared),
+        link(hypothesis, finding),
         link(shared, literature, Edge.role.CITES),
         link(other, shared),
       ],
@@ -80,19 +80,16 @@ describe("project knowledge relations", () => {
     expect(scope.nodes.map((node) => node.id)).toEqual([
       finding,
       shared,
-      roadmap,
-      decision,
+      observation,
+      hypothesis,
       literature,
       note,
     ]);
     const research = projectResearchMap(source, root, {
-      [roadmap]: { stages: [{ id: "s", title: "Stage", depends_on: [] }] },
-      [decision]: { status: "open" },
+      [hypothesis]: { verdict: "supported" },
     });
     expect(research.nodes.map((node) => node.id)).toEqual(scope.nodes.map((node) => node.id));
-    expect(research.nodes.find((node) => node.id === decision)?.state).toBe("open");
-    expect(research.stages).toHaveLength(1);
-    expect(research.attention).toHaveLength(1);
+    expect(research.nodes.find((node) => node.id === hypothesis)?.state).toBe("supported");
     expect(research.edges).toHaveLength(4);
     expect(projectKnowledgeMap(source, "projects/empty").nodes).toEqual([]);
   });
@@ -110,7 +107,7 @@ describe("project knowledge relations", () => {
     expect(source.edges).toHaveLength(9);
   });
 
-  it("keeps structural direction, role folding and non-overlap from Tack's map", () => {
+  it("keeps structural direction, role folding and non-overlap", () => {
     const map = projectKnowledgeMap(graph, root);
     const placed = layoutKnowledgeMap(map);
     const x = (id: string) => placed.find((node) => node.id === id)?.x ?? -1;
@@ -144,40 +141,23 @@ describe("project knowledge relations", () => {
   });
 });
 
-describe("Tack research map integration", () => {
-  it("retains recorded statuses, document classes and the full preview references", () => {
-    const roadmap = `${root}/knowledges/roadmap.md`;
-    const todo = `${root}/knowledges/todo.md`;
-    const milestone = `${root}/knowledges/milestone.md`;
+describe("research map integration", () => {
+  it("retains recorded verdicts, document classes and the full preview references", () => {
     const hypothesis = `${root}/knowledges/hypothesis.md`;
     const input = {
-      nodes: [
-        ...graph.nodes,
-        doc(roadmap, "Roadmap"),
-        doc(todo, "Todo"),
-        doc(milestone, "Milestone"),
-        doc(hypothesis, "Hypothesis"),
-      ],
+      nodes: [...graph.nodes, doc(hypothesis, "Hypothesis")],
       edges: [...graph.edges, link(hypothesis, finding, Edge.role.CONTRADICTS)],
     };
     const map = projectResearchMap(input, root, {
-      [roadmap]: { stages: [{ id: "s", title: "Test", depends_on: [], experiment: "e" }] },
-      [todo]: { items: [{ id: "t", title: "Wait", stage: "s", status: "blocked" }] },
-      [milestone]: { stage: "s", criterion: "Evidence", status: "open" },
       [hypothesis]: { verdict: "refuted" },
     });
-    expect(map.stages[0]).toMatchObject({ status: "blocked", todo: { done: 0, total: 1 } });
-    expect(map.nodes.find((node) => node.id === roadmap)).toMatchObject({
-      status: "blocked",
-      note: "0 of 1 stages done",
-    });
+    expect(map.nodes.find((node) => node.id === finding)?.note).toBe("Filed under e");
     expect(map.nodes.find((node) => node.id === hypothesis)?.state).toBe("refuted");
     expect(map.nodes.find((node) => node.id === plan)?.refs).toContainEqual({
       target: "https://example.org",
       role: "cites",
       kind: "external",
     });
-    expect(map.attention).toHaveLength(1);
     const canvas = toResearchGraph(map);
     // One visible line per pair; the model and its line classes keep both roles.
     expect(canvas.graph.edges).toHaveLength(4);
@@ -199,7 +179,7 @@ describe("knowledge provenance lineage", () => {
         link(finding, plan),
         link(report, finding),
         link(report, plan),
-        link(plan, outside, Edge.role.SUPERSEDES),
+        link(plan, outside, Edge.role.DERIVED_FROM),
         link(report, finding),
       ],
     };

@@ -82,6 +82,7 @@ describe("uniqueMolvisFiles", () => {
 
   it("still treats classic dumps as openable", () => {
     expect(isMolvisOpenable(file("dump.lammpstrj"))).toBe(true);
+    expect(isMolvisOpenable(file("out/relax/network.dcd"))).toBe(true);
     expect(isMolvisOpenable(file("notes.txt"))).toBe(false);
   });
 
@@ -128,6 +129,15 @@ describe("defaultMolvisFile", () => {
     expect(defaultMolvisFile(files)?.relPath).toBe("out/final.mol2");
   });
 
+  it("prefers a connection table over a DCD of the same run", () => {
+    const files = [
+      file("out/relax/network.dcd"),
+      file("out/relax/network.data"),
+      file("out/relax/network.mol2"),
+    ];
+    expect(defaultMolvisFile(files)?.relPath).toBe("out/relax/network.mol2");
+  });
+
   it("falls back to a store, then to nothing", () => {
     const store = { ...file("growth.mrec/zarr.json"), name: "growth.mrec" };
     expect(defaultMolvisFile([store])).toBe(store);
@@ -140,6 +150,7 @@ describe("MOLVIS_FILE_PATTERNS", () => {
     expect(MOLVIS_FILE_PATTERNS).toContain("*.xyz");
     expect(MOLVIS_FILE_PATTERNS).toContain("*.data");
     expect(MOLVIS_FILE_PATTERNS).toContain("*.lammpstrj");
+    expect(MOLVIS_FILE_PATTERNS).toContain("*.dcd");
     expect(MOLVIS_FILE_PATTERNS).not.toContain("*.lammps");
   });
 });

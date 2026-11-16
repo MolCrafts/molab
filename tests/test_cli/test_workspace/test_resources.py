@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -16,7 +15,6 @@ from molab.cli import app
 from molab.cli.workspace import resources
 from molab.knowledge import Finding, Observation, Report
 from molab.profile import ProfileConfig
-from molab.workflow import RunFailedError, Workflow
 from molab.workspace import Workspace
 from molab.workspace.run import Run
 from tests.support.records import read_record
@@ -33,12 +31,6 @@ def _failed_run(tmp_path: Path):
 
 
 class TestRunHarvest:
-    def test_of_gate_is_finding_observation_report(self) -> None:
-        src = inspect.getsource(resources.run_harvest)
-        assert "HARVEST_TARGETS" in src
-        assert "--of" in src
-        assert "Finding, Observation, or Report" in src
-
     def test_note_exits_with_the_harvest_gate(self, tmp_path: Path) -> None:
         ws, exp, run = _failed_run(tmp_path)
         result = CliRunner().invoke(
@@ -56,7 +48,7 @@ class TestRunHarvest:
             ],
         )
         assert result.exit_code == 1, result.output
-        assert "harvest --of must be Finding, Observation, or Report" in result.stdout
+        assert "harvest --of must be one of Finding, Observation, Report" in result.stdout
 
     def test_rejected_kinds_exit_1(self, tmp_path: Path) -> None:
         ws, exp, run = _failed_run(tmp_path)
@@ -221,6 +213,38 @@ class TestRunList:
         assert "cpu" in result.output
         assert "queued" in result.output
 
+    @pytest.mark.parametrize("command", ["list", "info"])
+    def test_an_ended_molq_job_is_reconciled_before_the_status_shows(
+        self, command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from molab.plugins.submit_molq.submit import encode_job_ref
+
+        ws = Workspace(tmp_path / "ws", name="lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
+        ref = {"cluster_id": "c", "incarnation": "1", "native_id": "7", "registry_id": "r"}
+        run._create_execution(executor={"backend": "molq", "job_id": encode_job_ref(ref)})
+
+        class _EndedJob:
+            def status(self) -> dict[str, object]:
+                return {"snapshots": [{"state": "cancelled", "terminal": True}]}
+
+            def logs(self, *, stream: str, offset: int) -> dict[str, object]:
+                return {"text": "", "next_offset": offset, "bytes_read": 0}
+
+        class _Client:
+            def job(self, _ref: object) -> _EndedJob:
+                return _EndedJob()
+
+        monkeypatch.setattr("molab.workspace.connection.get_client", lambda _r=None: _Client())
+        _wide_tables(monkeypatch)
+
+        target = ["p", "e"] if command == "list" else ["p", "e", run.id]
+        result = CliRunner().invoke(app, ["runs", command, *target, "--workspace", str(ws.root)])
+
+        assert result.exit_code == 0, result.output
+        assert "cancelled" in result.output and "queued" not in result.output
+
 
 class TestRunInfo:
     def test_shows_provenance_and_attempt_ids(self, tmp_path: Path) -> None:
@@ -319,79 +343,6 @@ class TestRunCreate:
         assert "Status: pending" in result.output
 
 
-def _healing_workflow(flag: Path) -> Workflow:
-    """stage_b raises until *flag* exists; stage_a is ``seed + 1``."""
-    wf = Workflow(name="healing")
-
-    @wf.task
-    def stage_a(seed: int) -> int:
-        return seed + 1
-
-    @wf.task(depends_on=["stage_a"])
-    def stage_b(stage_a: int) -> str:
-        if not flag.exists():
-            raise RuntimeError("FLAG missing")
-        return str(stage_a * 100)
-
-    return wf
-
-
-class TestRetryRun:
-    def test_rerun_reports_status_label(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        ws = Workspace(tmp_path / "lab", name="Lab")
-        ws.materialize()
-        run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
-        sentinel = object()
-
-        def fake_compiled_workflow_for_run(_run: Run) -> object:
-            return sentinel
-
-        def fake_execute(self: Run, workflow: object, /, **_kwargs: object) -> None:
-            assert workflow is sentinel
-
-        monkeypatch.setattr(
-            "molab.workflow.compiled_workflow_for_run",
-            fake_compiled_workflow_for_run,
-            raising=False,
-        )
-        monkeypatch.setattr(Run, "execute", fake_execute)
-
-        result = CliRunner().invoke(
-            app, ["runs", "rerun", "p", "e", run.id, "--workspace", str(ws.root)]
-        )
-
-        assert result.exit_code == 0, result.output
-        assert result.output.rstrip().endswith("status: pending")
-
-    def test_resume_after_failure_reports_succeeded(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        ws = Workspace(tmp_path / "lab", name="Lab")
-        ws.materialize()
-        run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
-        flag = tmp_path / "healed"
-        wf = _healing_workflow(flag)
-        compiled = (wf).compile()
-
-        with pytest.raises(RunFailedError):
-            run.execute(wf)
-
-        flag.write_text("ok", encoding="utf-8")
-        monkeypatch.setattr("molab.workflow.compiled_workflow_for_run", lambda _run: compiled)
-
-        result = CliRunner().invoke(
-            app, ["runs", "resume", "p", "e", run.id, "--workspace", str(ws.root)]
-        )
-
-        assert result.exit_code == 0, result.output
-        assert "status: succeeded" in result.output
-        assert [item.mode.value for item in run.executions] == ["initial", "resume"]
-        assert run.status_label == "succeeded"
-        assert run.has_failures is True
-
-
 def _greeting(tmp_path: Path) -> tuple[Workspace, str]:
     ws = Workspace(tmp_path / "ws", name="lab")
     ws.materialize()
@@ -402,12 +353,15 @@ def _greeting(tmp_path: Path) -> tuple[Workspace, str]:
 
 
 class TestAssetList:
-    def test_shows_title_and_kind(self, tmp_path: Path) -> None:
-        ws, _asset_id = _greeting(tmp_path)
+    @pytest.mark.parametrize("width", [64, 80, 120])
+    def test_shows_title_and_kind(self, tmp_path: Path, monkeypatch, width: int) -> None:
+        monkeypatch.setattr(resources, "_console", Console(width=width))
+        ws, asset_id = _greeting(tmp_path)
         result = CliRunner().invoke(resources.asset_app, ["list", "-ws", str(ws.root)])
         assert result.exit_code == 0, result.output
         assert "greeting" in result.output
         assert "text/plain" in result.output
+        assert asset_id in result.output
 
 
 class TestAssetInfo:

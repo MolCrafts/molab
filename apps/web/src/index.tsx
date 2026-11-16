@@ -61,6 +61,8 @@ async function enableMocking() {
 enableMocking().then(async () => {
   // Service worker (in dev:mock mode) is now in control of the page —
   // safe to fire plugin discovery without racing MSW activation.
+  // Shared views consume published data only, without plugin discovery or
+  // background workspace requests. Workspace links perform a full navigation.
   await bootPlugins();
 
   const root = ReactDOM.createRoot(rootElement);

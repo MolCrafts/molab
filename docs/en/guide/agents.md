@@ -4,7 +4,7 @@ Coding agents such as Claude Code and Codex edit a workspace the way a person do
 
 ## What an agent reads
 
-`molab init` writes a root `AGENTS.md` (and a `CLAUDE.md` that imports it with an `@AGENTS.md` line). molab owns only the block between `<!-- molab:begin -->` and `<!-- molab:end -->`, which it renders from code: the layout tree, what each attempt directory is for, the six knowledge classes, the scratch contract, and a "to do this, run that" table of commands. Anything you write outside the markers is kept. `molab agents sync` refreshes the block. It also appends any missing managed rules to `.gitignore` and writes the validation baseline when there is none.
+`molab init` writes a root `AGENTS.md` (and a `CLAUDE.md` that imports it with an `@AGENTS.md` line). molab owns only the block between `<!-- molab:begin -->` and `<!-- molab:end -->`, which it renders from code: the layout tree, what each attempt directory is for, the knowledge classes and their fields, the scratch contract, and a "to do this, run that" table of commands. Anything you write outside the markers is kept. `molab agents sync` refreshes the block. It also appends any missing managed rules to `.gitignore` and writes the validation baseline when there is none.
 
 The guide tells an agent to start at `./index.md`. Each `index.md` frontmatter is that level's record plus a derived `index:` block, and `index.children[].path` leads down to every project, experiment and run. A run's `index.executions[]` lists its attempts, and `index.knowledges` lists a level's knowledge documents. The frontmatter belongs to molab, so an agent may edit only the body.
 
@@ -15,13 +15,13 @@ The guide tells an agent to start at `./index.md`. Each `index.md` frontmatter i
 | try something quickly | `projects/<p>/experiments/<e>/scratch/` |
 | record a job that ran outside molab | `molab runs adopt P E RUN --product TASK=PATH --log FILE --job FILE --source FILE` |
 | read or write a record's narrative | `molab index show` / `molab index write --from FILE` |
-| write a knowledge document | `molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --record JSON --created-by AGENT` |
+| write a knowledge document | `molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --fields JSON --created-by AGENT` |
 | preview what a workflow script would run, writing nothing | `molab workflow dry-run SCRIPT --json` |
 | rebuild the derived index blocks | `molab index sync` |
 | print into the run's record | `from molab import print` ([Tracking a Computation](tracking.md)) |
 | record training data | `ctx.metrics.scalar(...)` ([Tracking a Computation](tracking.md#metrics)) |
 
-`scratch/` is for quick tests only. Nothing in it is cited and it stays out of git. It is never listed as a child, and `molab validate` warns about entries older than 14 days. A long job, or anything a result depends on, becomes a run. When that job has already finished outside molab, `molab runs adopt` moves its files into the run's next attempt (`executions/eNN/`: products under `out/<task>/`, scheduler files under `jobs/`, the log as `run.log`, scripts under `source/`) and seals the record with the real start and end times. `--params` creates the run first when it does not exist yet. `molab scratch clean --older-than 7d` empties old scratch entries, and `--dry-run` lists them without deleting anything.
+`scratch/` is for quick tests only. Nothing in it is cited and it stays out of git. It is never listed as a child, and `molab validate` warns about entries older than 14 days. A long job, or anything a result depends on, becomes a run. When that job has already finished outside molab, `molab runs adopt` moves its files into the run's next attempt (`executions/eNN/`: products under `out/<task>/`, scheduler files under `jobs/`, the log as `run.log`, scripts under `source/`) and seals the record with the real start and end times. The record says `observed: false` — molab holds what was handed over, not what it saw run — so no Milestone check is measured from it, and a succeeded job is adopted with the script that ran it (`--source`, or `--from` a `molab.track()` directory). Once an attempt is sealed, a write into its `out/` or `work/` is refused (`execution.sealed`): new output is a new attempt. `--params` creates the run first when it does not exist yet. `molab scratch clean --older-than 7d` empties old scratch entries, and `--dry-run` lists them without deleting anything.
 
 ## The check
 

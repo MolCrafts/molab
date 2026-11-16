@@ -3,7 +3,6 @@
 import {
   Activity,
   BookOpen,
-  Bot,
   CircleAlert,
   CircleCheck,
   FileText,
@@ -12,6 +11,7 @@ import {
   ListChecks,
   type LucideIcon,
   Scale,
+  ScrollText,
   SquareCheck,
   Workflow,
 } from "lucide-react";
@@ -24,12 +24,14 @@ export const KNOWLEDGE_CLASS_ICON: Record<KnowledgeClass, LucideIcon> = {
   Finding: CircleCheck,
   Observation: Activity,
   Hypothesis: Lightbulb,
-  Decision: Scale,
   Plan: ListChecks,
   Roadmap: Workflow,
   Todo: SquareCheck,
   Milestone: Flag,
-  Delegation: Bot,
+  Decision: Scale,
+  Manuscript: ScrollText,
 };
 
-export const knowledgeClassIcon = (cls: KnowledgeClass): LucideIcon => KNOWLEDGE_CLASS_ICON[cls];
+/** The class's icon; a row with no knowledge class is a plain file. */
+export const knowledgeClassIcon = (cls: KnowledgeClass | null): LucideIcon =>
+  cls === null ? FileText : KNOWLEDGE_CLASS_ICON[cls];

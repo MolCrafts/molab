@@ -6,23 +6,26 @@ import os
 import subprocess
 import sys
 import traceback
+import uuid
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, NamedTuple, Protocol
 
 import typer
+from molq import MolqError
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from molab._typing import JSONValue
 from molab.cli._app import app
-from molab.cli._common import console, deterministic_run_id, reap_zombie_run, rprint
+from molab.cli._common import console, reap_zombie_run, rprint
 from molab.cli._target import TargetOption, resolve_workspace_target
 from molab.profile import MolCfg, ProfileConfig, load_molcfg
 from molab.profile.loader import find_default_config
 from molab.workflow import default_binding_registry
 from molab.workspace.domain import ExecutionMode
 from molab.workspace.execution_context import profile_config_hash
+from molab.workspace.history import MOLAB_DIR
 from molab.workspace.run import RunStatus
 from molab.workspace.source_snapshot import SourceCaptureError
 from molab.workspace.target import LocalTarget, RemoteTarget
@@ -223,33 +226,6 @@ def _load_script_workspaces(
     return workspaces, override_path
 
 
-def _legacy_replica_run(
-    existing_by_id: Mapping[str, Run],
-    run_params: dict[str, JSONValue],
-    profile_cfg: ProfileConfig,
-) -> Run | None:
-    """Find a replica run created under the pre-UUIDv7 16-hex id scheme.
-
-    Read-only compatibility for older workspaces: the id is derived exactly as
-    ``molab run`` used to derive it (the run params, plus ``_profile`` and
-    ``_config_hash`` for a named profile) and matched against existing run ids.
-    It never reads or computes a definition hash.
-
-    Args:
-        existing_by_id: The experiment's runs keyed by id.
-        run_params: The replica's parameters (``seed`` / ``replica`` included).
-        profile_cfg: The active profile.
-
-    Returns:
-        The legacy run with that id, or ``None``.
-    """
-    id_seed = dict(run_params)
-    if profile_cfg.name is not None:
-        id_seed["_profile"] = profile_cfg.name
-        id_seed["_config_hash"] = profile_config_hash(profile_cfg)
-    return existing_by_id.get(deterministic_run_id(id_seed))
-
-
 def _experiment_candidates(
     exp: Experiment, profile_cfg: ProfileConfig
 ) -> tuple[list[RunCandidate], bool, int]:
@@ -258,8 +234,7 @@ def _experiment_candidates(
     Declared runs (any run without a ``replica`` parameter) are taken as they
     are. Otherwise one candidate per seed is built; its identity is the
     replica params plus :func:`profile_config_hash` of *profile_cfg*, looked up
-    first as a legacy 16-hex id (:func:`_legacy_replica_run`) and then through
-    :meth:`Experiment.find_run`. Nothing is created here.
+    through :meth:`Experiment.find_run`. Nothing is created here.
 
     Args:
         exp: The experiment to dispatch.
@@ -268,7 +243,6 @@ def _experiment_candidates(
     Returns:
         ``(candidates, use_declared_runs, total)``.
     """
-    existing_runs = sorted(exp.list_runs(), key=lambda item: item.id)
     # Declared runs are the cells. Replica cells exist only when the
     # experiment has none, so a later profile still gets its own run
     # instead of adopting a previous replica.
@@ -280,18 +254,12 @@ def _experiment_candidates(
     if use_declared_runs:
         candidates = [RunCandidate(run, dict(run.parameters), None, None) for run in declared_runs]
     else:
-        existing_by_id = {r.id: r for r in existing_runs}
         config_hash = profile_config_hash(profile_cfg)
         candidates = []
         for cell in exp.replica_cells():
             run_params = dict(cell)
             seed = run_params["seed"]
-            # Legacy id first: an old run's definition does not fold the
-            # config in, so a hash lookup first would let a config-less call
-            # adopt an old profile-keyed run.
-            existing = _legacy_replica_run(existing_by_id, run_params, profile_cfg)
-            if existing is None:
-                existing = exp.find_run(run_params, config_hash=config_hash)
+            existing = exp.find_run(run_params, config_hash=config_hash)
             candidates.append(RunCandidate(existing, run_params, config_hash, str(seed)))
     return candidates, use_declared_runs, total
 
@@ -395,8 +363,9 @@ def _create_dispatch_execution(
             false.
         profile_cfg: The profile the attempt runs under; recorded as its
             ``profile`` / ``config`` / ``config_hash``.
-        script: The defining script; recorded as ``environment.script`` and
-            captured as the attempt's source entrypoint.
+        script: The defining script; recorded as ``environment.script``.
+            The attempt captures the experiment's bound entrypoint as its
+            source, as every attempt does (``Run._create_execution``).
         submit_cwd: The directory ``molab run`` was invoked from.
         selected_tasks: The tasks a partial ``--rerun`` re-executes.
         task_executor: ``--executor`` / ``--max-workers`` as the record's
@@ -404,6 +373,8 @@ def _create_dispatch_execution(
 
     Returns:
         The new attempt's id (``e01``, ``e02``, …).
+
+    The dispatcher admits the attempt first (:func:`_admit`).
 
     Raises:
         ValueError: The workspace refuses this mode for this run (for
@@ -432,17 +403,50 @@ def _create_dispatch_execution(
             bypass_cache=bypass_cache,
             profile_config=profile_cfg,
             environment={"script": str(entrypoint), "submit_cwd": submit_cwd},
-            source_entrypoint=entrypoint,
             selected_tasks=selected_tasks,
             executor=dict(task_executor or {}),
         )
-    except SourceCaptureError as exc:
+    except (SourceCaptureError, FileNotFoundError) as exc:
         rprint(
             f"[red]Error:[/red] could not capture the source of "
-            f"{script.name} for run {mol_run.id}: {exc}"
+            f"{mol_run.experiment.entrypoint_file} for run {mol_run.id}: {exc}"
         )
         raise typer.Exit(1) from exc
     return record.id
+
+
+def _admit(
+    mol_run: Run,
+    exp: Experiment,
+    *,
+    continue_verb: str | None,
+    selected_tasks: tuple[str, ...],
+    profile_cfg: ProfileConfig,
+) -> None:
+    """Refuse, before its record exists, a resume or rerun that could not start.
+
+    :func:`molab.workflow.execute.admit_attempt` applies the seed rules the
+    start would apply: a ``--task`` the workflow lacks, or one whose upstream
+    has no usable recorded output, is refused here, so no attempt is created
+    and the run keeps its latest attempt. A plain run has nothing to admit.
+
+    Raises:
+        ValueError: The selection names a task the workflow does not have.
+        RunNotExecutableError: The predecessor's records cannot supply the
+            attempt.
+    """
+    if continue_verb is None:
+        return
+    from molab.workflow import compiled_workflow_for_experiment
+    from molab.workflow.execute import admit_attempt
+
+    admit_attempt(
+        mol_run,
+        compiled_workflow_for_experiment(exp),
+        mode=ExecutionMode.RESUME if continue_verb == "resume" else ExecutionMode.RERUN,
+        selected_tasks=selected_tasks,
+        profile_config=profile_cfg,
+    )
 
 
 def _execute_selected(
@@ -462,8 +466,9 @@ def _execute_selected(
 
     Each run's Execution record is created on the line right before its
     handler call, so a batch interrupted part-way leaves no QUEUED record on
-    the runs it never reached. A ``ValueError`` from creation (the workspace
-    refuses the mode) prints a skip line and does not call the handler; the
+    the runs it never reached. An attempt that is not admitted
+    (:func:`_admit`), or whose mode the workspace refuses, prints a skip line
+    with the reason, creates nothing and does not call the handler; the
     progress bar still advances. A source-capture ``RuntimeError`` is not
     caught and still aborts the batch.
 
@@ -481,9 +486,29 @@ def _execute_selected(
 
     Returns:
         The runs that were handed to *run_handler*, in order.
+
+    Raises:
+        typer.Exit: Exit code 1 when an attempt was not admitted and none was
+            dispatched.
     """
+    from molab.workflow import RunNotExecutableError
+
+    refused = 0
 
     def _dispatch_one(mol_run: Run, exp: Experiment, project: Project) -> bool:
+        nonlocal refused
+        try:
+            _admit(
+                mol_run,
+                exp,
+                continue_verb=continue_verb,
+                selected_tasks=selected_tasks,
+                profile_cfg=profile_cfg,
+            )
+        except (ValueError, RunNotExecutableError) as exc:
+            refused += 1
+            rprint(f"  [yellow]-[/yellow] {exp.name}  {mol_run.name} (skipped — {exc})")
+            return False
         try:
             execution_id = _create_dispatch_execution(
                 mol_run,
@@ -522,6 +547,9 @@ def _execute_selected(
             if _dispatch_one(mol_run, exp, project):
                 dispatched_runs.append(mol_run)
                 rprint(f"  [cyan]>[/cyan] dispatched {exp.name}  {mol_run.name}")
+    if refused and not dispatched_runs:
+        rprint(f"\n[red]Error:[/red] nothing ran — {refused} run(s) refused; no attempt created.")
+        raise typer.Exit(1)
     return dispatched_runs
 
 
@@ -557,6 +585,7 @@ def _dispatch_runs(
     require_recoverable: bool = False,
     selected_tasks: tuple[str, ...] = (),
     task_executor: Mapping[str, JSONValue] | None = None,
+    run_selectors: tuple[str, ...] = (),
 ) -> tuple[int, list[Run]]:
     """Select the runs of every bound experiment in *script* and dispatch them.
 
@@ -577,16 +606,24 @@ def _dispatch_runs(
             re-imports the script; it cannot use this process's binding).
         selected_tasks: The tasks a partial ``--rerun`` re-executes.
         task_executor: The task-executor facts each record carries.
+        run_selectors: ``--run``: only the existing runs these name (an id or
+            a run directory name, resolved by ``Experiment.get_run``) are
+            considered; empty considers every run.
 
     Returns:
         ``(count, runs)``. Dry-run and select-only return the selected count.
         A live dispatch returns how many runs were actually handed to the
         handler; a creation skip is not counted.
+
+    Raises:
+        typer.Exit: Exit code 1 when a ``--run`` selector names no run of the
+            script's experiments; nothing is created.
     """
     workspaces, override_path = _load_script_workspaces(script, workspace, explicit_workspace)
 
     total_dispatched = 0
     all_replicas: list[tuple[Run, Experiment, Project]] = []
+    matched: set[str] = set()
 
     for ws in workspaces:
         if override_path is not None and ws.root == override_path:
@@ -596,6 +633,17 @@ def _dispatch_runs(
                 if default_binding_registry.for_experiment(exp) is None:
                     continue
                 candidates, use_declared_runs, total = _experiment_candidates(exp, profile_cfg)
+                if run_selectors:
+                    named = {sel for sel in run_selectors if exp.has_run(sel)}
+                    matched |= named
+                    wanted = {exp.get_run(sel).id for sel in named}
+                    candidates = [
+                        item
+                        for item in candidates
+                        if item.existing_run is not None and item.existing_run.id in wanted
+                    ]
+                    if not candidates:
+                        continue
                 label = (
                     f"[cyan]{continue_verb}[/cyan] + {mode_label}"
                     if continue_verb is not None
@@ -616,6 +664,14 @@ def _dispatch_runs(
                 )
                 all_replicas.extend((mol_run, exp, project) for mol_run, _label in selected_runs)
                 total_dispatched += len(selected_runs)
+
+    unmatched = [sel for sel in run_selectors if sel not in matched]
+    if unmatched:
+        rprint(
+            f"[red]Error:[/red] --run {', '.join(unmatched)} names no run of the "
+            "experiments this script defines; nothing was created."
+        )
+        raise typer.Exit(1)
 
     if dry_run or run_handler is None:
         if not suppress_ok:
@@ -652,8 +708,9 @@ def _make_local_inprocess_handler() -> RunHandler:
     selection and, for a RESUME or partial RERUN record, the predecessor's
     recorded values. A failed attempt is persisted and swallowed here so the
     rest of the batch still runs; the result report reads the record
-    afterwards. An attempt that cannot start (for example a partial rerun
-    whose upstream has no recorded output) is sealed failed with the reason.
+    afterwards. A refusal known before the start was made before the record
+    was created; an attempt that still cannot start (its records changed
+    after it was admitted) is sealed failed with the reason.
 
     Returns:
         A :class:`RunHandler`.
@@ -755,12 +812,21 @@ def execute(
         )
         raise typer.Exit(1)
 
+    from molab.workspace.workspace import set_cli_root_override
+
+    # The run's workspace is the only one this worker writes. A script that
+    # declares a root at module level (a path on the submitting machine, or
+    # one computed from its own location) resolves here while it is imported,
+    # as under an explicit ``-ws``.
+    set_cli_root_override(Path(str(experiment.project.workspace.root)), explicit=True)
     try:
         spec = compiled_workflow_for_run(run_obj)
     except WorkflowRecoveryError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         _fail_unstarted(run_obj, execution_id, exc)
         raise typer.Exit(1) from exc
+    finally:
+        set_cli_root_override(None)
     default_binding_registry.bind(experiment, spec)
 
     rprint(f"[dim]execute[/dim] run={run_obj.id} execution={execution_id}")
@@ -857,6 +923,7 @@ def _spawn_background_local_run(
     rerun: bool,
     fresh: bool = False,
     selected_tasks: tuple[str, ...] = (),
+    run_selectors: tuple[str, ...] = (),
     extra_args: tuple[str, ...] = (),
 ) -> None:
     """Spawn a detached local ``molab run`` worker for long-running jobs."""
@@ -888,6 +955,8 @@ def _spawn_background_local_run(
         cmd.append("--fresh")
     for name in selected_tasks:
         cmd.extend(["--task", name])
+    for selector in run_selectors:
+        cmd.extend(["--run", selector])
     cmd.extend(extra_args)
 
     with log_path.open("ab") as log:
@@ -959,6 +1028,7 @@ def _run_dry_run(
     continue_verb: str | None,
     target_path: Path,
     explicit_ws: bool,
+    run_selectors: tuple[str, ...] = (),
 ) -> None:
     """Compile/materialize the run plan without executing tasks."""
     mode_label = "[blue]dry-run[/blue] compile-only"
@@ -971,6 +1041,7 @@ def _run_dry_run(
         run_handler=None,
         mode_label=mode_label,
         dry_run=True,
+        run_selectors=run_selectors,
     )
     if runs:
         watch_arg = _watch_path_for(target_path, runs)
@@ -1052,6 +1123,7 @@ def _run_local_inprocess(
     fresh: bool = False,
     selected_tasks: tuple[str, ...] = (),
     task_executor: Mapping[str, JSONValue] | None = None,
+    run_selectors: tuple[str, ...] = (),
 ) -> None:
     """Execute the run plan in-process, with a progress bar.
 
@@ -1087,6 +1159,7 @@ def _run_local_inprocess(
         fresh=fresh,
         selected_tasks=selected_tasks,
         task_executor=task_executor,
+        run_selectors=run_selectors,
     )
     _report_local_results(dispatched, continue_verb)
 
@@ -1109,6 +1182,7 @@ def _submit_to_scheduler(
     preamble: list[str] | None = None,
     selected_tasks: tuple[str, ...] = (),
     task_executor: Mapping[str, JSONValue] | None = None,
+    run_selectors: tuple[str, ...] = (),
 ) -> None:
     """Submit the run plan through molq and report (or monitor) the result."""
     from molab.plugins.submit_molq.metadata import supported_schedulers
@@ -1123,15 +1197,19 @@ def _submit_to_scheduler(
         raise typer.Exit(1)
 
     assert selected_scheduler is not None
-    submit_handler = make_submit_handler(
-        scheduler=selected_scheduler,
-        cluster=cluster,
-        resources=resources,
-        scheduling=scheduling,
-        target=selected_target,
-        preamble=preamble or None,
-        python=worker_python,
-    )
+    try:
+        submit_handler = make_submit_handler(
+            scheduler=selected_scheduler,
+            cluster=cluster,
+            resources=resources,
+            scheduling=scheduling,
+            target=selected_target,
+            preamble=preamble or None,
+            python=worker_python,
+        )
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
     handler: RunHandler = submit_handler
     mode_label = _profile_mode_label(profile_cfg, f"[magenta]{selected_scheduler}[/magenta]")
 
@@ -1148,6 +1226,7 @@ def _submit_to_scheduler(
         require_recoverable=True,
         selected_tasks=selected_tasks,
         task_executor=task_executor,
+        run_selectors=run_selectors,
     )
     if n == 0:
         verb = {"resume": "resumed", "rerun": "reran"}.get(continue_verb or "", "submitted")
@@ -1259,8 +1338,20 @@ def run(
                 "With --rerun: re-execute only this task (repeatable) with the inputs "
                 "the latest attempt recorded; every other completed task is seeded "
                 "from its record and every task downstream of a selected one is "
-                "skipped. Refused when an upstream the task needs has no usable "
-                "recorded output."
+                "skipped. Refused, before any attempt is created, when the workflow "
+                "has no such task or an upstream it needs has no usable recorded output."
+            ),
+        ),
+    ] = None,
+    runs: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--run",
+            help=(
+                "Dispatch only this run (repeatable): its id or its directory name "
+                "(e.g. seed=1), on whatever backend the other flags choose. A name that "
+                "matches no run of the script's experiments is refused before anything "
+                "is created."
             ),
         ),
     ] = None,
@@ -1302,11 +1393,15 @@ def run(
     ] = None,
     mem: Annotated[
         str | None,
-        typer.Option("--mem", help="Memory per job (e.g. 8G).", rich_help_panel="HPC Options"),
+        typer.Option("--mem", help="Memory per job (e.g. 8GB).", rich_help_panel="HPC Options"),
     ] = None,
     time: Annotated[
         str | None,
-        typer.Option("--time", help="Wall-clock time limit.", rich_help_panel="HPC Options"),
+        typer.Option(
+            "--time",
+            help="Wall-clock time limit (e.g. 12:00:00, 1-12:00:00, 12h, 1h30m).",
+            rich_help_panel="HPC Options",
+        ),
     ] = None,
     gpus: Annotated[
         int | None, typer.Option("--gpus", help="GPUs per job.", rich_help_panel="HPC Options")
@@ -1428,6 +1523,7 @@ def run(
         )
         raise typer.Exit(1)
     continue_verb = "resume" if resume else ("rerun" if rerun else None)
+    run_selectors = tuple(dict.fromkeys(runs or ()))
 
     selected_target, selected_scheduler, is_local = _select_backend(
         target_path=target.path,
@@ -1453,6 +1549,7 @@ def run(
             rerun=rerun,
             fresh=fresh,
             selected_tasks=selected_tasks,
+            run_selectors=run_selectors,
             extra_args=(
                 *(("--executor", executor) if executor else ()),
                 *(("--max-workers", str(max_workers)) if max_workers else ()),
@@ -1467,6 +1564,7 @@ def run(
             continue_verb=continue_verb,
             target_path=target.path,
             explicit_ws=explicit_ws,
+            run_selectors=run_selectors,
         )
         return
 
@@ -1480,6 +1578,7 @@ def run(
             fresh=fresh,
             selected_tasks=selected_tasks,
             task_executor=task_executor,
+            run_selectors=run_selectors,
         )
         return
 
@@ -1501,6 +1600,7 @@ def run(
         preamble=preamble or [],
         selected_tasks=selected_tasks,
         task_executor=task_executor,
+        run_selectors=run_selectors,
     )
 
 
@@ -1513,9 +1613,27 @@ def exec_cmd(
         str | None, typer.Option("--cwd", help="Working directory on the target")
     ] = None,
     timeout: Annotated[float | None, typer.Option("--timeout", help="Timeout in seconds")] = None,
+    account: Annotated[
+        str | None,
+        typer.Option("--account", "-A", help="Account / project name (remote target)."),
+    ] = None,
+    partition: Annotated[
+        str | None,
+        typer.Option("--partition", "-p", help="Partition / queue (remote target)."),
+    ] = None,
+    qos: Annotated[str | None, typer.Option("--qos", help="QOS (remote target).")] = None,
+    time: Annotated[
+        str | None,
+        typer.Option("--time", help="Job time limit, e.g. 00:05:00 (remote target)."),
+    ] = None,
     target_spec: TargetOption = ".",
 ) -> None:
-    """Execute a command on the workspace target (local or remote transport)."""
+    """Execute a command on the workspace target (local or remote transport).
+
+    On a remote target the command is one scheduler job. A cluster that
+    needs an account or a partition gets it from ``-A`` / ``-p``, as
+    ``molab run`` does; a refused submission prints the scheduler's message.
+    """
     target, _fs = resolve_workspace_target(target_spec)
 
     cmd: list[str] = list(command) if command else []
@@ -1533,15 +1651,30 @@ def exec_cmd(
         if isinstance(target, RemoteTarget):
             from molq import Execution, ExecutionUnit, JobSpec
 
+            from molab.plugins.submit_molq.submit import job_resources, job_scheduling
             from molab.workspace.connection import get_client
+            from molab.workspace.targets import target_definition, to_filesystem
 
             assert target.cluster_id is not None
+            # molq keeps the job's logs and receipts under its project root; a
+            # directory this exec owns, removed once the output is printed. It
+            # sits directly in the target root, so removing it leaves nothing.
+            target_fs = to_filesystem(target)
+            project_root = f"{target.path.rstrip('/')}/{MOLAB_DIR}-exec-{uuid.uuid4().hex}"
+            target_fs.mkdir(project_root, parents=True, exist_ok=True)
+            spec = JobSpec(
+                execution=Execution((ExecutionUnit.argv("main", cmd),), cwd=remote_cwd),
+                resources=job_resources({"time": time} if time is not None else {}),
+                scheduling=job_scheduling(
+                    {"queue": partition, "account": account, "qos": qos},
+                    "molab-exec",
+                    scheduler=str(target_definition(target)["scheduler"]),
+                ),
+            )
             job = (
                 get_client(target.registry_id)
                 .cluster(target.cluster_id)
-                .submit(
-                    JobSpec(execution=Execution((ExecutionUnit.argv("main", cmd),), cwd=remote_cwd))
-                )
+                .submit(spec, project_root=project_root)
             )
             observation = job.wait(timeout=timeout or 3600)
             for stream in ("stdout", "stderr"):
@@ -1553,6 +1686,7 @@ def exec_cmd(
                     if not chunk["bytes_read"]:
                         break
                     offset = chunk["next_offset"]
+            target_fs.rm(project_root, recursive=True)
             if observation["snapshots"][0]["state"] != "succeeded":
                 raise typer.Exit(1)
         else:
@@ -1563,6 +1697,10 @@ def exec_cmd(
                 raise typer.Exit(result.returncode)
     except (OSError, ValueError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    except MolqError as exc:
+        detail = exc.context.get("stderr")
+        rprint(f"[red]Error:[/red] {exc}" + (f"\n{str(detail).rstrip()}" if detail else ""))
         raise typer.Exit(1) from exc
 
 

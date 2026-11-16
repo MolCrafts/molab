@@ -2,15 +2,21 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+/**
+ * A Literature row: its identity and its bibliographic fields.
+ */
 export type ReferenceSummary = {
-    name: string;
-    relPath: string;
     title?: (string | null);
     authors?: Array<string>;
     year?: (number | null);
     doi?: (string | null);
     venue?: (string | null);
     url?: (string | null);
+    pdf_path?: (string | null);
+    pdf_asset_id?: (string | null);
     source?: string;
+    source_key?: (string | null);
+    name: string;
+    relPath: string;
 };
 

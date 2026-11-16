@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import codecs
 import io
+import logging
 from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from molab.atomicio import file_lock
 from molab.fs.window import iter_file_chunks
-from molab.plugins.submit_molq.submit import SubmitHandler
-from molab.workflow import read_journal
+from molab.plugins.submit_molq.submit import SubmitHandler, reconcile_latest
+from molab.workflow import RunNotExecutableError, read_journal
 from molab.workspace import (
     ExperimentNotFoundError as WorkspaceExperimentNotFoundError,
 )
@@ -24,6 +24,7 @@ from molab.workspace import (
     RunNotFoundError as WorkspaceRunNotFoundError,
 )
 from molab.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace.entity_record import record_lock
 from molab.workspace.execution_dirs import JOBS, product_dirs
 from molab.workspace.execution_repository import (
     RUN_LOG_FILENAME,
@@ -55,6 +56,8 @@ from ..schemas import (
     RunResponse,
 )
 from ..schemas._wire import ApiModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/projects/{project_id}/experiments/{experiment_id}/runs",
@@ -123,6 +126,7 @@ def _create_attempt(run, body: ExecutionAttemptCreateRequest, target: ComputeTar
     if body.max_workers is not None:
         executor["task_max_workers"] = body.max_workers
     try:
+        _admit(run, body)
         return run._create_execution(
             mode=ExecutionMode(body.mode),
             created_by=created_by,
@@ -132,8 +136,29 @@ def _create_attempt(run, body: ExecutionAttemptCreateRequest, target: ComputeTar
             environment={"submit_cwd": str(Path.cwd().resolve())},
             selected_tasks=tuple(body.tasks or ()),
         )
-    except (KeyError, ValueError) as exc:
+    except (KeyError, ValueError, RunNotExecutableError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _admit(run, body: ExecutionAttemptCreateRequest) -> None:  # noqa: ANN001
+    """Refuse a partial rerun that could not start, before its record exists.
+
+    :func:`molab.workflow.execute.admit_attempt`, the admission ``molab run``
+    applies. A run whose workflow a worker cannot recover is not admitted
+    here: it is refused when it is started.
+    """
+    from molab.workflow import can_recover_workflow, compiled_workflow_for_run
+    from molab.workflow.execute import admit_attempt
+
+    if not body.tasks or not can_recover_workflow(run):
+        return
+    admit_attempt(
+        run,
+        compiled_workflow_for_run(run),
+        mode=ExecutionMode(body.mode),
+        selected_tasks=tuple(body.tasks),
+        based_on=body.based_on_execution_id,
+    )
 
 
 def _attempt_with_request_key(run, key: str):  # noqa: ANN001, ANN202
@@ -142,13 +167,6 @@ def _attempt_with_request_key(run, key: str):  # noqa: ANN001, ANN202
         if (state.executor or {}).get(REQUEST_KEY) == key:
             return state
     return None
-
-
-def _request_key_lock(workspace, run) -> Path:  # noqa: ANN001
-    """Lock serializing keyed attempt creation on one Run."""
-    lock = Path(str(workspace.root)) / ".molab" / "locks" / f"{run.id}.request-key.lock"
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    return lock
 
 
 def _execution_repository(workspace, run) -> ExecutionRepository:  # noqa: ANN001
@@ -233,7 +251,7 @@ def _start_locally(run, execution_id: str) -> None:  # noqa: ANN001
     import sys
 
     _require_recoverable(run)
-    attempt_dir = Path(str(run.run_dir)) / "executions" / execution_id
+    attempt_dir = run.execution_dir(execution_id)
     jobs_dir = attempt_dir / JOBS.name
     jobs_dir.mkdir(parents=True, exist_ok=True)
     argv = [sys.executable, "-m", "molab.cli", "execute", str(run.run_dir)]
@@ -259,6 +277,13 @@ def _invalidate_run_nav_cache(workspace, run_or_exp_path: str) -> None:  # noqa:
         fs.invalidate(run_or_exp_path)
 
 
+def _reconcile(run) -> None:  # noqa: ANN001
+    """Bring a finished remote submission home before its status is read."""
+    outcome = reconcile_latest(run)
+    if outcome is not None and outcome.error is not None:
+        logger.warning(outcome.error)
+
+
 @router.get("", response_model=list[RunResponse])
 def list_runs(
     project_id: str,
@@ -275,6 +300,8 @@ def list_runs(
     if isinstance(fs, CachedRemoteFS):
         fs.invalidate_dir_listing(fs.join(str(experiment.experiment_dir), "runs"))
     runs = experiment.list_runs()
+    for run in runs:
+        _reconcile(run)
     document = experiment.workflow_document
     kind = experiment.workflow_kind
     return [
@@ -298,6 +325,7 @@ def get_run(
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
+    _reconcile(run)
     return RunResponse.from_model(run)
 
 
@@ -329,7 +357,10 @@ def create_execution(
     if body.request_key is None:
         state = _create_attempt(run, body, target)
     else:
-        with file_lock(_request_key_lock(workspace, run)):
+        # Serialize "find the keyed attempt, else create it" on this run's
+        # attempt set: the workspace's per-record lock on its executions dir.
+        executions = _execution_repository(workspace, run).executions_dir
+        with record_lock(workspace.fs, executions, workspace.root):
             existing = _attempt_with_request_key(run, body.request_key)
             if existing is not None:
                 return _execution_response(existing)
@@ -420,7 +451,7 @@ def get_execution_outputs(
 
     from molab.workspace.asset_repository import assets_produced_by
 
-    produced = assets_produced_by(workspace, execution_id)
+    produced = assets_produced_by(workspace, execution_id, run_id=run.id)
     asset_responses = [ManagedAssetResponse.from_model(asset) for asset in produced]
     # Registered bytes live with the asset record, outside this attempt.
     # What remains under a product directory is a working file.
@@ -488,7 +519,9 @@ def download_asset_content(
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    produced = {asset.id: asset for asset in assets_produced_by(workspace, execution_id)}
+    produced = {
+        asset.id: asset for asset in assets_produced_by(workspace, execution_id, run_id=run.id)
+    }
     asset = produced.get(asset_id)
     if asset is None:
         raise HTTPException(status_code=404, detail="asset was not registered by this attempt")
@@ -530,31 +563,25 @@ LogStream = Literal["stdout", "stderr", "run"]
 #: The most one ``…/logs/{stream}`` call returns.
 _LOG_CHUNK_BYTES = 256 * 1024
 
-_LEGACY_JOB_SUFFIX = {"stdout": ".out", "stderr": ".err"}
+_JOB_STREAM_SUFFIX = {"stdout": ".out", "stderr": ".err"}
 """A scheduler job's flat stream files: ``jobs/<job>.out`` / ``.err``."""
-
-_LEGACY_RUN_LOG = ("logs", "run.log")
-"""Where an older layout kept the attempt's own log."""
 
 
 def _execution_log_path(fs, exec_dir: str, stream: LogStream) -> str | None:  # noqa: ANN001
     """The file one log *stream* of an attempt is read from, or ``None``.
 
     The attempt's own file wins: ``stdout.log`` / ``stderr.log`` (written by
-    ``molab.print`` and ``ctx.log``, D92) or ``run.log``. Only when it is
-    absent does a legacy location answer — ``jobs/*/stdout.log`` (one
-    directory per job) or ``jobs/*.out`` / ``*.err`` for the stdio streams,
-    ``logs/run.log`` for ``run``.
+    ``molab.print`` and ``ctx.log``, D92) or ``run.log``. When a stdio file
+    is absent, the scheduler job's flat stream file answers
+    (``jobs/<job>.out`` / ``.err``).
     """
     if stream == "run":
-        candidates = [fs.join(exec_dir, RUN_LOG_FILENAME), fs.join(exec_dir, *_LEGACY_RUN_LOG)]
+        candidates = [fs.join(exec_dir, RUN_LOG_FILENAME)]
     else:
-        name = STDIO_FILES[stream]
-        candidates = [fs.join(exec_dir, name)]
+        candidates = [fs.join(exec_dir, STDIO_FILES[stream])]
         jobs = fs.join(exec_dir, JOBS.name)
         if fs.is_dir(jobs):
-            candidates += sorted(fs.glob(jobs, f"*/{name}"))
-            candidates += sorted(fs.glob(jobs, f"*{_LEGACY_JOB_SUFFIX[stream]}"))
+            candidates += sorted(fs.glob(jobs, f"*{_JOB_STREAM_SUFFIX[stream]}"))
     return next((path for path in candidates if fs.is_file(path)), None)
 
 
@@ -824,6 +851,8 @@ def cancel_execution(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # A remote attempt is sealed when it comes home; bring it now if its job has ended.
+    _reconcile(run)
     return _execution_response(run.execution(execution_id))
 
 
@@ -864,24 +893,21 @@ def harvest_run_route(
 ) -> dict[str, str]:
     """Harvest a terminal run into sourced Knowledge under its experiment."""
     from molab.knowledge.concepts import HARVEST_TARGETS
+    from molab.knowledge.content_rules import ContentRuleError
 
-    harvest_ok = HARVEST_TARGETS
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    if body.cls not in harvest_ok:
-        raise HTTPException(
-            status_code=422,
-            detail=f"{body.cls} is not a harvest target",
-        )
     try:
-        item = harvest_ok[body.cls].harvest(
+        item = HARVEST_TARGETS[body.cls].harvest(
             run,
             narrative=body.narrative,
             created_by=body.created_by,
             results=body.results,
             name=body.name,
         )
+    except ContentRuleError:
+        raise  # 422 through the app's handler, like every other knowledge write
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:

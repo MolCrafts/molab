@@ -13,7 +13,8 @@ import sqlite3
 from pathlib import Path
 
 from molab.knowledge.concept import Concept
-from molab.knowledge.zotero import ZoteroItem, ZoteroLibrary
+from molab.knowledge.concepts import LiteratureFields
+from molab.knowledge.zotero import ZoteroLibrary
 
 
 def _make_zotero_db(data_dir: Path) -> Path:
@@ -87,11 +88,12 @@ class TestReadZoteroItems:
 
     def test_parses_bib_fields_and_resolves_pdf_pointer(self, tmp_path: Path) -> None:
         db = _make_zotero_db(tmp_path)
-        items = {i.key: i for i in ZoteroLibrary(db).items()}
+        items = {i.source_key: i for i in ZoteroLibrary(db).items()}
         assert set(items) == {"AAAA", "BBBB"}  # attachment item excluded
 
         a = items["AAAA"]
-        assert isinstance(a, ZoteroItem)
+        assert isinstance(a, LiteratureFields)
+        assert a.source == "zotero"
         assert a.title == "Deep Learning"
         assert a.authors == ("Yann LeCun",)
         assert a.year == 2015
@@ -125,3 +127,34 @@ class TestConceptImportZotero:
 
         assert len(refs) == 2
         assert not (bundle_root / "sources.json").exists()
+
+    def test_a_reimport_keeps_tags_and_source(self, tmp_path: Path) -> None:
+        # The bib record carried a ``tags=[]`` default and a ``source="manual"``
+        # default, so every rewrite cleared the stored tags and relabelled a
+        # Zotero record as manual.
+        from molab.knowledge.concepts import Literature
+        from molab.knowledge.write import write_knowledge
+
+        src = tmp_path / "zotero"
+        src.mkdir()
+        db = _make_zotero_db(src)
+        bundle_root = tmp_path / "bundle"
+        bundle_root.mkdir()
+        root = Concept(bundle_root)
+        first = {ref.name: ref for ref in root.import_zotero(db)}["aaaa"]
+        first.write(tags=["glass", "ml"])
+
+        again = {ref.name: ref for ref in root.import_zotero(db)}["aaaa"]
+        assert again.tags() == ["glass", "ml"]
+        assert again.frontmatter()["source"] == "zotero"
+
+        write_knowledge(root, name="AAAA", of=Literature, created_by="t", text="", **_bib_title())
+        reread = Literature(first.path)
+        assert reread.tags() == ["glass", "ml"]
+        assert reread.frontmatter()["source"] == "zotero"
+        assert reread.frontmatter()["title"] == "Renamed"
+
+
+def _bib_title() -> dict[str, object]:
+    """A rewrite that sets only the title."""
+    return {"fields": {"title": "Renamed"}}

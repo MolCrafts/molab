@@ -21,13 +21,34 @@ The local↔remote contract is intentionally narrow:
   The isolated namespace also
   receives the selected ancestor ``index.md`` records and workflow code/document;
   code bindings are rewritten only in a temporary staging copy. An existing
-  Execution source snapshot takes precedence over the live entrypoint.
+  Execution source snapshot takes precedence over the live entrypoint. Each
+  asset the run names in ``inputs`` is uploaded as its whole slot to the same
+  place in the namespace, with its host's record, so the worker resolves the
+  ``molab:asset`` ref there as it would locally. So is each product an
+  earlier attempt of this run registered, so a later attempt re-registers
+  into that slot under the same id.
 * **Stage-out** pulls the remote ``executions/<id>/`` back **without** its
-  ``execution.json`` (products, logs, the per-attempt ``alive`` heartbeat)
-  and the run's ``values/`` store (the content-addressed values the pulled
-  journal cites; rsync adds only the new files), then reads the remote
-  ``execution.json`` and hands it to
+  ``execution.json``, **without its bulk tiers** (the attempt directories
+  declared not ``versioned``: ``out/``, ``work/``) and without molq's own job
+  files (:data:`MOLQ_JOB_FILES`), and the run's ``values/``
+  store (the content-addressed values the pulled journal cites; rsync adds
+  only the new files), then reads the remote ``execution.json`` and hands it
+  to
   :meth:`~molab.workspace.execution_repository.ExecutionRepository.merge_remote`.
+  The bulk tiers come back only when that record says the attempt
+  **succeeded**. That is the whole of what the rest needs from a failed,
+  killed or cancelled attempt: reconcile and the reaper read the record, the
+  ``alive`` heartbeat and the scheduler evidence under ``jobs/``; a person
+  reads ``run.log`` / ``traceback.txt`` / ``stdout.log`` / ``stderr.log``; a
+  resume seeds from the journal (``workflow.json``, ``nodes/``) and
+  ``values/``; asset adoption reads the staged experiment's ``assets/``,
+  outside the attempt. None of it lives in ``out/`` or ``work/``, whose
+  bytes (a killed MD run's 29 GB trajectory) stay on the target.
+  Before the merge, every asset the attempt registered in its staged
+  experiment comes back with the id the worker minted, installed by the
+  experiment's repository (``AssetRepository.adopt``); a product that cannot
+  take its slot here (another asset owns the slug or the bytes) raises and
+  leaves the local record unmerged.
   The plugin only moves bytes and decodes JSON; the workspace owns the record
   and decides how the worker's state and the local job ids combine. The
   run-level ``index.md`` is never pulled (its record is immutable and was
@@ -49,18 +70,20 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-from collections.abc import Sequence
-from pathlib import Path
+from collections.abc import Iterable, Sequence
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
 from molq import MolqError
 
 from molab.ids import hash_bytes
 from molab.workspace import Workspace
-from molab.workspace.domain import ExecutionMode
+from molab.workspace.asset_repository import asset_by_id
+from molab.workspace.domain import Asset, ExecutionMode, ExecutionOrigin, ExecutionStatus
 from molab.workspace.entity_record import ENTITY_FILENAME
+from molab.workspace.execution_dirs import JOBS, scratch_dirs
 from molab.workspace.execution_repository import ExecutionRepository
-from molab.workspace.naming import VALUE_CONTAINER
+from molab.workspace.naming import ASSET_CONTAINER, VALUE_CONTAINER
 from molab.workspace.source_snapshot import SourceCaptureError, copy_sources, source_manifest
 from molab.workspace.targets import target_run_dir
 
@@ -69,6 +92,18 @@ if TYPE_CHECKING:
 
 
 _RSYNC_EXCLUDES = ("__pycache__", "*.pyc", "*.pyo", ".DS_Store")
+
+MOLQ_JOB_FILES = ".molq"
+"""Where molq keeps a job's own files under the project root it was given.
+
+molq puts a job's default logs and (Shell) receipts in
+``<project_root>/.molq/jobs/<run_id>`` on the target and never deletes them;
+the project owner does. molab gives each attempt's job the attempt's ``jobs/``
+as its project root, so these files are that attempt's alone. They are molq's
+layout, not a molab record: stage-out leaves them on the target, molab keeps
+what it reads from them through molq (the job's stdout / stderr, flat as
+``jobs/<job>.out`` / ``.err``), and then removes them
+(:func:`~molab.plugins.submit_molq.submit.reconcile_submission`)."""
 
 
 class StagingFiles(Protocol):
@@ -97,6 +132,8 @@ class StagingFiles(Protocol):
     def read_text(self, path: str) -> str: ...
 
     def exists(self, path: str) -> bool: ...
+
+    def glob(self, path: str, pattern: str) -> Iterable[str]: ...
 
 
 def stage_in(
@@ -152,19 +189,19 @@ def stage_in(
     # One private workspace namespace per run: concurrent runs never overwrite
     # each other's workflow binding. Only selected ancestor metadata is staged.
     root = Path(str(workspace.root)).resolve()
-    relative = Path(src).relative_to(root)
-    destination_root = Path(dst)
-    for _part in relative.parts:
-        destination_root = destination_root.parent
+    destination_root = _staged_root(dst, mol_run)
     experiment = mol_run.experiment
     project = experiment.project
+    records = [
+        root / ENTITY_FILENAME,
+        Path(str(project.project_dir)) / ENTITY_FILENAME,
+        Path(str(experiment.experiment_dir)) / ENTITY_FILENAME,
+    ]
+    for host in _stage_assets(transport, mol_run, destination_root):
+        if host / ENTITY_FILENAME not in records:
+            records.append(host / ENTITY_FILENAME)
     with tempfile.TemporaryDirectory(prefix="molab-worker-") as temporary:
         bundle = Path(temporary)
-        records = [
-            root / ENTITY_FILENAME,
-            Path(str(project.project_dir)) / ENTITY_FILENAME,
-            Path(str(experiment.experiment_dir)) / ENTITY_FILENAME,
-        ]
         document = Path(str(experiment.experiment_dir)) / "workflow.ir.json"
         if document.is_file():
             records.append(document)
@@ -209,7 +246,12 @@ def stage_in(
             staged_experiment = (
                 Workspace.load(bundle).get_project(project.id).get_experiment(experiment.id)
             )
-            staged_experiment.bind_workflow("code", entrypoint=f"{code_remote}:{qualname}")
+            # Only the entrypoint moves; the graph IR ``define`` stored stays.
+            staged_experiment.bind_workflow(
+                "code",
+                entrypoint=f"{code_remote}:{qualname}",
+                document=staged_experiment.workflow_document,
+            )
             transport.mkdir(str(destination_root / code_relative), parents=True, exist_ok=True)
             transport.upload(
                 str(code_local),
@@ -222,6 +264,60 @@ def stage_in(
             remote = destination_root / relative_record
             transport.mkdir(str(remote.parent), parents=True, exist_ok=True)
             transport.upload(str(bundle / relative_record), str(remote))
+
+
+def _staged_root(remote_run: str, mol_run: Run) -> PurePosixPath:
+    """The workspace root of *mol_run*'s private namespace, given its remote run dir."""
+    workspace = mol_run.experiment.project.workspace
+    relative = Path(mol_run.run_dir).resolve().relative_to(Path(str(workspace.root)).resolve())
+    staged = PurePosixPath(remote_run)
+    for _part in relative.parts:
+        staged = staged.parent
+    return staged
+
+
+def _stage_assets(
+    transport: StagingFiles, mol_run: Run, destination_root: PurePosixPath
+) -> list[Path]:
+    """Upload the asset slots the run needs to the same place in the staged workspace.
+
+    These are each asset the run names in ``inputs``, and each product an
+    earlier attempt of this run registered: the worker then finds that slot
+    occupied and re-registers into it under the same id, as it would here.
+
+    Returns:
+        The host directories those slots belong to, whose records the staged
+        workspace needs to find them.
+
+    Raises:
+        ValueError: An input names no asset of this workspace.
+    """
+    workspace = mol_run.experiment.project.workspace
+    root = Path(str(workspace.root)).resolve()
+    needed: list[Asset] = []
+    for asset_id in mol_run.inputs:
+        asset = asset_by_id(workspace, asset_id)
+        if asset is None:
+            raise ValueError(f"input asset {asset_id} is not in this workspace")
+        needed.append(asset)
+    needed.extend(
+        asset
+        for asset in mol_run.experiment.assets.list()
+        if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == mol_run.id
+    )
+    hosts: list[Path] = []
+    for asset in needed:
+        repository = workspace.assets_at(asset.scope)
+        slug = repository.find_slug(asset.id)
+        assert slug is not None
+        host = Path(repository.scope_dir).resolve()
+        remote = destination_root / host.relative_to(root) / ASSET_CONTAINER / slug
+        transport.mkdir(str(remote), parents=True, exist_ok=True)
+        transport.upload(
+            str(host / ASSET_CONTAINER / slug), str(remote), recursive=True, exclude=_RSYNC_EXCLUDES
+        )
+        hosts.append(host)
+    return hosts
 
 
 def _stage_predecessor_journal(
@@ -257,7 +353,9 @@ def stage_out(
     """Pull one attempt's files back and merge the worker's record locally.
 
     The remote ``executions/<execution_id>/`` is pulled without its
-    ``execution.json``; the remote record is then read and merged through
+    ``execution.json`` and, unless the remote record says it succeeded,
+    without its bulk tiers (see the module doc for why that is all the rest
+    needs); the remote record is then read and merged through
     ``ExecutionRepository.merge_remote``, so the local job ids survive and a
     locally sealed record is never overwritten. Idempotent: a replayed call
     merges into an already-sealed record, which is a no-op.
@@ -281,13 +379,7 @@ def stage_out(
             creation-time environment key.
     """
     workspace = mol_run.experiment.project.workspace
-    record = next((item for item in mol_run.executions if item.id == execution_id), None)
-    frozen_path = record.executor.get("remote_run_dir") if record is not None else None
-    if frozen_path is not None and not isinstance(frozen_path, str):
-        raise ValueError("Execution remote_run_dir must be a path string")
-    remote_run = (
-        frozen_path if frozen_path is not None else target_run_dir(target, workspace, mol_run)
-    )
+    remote_run = remote_run_dir(mol_run, target, execution_id)
     local_run = str(Path(mol_run.run_dir).resolve())
     if remote_run == local_run:
         return True
@@ -295,15 +387,25 @@ def stage_out(
     remote_exec = f"{remote_run}/executions/{execution_id}"
     local_exec = str(Path(local_run) / "executions" / execution_id)
     Path(local_exec).mkdir(parents=True, exist_ok=True)
+    bulk = [directory.name for directory in scratch_dirs()]
     try:
         transport.download(
             remote_exec,
             local_exec,
             recursive=True,
-            exclude=(*_RSYNC_EXCLUDES, "execution.json"),
+            # ``/name`` is anchored at the attempt directory (rsync semantics).
+            exclude=(
+                *_RSYNC_EXCLUDES,
+                "execution.json",
+                *(f"/{name}" for name in bulk),
+                f"/{JOBS.name}/{MOLQ_JOB_FILES}",
+            ),
         )
         _pull_values(transport, remote_run, local_run)
         text = transport.read_text(f"{remote_exec}/execution.json")
+        if json.loads(text).get("status") == ExecutionStatus.SUCCEEDED.value:
+            _pull_bulk(transport, remote_exec, local_exec, bulk)
+        _pull_products(transport, mol_run, execution_id, _staged_root(remote_run, mol_run))
     except MolqError as exc:
         if exc.outcome == "unknown":
             raise
@@ -322,6 +424,76 @@ def stage_out(
         fs=workspace.fs,
     ).merge_remote(execution_id, json.loads(text))
     return True
+
+
+def remote_run_dir(mol_run: Run, target: ComputeTarget, execution_id: str) -> str:
+    """Where attempt *execution_id* of *mol_run* was staged on *target*.
+
+    The path recorded at submit (``executor["remote_run_dir"]``) wins, so a
+    later change of the target's scratch root does not lose the attempt.
+
+    Raises:
+        ValueError: The recorded path is not a string.
+    """
+    record = next((item for item in mol_run.executions if item.id == execution_id), None)
+    frozen_path = record.executor.get("remote_run_dir") if record is not None else None
+    if frozen_path is not None and not isinstance(frozen_path, str):
+        raise ValueError("Execution remote_run_dir must be a path string")
+    if frozen_path is not None:
+        return frozen_path
+    return target_run_dir(target, mol_run.experiment.project.workspace, mol_run)
+
+
+def _pull_bulk(
+    transport: StagingFiles, remote_exec: str, local_exec: str, names: Sequence[str]
+) -> None:
+    """Pull the bulk tiers *names* of a succeeded attempt; an absent one has nothing to pull."""
+    for name in names:
+        remote = f"{remote_exec}/{name}"
+        if not transport.exists(remote):
+            continue
+        local = Path(local_exec) / name
+        local.mkdir(parents=True, exist_ok=True)
+        transport.download(remote, str(local), recursive=True, exclude=_RSYNC_EXCLUDES)
+
+
+def _pull_products(
+    transport: StagingFiles, mol_run: Run, execution_id: str, staged_root: PurePosixPath
+) -> None:
+    """Bring back every asset attempt *execution_id* registered in its staged experiment.
+
+    Each slot keeps the id the worker minted; the experiment's repository
+    installs it (:meth:`~molab.workspace.asset_repository.AssetRepository.adopt`).
+    A slot already here with the same bytes and producer is not transferred again.
+
+    Raises:
+        ValueError: A product cannot take its slot here (see ``adopt``).
+    """
+    workspace = mol_run.experiment.project.workspace
+    experiment_dir = Path(str(mol_run.experiment.experiment_dir)).resolve()
+    relative = experiment_dir.relative_to(Path(str(workspace.root)).resolve())
+    remote_assets = staged_root / relative / ASSET_CONTAINER
+    if not transport.exists(str(remote_assets)):
+        return
+    repository = mol_run.experiment.assets
+    for record in sorted(transport.glob(str(remote_assets), "*/asset.json")):
+        raw = json.loads(transport.read_text(record))
+        origin = raw.get("origin") or {}
+        if origin.get("run_id") != mol_run.id or origin.get("execution_id") != execution_id:
+            continue
+        local = asset_by_id(workspace, raw["id"])
+        if (
+            local is not None
+            and local.content.digest == raw["content"]["digest"]
+            and local.origin.model_dump(mode="json") == origin
+        ):
+            continue
+        slot = PurePosixPath(record).parent
+        with tempfile.TemporaryDirectory(prefix="molab-product-") as temporary:
+            pulled = Path(temporary) / slot.name
+            pulled.mkdir()
+            transport.download(str(slot), str(pulled), recursive=True, exclude=_RSYNC_EXCLUDES)
+            repository.adopt(pulled)
 
 
 def _pull_values(transport: StagingFiles, remote_run: str, local_run: str) -> None:

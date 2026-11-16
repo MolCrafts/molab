@@ -9,14 +9,14 @@ Run-materialization semantics owned here:
   intent; there is no idempotent re-add);
 - an empty space yields ``[]``.
 
-``derive_run_id``'s own properties are owned by ``test_derive_run_id.py`` —
-this file only pins that ``add_runs`` does **not** fold params into identity.
+This file pins that ``add_runs`` does **not** fold params into identity.
 """
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from molab.workspace import GridSpace, Workspace
-from molab.workspace.utils import derive_run_id
 
 
 def _grid() -> GridSpace:
@@ -39,7 +39,7 @@ class TestAddRuns:
         ids = {r.id for r in runs}
         assert len(ids) == 4
         for run in runs:
-            assert run.id != derive_run_id(dict(run.parameters))
+            assert UUID(run.id).version == 7
 
     def test_ids_stable_across_reopened_experiment(self, workspace, tmp_path) -> None:
         project = workspace.add_project("det-project")

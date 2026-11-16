@@ -190,3 +190,132 @@ def test_init_replaces_an_unreadable_meta_file(tmp_path, app):
     assert read_record(target)["type"] == "workspace.root"
     assert read_record(target)["name"] == "lab"
     assert frontmatter.split((target / "index.md").read_text(encoding="utf-8"))[1] == "kept\n"
+
+
+def test_init_migrates_a_versioned_asset_and_keeps_its_id(tmp_path, app):
+    from pathlib import Path
+
+    target = tmp_path / "lab"
+    ws = Workspace(target, name="lab")
+    source = tmp_path / "hello.txt"
+    source.write_bytes(b"hello\n")
+    asset = ws.assets.import_asset("greeting", source)
+    record = Path(ws.assets.payload_path(asset.id)).parent
+    current = json.loads((record / "asset.json").read_text(encoding="utf-8"))
+    (record / "versions").mkdir()
+    (record / "versions" / "v001.json").write_text(
+        json.dumps(
+            {
+                "asset_id": asset.id,
+                "content": current["content"],
+                "origin": {"kind": "import", "uri": current["origin"]["uri"]},
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (record / "asset.json").write_text(
+        json.dumps(
+            {
+                "id": asset.id,
+                "title": current["title"],
+                "created_at": current["created_at"],
+                "created_by": current["created_by"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["init", str(target)])
+
+    assert result.exit_code == 0, result.output
+    assert not (record / "versions").exists()
+    loaded = Workspace.load(target).assets.get(asset.id)
+    assert loaded.content.digest == current["content"]["digest"]
+    assert loaded.origin.uri == current["origin"]["uri"]
+
+
+def test_init_never_rewrites_a_sealed_attempt_and_its_legacy_keys_still_read(tmp_path, app):
+    from pathlib import Path
+
+    from molab.workspace.domain import ExecutionStatus
+
+    target = tmp_path / "lab"
+    ws = Workspace(target, name="lab")
+    run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
+    execution = run.create_execution()
+    run.cancel(execution.id)
+    record_path = Path(str(run.path)) / "executions" / execution.id / "execution.json"
+    raw = json.loads(record_path.read_text(encoding="utf-8"))
+    raw["sealed_commit"] = "0" * 40
+    raw["artifacts"] = [{"id": "old-artifact", "name": "note.txt", "path": "artifacts/note.txt"}]
+    record_path.write_text(json.dumps(raw), encoding="utf-8")
+    before = record_path.read_bytes()
+
+    result = CliRunner().invoke(app, ["init", str(target)])
+
+    assert result.exit_code == 0, result.output
+    assert record_path.read_bytes() == before
+    reread = Workspace.load(target).get_project("p").get_experiment("e").get_run(run.id)
+    assert [item.status for item in reread.executions] == [ExecutionStatus.CANCELLED]
+
+
+def test_init_relabels_retired_edge_roles_as_derived_from(tmp_path, app):
+    from pathlib import Path
+
+    from molab.knowledge import Note
+
+    target = tmp_path / "lab"
+    Workspace(target, name="lab").materialize()
+    doc = target / "knowledges" / "trail.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(
+        "---\nclass: Note\nname: Trail\n---\n# Trail\n\n"
+        "- [@records the run](molab:experiment/E1/run/R1)\n"
+        "- [@supersedes old](old.md)\n"
+        "- [@cites paper](paper.md)\n\n"
+        "```\n[@records kept](code.md)\n```\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["init", str(target)])
+
+    assert result.exit_code == 0, result.output
+    edges = [
+        (edge.target if edge.is_ref else Path(edge.target).name, edge.role)
+        for edge in Note(doc).links()
+    ]
+    assert edges == [
+        ("molab:experiment/E1/run/R1", "derived_from"),
+        ("old.md", "derived_from"),
+        ("paper.md", "cites"),
+    ]
+    assert "[@records kept](code.md)" in doc.read_text(encoding="utf-8")
+
+
+def test_init_leaves_knowledge_an_older_molab_wrote_with_nothing_to_report(tmp_path, app):
+    from molab.knowledge.validate import validate_knowledge
+
+    target = tmp_path / "lab"
+    Workspace(target, name="lab").materialize()
+    docs = target / "knowledges"
+    docs.mkdir(parents=True, exist_ok=True)
+    (docs / "supervision.md").write_text(
+        "---\nclass: Delegation\nname: Supervision\nkind: research\ngoal: Replay\n"
+        "scope: molab:experiment/E1\nstate: done\n---\n# Supervision\n",
+        encoding="utf-8",
+    )
+    (docs / "gaps.md").write_text(
+        "---\nclass: Todo\nname: Gaps\nitems:\n  - id: a\n    title: A\n    status: done\n"
+        "gaps:\n  - id: a\n    component: molpy\n---\n# Gaps\n",
+        encoding="utf-8",
+    )
+    assert {issue["rule"] for issue in validate_knowledge(target, errors_only=True)} == {
+        "knowledge.class",
+        "knowledge.fields",
+    }
+
+    result = CliRunner().invoke(app, ["init", str(target)])
+
+    assert result.exit_code == 0, result.output
+    assert validate_knowledge(target, errors_only=True) == []

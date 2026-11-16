@@ -3,7 +3,6 @@ import { useCallback, useMemo } from "react";
 import { knowledgeApi } from "@/api";
 import { isSoftRemoteWait } from "@/api/errors";
 import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
-import type { DocSource } from "@/api/generated/models/DocSource";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
 import {
   type KnowledgeListFilters,
@@ -31,17 +30,11 @@ export interface UseKnowledgeDocs {
     name: string,
     hostPath?: string | null,
     options?: {
-      format?: "md" | "html";
+      format?: "md" | "html" | "tex";
       body?: string;
       cls?: DocCreateRequest.cls;
-      sources?: DocSource[];
-      record?: Record<string, unknown> | null;
-      title?: string | null;
-      authors?: string[] | null;
-      year?: number | null;
-      doi?: string | null;
-      venue?: string | null;
-      url?: string | null;
+      sources?: string[];
+      fields?: Record<string, unknown>;
     },
   ) => Promise<string>;
   renameDoc: (path: string, name: string) => Promise<void>;

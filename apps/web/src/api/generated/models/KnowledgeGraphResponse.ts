@@ -11,3 +11,4 @@ export type KnowledgeGraphResponse = {
     nodes: Array<NoteSummary>;
     edges: Array<KnowledgeGraphEdge>;
 };
+

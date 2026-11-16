@@ -24,6 +24,27 @@
 
 molab turns a Python script of typed tasks into a tracked, reproducible experiment. It pairs a content-hashed workflow engine with a file-system-backed `Workspace → Project → Experiment → Run` hierarchy, profile-driven run variants, and optional cluster submission — then adds a knowledge layer that writes findings, reports and notes beside the runs they describe, and a FastAPI server with a bundled React UI.
 
+In the web UI, knowledge files are browsed under **Workspace → Project →
+Experiment**. Select a project in the explorer to open its Relations editor tab;
+**Relations** previews that project's documents plus their connected workspace
+knowledge (plans, hypotheses and references), while retaining
+the file browser. The Files explorer also offers **Open Relations**, and a
+project page has a **Relations** action. Select a document in the relation map
+for its excerpt and references; open the document to return to its page.
+The map preserves Tack's paper grid, class-specific node shapes, typed arrows,
+floating status card and document preview. References are visible on first
+open; **Fold references** hides secondary links and selecting either endpoint
+reveals them. **Trace lineage** highlights a selected document's transitive
+origins and downstream consumers. The preview lists **Origins** and **Used by**
+with shortest-path step counts; only `derived_from` and `supersedes` imply
+provenance, while evidence and citations retain their separate roles. The
+**Show lineage** action on a project research document opens its Relations tab
+with that document selected. The offline NVE showcase includes a synthetic
+plan → observation → findings → report chain, conflicting
+evidence, an external citation, an asset/run source and a missing reference. Tack's execution controls and its
+existing research entry point remain in Tack.
+
+
 > **Under active development.** Public APIs may change between minor releases.
 
 ## Vision
@@ -72,7 +93,7 @@ uv tool install --editable /path/to/molab
 
 Workspace metadata uses `.molab/`; user configuration is stored under `~/.molab/`.
 
-Requires Python >= 3.12. Core depends on `pydantic`, `pyyaml`, `typer`, `rich`, `fastapi`, `uvicorn`, `zarr`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molcrafts-molab[gh]` the GitHub capability (httpx); `molcrafts-molab[molvis]` molvis snapshots, headless included; `molcrafts-molab[all]` bundles the optional extras, and `molcrafts-molab[dev]` pulls everything for development.
+Requires Python >= 3.12. Core depends on `pydantic`, `pyyaml`, `typer`, `rich`, `fastapi`, `uvicorn`, `zarr`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molcrafts-molab[molvis]` molvis snapshots, headless included; `molcrafts-molab[all]` bundles the optional extras, and `molcrafts-molab[dev]` pulls everything for development.
 
 Default `uv pip` / `pip` **does not** compile the React UI (no Node required). A published wheel already ships `src/molab/dist/`.
 

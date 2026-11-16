@@ -6,6 +6,7 @@ import {
   type DocTreeNode,
   KB_GROUP_ID,
   listHostOptions,
+  WORKSPACE_ABOVE_GROUP_ID,
 } from "@/plugins/knowledge/knowledgeDocTree";
 
 /** Depth-first search for the first node whose `relPath` matches. */
@@ -35,6 +36,26 @@ describe("buildDocTree", () => {
     expect(tree[0]?.children.map((child) => child.kind)).toEqual(["group", "doc"]);
     expect(findByRelPath(tree, "knowledges/a.md")?.kind).toBe("doc");
     expect(findByRelPath(tree, "projects/p/knowledges/b.md")?.kind).toBe("doc");
+  });
+
+  it("keeps workspace documents above a served project apart and read-only", () => {
+    const tree = buildDocTree(
+      [
+        { relPath: "knowledges/mine.md", hostPath: "", name: "mine.md" },
+        { relPath: "../../knowledges/lesson.md", hostPath: "../..", name: "lesson.md" },
+      ],
+      [],
+    );
+
+    expect(tree.map((node) => node.id)).toEqual([KB_GROUP_ID, WORKSPACE_ABOVE_GROUP_ID]);
+    expect(tree[0]?.children.map((node) => node.relPath)).toEqual(["knowledges/mine.md"]);
+    expect(tree[0]?.readOnly).toBe(false);
+    expect(findByRelPath(tree, "knowledges/mine.md")?.readOnly).toBe(false);
+    expect(tree[1]?.readOnly).toBe(true);
+    expect(findByRelPath(tree, "../../knowledges/lesson.md")).toMatchObject({
+      kind: "doc",
+      readOnly: true,
+    });
   });
 
   it("keeps the workspace visible for empty input", () => {

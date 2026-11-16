@@ -5,7 +5,7 @@ Walks through:
 1. ``import_asset`` — copies outside bytes in as an Asset.
 2. ``ctx.register`` — copies a task result in as an Asset of the experiment.
 3. ``ctx.checkpoint`` — writes a path under ``checkpoints/``. It is not an Asset.
-4. ``assets_produced_by`` — the assets one attempt registered.
+4. ``run.produced_assets()`` — the assets the latest attempt registered.
 5. ``Finding.harvest`` — the document cites ``molab:asset/<id>`` and the
    point the conclusion uses (``/loss``).
 6. ``finding.inputs`` — the next run's inputs are those asset ids. The root
@@ -67,9 +67,7 @@ async def main() -> None:
         log.append("epoch 1 done  loss=0.08")
         ctx.checkpoint("epoch-1", data={"step": 1})
 
-    from molab.workspace.asset_repository import assets_produced_by
-
-    produced = assets_produced_by(ws, run.executions[-1].id)
+    produced = run.produced_assets()
     metrics_asset = next(asset for asset in produced if asset.title == "metrics")
     print(f"metrics asset: molab:asset/{metrics_asset.id}")
 

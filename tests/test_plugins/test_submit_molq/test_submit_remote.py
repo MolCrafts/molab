@@ -153,8 +153,9 @@ def _install_fake_session(monkeypatch: pytest.MonkeyPatch, run, captured: dict[s
         def __init__(self, name: str) -> None:
             captured["cluster"] = name
 
-        def submit(self, spec, *, argv=None, request_key=None):
-            del argv, request_key
+        def submit(self, spec, *, project_root, request_key=None):
+            del request_key
+            captured["project_root"] = project_root
             unit = spec.execution.units[0]
             captured["submit_argv"] = list(unit.command.get("argv") or [])
             captured["submit_cwd"] = unit.cwd
@@ -372,7 +373,7 @@ workflow = (wf).compile()
 
 
 class TestRemoteWorkerOpensStagedAttempt:
-    @pytest.mark.parametrize("entry_kind", ["file", "package", "captured"])
+    @pytest.mark.parametrize("entry_kind", ["package", "captured"])
     def test_worker_runs_from_a_staged_only_layout(self, tmp_path: Path, entry_kind: str) -> None:
         """The worker must run from exactly what ``stage_in`` uploads.
 
@@ -408,9 +409,7 @@ class TestRemoteWorkerOpensStagedAttempt:
         experiment.bind_workflow("code", entrypoint=f"{entrypoint}:workflow")
         run = experiment.add_run(params={"seed": 1})
         run.materialize()
-        queued = run._create_execution(
-            source_entrypoint=wf_file if entry_kind == "captured" else None
-        )
+        queued = run._create_execution()
         if entry_kind == "captured":
             wf_file.write_text("raise RuntimeError('changed after queueing')", encoding="utf-8")
         assert queued.id == "e01"
@@ -462,3 +461,47 @@ class TestRemoteWorkerOpensStagedAttempt:
         assert result.returncode == 0, result.stdout + result.stderr
         record = json.loads(staged_record.read_text(encoding="utf-8"))
         assert record["status"] == "succeeded"
+
+
+class TestReconcileAfterAPrecreatedSubmission:
+    def test_a_finished_remote_job_is_staged_out(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The CLI and the server both precreate the attempt; once its job ends,
+        reconcile must pull the worker's record back instead of sealing the
+        attempt as never started."""
+        from molab.plugins.submit_molq import staging
+        from molab.plugins.submit_molq.submit import reconcile_submission
+
+        ws, project, experiment, run = _make_run(tmp_path)
+        _precreate_e01(ws, project, run)
+        transport = RecordingTransport()
+        monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _t: transport)
+        _install_fake_session(monkeypatch, run, {})
+        _remote_handler()(None, run, experiment, project, execution_id="e01")
+
+        class _EndedJob:
+            def status(self) -> dict[str, Any]:
+                return {"snapshots": [{"state": "succeeded", "terminal": True}]}
+
+            def logs(self, *, stream: str, offset: int) -> dict[str, Any]:
+                return {"text": "", "next_offset": offset, "bytes_read": 0}
+
+        class _Client:
+            def job(self, _ref: object) -> _EndedJob:
+                return _EndedJob()
+
+        staged: list[str] = []
+
+        def _stage_out(_transport: object, _run: object, _target: object, eid: str) -> bool:
+            staged.append(eid)
+            return False
+
+        monkeypatch.setattr("molab.workspace.connection.get_client", lambda _r=None: _Client())
+        monkeypatch.setattr(staging, "stage_out", _stage_out)
+
+        outcome = reconcile_submission(run, "e01")
+
+        assert outcome.error is None
+        assert staged == ["e01"]
+        assert run.execution("e01").status.value == "queued"

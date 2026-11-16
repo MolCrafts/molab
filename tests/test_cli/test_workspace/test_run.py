@@ -25,7 +25,6 @@ from typer.testing import CliRunner
 
 import molab.cli
 from molab._run_display import read_run_record
-from molab.cli._common import deterministic_run_id
 from molab.cli.workspace.run import _submit_to_scheduler
 from molab.profile import ProfileConfig
 from molab.workflow import (
@@ -290,6 +289,17 @@ def _bind_healing(tmp_path: Path) -> tuple[Project, Experiment, Run, Path, Path]
     return project, exp, run, flag, result
 
 
+def _bind_one(exp: Experiment) -> None:
+    """Bind a one-task workflow, as ``molab run`` has bound every experiment it dispatches."""
+    wf = Workflow(name="one")
+
+    @wf.task
+    def only(seed: int) -> int:
+        return seed
+
+    default_binding_registry.bind(exp, (wf).compile())
+
+
 def _fail_then_succeed(run: Run) -> None:
     """e01 failed, e02 succeeded — retryable, but the latest attempt is done."""
     run._create_execution()
@@ -297,6 +307,34 @@ def _fail_then_succeed(run: Run) -> None:
     run._create_execution(mode=ExecutionMode.RERUN, predecessor="e01")
     _seal(run, "e02", ExecutionStatus.SUCCEEDED)
 
+
+# stage_a fails until FLAG exists, so its first attempt records no output for it.
+_UPSTREAM_FAILS_SCRIPT = """\
+from pathlib import Path
+
+import molab as me
+from molab.workflow import Workflow
+
+FLAG = Path({flag!r})
+
+wf = Workflow(name="upstream")
+
+
+@wf.task
+def stage_a(seed: int) -> int:
+    if not FLAG.exists():
+        raise RuntimeError("FLAG missing")
+    return seed + 1
+
+
+@wf.task(depends_on=["stage_a"])
+def stage_b(stage_a: int) -> int:
+    return stage_a * 100
+
+
+ws = me.Workspace(name="lab")
+ws.add_project("p").add_experiment("e").define(wf, params={{"seed": [1]}})
+"""
 
 # seed 2 fails, seed 1 succeeds — one ``molab run`` with a mixed outcome.
 _SPLIT_SCRIPT = """\
@@ -328,8 +366,9 @@ class TestCreateDispatchExecution:
         from molab.cli.workspace.run import _create_dispatch_execution
         from molab.workspace.execution_context import profile_config_hash
 
-        _ws, _project, _exp, [run] = _declared(tmp_path)
+        _ws, _project, exp, [run] = _declared(tmp_path)
         script = _plain_script(tmp_path)
+        exp.bind_workflow("code", entrypoint=f"{script}:x")
         cfg = ProfileConfig({"k": 1}, name="cpu")
 
         execution_id = _create_dispatch_execution(
@@ -518,6 +557,7 @@ class TestExecuteSelected:
         from molab.cli.workspace.run import _execute_selected
 
         _ws, project, exp, [run] = _declared(tmp_path)
+        _bind_one(exp)
         _fail_then_succeed(run)
         handler = _SpyHandler()
         printed = _capture_prints(monkeypatch)
@@ -542,6 +582,7 @@ class TestExecuteSelected:
         from molab.cli.workspace.run import _execute_selected
 
         _ws, project, exp, [skipped, failed] = _declared(tmp_path, n_runs=2)
+        _bind_one(exp)
         _fail_then_succeed(skipped)
         failed._create_execution()
         _seal(failed, "e01", ExecutionStatus.FAILED)
@@ -989,8 +1030,10 @@ class TestRun:
         assert exit_code == 1, output
         assert "--rerun" in output
 
-    def test_rerun_task_with_an_unknown_task_fails_the_attempt(self, tmp_path: Path) -> None:
+    def test_rerun_task_with_an_unknown_task_creates_no_attempt(self, tmp_path: Path) -> None:
+        """A refusal known before start leaves the run as it was (no failed eNN)."""
         script = _write_script(tmp_path)
+        _heal(tmp_path)
         _molab("run", str(script), "--local", "-ws", str(tmp_path))
 
         exit_code, output = _molab(
@@ -999,9 +1042,83 @@ class TestRun:
 
         assert exit_code == 1, output
         assert "nope" in output
-        second = _only_run(tmp_path).execution("e02")
-        assert second.status.value == "failed"
-        assert "nope" in second.error["message"]
+        run = _only_run(tmp_path)
+        assert [item.id for item in run.executions] == ["e01"]
+        assert run.status_label == "succeeded"
+
+    def test_rerun_task_whose_upstream_has_no_recorded_output_creates_no_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        script = tmp_path / "s.py"
+        script.write_text(_UPSTREAM_FAILS_SCRIPT.format(flag=str(tmp_path / "healed")))
+        exit_code, output = _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        assert exit_code == 1, output
+
+        exit_code, output = _molab(
+            "run", str(script), "--rerun", "--task", "stage_b", "--local", "-ws", str(tmp_path)
+        )
+
+        assert exit_code == 1, output
+        assert "stage_a" in output
+        assert "skipped" in output
+        run = _only_run(tmp_path)
+        assert [item.id for item in run.executions] == ["e01"]
+
+    def test_rerun_of_one_selected_run_leaves_the_others(self, tmp_path: Path) -> None:
+        script = tmp_path / "split.py"
+        script.write_text(_SPLIT_SCRIPT, encoding="utf-8")
+        _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        [project] = Workspace.load(tmp_path).list_projects()
+        [exp] = project.list_experiments()
+        first = next(run for run in exp.list_runs() if run.metadata.parameters["seed"] == 1)
+
+        exit_code, output = _molab(
+            "run", str(script), "--rerun", "--run", first.id, "--local", "-ws", str(tmp_path)
+        )
+
+        assert exit_code == 0, output
+        attempts = {
+            run.metadata.parameters["seed"]: [e.id for e in run.executions]
+            for run in exp.list_runs()
+        }
+        assert attempts == {1: ["e01", "e02"], 2: ["e01"]}
+
+    def test_a_run_is_selected_by_its_directory_name(self, tmp_path: Path) -> None:
+        script = tmp_path / "split.py"
+        script.write_text(_SPLIT_SCRIPT, encoding="utf-8")
+        _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        [project] = Workspace.load(tmp_path).list_projects()
+        [exp] = project.list_experiments()
+        second = next(run for run in exp.list_runs() if run.metadata.parameters["seed"] == 2)
+
+        exit_code, output = _molab(
+            "run",
+            str(script),
+            "--resume",
+            "--run",
+            Path(second.run_dir).name,
+            "--local",
+            "-ws",
+            str(tmp_path),
+        )
+
+        assert exit_code == 1, output  # seed 2 fails again
+        assert [e.mode.value for e in second.executions] == ["initial", "resume"]
+
+    def test_a_selector_naming_no_run_creates_nothing(self, tmp_path: Path) -> None:
+        script = tmp_path / "split.py"
+        script.write_text(_SPLIT_SCRIPT, encoding="utf-8")
+        _molab("run", str(script), "--local", "-ws", str(tmp_path))
+
+        exit_code, output = _molab(
+            "run", str(script), "--rerun", "--run", "no-such-run", "--local", "-ws", str(tmp_path)
+        )
+
+        assert exit_code == 1, output
+        assert "no-such-run" in output
+        [project] = Workspace.load(tmp_path).list_projects()
+        [exp] = project.list_experiments()
+        assert [[e.id for e in run.executions] for run in exp.list_runs()] == [["e01"], ["e01"]]
 
     def test_one_failed_run_of_two_exits_1(self, tmp_path: Path) -> None:
         script = tmp_path / "split.py"
@@ -1172,9 +1289,9 @@ def _install_fake_molq(monkeypatch: pytest.MonkeyPatch, run: Run) -> SubmitSpy:
 
     class _FakeCluster:
         def submit(
-            self, spec: object, *, argv: object = None, request_key: object = None
+            self, spec: object, *, project_root: str, request_key: object = None
         ) -> _FakeJob:
-            del argv, request_key
+            del project_root, request_key
             env = dict(getattr(getattr(spec, "execution", None), "env", None) or {})
             spy.submits += 1
             spy.execution_id = env.get("MOLAB_EXECUTION_ID")
@@ -1272,6 +1389,84 @@ class TestSubmitToScheduler:
         assert list(run_dir.rglob("fresh.json")) == []
         assert sorted(p.name for p in (run_dir / "executions").iterdir()) == ["e01", "e02"]
 
+    def test_an_unreadable_time_limit_stops_the_submission(
+        self, scheduler_fixture: SchedulerFixture, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A limit that was not understood once ran the job under the scheduler's default."""
+        fx = scheduler_fixture
+
+        with pytest.raises(typer.Exit) as stopped:
+            _submit_to_scheduler(
+                script=fx.script,
+                profile_cfg=ProfileConfig({}, name=None),
+                continue_verb="rerun",
+                target_path=fx.ws.root,
+                explicit_ws=True,
+                selected_target=None,
+                selected_scheduler="local",
+                cluster="registered-local",
+                resources={"time": "half a day"},
+                scheduling={},
+                block=False,
+            )
+
+        assert stopped.value.exit_code == 1
+        assert "half a day" in capsys.readouterr().out
+        assert fx.spy.execution_id is None
+        assert sorted(p.name for p in (Path(fx.run.run_dir) / "executions").iterdir()) == ["e01"]
+
+    def test_a_refused_partial_rerun_submits_and_creates_nothing(
+        self, scheduler_fixture: SchedulerFixture, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fx = scheduler_fixture
+
+        with pytest.raises(typer.Exit) as stopped:
+            _submit_to_scheduler(
+                script=fx.script,
+                profile_cfg=ProfileConfig({}, name=None),
+                continue_verb="rerun",
+                target_path=fx.ws.root,
+                explicit_ws=True,
+                selected_target=None,
+                selected_scheduler="local",
+                cluster="registered-local",
+                resources={},
+                scheduling={},
+                block=False,
+                selected_tasks=("nope",),
+            )
+
+        assert stopped.value.exit_code == 1
+        assert "nope" in capsys.readouterr().out
+        assert fx.spy.submits == 0
+        assert sorted(p.name for p in (Path(fx.run.run_dir) / "executions").iterdir()) == ["e01"]
+
+    def test_rerun_submits_only_the_selected_run(self, scheduler_fixture: SchedulerFixture) -> None:
+        fx = scheduler_fixture
+        other = fx.run.experiment.add_run(params={"seed": 2})
+        other._create_execution()
+        other.cancel("e01")
+
+        _submit_to_scheduler(
+            script=fx.script,
+            profile_cfg=ProfileConfig({}, name=None),
+            continue_verb="rerun",
+            target_path=fx.ws.root,
+            explicit_ws=True,
+            selected_target=None,
+            selected_scheduler="local",
+            cluster="registered-local",
+            resources={},
+            scheduling={},
+            block=False,
+            run_selectors=(fx.run.id,),
+        )
+
+        assert fx.spy.submits == 1
+        assert fx.spy.record_error is None, fx.spy.record_error
+        assert [e.id for e in fx.run.executions] == ["e01", "e02"]
+        assert [e.id for e in other.executions] == ["e01"]
+
     def test_resume_hands_a_queued_resume_record(
         self, monkeypatch: pytest.MonkeyPatch, scheduler_fixture: SchedulerFixture
     ) -> None:
@@ -1358,34 +1553,7 @@ def _replica_experiment(tmp_path: Path) -> Experiment:
     return ws.add_project("p").add_experiment("r", n_replicas=1, seeds=[7])
 
 
-def _legacy_run(exp: Experiment, cfg: ProfileConfig) -> Run:
-    """A replica run under HEAD's profile-aware 16-hex id."""
-    assert cfg.name is not None
-    return exp.add_run(
-        params={"seed": 7, "replica": 0},
-        id=deterministic_run_id(
-            {"seed": 7, "replica": 0, "_profile": cfg.name, "_config_hash": cfg.content_hash()}
-        ),
-    )
-
-
 class TestExperimentCandidates:
-    def test_legacy_replica_run_is_found_by_its_id(self, tmp_path: Path) -> None:
-        from molab.cli.workspace.run import _experiment_candidates
-        from molab.workspace.execution_context import profile_config_hash
-
-        exp = _replica_experiment(tmp_path)
-        cfg = ProfileConfig({"n": 1}, name="cpu")
-        legacy = _legacy_run(exp, cfg)
-
-        [(existing, _params, config_hash, _label)], _declared_runs, _total = _experiment_candidates(
-            exp, cfg
-        )
-
-        assert existing is not None
-        assert existing.id == legacy.id
-        assert config_hash == profile_config_hash(cfg)
-
     def test_empty_unnamed_profile_has_no_config_hash(self, tmp_path: Path) -> None:
         from molab.cli.workspace.run import _experiment_candidates
 
@@ -1451,16 +1619,6 @@ class TestSelectCandidateRuns:
         assert first.id != second.id
         assert len(exp.list_runs()) == 2
 
-    def test_legacy_replica_run_is_reused(self, tmp_path: Path) -> None:
-        exp = _replica_experiment(tmp_path)
-        cfg = ProfileConfig({"n": 1}, name="cpu")
-        legacy = _legacy_run(exp, cfg)
-
-        [selected] = _select_round(exp, cfg, None)
-
-        assert selected.id == legacy.id
-        assert len(exp.list_runs()) == 1
-
     def test_rerun_on_an_empty_experiment_selects_and_creates_nothing(self, tmp_path: Path) -> None:
         exp = _replica_experiment(tmp_path)
 
@@ -1483,3 +1641,113 @@ class TestRunHelpText:
 
         assert code == 0
         assert "run-<id>" not in out
+
+
+# ── exec ──────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class _ExecSpy:
+    specs: list[object] = field(default_factory=list)
+    project_roots: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+
+
+def _fake_exec_client(monkeypatch: pytest.MonkeyPatch, *, reject: str | None = None) -> _ExecSpy:
+    """A molq client whose cluster runs every job to success, printing ``node7``."""
+    from molq import MolqError
+
+    spy = _ExecSpy()
+
+    class _Job:
+        def wait(self, *, timeout: float) -> dict[str, object]:
+            del timeout
+            return {"snapshots": [{"state": "succeeded"}]}
+
+        def logs(self, *, stream: str, offset: int) -> dict[str, object]:
+            text = "node7\n"[offset:] if stream == "stdout" else ""
+            return {"text": text, "next_offset": offset + len(text), "bytes_read": len(text)}
+
+    class _Cluster:
+        def definition(self) -> dict[str, object]:
+            return {"id": "hpc", "name": "hpc", "scheduler": "slurm"}
+
+        def submit(self, spec: object, *, project_root: str) -> _Job:
+            spy.project_roots.append(project_root)
+            if reject is not None:
+                raise MolqError(
+                    "SUBMISSION_REJECTED",
+                    "Native scheduler command failed",
+                    command="sbatch",
+                    stderr=reject,
+                )
+            spy.specs.append(spec)
+            return _Job()
+
+    class _Client:
+        def cluster(self, _name: str) -> _Cluster:
+            return _Cluster()
+
+    class _TargetFS:
+        def mkdir(self, path: str, *, parents: bool, exist_ok: bool) -> None:
+            del path, parents, exist_ok
+
+        def rm(self, path: str, *, recursive: bool) -> None:
+            del recursive
+            spy.removed.append(path)
+
+    monkeypatch.setattr("molab.workspace.connection.get_client", lambda _r=None: _Client())
+    monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _target: _TargetFS())
+    return spy
+
+
+def _workspace_with_remote_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from molab.workspace import ComputeTarget
+
+    ws = Workspace(tmp_path / "ws", name="lab")
+    ws.materialize()
+    ws.add_target(
+        ComputeTarget(name="hpc", registry_id="reg", cluster_id="hpc", scratch_root="/scratch")
+    )
+    monkeypatch.chdir(ws.root)
+
+
+class TestExec:
+    def test_account_and_partition_reach_the_scheduler(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """sbatch on a multi-account cluster refuses a job that names no account."""
+        _workspace_with_remote_target(tmp_path, monkeypatch)
+        spy = _fake_exec_client(monkeypatch)
+
+        exit_code, output = _molab(
+            "exec",
+            "-t",
+            "@hpc",
+            "-A",
+            "proj-1",
+            "-p",
+            "cpu",
+            "--time",
+            "00:05:00",
+            "--",
+            "hostname",
+        )
+
+        assert exit_code == 0, output
+        assert "node7" in output
+        [spec] = spy.specs
+        assert spec.scheduling.account == "proj-1"  # type: ignore[attr-defined]
+        assert spec.scheduling.partition == "cpu"  # type: ignore[attr-defined]
+        assert spec.resources.time_limit_seconds == 300  # type: ignore[attr-defined]
+
+    def test_a_rejected_submission_names_the_scheduler_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _workspace_with_remote_target(tmp_path, monkeypatch)
+        _fake_exec_client(monkeypatch, reject="sbatch: error: Invalid account")
+
+        exit_code, output = _molab("exec", "-t", "@hpc", "--", "hostname")
+
+        assert exit_code == 1
+        assert "sbatch: error: Invalid account" in output

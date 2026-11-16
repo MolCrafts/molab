@@ -45,9 +45,17 @@ def init(
 
     Defaults to the current directory. A legacy meta file or an ``index.md``
     that is not the current record is rewritten and the meta file is removed.
+    A versioned asset record is rewritten by ``AssetRepository.migrate_legacy``
+    (the same path as ``molab asset migrate``), which keeps its id. Knowledge an
+    older molab wrote is rewritten by ``migrate_knowledge``: a ``Delegation`` is a
+    ``Plan``, a frontmatter key its class does not declare moves to the end of
+    the narrative, and a link labelled with a retired role (``@records``,
+    ``@supersedes``) is relabelled ``@derived_from``.
     """
     from molab.cli._target import open_workspace, resolve_workspace_target
+    from molab.knowledge.migration import migrate_knowledge
     from molab.services.agent_guide import sync_agent_files
+    from molab.workspace.asset_repository import migrate_legacy_assets
     from molab.workspace.fs_local import LocalFS
     from molab.workspace.history import GitHistory
     from molab.workspace.rewrite import rewrite_records
@@ -59,6 +67,8 @@ def init(
         rewrite_records(target.path, fs=fs, name=name)
         _target, _fs, ws = open_workspace(spec, require_existing=False, name=name)
         ws.materialize()
+        migrate_legacy_assets(ws)
+        migrate_knowledge(ws)
         if isinstance(ws.fs, LocalFS):
             GitHistory(ws.root).init()
             # Last: the agent guide, ignore rules, validation baseline, and the

@@ -16,7 +16,7 @@ The comparison that rejected Temporal, Ray, AiiDA, and PSI/J as workflow-engine 
 
 ## Run lock is keyed by a bare run id
 
-The run lock uses the bare run id. Accepted legacy debt from the execution-mode work. `qualify_run_id` remains the permanent qualifier when a bare id must be turned into a `molab:` ref.
+The run metadata lock (`Run._metadata_lock`) and the `ExecutionRepository` create / state / seal locks use the bare run id. Accepted legacy debt from the execution-mode work; no layer above workspace composes a lock path any more (the server's keyed attempt creation takes `entity_record.record_lock` on the run's executions directory). `qualify_run_id` remains the permanent qualifier when a bare id must be turned into a `molab:` ref.
 
 ## Evidence after an early seal
 

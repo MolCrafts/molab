@@ -6,7 +6,7 @@ one marked block of that file, between :data:`BEGIN_MARKER` and
 :data:`END_MARKER`, and rewrites only that block; everything outside it is the
 user's. The block is rendered from the same constants the writers and the
 validator use — the naming law, the declared attempt directories and their
-purposes, the six knowledge classes — so it cannot describe a layout molab
+purposes, the knowledge classes — so it cannot describe a layout molab
 does not write. The "to do X, run Y" table lists only commands that exist;
 a test resolves each one in the CLI.
 
@@ -65,16 +65,19 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
     ),
     (
         "Write a knowledge document",
-        "molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --record JSON --created-by AGENT",
+        "molab knowledge write NAME TEXT --on HOST --class CLASS --source SOURCE --fields JSON --created-by AGENT",
+    ),
+    (
+        "Settle a Milestone from a run's registered numbers",
+        "molab knowledge evaluate DOC --measure CHECK=molab:asset/ID",
+    ),
+    (
+        "Write a Manuscript's bibliography from the Literature it cites",
+        "molab knowledge bib DOC [--out FILE]",
     ),
     (
         "Preview a knowledge document as a reader sees it (or export one HTML file)",
         "molab knowledge serve DOC [--export FILE]",
-    ),
-    (
-        "Report back as a dispatched worker",
-        "molab knowledge write NAME TEXT --on HOST --class Report --source SOURCE "
-        '--record \'{"kind": "worker_report", ...}\' --created-by WORKER',
     ),
     ("Import external data", "molab asset import TITLE PATH --project PROJECT"),
     (
@@ -191,22 +194,12 @@ def _layout() -> str:
 def _knowledge_classes() -> str:
     from molab.knowledge.concepts import _PRODUCTS
 
-    lines = ["| class | what it is |", "|---|---|"]
+    lines = ["| class | what it is | its fields |", "|---|---|---|"]
     for name, klass in _PRODUCTS.items():
         doc = (klass.__doc__ or "").strip().splitlines()
-        lines.append(f"| `{name}` | {_md(doc[0]) if doc else ''} |")
-    return "\n".join(lines)
-
-
-def _worker_records() -> str:
-    """The two worker-round records, by class and ``kind``, with their fields."""
-    from molab.knowledge.worker_report import WORKER_RECORD_CLASSES, BriefRecord, WorkerReportRecord
-
-    models = {"worker_report": WorkerReportRecord, "brief": BriefRecord}
-    lines = ["| class | `kind` | record fields |", "|---|---|---|"]
-    for kind, owner in WORKER_RECORD_CLASSES.items():
-        fields = ", ".join(f"`{name}`" for name in models[kind].model_fields if name != "kind")
-        lines.append(f"| `{owner}` | `{kind}` | {fields} |")
+        model = klass.FIELDS
+        fields = ", ".join(f"`{key}`" for key in model.model_fields) if model else "none"
+        lines.append(f"| `{name}` | {_md(doc[0]) if doc else ''} | {fields} |")
     return "\n".join(lines)
 
 
@@ -290,7 +283,7 @@ def render_agent_guide(ws: Workspace) -> str:
         "viewers render it. Never link a `localhost` server.",
         f"- When `{WORKFLOW_SCRIPT_FILENAME}` grows past a few hundred lines, move its tasks "
         f"into modules under `{WORKFLOW_LIB_CONTAINER}/`.",
-        "- Create an experiment when its stage starts, not ahead of the roadmap.",
+        "- Create an experiment when its work starts, not in advance.",
         "",
         "### Knowledge documents",
         "",
@@ -298,21 +291,17 @@ def render_agent_guide(ws: Workspace) -> str:
         'or `<slug>.html` (the record as JSON in `<script id="molab-record">`, a body of '
         "`<molab-markdown>` blocks and `<molab-…>` elements); its record names one class "
         "(`class:`). The table is the set. Write them with `molab knowledge write` "
-        "(`--format html` for the HTML form).",
+        "(`--format html` for the HTML form). A `Manuscript` is `<slug>.tex`: LaTeX that "
+        "compiles as it stands, its record in a leading `%%` comment block and its sources "
+        "as `% - [@role label](target)` comment lines; each `\\cite{key}` names a "
+        "`Literature` document (its file name) in that level or one above, and "
+        "`molab knowledge bib DOC` writes the bibliography from them.",
         "",
         _knowledge_classes(),
         "",
-        "#### Worker records",
-        "",
-        "A supervised worker round is two of those documents with a structured record: "
-        "the `Note` you were dispatched with (`kind: brief` — the delegation, the round, "
-        "the digest of its text, the documents it was compiled from, and the protocol you "
-        "are held to) and the `Report` you write back (`kind: worker_report`). Report every "
-        "acceptance check by name with its verdict, every product, every departure from the "
-        "protocol, and every MolCrafts capability you needed and did not find; molab "
-        "refuses a record with an unknown field or on the wrong class.",
-        "",
-        _worker_records(),
+        "Any other frontmatter key is refused. A `Roadmap`, `Todo` or `Milestone` cites "
+        "the `Plan` it belongs to; a stage a `Todo` item or a `Milestone` names must be "
+        "on a `Roadmap` that cites the same `Plan`.",
         "",
         "### To do this, run that",
         "",

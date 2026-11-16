@@ -1,9 +1,10 @@
 """``Concept`` — a knowledge document whose **path is its identity**.
 
 A product document is one file, ``knowledges/<name>.md`` (YAML frontmatter +
-markdown) or ``knowledges/<name>.html`` (the record as JSON in
+markdown) or ``knowledges/<name>.html`` (the frontmatter as JSON in
 ``<script id="molab-record">``, a body of ``<molab-markdown>`` blocks and
-``<molab-…>`` elements). The record names the class; the narrative's markdown
+``<molab-…>`` elements). The frontmatter names the class and carries the
+fields that class declares (:attr:`Concept.FIELDS`); the narrative's markdown
 links are the graph.
 A bare :class:`Concept` is only a root handle for ``walk`` / ``search`` /
 ``import_zotero``. It does not construct a subclass.
@@ -26,7 +27,10 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
+from pydantic import BaseModel
+
 from molab.fs import FileSystem, LocalFS, PathArg
+from molab.texdoc import link_text
 
 from .edges import (
     DEFAULT_EDGE_ROLE,
@@ -39,8 +43,13 @@ from .edges import (
 )
 
 if TYPE_CHECKING:
+    from molab.workspace.domain import Asset
+    from molab.workspace.folder import Folder
+    from molab.workspace.refs import MolabRef
+
     from .concepts import Literature
     from .edges import Backlink
+    from .naming import KnowledgeFormat
     from .search import SearchResult
 
 #: ``[label](target)`` — both halves captured; the label carries the edge role.
@@ -65,18 +74,21 @@ def _mask_code(text: str) -> str:
     return _CODE_SPAN.sub(_blank, _CODE_FENCE.sub(_blank, text))
 
 
-def markdown_links(text: str) -> list[re.Match[str]]:
-    """Every markdown link in *text* outside code, as matches against *text*."""
-    masked = _mask_code(text)
+def markdown_links(text: str, *, path: object = None) -> list[re.Match[str]]:
+    """Every markdown link in *text* outside code, as matches against *text*.
+
+    *text* is the body of the document at *path*. A TeX body carries links
+    only in whole-line ``%`` comments (:func:`molab.texdoc.link_text`): a
+    bracket followed by a parenthesis in LaTeX is mathematics, not a link.
+    """
+    from .naming import is_tex_document
+
+    masked = link_text(text) if path is not None and is_tex_document(path) else _mask_code(text)
     return [
         match
         for match in _MD_LINK.finditer(text)
         if masked[match.start() : match.end()] == match.group(0)
     ]
-
-
-#: Declared type of a bare root handle.
-FALLBACK_CONCEPT_TYPE = "concept"
 
 
 class LinkScan(NamedTuple):
@@ -105,20 +117,26 @@ class Concept:
     A bare ``Knowledge`` is a root handle: it walks, searches and opens
     documents, and it is not a document itself. Product subclasses are one
     file, ``knowledges/<name>.md`` or ``knowledges/<name>.html``, whose
-    record names the class.
+    frontmatter names the class.
     """
 
-    #: Declared type of a bare root handle. A file document uses its own.
-    DEFAULT_TYPE: ClassVar[str] = FALLBACK_CONCEPT_TYPE
     #: Product documents are markdown files, not directories.
     FILE_DOCUMENT: ClassVar[bool] = False
+    #: The storage formats this class's documents may take, the default first
+    #: (:data:`~molab.knowledge.naming.KnowledgeFormat`). A write in another
+    #: format is refused, and ``molab validate`` reports a file in one.
+    FORMATS: ClassVar[tuple[KnowledgeFormat, ...]] = ("md", "html")
+    #: The frontmatter fields this class owns beyond the keys every document
+    #: carries (:data:`~molab.knowledge.fields.COMMON_KEYS`): a pydantic model
+    #: that refuses an unknown key. ``None`` owns none, so no other key is
+    #: written. A subclass that adds fields extends its parent's model.
+    FIELDS: ClassVar[type[BaseModel] | None] = None
 
     def __init__(
         self,
         path: PathArg,
         name: str | None = None,
         *,
-        type: str | None = None,
         fs: FileSystem | None = None,
     ) -> None:
         """Bind this Concept to *path*, or to *path* (a host) plus *name*.
@@ -133,7 +151,6 @@ class Concept:
                 ``<host>/knowledges/<slug>.md``. Nothing touches disk; the first
                 :meth:`write` / :meth:`ref` lands the bytes. A bare
                 :class:`Concept` is not a document and raises ``TypeError``.
-            type: Declared type; defaults to :attr:`DEFAULT_TYPE`.
             fs: The filesystem to read and write through; defaults to the
                 host's own disk (never the local one) in the *name* form, and
                 to :class:`~molab.fs.LocalFS` otherwise.
@@ -146,9 +163,7 @@ class Concept:
         if name is not None:
             from .location import _folder, _host_fs
 
-            # ``self.__class__``, not ``type(self)``: the *type* kwarg below
-            # shadows the builtin.
-            raw = str(_folder(path, name, self.__class__))
+            raw = str(_folder(path, name, type(self)))
             disk = fs if fs is not None else _host_fs(path)
         else:
             raw = str(path)
@@ -159,16 +174,15 @@ class Concept:
             disk = fs if fs is not None else LocalFS()
         self._fs: FileSystem = disk
         self._path = raw
-        self._type = type if type is not None else self.DEFAULT_TYPE
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}({self._path!r}, type={self._type!r})"
+        return f"{type(self).__name__}({self._path!r})"
 
     def __eq__(self, other: object) -> bool:
         """Two Concepts are equal when they address the same directory.
 
-        Path *is* identity, so this is the only sound definition — the declared
-        type is metadata about that directory, not a second identity axis.
+        Path *is* identity, so this is the only sound definition — the class
+        is what the file declares, not a second identity axis.
         """
         if not isinstance(other, Concept):
             return NotImplemented
@@ -272,8 +286,8 @@ class Concept:
         walk stays on the path the caller named.
 
         Yields:
-            One opened document per markdown file. A file that cannot be
-            opened is skipped.
+            One opened document per document file. A file whose frontmatter
+            names no knowledge class is not a document and is skipped.
         """
         from .concepts import _open_document
         from .errors import KnowledgeNotFoundError
@@ -282,8 +296,8 @@ class Concept:
             try:
                 yield _open_document(path, fs=self._fs)
             except (KnowledgeNotFoundError, ValueError):
-                # Unknown class, or a path that is not a document. One bad
-                # file does not hide the rest of the tree.
+                # No class, or a path that is not a document. One bad file
+                # does not hide the rest of the tree.
                 continue
 
     def search(
@@ -310,14 +324,14 @@ class Concept:
 
         Returns:
             The ranked hits. Each entry path is relative to this handle and
-            keeps its ``.md`` / ``.html`` suffix. ``type`` is the Knowledge
-            class name. An HTML document is titled by its record ``name`` (or
-            ``title``) and ranked on its text without tags.
+            keeps its ``.md`` / ``.html`` suffix. ``cls`` is the Knowledge
+            class name; the title is :meth:`title`'s rule. An HTML document is
+            ranked on its text without tags.
         """
-        from .concepts import _PRODUCTS
+        from .concepts import class_of
         from .frontmatter import document_text, split_frontmatter
-        from .naming import is_html_document
-        from .search import ConceptIndexEntry, extract_title, search_index
+        from .index_section import document_title
+        from .search import ConceptIndexEntry, search_index
 
         entries: list[ConceptIndexEntry] = []
         bodies: dict[str, str] = {}
@@ -326,11 +340,10 @@ class Concept:
             if raw is None:
                 continue
             meta, body = split_frontmatter(raw, path=path)
-            raw_class = meta.get("class")
-            class_name = raw_class if isinstance(raw_class, str) and raw_class else "Note"
-            if class_name not in _PRODUCTS:
+            klass = class_of(meta)
+            if klass is None:
                 continue
-            klass = _PRODUCTS[class_name]
+            title = document_title(meta, body, PurePosixPath(path).stem)
             if isinstance(of, type) and not issubclass(klass, of):
                 continue
             tags_raw = meta.get("tags")
@@ -338,14 +351,12 @@ class Concept:
             if tag is not None and tag not in tags:
                 continue
             body = document_text(body, path=path)
-            named = _meta_text(meta, "name", "title") if is_html_document(path) else None
-            title = named or extract_title(body) or PurePosixPath(path).stem
             rel = PurePosixPath(os.path.relpath(path, self._path)).as_posix()
             bodies[rel] = body if include_text else ""
             entries.append(
                 ConceptIndexEntry(
                     path=rel,
-                    type=klass.__name__,
+                    cls=klass.__name__,
                     title=title,
                     tags=tags,
                 )
@@ -357,10 +368,6 @@ class Concept:
             limit=limit,
             include_body=include_text,
         )
-
-    def type(self) -> str:
-        """This handle's declared type. A file document does not read disk."""
-        return self._type
 
     def tags(self) -> list[str]:
         """Categorical labels from frontmatter."""
@@ -378,6 +385,34 @@ class Concept:
             return {}
         meta, _body = split_frontmatter(text, path=self._path)
         return meta
+
+    def fields(self) -> BaseModel | None:
+        """This document's :attr:`FIELDS`, read from its frontmatter; ``None`` without.
+
+        A key the class does not declare is not read (``molab validate``
+        reports it); a declared value the model rejects raises ``ValueError``.
+        """
+        model = type(self).FIELDS
+        return None if model is None else self._fields_of(model)
+
+    def _fields_of[M: BaseModel](self, model: type[M]) -> M:
+        """*model* built from this document's frontmatter keys that it declares."""
+        meta = self.frontmatter()
+        return model.model_validate({key: meta[key] for key in model.model_fields if key in meta})
+
+    def title(self) -> str:
+        """The display title: frontmatter ``title``, else the first H1, else ``name``, else the stem.
+
+        The one rule, :func:`~molab.knowledge.index_section.document_title`.
+        """
+        from .frontmatter import split_frontmatter
+        from .index_section import document_title
+
+        self._require_document("title")
+        meta, body = split_frontmatter(
+            read_text_or_none(self._path, fs=self._fs) or "", path=self._path
+        )
+        return document_title(meta, body, self.name)
 
     def read(self) -> str:
         """This document's narrative: the markdown body, or the HTML ``<body>`` content."""
@@ -397,7 +432,7 @@ class Concept:
         text: str | None = None,
         role: EdgeRole = DEFAULT_EDGE_ROLE,
     ) -> None:
-        """Cross-reference another Knowledge document — the strict spelling of :meth:`cite`.
+        """Cross-reference another Knowledge document.
 
         *ref* must denote a Knowledge: a :class:`Concept` subclass instance
         other than the bare base class, or a path whose markdown file names one.
@@ -418,27 +453,6 @@ class Concept:
         """
         target = _knowledge_target(ref, fs=self._fs)
         append_link(self, target, text=text, role=role)
-
-    def cite(
-        self,
-        ref: Concept | PathArg,
-        *,
-        text: str | None = None,
-        role: EdgeRole = DEFAULT_EDGE_ROLE,
-    ) -> None:
-        """Cite *ref* — append a typed markdown link.
-
-        The loose spelling of :meth:`ref`: a Knowledge target is delegated to
-        it, while a bare directory (a run, an experiment) is still linked as
-        given, so knowledge never imports the workspace layer. All six
-        knowledge classes share this verb.
-        """
-        try:
-            target = _knowledge_target(ref, fs=self._fs)
-        except TypeError:
-            append_link(self, ref, text=text, role=role)
-            return
-        self.ref(target, text=text, role=role)
 
     def backlinks(self, *, within: Concept | PathArg | None = None) -> list[Backlink]:
         """Documents under *within* whose links point at this one.
@@ -476,24 +490,30 @@ class Concept:
         Raises:
             FileExistsError: If the destination already exists.
             ValueError: If *within* is omitted and cannot be derived.
+
+        Runs under the document's lock and records one ``knowledge.moved``
+        history commit (:func:`~molab.knowledge.mutation.mutation`).
         """
         from .location import document_slug
+        from .mutation import mutation
 
         self._require_document("rename")
-        slug = document_slug(new_name)
-        if type(self).FILE_DOCUMENT:
-            slug = f"{slug}{PurePosixPath(self._path).suffix}"
+        slug = f"{document_slug(new_name)}{PurePosixPath(self._path).suffix}"
         dst = self._fs.join(self._fs.dirname(self._path), slug)
         if self._norm(dst) == self._norm(self._path):
             return
-        if self._fs.exists(dst):
-            raise FileExistsError(f"cannot rename {self._path!r} to {dst!r}: destination exists")
-        inbound = self.backlinks(within=within)
-        old = self._path
-        self._fs.mv(old, dst)
-        self._path = dst
-        _rewrite_inbound(inbound, old, dst)
-        _refresh_sections(self._fs, dst)
+        with mutation(self, "knowledge.moved", f"rename {self.name} to {new_name}") as change:
+            if self._fs.exists(dst):
+                raise FileExistsError(
+                    f"cannot rename {self._path!r} to {dst!r}: destination exists"
+                )
+            inbound = self.backlinks(within=within)
+            old = self._path
+            self._fs.mv(old, dst)
+            self._path = dst
+            _rewrite_inbound(inbound, old, dst)
+            _refresh_sections(self._fs, dst)
+            change.touched.extend(str(link.source.path) for link in inbound)
 
     def move_to(
         self,
@@ -522,10 +542,14 @@ class Concept:
             TypeError: If *host* is a document instance.
             ValueError: If *stem* is empty, contains ``/``, or is ``.`` / ``..``,
                 or *within* is omitted and cannot be derived.
+
+        Runs under the document's lock and records one ``knowledge.moved``
+        history commit (:func:`~molab.knowledge.mutation.mutation`).
         """
         if stem is not None and (stem == "" or "/" in stem or stem in {".", ".."}):
             raise ValueError(f"stem {stem!r} is not a single path segment")
         from .location import _folder
+        from .mutation import mutation
         from .naming import document_format
 
         fmt = document_format(self._path)
@@ -534,31 +558,38 @@ class Concept:
         dst = planned if stem is None else self._fs.join(self._fs.dirname(planned), stem + suffix)
         if self._norm(dst) == self._norm(self._path):
             return
-        if self._fs.exists(dst):
-            raise FileExistsError(f"cannot move {self._path!r} to {dst!r}: destination exists")
-        old = self._path
-        inbound = None
-        old_dir = ""
-        if relink:
-            inbound = self.backlinks(within=within)
-            old_dir = _link_base(self)
-        self._fs.mkdir(self._fs.dirname(dst), parents=True, exist_ok=True)
-        self._fs.mv(old, dst)
-        self._path = dst
-        if relink and inbound is not None:
-            new_dir = _link_base(self)
-            _retarget_links(self, lambda target: _rehome_link(target, old_dir, new_dir))
-            _rewrite_inbound(inbound, old, dst)
-        _refresh_sections(self._fs, old, dst)
+        with mutation(self, "knowledge.moved", f"move {self.name}") as change:
+            if self._fs.exists(dst):
+                raise FileExistsError(f"cannot move {self._path!r} to {dst!r}: destination exists")
+            old = self._path
+            inbound = None
+            old_dir = ""
+            if relink:
+                inbound = self.backlinks(within=within)
+                old_dir = _link_base(self)
+            self._fs.mkdir(self._fs.dirname(dst), parents=True, exist_ok=True)
+            self._fs.mv(old, dst)
+            self._path = dst
+            if relink and inbound is not None:
+                new_dir = _link_base(self)
+                _retarget_links(self, lambda target: _rehome_link(target, old_dir, new_dir))
+                _rewrite_inbound(inbound, old, dst)
+                change.touched.extend(str(link.source.path) for link in inbound)
+            _refresh_sections(self._fs, old, dst)
 
     def delete(self) -> None:
         """Remove this document. Inbound links are left dangling.
 
-        The host's ``index.knowledges`` section is rebuilt afterwards.
+        The host's ``index.knowledges`` section is rebuilt afterwards. Runs
+        under the document's lock and records one ``knowledge.deleted`` history
+        commit (:func:`~molab.knowledge.mutation.mutation`).
         """
+        from .mutation import mutation
+
         self._require_document("delete")
-        self._fs.rm(self._path)
-        _refresh_sections(self._fs, self._path)
+        with mutation(self, "knowledge.deleted", f"delete {self.name}"):
+            self._fs.rm(self._path)
+            _refresh_sections(self._fs, self._path)
 
     def supersede_with(
         self, successor: Concept, *, within: Concept | PathArg | None = None
@@ -583,9 +614,10 @@ class Concept:
     def export(self) -> str:
         """This document as a file to hand out.
 
-        A markdown document exports its narrative, without frontmatter. An
-        HTML document exports the whole file: it is already a standalone page,
-        and its record is an inert script element.
+        A markdown document exports its narrative, without frontmatter, and a
+        TeX document its LaTeX, without the record block. An HTML document
+        exports the whole file: it is already a standalone page, and its
+        frontmatter is an inert script element.
         """
         from .naming import is_html_document
 
@@ -609,161 +641,131 @@ class Concept:
                 return Knowledge(root, fs=self._fs)
         raise ValueError(f"{self.path} is not inside a workspace; pass within= explicitly")
 
-    @classmethod
-    def create(
-        cls,
-        host: object,
-        name: str,
-        *,
-        sources: list[object] | None = None,
-        created_by: str,
-        text: str,
-        cite: Sequence[tuple[object, str]] = (),
-        title: str = "",
-    ) -> Concept:
-        """Write this class under *host* (idempotent on *name*).
-
-        Args:
-            host: Parent folder (a Project or Experiment).
-            name: Document name; slugified to the landed filename.
-            sources: Source list. Required for Finding, Report, Plan, Observation.
-            created_by: Author (a person or tool identifier).
-            text: Narrative for the document.
-            cite: Optional ``(target, role)`` pairs.
-            title: History summary for ``knowledge.created``. Falls back to *name*.
-
-        Returns:
-            The written document.
-        """
-        from .write import write_knowledge
-
-        return write_knowledge(
-            host,  # ty: ignore[invalid-argument-type]
-            name=name,
-            of=cls,
-            sources=list(sources or ()),
-            created_by=created_by,
-            text=text,
-            cite=cite,  # ty: ignore[invalid-argument-type]
-            title=title,
-        )
-
     def write(
         self,
-        text: str | object | None = None,
-        data: object | None = None,
+        text: str | None = None,
+        fields: Mapping[str, object] | None = None,
         *,
         tags: list[str] | None = None,
-        status: str | None = None,
         replace: bool = False,
     ) -> None:
         """Write this document.
 
-        A string is the narrative, or a full markdown document with YAML
-        frontmatter. Structured records (``ReferenceMeta``, sources, tags)
-        fold into the frontmatter. One file: ``knowledges/<name>.md``, or
-        ``.html`` for an HTML document (the record and body in that format).
+        A string is the narrative, or a full document whose frontmatter is
+        merged over the stored one. One file: ``knowledges/<name>.md``, or
+        ``.html`` for an HTML document (the frontmatter and body in that
+        format).
 
         With ``replace=True``, *text* is the whole file. It is persisted
         verbatim: no frontmatter merge and no source rendering. Equal bytes
         are left untouched.
 
         Args:
-            text: Narrative, a full markdown document, or a structured record
-                when *data* is omitted.
-            data: Structured record folded into the frontmatter.
+            text: Narrative, or a full document. ``None`` keeps the narrative.
+            fields: Frontmatter keys to set, merged over the stored ones: the
+                class's own :attr:`FIELDS`, or a key every document carries.
             tags: Frontmatter tags. ``None`` leaves stored tags alone.
-            status: Frontmatter status. ``None`` leaves stored status alone.
             replace: Persist *text* as the whole file.
+
+        Runs under the document's lock and records one history commit,
+        ``knowledge.meta_changed`` when the narrative is kept and
+        ``knowledge.edited`` otherwise
+        (:func:`~molab.knowledge.mutation.mutation`).
 
         Raises:
             TypeError: ``replace=True`` and *text* is not a ``str``.
-            ValueError: ``replace=True`` and the frontmatter ``class`` is not
-                this document's class.
+            ValueError: The frontmatter ``class`` is not this document's
+                class.
+            ContentRuleError: The document the write would leave breaks an
+                error-level content rule, its class's fields among them
+                (:func:`~molab.knowledge.content_rules.error_issues`). Nothing
+                is written.
         """
+        from .content_rules import refuse_errors
         from .frontmatter import dump_frontmatter, split_frontmatter
-        from .naming import as_knowledge_file
+        from .mutation import mutation
 
         self._require_document("write")
-        if replace:
-            if not isinstance(text, str):
-                raise TypeError(
-                    f"replace=True requires the whole document as str, got {type(text).__name__}"
-                )
-            meta, _body = split_frontmatter(text, path=self._path)
-            declared = meta.get("class")
-            if declared != type(self).__name__:
-                raise ValueError(
-                    f"frontmatter class {declared!r} does not match {type(self).__name__}"
-                )
-            if self._fs.is_file(self._path) and self._fs.read_text(self._path) == text:
-                return
-            self._accept_written_record(meta, creating=not self._fs.is_file(self._path))
-            self._fs.mkdir(self._fs.dirname(self._path), parents=True, exist_ok=True)
-            self._fs.atomic_write_text(self._path, text)
-            return
-
-        if self.__class__.FILE_DOCUMENT:
-            self._path = as_knowledge_file(self._path)
-        record = data
-        narrative: str | None
-        incoming_fm: dict[str, object] = {}
-        if text is None:
-            narrative = None
-        elif isinstance(text, str):
-            incoming_fm, body = split_frontmatter(text, path=self._path)
-            if incoming_fm:
-                narrative = body
-            else:
-                narrative = text
+        if text is None and not replace:
+            event = "knowledge.meta_changed"
+            summary = f"{self.name}: tags" if fields is None else f"{self.name}: fields"
         else:
-            record = text if record is None else record
-            narrative = None
-        extra: dict[str, object] = dict(incoming_fm)
-        if tags is not None:
-            extra["tags"] = list(tags)
-        if status is not None:
-            extra["status"] = status
-        if record is not None:
-            dumped = _record_as_dict(record)
-            extra = {**dumped, **extra}
-        extra["class"] = type(self).__name__
-        extra.pop("type", None)
-        extra.pop("id", None)
-        sources = list(getattr(self, "_sources", None) or [])
-        existing_fm = self.frontmatter()
-        merged = {**existing_fm, **extra}
-        self._accept_written_record(merged, creating=not self.exists())
-        if narrative is None:
-            narrative = self.read()
-        parent = str(PurePosixPath(self._path).parent)
-        self._fs.mkdir(parent, parents=True, exist_ok=True)
-        body, _appended = append_source_links(
-            narrative or "", sources, base_dir=parent, path=self._path
-        )
-        self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body, path=self._path))
+            event, summary = "knowledge.edited", f"edit {self.name}"
+        with mutation(self, event, summary):
+            if replace:
+                if not isinstance(text, str):
+                    raise TypeError(
+                        f"replace=True requires the whole document as str, got {type(text).__name__}"
+                    )
+                meta, body = split_frontmatter(text, path=self._path)
+                declared = meta.get("class")
+                if declared != type(self).__name__:
+                    raise ValueError(
+                        f"frontmatter class {declared!r} does not match {type(self).__name__}"
+                    )
+                if self._fs.is_file(self._path) and self._fs.read_text(self._path) == text:
+                    return
+                self._refuse_other_class()
+                refuse_errors(type(self), str(self._path), meta, body)
+                self._fs.mkdir(self._fs.dirname(self._path), parents=True, exist_ok=True)
+                self._fs.atomic_write_text(self._path, text)
+                return
 
-    def _accept_written_record(self, merged: Mapping[str, object], *, creating: bool) -> None:
-        """Refuse a record ``write_knowledge`` would refuse. Nothing is written yet."""
-        from pydantic import ValidationError
-
-        from .planning import check_planning_record
-        from .worker_report import check_worker_record
-
-        klass = type(self)
-        existing = None if creating else self.frontmatter()
-        if existing and existing.get("class") != klass.__name__:
-            raise ValueError(
-                f"{self.path} already holds a {existing.get('class')}, not a {klass.__name__}"
+            head: dict[str, object] = {}
+            narrative = text
+            if text is not None:
+                incoming, body = split_frontmatter(text, path=self._path)
+                if incoming:
+                    head.update(incoming)
+                    narrative = body
+            if fields is not None:
+                head.update(fields)
+            if tags is not None:
+                head["tags"] = list(tags)
+            head["class"] = type(self).__name__
+            sources = list(getattr(self, "_sources", None) or [])
+            merged = {**self.frontmatter(), **head}
+            self._refuse_other_class()
+            if narrative is None:
+                narrative = self.read()
+            parent = str(PurePosixPath(self._path).parent)
+            body, _appended = append_source_links(
+                narrative or "", sources, base_dir=parent, path=self._path
             )
-        check_record = getattr(klass, "check_record", None)
-        if callable(check_record):
-            check_record(dict(merged), existing=existing)
-        try:
-            check_planning_record(klass, merged, creating=creating)
-        except ValidationError as exc:
-            raise ValueError(f"invalid {klass.__name__} record: {exc}") from exc
-        check_worker_record(klass, merged, existing=existing)
+            refuse_errors(type(self), str(self._path), merged, body)
+            self._fs.mkdir(parent, parents=True, exist_ok=True)
+            self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body, path=self._path))
+
+    def _refuse_other_class(self) -> None:
+        """Refuse to write over a file that holds another class. Nothing is written yet."""
+        stored = self.frontmatter() if self.exists() else {}
+        if stored and stored.get("class") != type(self).__name__:
+            raise ValueError(
+                f"{self.path} already holds a {stored.get('class')}, not a {type(self).__name__}"
+            )
+
+    def _follow_moved(self, old: str, new: str) -> None:
+        """Re-point an edge this document holds outside its markdown links at *new*.
+
+        :func:`_rewrite_inbound` calls it on each document that linked the
+        moved document at *old*, after the markdown links are rewritten. A
+        class whose edges are all markdown links holds no other kind.
+        """
+
+    def _store_relinked(self, body: str) -> None:
+        """Store *body*, in which only link targets changed, under the stored frontmatter.
+
+        Moving a document rewrites the links that point at it. Relinking
+        changes no content rule's verdict, so it skips :meth:`write`'s gate: a
+        document that already breaks a rule does not block the move.
+        """
+        from .frontmatter import dump_frontmatter
+        from .mutation import mutation
+
+        with mutation(self, "knowledge.edited", f"relink {self.name}"):
+            self._fs.atomic_write_text(
+                self._path, dump_frontmatter(self.frontmatter(), body, path=self._path)
+            )
 
     def links(self) -> list[Edge]:
         """The documents this one cites — typed markdown links in the narrative."""
@@ -779,18 +781,20 @@ class Concept:
         Args:
             body: The narrative to scan.
         """
+        return self._classify_links(markdown_links(body, path=self._path))
+
+    def _classify_links(self, links: Iterable[re.Match[str]]) -> LinkScan:
+        """Resolve each matched markdown link against this document's directory."""
         from molab.workspace.refs import is_ref
 
-        base = PurePosixPath(self._path)
-        if self.__class__.FILE_DOCUMENT:
-            base = base.parent
+        base = PurePosixPath(self._path).parent
         concepts: list[str] = []
         external: list[str] = []
         other: list[str] = []
         typed_concepts: list[Edge] = []
         refs: list[str] = []
         missing: list[str] = []
-        for link in markdown_links(body):
+        for link in links:
             raw_label, target = link.group(1), link.group(2)
             role, _human = parse_role(raw_label)
             if target.startswith(("http://", "https://")):
@@ -852,7 +856,6 @@ class Concept:
             The :class:`Literature` records created or updated.
         """
         from .concepts import Literature
-        from .reference_meta import ReferenceMeta
         from .write import write_knowledge
         from .zotero import ZoteroLibrary
 
@@ -862,20 +865,11 @@ class Concept:
         for item in ZoteroLibrary(path).items():
             written = write_knowledge(
                 host,  # ty: ignore[invalid-argument-type]
-                name=item.key,
+                name=str(item.source_key),
                 of=Literature,
                 created_by="zotero",
                 text="",
-                record=ReferenceMeta(
-                    title=item.title,
-                    authors=item.authors,
-                    year=item.year,
-                    doi=item.doi,
-                    url=item.url,
-                    pdf_path=item.pdf_path,
-                    source="zotero",
-                    source_key=item.key,
-                ),
+                fields=item.model_dump(mode="json", exclude_unset=True),
                 fs=self._fs,
             )
             refs.append(written)  # ty: ignore[invalid-argument-type]
@@ -885,8 +879,7 @@ class Concept:
 def _knowledge_target(ref: object, *, fs: FileSystem) -> Concept:
     """The Knowledge *ref* denotes, or ``TypeError`` — the one strictness rule.
 
-    Shared by :meth:`Concept.ref` (which propagates the error) and
-    :meth:`Concept.cite` (which falls back to its loose path branch): an object
+    Used by :meth:`Concept.ref`: an object
     denotes a Knowledge when its class is a :class:`Concept` subclass other than
     the bare base class, and a path denotes one when the markdown file there
     names a subclass. A run / project / experiment directory fails both — it
@@ -947,27 +940,6 @@ def _refresh_sections(fs: FileSystem, *document_paths: str) -> None:
         refresh_section(path, fs=fs)
 
 
-def _record_as_dict(record: object) -> dict[str, object]:
-    """Flatten a write() record into frontmatter keys.
-
-    ``type`` and ``id`` are a concept's identity, never a record's, and are
-    dropped. ``kind`` is a record field — a Delegation's ``research`` /
-    ``capability``, a worker record's ``worker_report`` / ``brief`` — and is
-    kept.
-    """
-    from .concept_meta import ConceptMeta
-
-    if isinstance(record, ConceptMeta):
-        payload = dict(record.model_dump(mode="json"))
-    elif isinstance(record, Mapping):
-        payload = {str(key): value for key, value in record.items()}
-    else:
-        payload = {}
-    payload.pop("type", None)
-    payload.pop("id", None)
-    return payload
-
-
 def _skip_link(target: str) -> bool:
     """Whether *target* is an external, schemed, anchor, or molab reference.
 
@@ -981,10 +953,8 @@ def _skip_link(target: str) -> bool:
 
 
 def _link_base(doc: Concept) -> str:
-    """The directory relative links in *doc* are resolved against."""
-    if type(doc).FILE_DOCUMENT:
-        return str(PurePosixPath(doc.path).parent)
-    return str(doc.path)
+    """The directory relative links in document *doc* are resolved against."""
+    return str(PurePosixPath(doc.path).parent)
 
 
 def _rehome_link(target: str, old_dir: str, new_dir: str) -> str | None:
@@ -1009,11 +979,14 @@ def _rewrite_inbound(inbound: Sequence[Backlink], old: str, new: str) -> None:
     for link in inbound:
         doc = link.source
         _retarget_links(doc, lambda target, doc=doc: _rewrite(doc, target))
+        doc._follow_moved(old, new)
 
 
 def retarget_links(
     text: str,
     rewrite: Callable[[str, bool], str | None],
+    *,
+    path: object = None,
 ) -> tuple[str, int]:
     """Replace markdown link targets in *text*. Pure: no I/O.
 
@@ -1026,6 +999,7 @@ def retarget_links(
     Args:
         text: Markdown to scan.
         rewrite: Maps ``(target, image)`` to a new target, or ``None`` to keep it.
+        path: The document *text* belongs to (:func:`markdown_links`).
 
     Returns:
         The new text and how many targets actually changed.
@@ -1033,7 +1007,7 @@ def retarget_links(
     count = 0
     pieces: list[str] = []
     cursor = 0
-    for match in markdown_links(text):
+    for match in markdown_links(text, path=path):
         label, target = match.group(1), match.group(2)
         image = match.start() > 0 and text[match.start() - 1] == "!"
         updated = rewrite(target, image)
@@ -1057,9 +1031,9 @@ def _retarget_links(doc: Concept, rewrite: Callable[[str], str | None]) -> bool:
     Returns:
         Whether the narrative changed.
     """
-    new, count = retarget_links(doc.read(), lambda target, _image: rewrite(target))
+    new, count = retarget_links(doc.read(), lambda target, _image: rewrite(target), path=doc.path)
     if count > 0:
-        doc.write(new)
+        doc._store_relinked(new)
     return count > 0
 
 
@@ -1094,7 +1068,7 @@ def append_source_links(
         return body, 0
     have = {
         (parse_role(label)[0], posixpath.normpath(target))
-        for label, target in (link.groups() for link in markdown_links(body))
+        for label, target in (link.groups() for link in markdown_links(body, path=path))
     }
     lines: list[str] = []
     for source in sources:
@@ -1110,45 +1084,6 @@ def append_source_links(
     from .frontmatter import append_markdown
 
     return append_markdown(body, "\n".join(lines) + "\n", path=path), len(lines)
-
-
-def remove_legacy_files(
-    directory: PathArg,
-    names: Sequence[str],
-    *,
-    fs: FileSystem,
-) -> list[str]:
-    """Delete named plain files in *directory*, then remove it when empty.
-
-    Never recursive, and never touches an entry that was not named. A name
-    that is a subdirectory is left in place and reported.
-
-    Args:
-        directory: Directory holding the legacy files.
-        names: Plain file names to delete when they are files.
-        fs: Filesystem the directory lives on.
-
-    Returns:
-        Sorted names that remain after the named files are gone. Empty when
-        the directory itself was removed.
-
-    Raises:
-        ValueError: A name contains ``/`` or is ``.`` / ``..``.
-    """
-    for name in names:
-        if "/" in name or name in {".", ".."}:
-            raise ValueError(f"legacy name {name!r} is not a single file name")
-    if not fs.is_dir(directory):
-        return []
-    for name in names:
-        path = fs.join(directory, name)
-        if fs.is_file(path):
-            fs.rm(path)
-    remaining = fs.ls(directory, A=True)
-    if not remaining:
-        Path(os.fspath(directory)).rmdir()
-        return []
-    return sorted(remaining)
 
 
 def backlinks_to(
@@ -1189,64 +1124,86 @@ def backlinks_to(
     return found
 
 
+def link_target(dst: Concept | Folder | Asset | MolabRef | PathArg) -> str:
+    """The target an edge to *dst* names, before it is made relative.
+
+    The one resolver for every link writer. A workspace project, experiment,
+    run or asset is its ``molab:`` reference. A reference, or a string that is
+    one, is itself. A document is its path, any other workspace folder its
+    directory, and a path is itself.
+
+    Raises:
+        TypeError: *dst* is none of those. An arbitrary object is never
+            ``str()``-ed into a link: its repr would be a silently broken edge.
+    """
+    from molab.workspace.domain import Asset
+    from molab.workspace.experiment import Experiment
+    from molab.workspace.folder import Folder
+    from molab.workspace.project import Project
+    from molab.workspace.refs import MolabRef, ref_of
+    from molab.workspace.run import Run
+
+    if isinstance(dst, (Project, Experiment, Run, Asset)):
+        return str(ref_of(dst))
+    if isinstance(dst, Concept):
+        return str(dst.path)
+    if isinstance(dst, Folder):
+        return str(dst.resolve())
+    if isinstance(dst, (MolabRef, str, os.PathLike)):
+        return str(dst)
+    raise TypeError(
+        f"edge target must be a document, a workspace entity, a molab reference or a "
+        f"path, got {type(dst).__name__}"
+    )
+
+
 def append_link(
     src: Concept,
-    dst: Concept | PathArg,
+    dst: Concept | Folder | Asset | MolabRef | PathArg,
     *,
     text: str | None = None,
     role: EdgeRole = DEFAULT_EDGE_ROLE,
 ) -> None:
-    """Append a typed relative markdown link ``src → dst`` to ``src``'s body.
+    """Append a typed markdown link ``src → dst`` to ``src``'s body.
 
-    The single markdown-edge writer, and the sole role-writing chokepoint:
-    ``Note.cite`` delegates here,
-    so the on-disk edge format cannot drift. The graph lives in the markdown
-    body. The default role encodes to the bare label, so pre-role
-    output stays byte-identical. Appends unconditionally; link dedup remains a
-    future enhancement.
+    The single markdown-edge writer, and the sole role-writing chokepoint, so
+    the on-disk edge format cannot drift. The graph lives in the markdown
+    body. The default role encodes to the bare label. Appends
+    unconditionally.
 
-    **A link target is a path, not a class.** *dst* may be a ``Concept`` or a
-    bare directory path, so a Concept can cite something outside its own family
-    — a workspace ``Run``, an asset record dir — without ``molab.knowledge``
-    importing the layer that owns it.
+    *dst* resolves through :func:`link_target`: a ``molab:`` reference is
+    written verbatim, and a path is written relative to *src*.
 
     Args:
         src: The Concept the edge originates from.
-        dst: The Concept, or directory path, the edge points to.
-        text: Optional link label; defaults to *dst*'s directory name.
+        dst: What the edge points to (see :func:`link_target`).
+        text: Optional link label; defaults to the target's last segment.
         role: The declared :class:`~molab.knowledge.edges.EdgeRole`.
+
+    Runs under *src*'s lock and records one ``knowledge.linked`` history
+    commit (:func:`~molab.knowledge.mutation.mutation`).
 
     Raises:
         ValueError: If *role* is not a known ``EdgeRole`` — validated before any
             write, so an invalid role leaves the document body untouched.
-        TypeError: If *dst* is neither a ``Concept`` nor a path.
+        TypeError: If *dst* names nothing :func:`link_target` accepts.
     """
     validate_role(role)
-    from molab.workspace.refs import MolabRef, is_ref
+    from molab.workspace.refs import is_ref
 
-    if isinstance(dst, MolabRef) or (isinstance(dst, str) and is_ref(dst)):
-        target = str(dst)
+    from .mutation import mutation
+
+    target = link_target(dst)
+    if is_ref(target):
         label = text if text is not None else target.rstrip("/").rsplit("/", 1)[-1]
-        _append_line(src, link_line(encode_label(role, label), target))
+        with mutation(src, "knowledge.linked", f"@{role} {target} from {src.name}"):
+            _append_line(src, link_line(encode_label(role, label), target))
         return
-    if isinstance(dst, Concept):
-        dst_path = str(dst.path)
-    elif isinstance(dst, (str, os.PathLike)):
-        dst_path = str(dst)
-    else:
-        # Never ``str()`` an arbitrary object into a link: that would write a
-        # repr as the target and produce a silently broken edge. A caller
-        # holding a foreign-family object (a workspace ``Folder``) passes its
-        # directory.
-        raise TypeError(
-            f"edge target must be a Concept or a path, got {type(dst).__name__}; "
-            "pass its directory (e.g. folder.resolve())"
-        )
-    src_base = str(Path(src.path).parent) if type(src).FILE_DOCUMENT else str(src.path)
-    rel = os.path.relpath(dst_path, src_base)
-    rel_posix = PurePosixPath(rel).as_posix()
-    label = text if text is not None else PurePosixPath(dst_path).name
-    _append_line(src, link_line(encode_label(role, label), rel_posix))
+    src_base = str(Path(src.path).parent)
+    rel_posix = PurePosixPath(os.path.relpath(target, src_base)).as_posix()
+    label = text if text is not None else PurePosixPath(target).name
+    with mutation(src, "knowledge.linked", f"@{role} {rel_posix} from {src.name}"):
+        _append_line(src, link_line(encode_label(role, label), rel_posix))
 
 
 def _append_line(src: Concept, line: str) -> None:
@@ -1254,15 +1211,6 @@ def _append_line(src: Concept, line: str) -> None:
     from .frontmatter import append_markdown
 
     src.write(append_markdown(src.read(), line + "\n", path=src.path))
-
-
-def _meta_text(meta: Mapping[str, object], *keys: str) -> str | None:
-    """The first non-blank string among *keys* of *meta*."""
-    for key in keys:
-        value = meta.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
 
 
 def read_text_or_none(path: PathArg, *, fs: FileSystem) -> str | None:
@@ -1282,13 +1230,12 @@ Knowledge = Concept
 
 
 __all__ = [
-    "FALLBACK_CONCEPT_TYPE",
     "Concept",
     "Knowledge",
     "LinkScan",
     "append_link",
     "append_source_links",
+    "link_target",
     "read_text_or_none",
-    "remove_legacy_files",
     "retarget_links",
 ]

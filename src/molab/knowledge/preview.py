@@ -45,7 +45,6 @@ if TYPE_CHECKING:
 
 __all__ = ["RenderedPage", "export_page", "render_page", "serve"]
 
-ASSET_REF = re.compile(r"^molab:asset/([0-9a-fA-F-]{8,})$")
 _ADMONITION = re.compile(r'^(!!!|\?\?\?\+?)\s+([A-Za-z]+)(?:\s+"([^"]*)")?\s*$')
 _COMPONENT = re.compile(r"^::(molab-[a-z][a-z0-9-]*)(?:\{(.*)\})?\s*$")
 _SOURCE_LINE = re.compile(r"^- \[@[a-z_]+ ")
@@ -175,12 +174,17 @@ class _Linker:
 
     def target(self, href: str) -> str | None:
         """The URL to put in the page, or ``None`` to drop the link (keep its text)."""
-        match = ASSET_REF.match(href)
-        if match:
-            self.assets.append(match.group(1))
-            return self.asset_url(match.group(1))
-        if href.startswith("molab:"):
-            return None
+        from molab.workspace.refs import InvalidRefError, is_ref, parse_ref
+
+        if is_ref(href):
+            try:
+                asset_id = parse_ref(href).asset_id
+            except InvalidRefError:
+                return None
+            if asset_id is None:
+                return None
+            self.assets.append(asset_id)
+            return self.asset_url(asset_id)
         if "://" in href or href.startswith(("#", "mailto:")):
             return href
         if self.doc_url and href.endswith((".md", ".html")):
@@ -266,11 +270,8 @@ def render_page(
     linker = _Linker(doc, workspace_root, asset_url, doc_url)
     content = _body_html(body, linker)
     footer = _sources_html(sources, linker)
-    heading = re.search(r"<h1>(.*?)</h1>", content, re.S)
-    title = (
-        re.sub(r"<[^>]+>", "", heading.group(1)) if heading else str(meta.get("name") or doc.stem)
-    )
-    cls = str(meta.get("class") or type(concept).__name__)
+    title = concept.title()
+    cls = type(concept).__name__
     tags = " ".join(f'<span class="tag">#{html.escape(str(t))}</span>' for t in concept.tags())
     byline = " · ".join(
         html.escape(str(v)) for v in (meta.get("created_by"), meta.get("created_at")) if v
@@ -319,6 +320,21 @@ def _payload(workspace: Workspace, asset_id: str) -> Path:
     return Path(payload_path_for(workspace, asset_id))
 
 
+def standalone_page(doc: Path, workspace: Workspace) -> RenderedPage:
+    """Render *doc* as one page that needs nothing else: every asset it shows is inlined.
+
+    The page a reader is handed, whether written to a file (:func:`export_page`)
+    or answered over HTTP. Links to other documents are shown as text.
+    """
+
+    def inline(asset_id: str) -> str:
+        path = _payload(workspace, asset_id)
+        data = path.read_bytes()
+        return f"data:{_mime(path, data)};base64,{base64.b64encode(data).decode()}"
+
+    return render_page(doc, Path(str(workspace.root)), asset_url=inline)
+
+
 def export_page(doc: Path, workspace: Workspace, out: Path) -> RenderedPage:
     """Write *doc* to *out* as one self-contained file, assets inlined.
 
@@ -329,12 +345,7 @@ def export_page(doc: Path, workspace: Workspace, out: Path) -> RenderedPage:
         RuntimeError: A PDF was asked for and Playwright is not installed.
     """
 
-    def inline(asset_id: str) -> str:
-        path = _payload(workspace, asset_id)
-        data = path.read_bytes()
-        return f"data:{_mime(path, data)};base64,{base64.b64encode(data).decode()}"
-
-    page = render_page(doc, Path(str(workspace.root)), asset_url=inline)
+    page = standalone_page(doc, workspace)
     if out.suffix.lower() == ".pdf":
         _print_pdf(page.html, out)
     else:
@@ -380,6 +391,7 @@ def serve(
     """
     from http import HTTPStatus
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from socketserver import TCPServer
     from urllib.parse import quote, unquote
 
     root = Path(str(workspace.root)).resolve()
@@ -437,7 +449,17 @@ def serve(
                 return
             self._send(HTTPStatus.NOT_FOUND, b"not found", "text/plain")
 
-    server = ThreadingHTTPServer((host, port), Handler)
+    class Server(ThreadingHTTPServer):
+        def server_bind(self) -> None:
+            """Bind without ``HTTPServer``'s ``socket.getfqdn(host)``.
+
+            That reverse DNS lookup can stall for seconds (a macOS CI runner),
+            and nothing here reads the name it finds.
+            """
+            TCPServer.server_bind(self)
+            self.server_name, self.server_port = host, self.server_address[1]
+
+    server = Server((host, port), Handler)
     url = f"http://{host}:{server.server_address[1]}/view/{quote(start)}"
     if on_ready:
         on_ready(url)

@@ -15,7 +15,6 @@ from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES, Execution
 from molab.workspace.folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_PROJECT_KIND
 
 from ._wire import ApiModel
-from .molq import MolqJobSummary  # noqa: F401  (preserve import surface)
 from .responses import RunStatusSummaryResponse, workspace_relative
 
 

@@ -12,11 +12,18 @@ experiment has no ``workflow.ir.json``. The codec remains the only IR parser.
 ``GET …/dry-run`` walks that stored IR with the workflow layer's dry run and
 never imports the experiment's script: a code experiment's graph snapshot is
 compiled with stub bodies (:func:`molab.workflow.dry_run.compiled_for_simulation`).
+``?source=code`` instead previews current source in an isolated scratch child,
+using the same application service as the CLI. Registered runs are separate
+from the source's declared sweep; the response names its provenance.
 """
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 
@@ -109,6 +116,7 @@ def get_workflow_document(
 def dry_run_workflow_document(
     project_id: str,
     experiment_id: str,
+    source: Literal["stored", "code"] = "stored",
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> WorkflowDryRunResponse:
     """Walk the stored workflow IR without running a task or importing code.
@@ -119,14 +127,54 @@ def dry_run_workflow_document(
     Nothing is written.
     """
     experiment = _resolve_experiment(workspace, project_id, experiment_id)
+    path = Path(str(experiment.resolve())).relative_to(Path(str(workspace.root))).as_posix()
+    if source == "code" and experiment.metadata.workflow_kind == "code":
+        entrypoint = experiment.metadata.workflow_entrypoint
+        if not entrypoint:
+            raise ValueError("code workflow has no entrypoint")
+        script = Path(str(experiment.resolve())) / entrypoint.split(":", 1)[0]
+        # Source loading changes process-global bindings and workspace overrides.
+        # Keep those changes out of the server and any concurrently running job.
+        try:
+            preview = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "molab.services.workflow_preview",
+                    str(script),
+                    str(workspace.root),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise ValueError(f"source preview failed: {exc.stderr[-4000:]}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("source preview exceeded 60 seconds") from exc
+        reports = json.loads(preview.stdout)
+        for report in reports:
+            if report["experiment"]["path"] == path:
+                report["experiment"]["id"] = experiment.id
+                report["registered_runs"] = [
+                    {"params": run.parameters} for run in experiment.list_runs()
+                ]
+                return WorkflowDryRunResponse.model_validate(report)
+        raise ValueError(f"source does not declare experiment {path}")
     document = experiment.workflow_document
     if document is None:
         raise ExperimentNotFoundError(f"{experiment_id} (no workflow document)")
     compiled = compiled_for_simulation(document)
-    path = Path(str(experiment.resolve())).relative_to(Path(str(workspace.root))).as_posix()
     report = report_from_compiled(
         compiled,
         experiment={"id": experiment.id, "name": experiment.metadata.name, "path": path},
         runs=[run.parameters for run in experiment.declared_runs()],
+    )
+    report.update(
+        source="stored",
+        definition_hash=experiment.metadata.definition_hash,
+        entrypoint=experiment.metadata.workflow_entrypoint,
+        registered_runs=[{"params": run.parameters} for run in experiment.list_runs()],
     )
     return WorkflowDryRunResponse.model_validate(report)

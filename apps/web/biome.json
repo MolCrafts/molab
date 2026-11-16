@@ -19,7 +19,8 @@
       "**/src/**/*.tsx",
       "mocks/db/**/*.ts",
       "mocks/handlers/**/*.ts",
-      "!**/src/api/generated"
+      "!**/src/api/generated",
+      "!**/src/api/sharing-generated"
     ]
   }
 }

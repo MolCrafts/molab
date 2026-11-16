@@ -113,7 +113,7 @@ def import_zotero(
 
     rprint(f"[green]OK[/green] Imported {len(refs)} literature record(s) into {tree.path}")
     for ref in refs:
-        meta = ref.record
+        meta = ref.fields()
         title = meta.title or "(untitled)"
         year = f" ({meta.year})" if meta.year else ""
         rel = Path(ref.path).relative_to(tree.path).as_posix()
@@ -309,12 +309,9 @@ def knowledge_search(
         list[str] | None,
         typer.Option("--source", help="Restrict to these sources (repeatable)."),
     ] = None,
-    concept_type: Annotated[
+    doc_class: Annotated[
         str | None,
-        typer.Option(
-            "--type",
-            help="Knowledge class name filter (Note, Literature, Finding, ...).",
-        ),
+        typer.Option("--class", help="Only documents of this knowledge class."),
     ] = None,
     tag: Annotated[str | None, typer.Option("--tag", help="Only concepts with this tag.")] = None,
     limit: Annotated[int, typer.Option("--limit", help="Maximum hits to show.")] = 10,
@@ -331,13 +328,12 @@ def knowledge_search(
     from rich import print as _rich_print
     from rich.table import Table
 
-    from molab.knowledge import Knowledge
     from molab.knowledge.concepts import _product
     from molab.knowledge.sources import KnowledgeSourceStore
 
     ws_root = _workspace_root(path)
     try:
-        cls = _product(concept_type) if concept_type else None
+        cls = _product(doc_class) if doc_class else None
     except ValueError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
@@ -347,13 +343,8 @@ def knowledge_search(
         workspace_root=ws_root,
         include_workspace=ws_root is not None,
         limit=limit,
-        concept_type=concept_type,
+        of=cls,
         tag=tag,
-        workspace_searcher=(
-            (lambda: Knowledge(ws_root).search(query, of=cls, tag=tag, limit=limit))
-            if ws_root is not None
-            else None
-        ),
     )
     if not hits:
         rprint(f"[dim]No knowledge matches for {query!r}.[/dim]")
@@ -423,6 +414,9 @@ def knowledge_read(
     except (KnowledgeNotFoundError, FileNotFoundError):
         rprint(f"[red]Error:[/red] no knowledge concept at {ref!r}.")
         rprint("Find valid refs with [bold]molab knowledge search[/bold].")
+        raise typer.Exit(1) from None
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {ref!r} is not a knowledge document: {exc}")
         raise typer.Exit(1) from None
 
     rprint(f"[bold]{ref}[/bold]  [dim]{type(concept).__name__}[/dim]")
@@ -576,25 +570,28 @@ def _document(workspace: Workspace, ref: str) -> object:
     except (KnowledgeNotFoundError, FileNotFoundError):
         rprint(f"[red]Error:[/red] no knowledge document at {ref!r}.")
         raise typer.Exit(1) from None
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {ref!r} is not a knowledge document: {exc}")
+        raise typer.Exit(1) from None
 
 
 def _rel_to_workspace(workspace: Workspace, doc_path: object) -> str:
     return Path(str(doc_path)).relative_to(Path(str(workspace.root))).as_posix()
 
 
-def _load_record(raw: str | None) -> dict[str, object] | None:
-    """A ``--record`` JSON object, or the object in a JSON file.
+def _load_fields(raw: str | None) -> dict[str, object]:
+    """A ``--fields`` JSON object, or the object in a JSON file.
 
     Inline JSON is told by its leading ``{``; anything else is a path. The
-    inline text is never probed as a path, whose name limit a record of any
+    inline text is never probed as a path, whose name limit an object of any
     size would exceed.
     """
     if raw is None:
-        return None
+        return {}
     text = raw if raw.lstrip().startswith("{") else Path(raw).read_text(encoding="utf-8")
     loaded = json.loads(text)
     if not isinstance(loaded, dict):
-        raise ValueError("--record must be a JSON object")
+        raise ValueError("--fields must be a JSON object")
     return loaded
 
 
@@ -613,10 +610,7 @@ def knowledge_write(
         str,
         typer.Option(
             "--class",
-            help=(
-                "Note, Literature, Report, Finding, Plan, Roadmap, Todo, "
-                "Milestone, Observation, Hypothesis, Decision, or Delegation."
-            ),
+            help="The knowledge class; an unknown name lists them.",
         ),
     ] = "Note",
     path: Annotated[
@@ -630,14 +624,19 @@ def knowledge_write(
         list[str] | None,
         typer.Option(
             "--source",
-            help="File path or DOI (10.… or DOI:…). Repeat once per source.",
+            help="An entity ref, URL or DOI, or a file path (a relative one is read from "
+            "the workspace root). Repeat once per source; a sourced class given none "
+            "names its host.",
         ),
     ] = None,
-    record: Annotated[
+    fields: Annotated[
         str | None,
         typer.Option(
-            "--record",
-            help="JSON object of this class's frontmatter fields, or a path to that JSON.",
+            "--fields",
+            help=(
+                "JSON object of the fields this class declares (a Hypothesis verdict, a "
+                "Literature's bibliography, a Note status), or a path to that JSON."
+            ),
         ),
     ] = None,
     replaces: Annotated[
@@ -655,8 +654,9 @@ def knowledge_write(
         typer.Option(
             "--format",
             help=(
-                "md (<slug>.md, YAML frontmatter + markdown) or html (<slug>.html). "
-                "Default: md, or an existing document's own format."
+                "md (<slug>.md, YAML frontmatter + markdown), html (<slug>.html) or tex "
+                "(<slug>.tex, a Manuscript's only format). Default: the class's own format "
+                "(tex for a Manuscript, md otherwise), or an existing document's."
             ),
         ),
     ] = None,
@@ -676,13 +676,9 @@ def knowledge_write(
     except ValueError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
-    sources = (
-        normalize_sources(source, default_host=host)
-        if source or getattr(cls, "REQUIRES_SOURCES", False)
-        else ()
-    )
+    sources = normalize_sources(source or [], default_host=host, of=cls)
     try:
-        payload = _load_record(record)
+        payload = _load_fields(fields)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
@@ -694,7 +690,7 @@ def knowledge_write(
             sources=sources,
             created_by=created_by,
             text=text,
-            record=payload,
+            fields=payload,
             fs=workspace.fs,
             replaces=[workspace.fs.join(str(workspace.resolve()), item) for item in replaces or ()],
             format=doc_format,
@@ -711,21 +707,57 @@ def knowledge_list(
         Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
     ] = None,
 ) -> None:
-    """List knowledge documents and TeX manuscripts. The same walk as ``GET /knowledge``."""
+    """List knowledge documents. The same walk as ``GET /knowledge``."""
     from molab.knowledge import Knowledge
-    from molab.knowledge.tex_docs import TEX_CLASS, iter_tex_documents
 
     workspace = _require_workspace(path)
-    rows: list[tuple[str, str]] = []
-    for item in Knowledge(workspace.root, fs=workspace.fs).walk():
-        rows.append((type(item).__name__, _rel_to_workspace(workspace, item.path)))
-    for absolute in iter_tex_documents(workspace.root, workspace.fs):
-        rows.append((TEX_CLASS, _rel_to_workspace(workspace, absolute)))
+    rows = [
+        (type(item).__name__, _rel_to_workspace(workspace, item.path))
+        for item in Knowledge(workspace.root, fs=workspace.fs).walk()
+    ]
     if not rows:
         rprint("[dim]No knowledge documents.[/dim]")
         return
     for kind, rel in sorted(rows, key=lambda row: row[1]):
         print(f"{kind}\t{rel}")
+
+
+@knowledge_app.command("bib")
+def knowledge_bib(
+    ref: Annotated[str, typer.Argument(help="Workspace-relative path of a Manuscript.")],
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Write the BibTeX to this file instead of stdout."),
+    ] = None,
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+) -> None:
+    """Print a Manuscript's bibliography: one BibTeX entry per Literature it cites.
+
+    Each ``\\cite`` key is the name of a Literature document in the
+    manuscript's host or a host above it (``Manuscript.bibliography``). A key
+    no Literature answers is refused, so a build never runs on a partial
+    bibliography.
+    """
+    from molab.knowledge import Manuscript
+
+    workspace = _require_workspace(path)
+    doc = _document(workspace, ref)
+    if not isinstance(doc, Manuscript):
+        rprint(f"[red]Error:[/red] {ref!r} is a {type(doc).__name__}, not a Manuscript.")
+        raise typer.Exit(1)
+    try:
+        bibliography = doc.bibliography()
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if out is None:
+        print(bibliography)
+        return
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(bibliography + "\n", encoding="utf-8")
+    rprint(f"[green]OK[/green] wrote {out}")
 
 
 @knowledge_app.command("rename")
@@ -778,6 +810,107 @@ def knowledge_delete(
     doc = _document(workspace, ref)
     doc.delete()  # ty: ignore[unresolved-attribute]
     rprint(f"[green]OK[/green] deleted {ref}")
+
+
+@knowledge_app.command("fields")
+def knowledge_fields(
+    ref: Annotated[str, typer.Argument(help="Workspace-relative document path.")],
+    set_fields: Annotated[
+        str | None,
+        typer.Option(
+            "--set",
+            help="The complete new fields: a JSON object, or a path to one. An omitted key "
+            "is removed.",
+        ),
+    ] = None,
+    if_match: Annotated[
+        str | None,
+        typer.Option("--if-match", help="The digest you read; refused if the file changed."),
+    ] = None,
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+) -> None:
+    """Print a document's class fields and digest as JSON, or replace them whole with --set.
+
+    The same operation as ``GET`` / ``PATCH /api/knowledge/doc/fields``
+    (``replace_fields``): the class checks the new fields before anything is
+    written, and the change is one ``knowledge.fields_replaced`` history commit.
+    """
+    from molab.knowledge.fields import DigestConflictError, digest_of, own_fields, replace_fields
+
+    workspace = _require_workspace(path)
+    doc = _document(workspace, ref)
+    digest = digest_of(doc)  # ty: ignore[invalid-argument-type]
+    if set_fields is not None:
+        try:
+            digest = replace_fields(doc, _load_fields(set_fields), if_match=if_match)  # ty: ignore[invalid-argument-type]
+        except (OSError, json.JSONDecodeError, DigestConflictError, ValueError) as exc:
+            rprint(f"[red]Error:[/red] {exc}")
+            raise typer.Exit(1) from None
+    payload = {
+        "relPath": ref,
+        "cls": type(doc).__name__,
+        "fields": own_fields(doc.frontmatter()),  # ty: ignore[unresolved-attribute]
+        "digest": digest,
+    }
+    print(json.dumps(payload, ensure_ascii=False, default=str))
+
+
+@knowledge_app.command("evaluate")
+def knowledge_evaluate(
+    ref: Annotated[str, typer.Argument(help="Workspace-relative path of a Milestone.")],
+    measure: Annotated[
+        list[str],
+        typer.Option(
+            "--measure",
+            help="CHECK=molab:asset/<id>: the registered file that holds a check's value. Repeatable.",
+        ),
+    ],
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Print the fields as JSON.")] = False,
+) -> None:
+    """Measure a Milestone's checks from registered files and write its status.
+
+    Each check's value is read at its span from the asset given for it. The
+    bytes must be a run's own: registered by an attempt molab ran, in a run
+    molab ran to success, and not swapped since by ``asset replace``. ``met`` needs
+    every critical check measured and passed; a failed critical check is
+    ``missed``. The same verb as ``molab.knowledge.acceptance.evaluate_milestone``.
+    """
+    from molab.knowledge import Milestone
+    from molab.knowledge.acceptance import AcceptanceError, evaluate_milestone
+    from molab.knowledge.fields import DigestConflictError
+
+    workspace = _require_workspace(path)
+    doc = _document(workspace, ref)
+    if not isinstance(doc, Milestone):
+        rprint(f"[red]Error:[/red] {ref!r} is a {type(doc).__name__}, not a Milestone.")
+        raise typer.Exit(1)
+    measures: dict[str, str] = {}
+    for item in measure:
+        check, sep, source = item.partition("=")
+        if not sep or not check or not source:
+            rprint(f"[red]Error:[/red] --measure takes CHECK=molab:asset/<id>, got {item!r}")
+            raise typer.Exit(1)
+        if check in measures:
+            rprint(f"[red]Error:[/red] check {check!r} is given two sources; name one")
+            raise typer.Exit(1)
+        measures[check] = source
+    try:
+        fields = evaluate_milestone(doc, measures)
+    except (AcceptanceError, DigestConflictError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if json_out:
+        print(json.dumps(fields.model_dump(mode="json"), ensure_ascii=False))
+        return
+    for item in fields.measurements:
+        mark = "[green]pass[/green]" if item.passed else "[red]fail[/red]"
+        rprint(f"{mark} {item.check} = {item.value}  ({item.ref})")
+    rprint(f"[bold]{fields.status}[/bold] {ref}")
 
 
 def _load_run(run_id: str, path: Path | None) -> object:

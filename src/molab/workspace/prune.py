@@ -323,7 +323,7 @@ def discard_superseded_attempts(run: Run) -> tuple[str, ...]:
     workspace = run.experiment.project.workspace
     touched: list[str] = [str(repo.run_dir)]
     for execution_id in stale:
-        for asset in assets_produced_by(workspace, execution_id):
+        for asset in assets_produced_by(workspace, execution_id, run_id=run.id):
             if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id:
                 removed = workspace.assets_at(asset.scope).remove(asset.id)
                 if removed is not None:

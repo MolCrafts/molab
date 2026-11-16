@@ -5,7 +5,7 @@ rows. :func:`context_with_knowledge` is the only producer: the server and the
 CLI both call it instead of walking the tree twice.
 
 Enumeration is a workspace-scope handle (``Knowledge(workspace.root, fs=workspace.fs)``).
-The title comes from :func:`molab.knowledge.search.extract_title`. Both
+The title is :meth:`molab.knowledge.Knowledge.title`. Both
 functions are pure reads: no write, no cache, no global state.
 """
 
@@ -16,38 +16,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from molab.knowledge import (
-    Decision,
-    Delegation,
-    Finding,
-    Hypothesis,
-    Knowledge,
-    Literature,
-    Milestone,
-    Note,
-    Observation,
-    Plan,
-    Report,
-    Roadmap,
-    Todo,
-)
-from molab.knowledge.search import extract_title
+from molab.knowledge import Knowledge
 from molab.workspace import ContextFocus, WorkspaceContext
-
-_CONTEXT_CLASSES = (
-    Note,
-    Literature,
-    Report,
-    Finding,
-    Plan,
-    Roadmap,
-    Todo,
-    Milestone,
-    Observation,
-    Hypothesis,
-    Decision,
-    Delegation,
-)
 
 if TYPE_CHECKING:
     from molab.workspace import Workspace
@@ -64,9 +34,8 @@ class KnowledgeRef(BaseModel, frozen=True):
     """A knowledge document's identity: workspace-relative ``.md`` path, class name, title."""
 
     path: str
-    type: str
+    cls: str
     title: str
-    id: str | None = None
 
 
 class KnowledgeContext(WorkspaceContext, frozen=True):
@@ -88,19 +57,14 @@ def project_knowledge(workspace: Workspace) -> list[KnowledgeRef]:
     Returns:
         One :class:`KnowledgeRef` per knowledge document.
     """
-    rows: list[KnowledgeRef] = []
-    for concept in Knowledge(workspace.root, fs=workspace.fs).walk():
-        if isinstance(concept, _CONTEXT_CLASSES):
-            name = concept.name
-            rows.append(
-                KnowledgeRef(
-                    path=Path(concept.path).relative_to(workspace.root).as_posix(),
-                    type=type(concept).__name__,
-                    title=extract_title(concept.read()) or name,
-                    id=str(name) if name is not None else None,
-                )
-            )
-    return rows
+    return [
+        KnowledgeRef(
+            path=Path(concept.path).relative_to(workspace.root).as_posix(),
+            cls=type(concept).__name__,
+            title=concept.title(),
+        )
+        for concept in Knowledge(workspace.root, fs=workspace.fs).walk()
+    ]
 
 
 def context_with_knowledge(

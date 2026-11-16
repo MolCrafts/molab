@@ -54,8 +54,10 @@ from rich.live import Live
 
 from molab.plugins.submit_molq.cancel import try_cancel
 from molab.plugins.submit_molq.metadata import normalize_executor_info
+from molab.plugins.submit_molq.submit import reconcile_latest
 from molab.workspace import Experiment, Project, Run, Workspace
 from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES
+from molab.workspace.errors import AttemptNotHomeError
 
 from .rendering import (
     _DeleteDialog,
@@ -338,6 +340,11 @@ def _execute_delete(dialog: _DeleteDialog) -> list[str]:
                 run = node.ref
                 if running and not _cancel_through_core(run, warnings):
                     continue  # do NOT delete if the signal failed
+                # A remote attempt left open by the cancel comes home first, if
+                # its job has ended; otherwise remove_run refuses with the reason.
+                outcome = reconcile_latest(run)
+                if outcome is not None and outcome.error is not None:
+                    warnings.append(outcome.error)
                 run.experiment.remove_run(run.id)
             elif node.kind == "execution":
                 assert (
@@ -361,6 +368,8 @@ def _execute_delete(dialog: _DeleteDialog) -> list[str]:
                 assert isinstance(node.ref, Project)
                 proj = node.ref
                 proj.workspace.remove_project(proj.id)
+        except AttemptNotHomeError as exc:
+            warnings.append(str(exc))
         except Exception as exc:  # pragma: no cover - surface anything unexpected
             warnings.append(f"delete failed for {_describe_target(node)}: {exc}")
     return warnings

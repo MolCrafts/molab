@@ -147,7 +147,7 @@ CHECKPOINTS = ExecutionDir(
 )
 
 # ``source/`` is filled once, when the attempt is created, by
-# ``Run._create_execution(source_entrypoint=...)``: the exact code the attempt
+# ``Run._create_execution`` from the experiment's bound entrypoint: the exact code the attempt
 # ran. It is versioned (small, and the point is to keep it) and never prunable.
 NODES = ExecutionDir(
     name="nodes",

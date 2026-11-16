@@ -374,6 +374,10 @@ def run_adopt(
 ) -> None:
     """Record a finished job that ran outside molab as a sealed attempt, moving its files in.
 
+    The record says ``observed: false``: molab holds what was handed over, not
+    what it saw run, so no Milestone check is measured from it. A succeeded
+    job is adopted with the script that ran it (``--source``, or ``--from``).
+
     The files are moved (renamed, same filesystem) into the run's next
     ``executions/eNN/``: products into ``out/<task>/``, scheduler files into
     ``jobs/``, the log as ``run.log``, scripts into ``source/``. ``--from DIR``
@@ -392,6 +396,12 @@ def run_adopt(
     except ValueError:
         rprint(f"[red]Error:[/red] unknown status {status!r}")
         raise typer.Exit(2) from None
+    if state == ExecutionStatus.SUCCEEDED and not source and tracked is None:
+        rprint(
+            "[red]Error:[/red] a succeeded job is adopted with the script that ran it: "
+            "pass --source FILE (repeatable), or --from a molab.track() directory"
+        )
+        raise typer.Exit(2)
     products: dict[str, list[str]] = {}
     for spec in product or []:
         task, sep, path = spec.partition("=")
@@ -489,6 +499,7 @@ def run_adopt(
         "path": f"{run_rel}/executions/{execution.id}",
         "status": execution.status.value,
         "mode": execution.mode.value,
+        "observed": execution.observed,
         "started_at": execution.started_at.isoformat() if execution.started_at else None,
         "finished_at": execution.finished_at.isoformat() if execution.finished_at else None,
     }
@@ -498,6 +509,15 @@ def run_adopt(
     rprint(f"[green]OK[/green] adopted {payload['path']} ({payload['status']})")
     if created:
         rprint(f"  created run {run_rel}")
+
+
+def _reconcile(r: Run) -> None:
+    """Bring a finished remote submission home before its status is shown."""
+    from molab.plugins.submit_molq.submit import reconcile_latest
+
+    outcome = reconcile_latest(r)
+    if outcome is not None and outcome.error is not None:
+        rprint(f"[yellow]{outcome.error}[/yellow]")
 
 
 @run_app.command("list")
@@ -526,6 +546,9 @@ def run_list(
         rprint(f"[yellow]No runs found in {project_id}/{experiment_id}[/yellow]")
         return
     from molab._run_display import elapsed
+
+    for r in runs:
+        _reconcile(r)
 
     table = Table(title=f"Runs in {project_id}/{experiment_id}")
     table.add_column("Run", style="cyan", overflow="fold")
@@ -723,6 +746,8 @@ def run_cancel(
         if warning is not None:
             rprint(f"  [yellow]Warning:[/yellow] {warning} (workspace state updated)")
             errors += 1
+        # A remote attempt is sealed when it comes home; bring it now if its job has ended.
+        _reconcile(r)
         rprint(f"  [green]OK[/green] Cancelled {r.id}")
         cancelled += 1
 
@@ -733,103 +758,6 @@ def run_cancel(
         rprint(".")
 
 
-def _retry_run(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    target_spec: str,
-    *,
-    resume: bool = False,
-    rerun: bool = False,
-    fresh: bool = False,
-) -> None:
-    """Shared body of ``runs resume`` / ``runs rerun`` — the CLI twins of
-    ``POST .../{run_id}/resume|rerun``, executing in-process on this host
-    (same path as ``molab run --resume/--rerun``)."""
-    ws = _open_ws(target_spec)
-    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
-    from molab.workspace import ProjectNotFoundError as _ProjNotFound
-    from molab.workspace import RunNotFoundError as _RunNotFound
-    from molab.workspace.run_reaper import reap_zombie_run
-    from molab.workspace.targets import LOCAL_TARGET_NAME
-
-    try:
-        project = ws.get_project(project_id)
-        experiment = project.get_experiment(experiment_id)
-        run = experiment.get_run(run_id)
-    except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
-        rprint(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
-
-    target = getattr(run.metadata, "target", None)
-    if target and target != LOCAL_TARGET_NAME:
-        rprint(
-            f"[red]Error:[/red] run {run.id} targets {target!r} — this command "
-            "executes in-process on this host only. Use the server's "
-            "POST /runs/{id}/resume|rerun (or `molab run` on that host)."
-        )
-        raise typer.Exit(1)
-
-    reap_zombie_run(run)
-    from molab.workflow import (
-        RunFailedError,
-        RunNotExecutableError,
-        compiled_workflow_for_run,
-    )
-
-    try:
-        workflow = compiled_workflow_for_run(run)
-    except Exception as exc:
-        rprint(f"[red]Error:[/red] cannot reconstruct the run's workflow: {exc}")
-        raise typer.Exit(1) from None
-    verb = "Resumed" if resume else "Reran"
-    try:
-        run.execute(workflow, resume=resume, rerun=rerun, fresh=fresh)
-    except RunNotExecutableError as exc:
-        rprint(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
-    except RunFailedError as exc:
-        rprint(f"[red]FAILED[/red] {exc}")
-        raise typer.Exit(1) from None
-    rprint(f"[green]OK[/green] {verb} run {run.id} — status: {run.status_label}")
-
-
-@run_app.command("resume")
-def run_resume(
-    project_id: Annotated[str, typer.Argument(help="Project ID")],
-    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
-    run_id: Annotated[str, typer.Argument(help="Run ID")],
-    target_spec: TargetOption = ".",
-) -> None:
-    """Open a new RESUME execution based on the latest attempt.
-
-    CLI twin of ``POST .../{run_id}/resume`` and ``molab run --resume``.
-    Completed nodes are seeded from that attempt's journal.
-    """
-    _retry_run(project_id, experiment_id, run_id, target_spec, resume=True)
-
-
-@run_app.command("rerun")
-def run_rerun(
-    project_id: Annotated[str, typer.Argument(help="Project ID")],
-    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
-    run_id: Annotated[str, typer.Argument(help="Run ID")],
-    fresh: Annotated[
-        bool,
-        typer.Option(
-            "--fresh",
-            help="Also bypass content-addressed cache reads (results are still written back).",
-        ),
-    ] = False,
-    target_spec: TargetOption = ".",
-) -> None:
-    """Rerun a failed/cancelled run from the top in a fresh execution.
-
-    CLI twin of ``POST .../{run_id}/rerun`` and ``molab run --rerun``.
-    """
-    _retry_run(project_id, experiment_id, run_id, target_spec, rerun=True, fresh=fresh)
-
-
 @run_app.command("harvest")
 def run_harvest(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
@@ -838,19 +766,18 @@ def run_harvest(
     narrative: Annotated[str, typer.Argument(help="Interpretation of the run outcome")],
     of: Annotated[
         str,
-        typer.Option("--of", help="Finding, Observation, or Report"),
+        typer.Option("--of", help="The class to harvest into; an unknown name lists them."),
     ] = "Finding",
     created_by: Annotated[str, typer.Option("--created-by")] = "cli",
     target_spec: TargetOption = ".",
 ) -> None:
-    """Harvest a terminal run into Finding, Observation, or Report."""
+    """Harvest a terminal run into a sourced knowledge document (Finding by default)."""
     ws = _open_ws(target_spec)
     from molab.knowledge.concepts import HARVEST_TARGETS
     from molab.workspace import ExperimentNotFoundError as _ExpNotFound
     from molab.workspace import ProjectNotFoundError as _ProjNotFound
     from molab.workspace import RunNotFoundError as _RunNotFound
 
-    harvest_targets = HARVEST_TARGETS
     try:
         project = ws.get_project(project_id)
         experiment = project.get_experiment(experiment_id)
@@ -858,10 +785,11 @@ def run_harvest(
     except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
-    cls = harvest_targets.get(of)
+    cls = HARVEST_TARGETS.get(of)
     if cls is None:
         rprint(
-            f"[red]Error:[/red] harvest --of must be Finding, Observation, or Report (got {of!r})."
+            f"[red]Error:[/red] harvest --of must be one of {', '.join(HARVEST_TARGETS)} "
+            f"(got {of!r})."
         )
         raise typer.Exit(1)
     try:
@@ -921,6 +849,48 @@ def run_ingest_metrics(
         rprint(f"  [dim]skip[/dim] {skip.format}: {skip.path.name} — {skip.reason}")
 
 
+@run_app.command("reconcile")
+def run_reconcile(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    execution_id: Annotated[
+        str | None,
+        typer.Option("--execution", "-x", help="The attempt (eNN); default: the newest."),
+    ] = None,
+    target_spec: TargetOption = ".",
+) -> None:
+    """Bring one of the run's remote attempts home now (default: the newest).
+
+    Every status read does this for a queued attempt. This also brings home a
+    cancelled attempt an older molab sealed before it came home, once its job
+    has ended, and removes its job files from the target.
+    """
+    from molab.plugins.submit_molq.submit import reconcile_submission
+    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molab.workspace import ProjectNotFoundError as _ProjNotFound
+    from molab.workspace import RunNotFoundError as _RunNotFound
+
+    ws = _open_ws(target_spec)
+    try:
+        r = ws.get_project(project_id).get_experiment(experiment_id).get_run(run_id)
+    except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if not r.executions:
+        rprint(f"[yellow]Run {r.id} has no attempt — nothing to bring home.[/yellow]")
+        return
+    try:
+        outcome = reconcile_submission(r, execution_id or r.executions[-1].id, cancelled_away=True)
+    except KeyError as exc:
+        rprint(f"[red]Error:[/red] run {r.id} has no attempt {exc}")
+        raise typer.Exit(1) from None
+    if outcome.error is not None:
+        rprint(f"[red]Error:[/red] {outcome.error}")
+        raise typer.Exit(1)
+    rprint(f"[green]OK[/green] {r.id} {outcome.record.id}: {outcome.record.status.value}")
+
+
 @run_app.command("info")
 def run_info(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
@@ -950,6 +920,7 @@ def run_info(
         rprint(f"[red]Error:[/red] Run not found: {run_id}")
         raise typer.Exit(1) from None
 
+    _reconcile(r)
     rprint(f"[bold]Run:[/bold] {r.name}  [dim]{r.id}[/dim]")
     rprint(f"  Path: {r.run_dir}")
     status = r.status_label

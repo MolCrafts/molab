@@ -1,6 +1,6 @@
 import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
+import type { DocFieldsUpdate } from "@/api/generated/models/DocFieldsUpdate";
 import type { DocRelationUpdate as ApiDocRelationUpdate } from "@/api/generated/models/DocRelationUpdate";
-import type { DocSource } from "@/api/generated/models/DocSource";
 import { EmbedRequest } from "@/api/generated/models/EmbedRequest";
 import type { EntityCard } from "@/api/generated/models/EntityCard";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
@@ -9,14 +9,8 @@ import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
 export type { EntityCard } from "@/api/generated/models/EntityCard";
 
 export type EmbedTargetKind = "run" | "experiment" | "asset" | "reference";
-export type EmbedRole =
-  | "derived_from"
-  | "cites"
-  | "supersedes"
-  | "supports"
-  | "contradicts"
-  | "records"
-  | "references";
+/** An edge role, as the server's vocabulary spells it (generated from its OpenAPI). */
+export type EmbedRole = NonNullable<EmbedRequest["role"]>;
 
 export interface DocRelation {
   id: number;
@@ -52,8 +46,10 @@ export const knowledgeApi = {
   listKnowledge: (options: { tag?: string | null; status?: string | null } = {}) =>
     KnowledgeService.listKnowledge(options.tag ?? undefined, options.status ?? undefined),
   getNote: (path: string) => KnowledgeService.getNote(path),
-  searchKnowledge: (q: string, options: { type?: string | null; tag?: string | null } = {}) =>
-    KnowledgeService.searchKnowledge(q, options.type ?? undefined, options.tag ?? undefined),
+  searchKnowledge: (
+    q: string,
+    options: { cls?: `${DocCreateRequest.cls}` | null; tag?: string | null } = {},
+  ) => KnowledgeService.searchKnowledge(q, options.cls ?? undefined, options.tag ?? undefined),
   getNoteCards: async (path: string): Promise<EntityCard[]> => {
     const detail = await KnowledgeService.getNote(path);
     return detail.cards ?? [];
@@ -74,39 +70,31 @@ export const knowledgeApi = {
       text: request.text ?? null,
     }),
   editDoc: (path: string, body: string) => KnowledgeService.editDoc(path, { body }),
-  updateDocMeta: (path: string, patch: { tags?: string[]; status?: string }) =>
+  updateDocMeta: (path: string, patch: { tags?: string[] }) =>
     KnowledgeService.updateDocMeta(path, patch),
+  getDocFields: (path: string) => KnowledgeService.getDocFields(path),
+  replaceDocFields: (path: string, update: DocFieldsUpdate) =>
+    KnowledgeService.replaceDocFields(path, update),
   createDoc: (
     name: string,
     options: {
       hostPath?: string | null;
-      format?: "md" | "html";
+      format?: "md" | "html" | "tex";
       body?: string;
       cls?: DocCreateRequest.cls;
-      sources?: DocSource[];
-      record?: Record<string, unknown> | null;
-      title?: string | null;
-      authors?: string[] | null;
-      year?: number | null;
-      doi?: string | null;
-      venue?: string | null;
-      url?: string | null;
+      /** Entity refs, URLs or DOIs, workspace files; a sourced class given none names its host. */
+      sources?: string[];
+      fields?: Record<string, unknown>;
     } = {},
   ): Promise<NoteSummary> =>
     KnowledgeService.createDoc({
       name,
       hostPath: options.hostPath ?? null,
-      ...(options.format ? { format: options.format as DocCreateRequest.format } : {}),
+      ...(options.format ? { format: options.format } : {}),
       body: options.body ?? "",
       cls: options.cls,
       sources: options.sources,
-      record: options.record,
-      title: options.title,
-      authors: options.authors,
-      year: options.year,
-      doi: options.doi,
-      venue: options.venue,
-      url: options.url,
+      fields: options.fields,
     }),
   uploadDocMedia: async (path: string, file: File): Promise<string> => {
     const body = new FormData();
@@ -130,6 +118,9 @@ export const knowledgeApi = {
     await KnowledgeService.deleteDoc(path);
   },
   getBacklinks: (path: string) => KnowledgeService.getBacklinks(path),
+  /** A Manuscript's BibTeX, written by molab from the Literature it cites. */
+  docBibliography: async (path: string): Promise<string> =>
+    String(await KnowledgeService.getDocBibliography(path)),
   docExportUrl: (path: string): string =>
     `/api/knowledge/doc/export?path=${encodeURIComponent(path)}`,
 };

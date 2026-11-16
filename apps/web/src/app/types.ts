@@ -339,7 +339,7 @@ export type ExperimentView =
   | "notebook"
   | "products";
 /** A project's views (L02). Attention, Timeline and Settings left in L02; their old URLs open the Overview. */
-export type ProjectView = "overview" | "experiments" | "assets" | "plan";
+export type ProjectView = "overview" | "experiments" | "assets";
 
 export interface ObjectSelection {
   objectType: BaseObjectType;

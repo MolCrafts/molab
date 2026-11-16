@@ -16,6 +16,8 @@ export const knowledgeKeys = {
   notes: () => [...knowledgeKeys.all, "note"] as const,
   note: (path: string) => [...knowledgeKeys.notes(), path] as const,
   backlinks: (path: string) => [...knowledgeKeys.all, "backlinks", path] as const,
+  /** A Manuscript's bibliography: it changes with the Manuscript and with the Literature it cites. */
+  bibliography: (path: string) => [...knowledgeKeys.all, "bibliography", path] as const,
   /** Documents citing a run or an experiment. */
   citations: (kind: "run" | "experiment", experimentId: string, runId: string | null) =>
     [...knowledgeKeys.all, "citations", kind, experimentId, runId] as const,
@@ -67,6 +69,18 @@ export const knowledgeBacklinksQueryOptions = (path: string) =>
     queryFn: () => knowledgeApi.getBacklinks(path),
     staleTime: 30_000,
   });
+
+export const knowledgeBibliographyQueryOptions = (path: string) =>
+  queryOptions({
+    queryKey: knowledgeKeys.bibliography(path),
+    queryFn: () => knowledgeApi.docBibliography(path),
+    staleTime: 30_000,
+    // 422 names the \cite key no Literature answers; retrying does not change that.
+    retry: false,
+  });
+
+export const useKnowledgeBibliographyQuery = (path: string, enabled = true) =>
+  useQuery({ ...knowledgeBibliographyQueryOptions(path), enabled: enabled && path.length > 0 });
 
 export const useKnowledgeListQuery = (filters: KnowledgeListFilters = {}, enabled = true) =>
   useQuery({ ...knowledgeListQueryOptions(filters), enabled });

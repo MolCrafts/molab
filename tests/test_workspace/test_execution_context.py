@@ -444,7 +444,7 @@ class _AliveRemoveFails(CountingFileSystem):
 
 
 def _produced(run: Run, execution_id: str):
-    return assets_produced_by(run.experiment.project.workspace, execution_id)
+    return assets_produced_by(run.experiment.project.workspace, execution_id, run_id=run.id)
 
 
 def _payload(run: Run, asset) -> bytes:
@@ -498,6 +498,20 @@ class TestExecutionContextRegister:
         )
         assert all(slug.endswith("--network-data") for slug in slugs)
         assert not any(slug.endswith("-2") for slug in slugs)
+
+    def test_in_memory_bytes_keep_the_title_suffix(self, run: Run) -> None:
+        with run.start() as ctx:
+            data = ctx.register(b"LAMMPS\n", title="network.data")
+            bare = ctx.register(b"raw", title="charges")
+            svg = ctx.register(b"<svg/>\n", title="depiction.svg")
+        assert data.file == "payload.data"
+        assert bare.file == "payload"
+        assert svg.file == "payload.svg"
+        assert svg.media_type == "image/svg+xml"
+
+    def test_in_memory_log_bytes_are_refused(self, run: Run) -> None:
+        with run.start() as ctx, pytest.raises(ValueError, match="log"):
+            ctx.register(b"step\n", title="run.log")
 
     def test_user_results_title_and_set_result_do_not_collapse(self, run: Run) -> None:
         with run.start() as ctx:

@@ -26,11 +26,11 @@ describe("showcase typed knowledge links", () => {
   it("classifies entity refs, external sources and missing files; skips fenced examples", () => {
     const edges = showcaseKnowledgeEdges(
       notes(
-        "[@records run](molab:experiment/e/run/r)\n[@cites paper](https://example.org/paper)\n[old](gone.md)\n```md\n[@derived_from example](source.md)\n```\n`[example](source.md)`",
+        "[@derived_from run](molab:experiment/e/run/r)\n[@cites paper](https://example.org/paper)\n[old](gone.md)\n```md\n[@derived_from example](source.md)\n```\n`[example](source.md)`",
       ),
     );
     expect(edges.map((edge) => [edge.role, edge.kind])).toEqual([
-      ["records", "ref"],
+      ["derived_from", "ref"],
       ["cites", "external"],
       ["references", "missing"],
     ]);

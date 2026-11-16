@@ -451,3 +451,50 @@ class TestEntrypointPortability:
         ws.add_project("p").add_experiment("e").bind_workflow("code", entrypoint="workflow.py:wf")
         report = validate_workspace(ws.resolve())
         assert not any(v.rule == "experiment.absolute_entrypoint" for v in report.violations)
+
+
+class TestExperimentSourceModules:
+    """A module ``workflow.py`` imports is what an attempt ships as source, so it is legal."""
+
+    @staticmethod
+    def _experiment_with_helpers(tmp_path: Path, *, bind: bool) -> tuple[Workspace, Path]:
+        ws = _workspace(tmp_path)
+        exp = ws.get_project("alpha").get_experiment("sweep")
+        directory = Path(str(exp.resolve()))
+        (directory / "workflow.py").write_text(
+            "import nacl_model\nfrom checks import ok\nfrom helpers import units\nwf = None\n"
+        )
+        (directory / "nacl_model.py").write_text("SIGMA = 1.0\n")
+        (directory / "checks.py").write_text("def ok():\n    return True\n")
+        (directory / "helpers").mkdir()
+        (directory / "helpers" / "__init__.py").write_text("")
+        (directory / "helpers" / "units.py").write_text("KB = 1.0\n")
+        (directory / "analysis.py").write_text("print('not imported')\n")
+        if bind:
+            exp.bind_workflow("code", entrypoint=f"{directory}/workflow.py:wf")
+        return ws, directory
+
+    @pytest.mark.parametrize("bind", [True, False])
+    def test_imported_siblings_are_legal_and_the_rest_stray(
+        self, tmp_path: Path, bind: bool
+    ) -> None:
+        ws, directory = self._experiment_with_helpers(tmp_path, bind=bind)
+
+        report = ws.validate()
+
+        root = Path(ws.resolve())
+        stray = {v.path for v in report.errors if v.rule == "layout.stray"}
+        assert stray == {(directory / "analysis.py").relative_to(root).as_posix()}
+
+    def test_every_file_an_attempt_captures_validates(self, tmp_path: Path) -> None:
+        ws, directory = self._experiment_with_helpers(tmp_path, bind=True)
+        run = ws.get_project("alpha").get_experiment("sweep").list_runs()[0]
+
+        captured = run._create_execution().source
+
+        assert captured is not None
+        shipped = {item.name.split("/")[0] for item in captured.files}
+        assert shipped == {"workflow.py", "nacl_model.py", "checks.py", "helpers"}
+        root = Path(ws.resolve())
+        stray = {v.path for v in ws.validate().errors if v.rule == "layout.stray"}
+        assert not {(directory / name).relative_to(root).as_posix() for name in shipped} & stray

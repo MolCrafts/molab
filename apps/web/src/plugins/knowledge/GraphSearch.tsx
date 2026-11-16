@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { searchResearchNodes } from "./graph-search";
 import type { HiddenReason } from "./graph-view";
 import type { MapNode } from "./research-map";
-import { reasoningLabel, stageLabels } from "./research-ui";
+import { reasoningLabel } from "./research-ui";
 
 /** A map-local navigator: the full graph stays visible while results locate its documents. */
 export const GraphSearch = ({
@@ -132,9 +132,7 @@ export const GraphSearch = ({
                     · Show & locate
                   </span>
                 )}
-                <span className="tw-hint">
-                  {reasoningLabel(node) ?? stageLabels[node.status ?? ""] ?? node.host ?? node.id}
-                </span>
+                <span className="tw-hint">{reasoningLabel(node) ?? node.host ?? node.id}</span>
               </button>
             ))}
           </div>

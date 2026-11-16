@@ -720,8 +720,19 @@ class Workspace(Folder):
         return proj
 
     def del_project(self, name: str) -> None:
-        """Delete a project directory and its children."""
-        self.remove_folder(self.project(name).id, cls=Project)
+        """Delete a project directory and its children.
+
+        Raises:
+            AttemptNotHomeError: An attempt of one of its runs is still away on
+                a compute target (:func:`~molab.workspace.lifecycle_ops.refuse_attempts_away`).
+        """
+        from .lifecycle_ops import refuse_attempts_away
+
+        project = self.project(name)
+        refuse_attempts_away(
+            run for experiment in project.list_experiments() for run in experiment.list_runs()
+        )
+        self.remove_folder(project.id, cls=Project)
 
     def has_project(self, name: str) -> bool:
         try:

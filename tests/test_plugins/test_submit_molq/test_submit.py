@@ -14,6 +14,7 @@ involved.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,6 +56,7 @@ class SubmitSpy:
     metadata: dict[str, str] | None = None
     record_at_submit: Execution | None = None
     record_error: str | None = None
+    project_root: str | None = None
     spec: Any = None
 
 
@@ -91,10 +93,12 @@ def _install_fake_molq(
 
     class _FakeCluster:
         def submit(
-            self, spec: Any, *, argv: list[str] | None = None, request_key: str | None = None
+            self, spec: Any, *, project_root: str, request_key: str | None = None
         ) -> _FakeJob:
-            del argv, request_key
+            # molq's Cluster.submit: a project root is required.
+            del request_key
             spy.submits += 1
+            spy.project_root = project_root
             spy.spec = spec
             unit = spec.execution.units[0]
             command = unit.command
@@ -285,6 +289,55 @@ class TestSubmitHandler:
 
         assert spy.argv is not None
         assert spy.argv[0] == "/venvs/aarch64/bin/python"
+
+    @pytest.mark.parametrize(
+        ("written", "seconds"),
+        [
+            ("1h30m", 5400),
+            ("2d", 172800),
+            ("90s", 90),
+            ("3600", 3600),
+            ("12:00:00", 43200),
+            ("00:30:05", 1805),
+            ("1-12:00:00", 129600),
+        ],
+    )
+    def test_the_time_limit_reaches_the_scheduler(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, written: str, seconds: int
+    ) -> None:
+        _ws, project, experiment, run = _make_run(tmp_path)
+        spy = _install_fake_molq(monkeypatch, run)
+        handler = make_submit_handler(
+            scheduler="local",
+            cluster="local",
+            resources={"time": written, "mem": "8GB"},
+            scheduling={},
+        )
+
+        handler(None, run, experiment, project)
+
+        assert spy.spec.resources.time_limit_seconds == seconds
+        assert spy.spec.resources.memory_bytes == "8000000000"
+
+    @pytest.mark.parametrize(
+        "resources",
+        [{"time": "12:00"}, {"time": "soon"}, {"time": ""}, {"mem": "8 gigs"}, {"mem": "8XB"}],
+    )
+    def test_an_unreadable_resource_is_refused_before_any_attempt_exists(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, resources: dict[str, str]
+    ) -> None:
+        """A limit molab cannot read must not become a job with the scheduler's default."""
+        _ws, _project, _experiment, run = _make_run(tmp_path)
+        spy = _install_fake_molq(monkeypatch, run)
+        (value,) = resources.values()
+
+        with pytest.raises(ValueError, match=re.escape(repr(value))):
+            make_submit_handler(
+                scheduler="local", cluster="local", resources=resources, scheduling={}
+            )
+
+        assert spy.submits == 0
+        assert _execution_ids(run) == []
 
     def test_no_uuid_execution_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
@@ -518,13 +571,25 @@ def _install_refreshing_molq(
     *,
     state: str = "queued",
     refresh_error: Exception | None = None,
+    logs: dict[str, str] | None = None,
+    logs_error: Exception | None = None,
 ) -> RefreshSpy:
-    """Replace the application client with a fake whose ``status`` reports *state*."""
+    """Replace the application client with a fake whose ``status`` reports *state*.
+
+    ``logs`` is the scheduler's own output per stream, served in 4-byte chunks.
+    """
     spy = RefreshSpy()
+    served = logs or {}
 
     class _Job:
         def __init__(self, ref: dict[str, str]) -> None:
             self.ref = ref
+
+        def logs(self, *, stream: str = "stdout", offset: int = 0) -> dict[str, object]:
+            if logs_error is not None:
+                raise logs_error
+            text = served.get(stream, "")[offset : offset + 4]
+            return {"text": text, "next_offset": offset + len(text), "bytes_read": len(text)}
 
         def status(self, **_kw: object) -> dict[str, object]:
             if refresh_error is not None:
@@ -601,6 +666,43 @@ class TestReconcileSubmission:
         assert state in str(e01.error["message"]).lower()
         assert returned.record == e01
         assert returned.error is None
+
+    def test_the_scheduler_output_of_an_ended_job_is_kept_in_jobs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A worker that dies before it starts leaves only the scheduler's own output."""
+        from molab.plugins.submit_molq.submit import reconcile_submission
+
+        _ws, _project, run = _submit_local(monkeypatch, tmp_path)
+        _install_refreshing_molq(
+            monkeypatch,
+            state="failed",
+            logs={"stdout": "loading env\n", "stderr": "python: No such file or directory\n"},
+        )
+
+        reconcile_submission(run, "e01")
+
+        jobs = run.execution_dir("e01") / "jobs"
+        assert (jobs / "fake-sched-id.out").read_text() == "loading env\n"
+        assert (jobs / "fake-sched-id.err").read_text() == "python: No such file or directory\n"
+        assert run.execution("e01").status.value == "failed"
+
+    def test_unreadable_scheduler_output_does_not_stop_the_seal(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from molab.plugins.submit_molq.submit import reconcile_submission
+
+        _ws, _project, run = _submit_local(monkeypatch, tmp_path)
+        _install_refreshing_molq(
+            monkeypatch,
+            state="failed",
+            logs_error=MolqError("FILE_UNAVAILABLE", "Native log location unavailable"),
+        )
+
+        returned = reconcile_submission(run, "e01")
+
+        assert returned.record.status.value == "failed"
+        assert not (run.execution_dir("e01") / "jobs" / "fake-sched-id.out").exists()
 
     def test_rebuilds_the_job_from_recorded_executor(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -758,6 +860,41 @@ class TestReconcileSubmission:
         assert e01.error is not None
         assert e01.error["type"] == "SchedulerJobEndedBeforeStart"
         assert e01.executor["job_id"] == _JOB_ID
+        assert returned.record == e01
+        assert returned.error is None
+
+    @pytest.mark.parametrize(
+        ("state", "sealed"),
+        [("timed_out", "failed"), ("failed", "failed"), ("cancelled", "cancelled")],
+    )
+    def test_a_started_attempt_whose_job_ended_is_sealed_with_the_schedulers_word(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: str, sealed: str
+    ) -> None:
+        """A job killed at its time limit leaves a worker record that says ``running``."""
+        from molab.plugins.submit_molq.submit import reconcile_submission
+
+        run, transport = _submit_remote(monkeypatch, tmp_path)
+        local = run.execution("e01")
+        transport.texts["/executions/e01/execution.json"] = json.dumps(
+            {
+                "schema_version": 4,
+                **local.model_dump(mode="json"),
+                "status": "running",
+                "started_at": "2026-01-01T00:00:01Z",
+                "executor": {"backend": "molq", "kind": "local", "host": "node7", "pid": 42},
+                "environment": {**local.environment, "host": "node7"},
+            }
+        )
+        _install_refreshing_molq(monkeypatch, state=state)
+
+        returned = reconcile_submission(run, "e01")
+
+        e01 = run.execution("e01")
+        assert e01.status.value == sealed
+        assert e01.started_at is not None
+        assert e01.error is not None
+        assert e01.error["type"] == "SchedulerJobEnded"
+        assert state in e01.error["message"]
         assert returned.record == e01
         assert returned.error is None
 

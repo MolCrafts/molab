@@ -6,19 +6,16 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
-from molab.server.exceptions import PreviewReaderError
 
+def render_png(frames: Sequence[Any]) -> bytes:
+    """Render *frames* via ``molvis.Molvis``. Frames are molpy Frames.
 
-def render_png(frames: Sequence[Any], *, dataset_path: str) -> bytes:
-    """Render *frames* via ``molvis.Molvis``. Frames are molpy Frames."""
+    Raises:
+        ImportError: molvis is not installed.
+    """
     os.environ.setdefault("MOLVIS_HEADLESS", "1")
-    try:
-        from molvis import Molvis
-    except ImportError as exc:
-        raise PreviewReaderError(dataset_path, "molvis is not installed") from exc
-    try:
-        viewer = Molvis()
-        viewer.set_trajectory(frames)
-        return viewer.snapshot()
-    except Exception as exc:
-        raise PreviewReaderError(dataset_path, f"snapshot failed: {exc}") from exc
+    from molvis import Molvis
+
+    viewer = Molvis()
+    viewer.set_trajectory(frames)
+    return viewer.snapshot()

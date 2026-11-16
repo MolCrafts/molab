@@ -14,7 +14,11 @@
     "paths": {
       "@/*": ["./../web/src/*"],
       "@molcrafts/ui-vega-lite": ["../../../molcrafts-ui/packages/vega-lite/src/index.tsx"],
-      "@molcrafts/ui-vega": ["../../../molcrafts-ui/packages/vega/src/index.tsx"]
+      "@molcrafts/ui-vega": ["../../../molcrafts-ui/packages/vega/src/index.tsx"],
+      "react": ["../../node_modules/@types/react"],
+      "react/*": ["../../node_modules/@types/react/*"],
+      "vega": ["../../node_modules/vega"],
+      "vega-lite": ["../../node_modules/vega-lite/build/index"]
     }
   },
   "include": [

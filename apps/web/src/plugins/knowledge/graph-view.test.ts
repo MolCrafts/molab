@@ -8,7 +8,6 @@ const node = (id: string, cls = "Finding", state: string | null = null): MapNode
   cls,
   state,
   title: id,
-  status: null,
   excerpt: "",
   note: "",
   host: null,
@@ -18,7 +17,7 @@ const map = {
   nodes: [
     node("a", "Plan"),
     node("b"),
-    node("c", "Decision", "open"),
+    node("c", "Hypothesis", "supported"),
     node("d", "Hypothesis", "open"),
     node("isolated"),
   ],
@@ -48,10 +47,14 @@ describe("orthogonal graph view", () => {
     ).toEqual(["supports"]);
   });
   it("keeps state filters local to their class and intersects manual/type filters", () => {
-    expect(shown(view({ hiddenStates: { Decision: ["open"] } }))).toContain("d");
+    expect(shown(view({ hiddenStates: { Hypothesis: ["supported"] } }))).toContain("d");
     expect(
       shown(
-        view({ hiddenStates: { Decision: ["open"] }, hiddenClasses: ["Plan"], hiddenNodes: ["b"] }),
+        view({
+          hiddenStates: { Hypothesis: ["supported"] },
+          hiddenClasses: ["Plan"],
+          hiddenNodes: ["b"],
+        }),
       ),
     ).toEqual(["d", "isolated"]);
   });
@@ -87,8 +90,8 @@ describe("orthogonal graph view", () => {
     expect(
       shown(
         view({
-          hiddenClasses: ["Decision"],
-          hiddenStates: { Decision: ["open"] },
+          hiddenClasses: ["Hypothesis"],
+          hiddenStates: { Hypothesis: ["supported"] },
           hiddenNodes: ["c"],
           roles: [],
           focus: { anchor: "c", direction: "both", depth: 1 },
@@ -112,8 +115,8 @@ describe("orthogonal graph view", () => {
   });
   it("search recovery preserves unrelated filters and only leaves focus when needed", () => {
     const v = view({
-      hiddenClasses: ["Decision", "Plan"],
-      hiddenStates: { Decision: ["open", "made"], Hypothesis: ["open"] },
+      hiddenClasses: ["Hypothesis", "Plan"],
+      hiddenStates: { Hypothesis: ["supported", "open"] },
       hiddenNodes: ["c", "b"],
       roles: ["supports"],
       focus: { anchor: "a", direction: "outgoing", depth: 1 },
@@ -121,7 +124,7 @@ describe("orthogonal graph view", () => {
     const recovered = revealGraphNode(map, v, map.nodes[2]);
     expect(recovered).toMatchObject({
       hiddenClasses: ["Plan"],
-      hiddenStates: { Decision: ["made"], Hypothesis: ["open"] },
+      hiddenStates: { Hypothesis: ["open"] },
       hiddenNodes: ["b"],
       roles: ["supports"],
       focus: null,

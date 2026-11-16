@@ -15,7 +15,7 @@ describe("knowledge search inventory", () => {
       "Observation",
       "Hypothesis",
       "Decision",
-      "Delegation",
+      "Manuscript",
     ]);
   });
 });

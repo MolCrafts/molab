@@ -26,7 +26,7 @@ interface ShowcaseNote {
   tags: string[];
   body: string;
   links: string[];
-  record?: Record<string, unknown>;
+  fields?: Record<string, unknown>;
 }
 
 const documentSlug = (name: string): string => {
@@ -125,89 +125,10 @@ for (const [cls, name, excerpt, hostPath] of [
     excerpt,
     status: "active",
     tags: ["example", cls.toLowerCase()],
-    body: `# ${name}\n\n${excerpt}\n\nSynthetic example for interface exploration.\n\n[@records benchmark](molab:experiment/exp-nve/run/md-001)`,
+    body: `# ${name}\n\n${excerpt}\n\nSynthetic example for interface exploration.\n\n[@derived_from benchmark](molab:experiment/exp-nve/run/md-001)`,
     links: [],
   };
   notes.set(relPath, note);
-}
-
-const thermostat =
-  "projects/nve-drift/experiments/thermostat-validation/knowledges/thermostat-validation.md";
-for (const note of [
-  {
-    cls: "Roadmap",
-    name: "Thermostat roadmap",
-    excerpt: "Bind the workflow, then compare relaxation times.",
-    record: {
-      stages: [
-        { id: "bind", title: "Bind the workflow", experiment: "thermostat-validation" },
-        {
-          id: "compare",
-          title: "Compare relaxation times",
-          experiment: "thermostat-validation",
-          depends_on: ["bind"],
-        },
-      ],
-    },
-  },
-  {
-    cls: "Todo",
-    name: "Thermostat todo",
-    excerpt: "The comparison stays blocked until the workflow is bound.",
-    record: {
-      items: [
-        { id: "bind-workflow", title: "Bind a workflow", status: "open", stage: "bind" },
-        {
-          id: "compare-times",
-          title: "Compare relaxation times",
-          status: "blocked",
-          stage: "compare",
-        },
-      ],
-    },
-  },
-  {
-    cls: "Milestone",
-    name: "Relaxation times compared",
-    excerpt: "The thermostat examples have been compared.",
-    record: {
-      stage: "compare",
-      criterion: "Relaxation times are compared for the thermostat examples.",
-      status: "open",
-    },
-  },
-  {
-    cls: "Delegation",
-    name: "Thermostat check",
-    excerpt: "Check that the thermostat examples stay near 300 K.",
-    record: {
-      goal: "Check that the thermostat examples stay near 300 K.",
-      scope: "projects/nve-drift",
-      state: "open",
-    },
-  },
-] satisfies Array<{
-  cls: string;
-  name: string;
-  excerpt: string;
-  record: Record<string, unknown>;
-}>) {
-  const relPath = documentRelPath(
-    "projects/nve-drift/experiments/thermostat-validation",
-    note.name,
-  );
-  notes.set(relPath, {
-    cls: note.cls,
-    name: note.name,
-    relPath,
-    hostPath: "projects/nve-drift/experiments/thermostat-validation",
-    excerpt: note.excerpt,
-    status: "active",
-    tags: ["example", note.cls.toLowerCase()],
-    body: `# ${note.name}\n\n${note.excerpt}\n\nCites [${thermostat}](${thermostat}).\n`,
-    links: [thermostat],
-    record: note.record,
-  });
 }
 
 // L10: one document stored as HTML — prose in <molab-markdown>, components as elements.
@@ -316,11 +237,7 @@ const TEMPLATE_BODIES: Record<string, string> = {
     '!!! abstract "Goal"',
     "    Pick the largest timestep that keeps NVE energy drift below 1·10⁻⁴ eV/atom/ps.",
     "",
-    "## Roadmap",
-    "",
-    "::molab-stage-track",
-    "",
-    "## Next",
+    "## Work items",
     "",
     "- [x] Baseline at 0.5 fs",
     "- [ ] Sweep 0.5 / 1 / 2 fs × two drivers",
@@ -342,53 +259,10 @@ const TEMPLATE_BODIES: Record<string, string> = {
     '!!! quote "§4.2"',
     "    For water with flexible O–H bonds the stable limit is near 1 fs.",
   ].join("\n"),
-  "Thermostat roadmap": [
-    "::molab-stage-track",
-    "",
-    "## Stages",
-    "",
-    "### Bind the workflow",
-    "",
-    "Bind a code workflow and run one smoke test.",
-    "",
-    "### Compare relaxation times",
-    "",
-    '!!! warning "Blocked"',
-    "    Waits for **Bind the workflow**.",
-  ].join("\n"),
-  "Thermostat todo": [
-    "::molab-todo-list",
-    "",
-    "## Notes",
-    "",
-    "Use the same seeds as the integrator benchmark.",
-  ].join("\n"),
-  "Relaxation times compared": [
-    `::molab-milestone{evidence="molab:experiment/exp-nve/run/md-002 molab:experiment/exp-nve/run/md-011"}`,
-    "",
-    "## On the roadmap",
-    "",
-    "Stage 2 of 2 of the thermostat roadmap.",
-  ].join("\n"),
-  "Thermostat check": [
-    '!!! note "Brief"',
-    "    Check that the thermostat examples stay near 300 K at 1 and 2 fs; report any run that drifts more than 5 K.",
-    "",
-    "## Asks",
-    "",
-    "::molab-approval{gate=plan}",
-    "",
-    "## Scope",
-    "",
-    '::molab-params{experiment="Thermostat Validation" may_run_on=hpc-slurm budget="4 GPU-hours"}',
-  ].join("\n"),
 };
 for (const note of notes.values()) {
   const body = TEMPLATE_BODIES[note.name];
   if (body) note.body = body;
-  if (note.cls === "Delegation" && note.record) {
-    note.record = { ...note.record, state: "blocked", questions: ["Run 4 jobs on hpc-slurm?"] };
-  }
 }
 
 const manuscript = getFile("manuscript/main.tex");
@@ -559,9 +433,10 @@ export const featureShowcaseHandlers = [
     return HttpResponse.json({
       name: note.name,
       relPath: note.relPath,
+      cls: note.cls ?? "Note",
       body: note.body,
       links: note.links,
-      record: note.record ?? {},
+      fields: note.fields ?? {},
       format: note.relPath.endsWith(".html") ? "html" : "md",
       ...showcaseTimes(note.relPath),
       cards: noteCards(path),
@@ -575,7 +450,7 @@ export const featureShowcaseHandlers = [
       .map((note) => ({
         path: note.relPath,
         title: note.name,
-        type: "note",
+        cls: note.cls ?? "Note",
         snippet: note.excerpt,
         tags: note.tags,
       }));
@@ -612,7 +487,7 @@ export const featureShowcaseHandlers = [
       .map((edge) => ({
         path: edge.source,
         title: notes.get(edge.source)?.name ?? edge.source,
-        type: notes.get(edge.source)?.cls?.toLowerCase() ?? "note",
+        cls: notes.get(edge.source)?.cls ?? "Note",
         role: edge.role,
       }));
     return HttpResponse.json({ entity, backlinks });
@@ -633,9 +508,10 @@ export const featureShowcaseHandlers = [
     return HttpResponse.json({
       name: note.name,
       relPath: note.relPath,
+      cls: note.cls ?? "Note",
       body: note.body,
       links: note.links,
-      record: note.record ?? {},
+      fields: note.fields ?? {},
       format: note.relPath.endsWith(".html") ? "html" : "md",
       updatedAt: new Date().toISOString(),
       createdAt: showcaseTimes(note.relPath).createdAt,
@@ -643,16 +519,29 @@ export const featureShowcaseHandlers = [
     });
   }),
 
-  http.patch(workspaceRoute("/api/knowledge/doc/record"), async ({ request }) => {
+  http.get(workspaceRoute("/api/knowledge/doc/fields"), ({ request }) => {
     const path = new URL(request.url).searchParams.get("path") ?? "";
     const note = notes.get(path);
     if (!note) return HttpResponse.json({ detail: "Note not found" }, { status: 404 });
-    const payload = (await request.json()) as { record?: Record<string, unknown> };
-    note.record = payload.record ?? {};
     return HttpResponse.json({
       relPath: note.relPath,
       cls: note.cls ?? "Note",
-      record: note.record,
+      fields: note.fields ?? {},
+      digest: `sha256:${Date.now().toString(16)}`,
+    });
+  }),
+
+  http.patch(workspaceRoute("/api/knowledge/doc/fields"), async ({ request }) => {
+    const path = new URL(request.url).searchParams.get("path") ?? "";
+    const note = notes.get(path);
+    if (!note) return HttpResponse.json({ detail: "Note not found" }, { status: 404 });
+    const payload = (await request.json()) as { fields?: Record<string, unknown> };
+    note.fields = payload.fields ?? {};
+    if (typeof note.fields.status === "string") note.status = note.fields.status;
+    return HttpResponse.json({
+      relPath: note.relPath,
+      cls: note.cls ?? "Note",
+      fields: note.fields,
       digest: `sha256:${Date.now().toString(16)}`,
     });
   }),
@@ -662,9 +551,8 @@ export const featureShowcaseHandlers = [
     const path = url.searchParams.get("path") ?? "";
     const note = notes.get(path);
     if (!note) return HttpResponse.json({ detail: "Note not found" }, { status: 404 });
-    const body = (await request.json()) as { tags?: string[]; status?: string };
+    const body = (await request.json()) as { tags?: string[] };
     if (body.tags) note.tags = body.tags;
-    if (body.status) note.status = body.status;
     return HttpResponse.json(noteSummary(note));
   }),
 
@@ -674,7 +562,7 @@ export const featureShowcaseHandlers = [
       body?: string;
       hostPath?: string | null;
       cls?: string;
-      record?: Record<string, unknown>;
+      fields?: Record<string, unknown>;
       format?: "md" | "html";
     };
     const name = body.name ?? "note";
@@ -691,7 +579,7 @@ export const featureShowcaseHandlers = [
       tags: [],
       body: body.body ?? "",
       links: [],
-      record: body.record,
+      fields: body.fields,
     };
     if (notes.has(relPath))
       return HttpResponse.json({ detail: "Document already exists" }, { status: 409 });
@@ -792,7 +680,7 @@ export const featureShowcaseHandlers = [
       const hostPath = getExperiment(run.experimentId)?.path ?? "";
       const name = body.name ?? `${run.id}-${params.operation}`;
       const relPath = documentRelPath(hostPath, name);
-      const reportBody = `# ${name}\n\n${narrative}\n\n[@records ${run.id}](${run.ref})`;
+      const reportBody = `# ${name}\n\n${narrative}\n\n[@derived_from ${run.id}](${run.ref})`;
       notes.set(relPath, {
         cls: body.cls ?? "Finding",
         name,

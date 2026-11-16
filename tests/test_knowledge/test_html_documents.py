@@ -15,9 +15,9 @@ from typing import Any
 import pytest
 
 from molab import htmldoc
-from molab.knowledge import Knowledge, Note, Roadmap, SourceRef
+from molab.knowledge import Hypothesis, Knowledge, Note, Observation, SourceRef
 from molab.knowledge.concepts import _open_document
-from molab.knowledge.record import record_of, replace_record
+from molab.knowledge.fields import own_fields, replace_fields
 from molab.knowledge.write import write_knowledge
 
 BODY = (
@@ -40,7 +40,7 @@ class TestWrite:
         assert Path(doc.path).name == "tg-page.html"
         text = Path(doc.path).read_text(encoding="utf-8")
         assert text.startswith("<!doctype html>\n")
-        assert "<title>Tg page</title>" in text
+        assert "<title>Glass transition</title>" in text
         meta, body = htmldoc.split(text)
         assert body == BODY
         assert meta["class"] == "Note"
@@ -88,34 +88,32 @@ class TestWrite:
     def test_a_sourced_html_document_keeps_its_sources(self, experiment: Any) -> None:
         doc = write_knowledge(
             experiment,
-            name="finding",
-            of=Roadmap,
+            name="observation",
+            of=Observation,
             sources=[SourceRef.of(experiment)],
             created_by="t",
             text="<p>plan</p>\n",
-            record={"stages": [{"id": "s1", "title": "One"}]},
             format="html",
         )
         assert Path(doc.path).suffix == ".html"
         assert "<molab-markdown>\n" in doc.read()
         assert len(doc.sources) == 1  # ty: ignore[unresolved-attribute]
 
-    def test_replace_record_keeps_the_html_form(self, experiment: Any) -> None:
+    def test_replace_fields_keeps_the_html_form(self, experiment: Any) -> None:
         doc = write_knowledge(
             experiment,
-            name="road",
-            of=Roadmap,
+            name="claim",
+            of=Hypothesis,
             sources=[SourceRef.of(experiment)],
             created_by="t",
             text="<p>plan</p>\n",
-            record={"stages": [{"id": "s1", "title": "One"}]},
+            fields={"verdict": "open"},
             format="html",
         )
-        replace_record(doc, {"stages": [{"id": "s2", "title": "Two"}]})
+        replace_fields(doc, {"verdict": "supported"})
 
         assert Path(doc.path).read_text(encoding="utf-8").startswith("<!doctype html>")
-        assert record_of(doc)["stages"] == [{"id": "s2", "title": "Two"}]
-        assert "created_at" not in record_of(doc)
+        assert own_fields(doc.frontmatter()) == {"verdict": "supported"}
         assert doc.read().startswith("<p>plan</p>\n")
 
 
@@ -137,7 +135,7 @@ class TestRead:
 
         hits = root.search("cooling").hits
         assert [hit.entry.path for hit in hits] == ["knowledges/tg-page.html"]
-        assert hits[0].entry.title == "Tg page"
+        assert hits[0].entry.title == "Glass transition"
         assert not root.search("molab").hits
         assert not root.search("densityseries").hits
 

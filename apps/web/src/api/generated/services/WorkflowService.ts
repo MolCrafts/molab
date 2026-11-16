@@ -85,6 +85,7 @@ export class WorkflowService {
      * Nothing is written.
      * @param projectId
      * @param experimentId
+     * @param source
      * @param molabSession
      * @returns WorkflowDryRunResponse Successful Response
      * @throws ApiError
@@ -92,6 +93,7 @@ export class WorkflowService {
     public static dryRunWorkflowDocument(
         projectId: string,
         experimentId: string,
+        source: 'stored' | 'code' = 'stored',
         molabSession?: (string | null),
     ): CancelablePromise<WorkflowDryRunResponse> {
         return __request(OpenAPI, {
@@ -103,6 +105,9 @@ export class WorkflowService {
             },
             cookies: {
                 'molab_session': molabSession,
+            },
+            query: {
+                'source': source,
             },
             errors: {
                 422: `Validation Error`,
@@ -192,6 +197,7 @@ export class WorkflowService {
      * @param projectId
      * @param experimentId
      * @param ws
+     * @param source
      * @param molabSession
      * @returns WorkflowDryRunResponse Successful Response
      * @throws ApiError
@@ -200,6 +206,7 @@ export class WorkflowService {
         projectId: string,
         experimentId: string,
         ws: string,
+        source: 'stored' | 'code' = 'stored',
         molabSession?: (string | null),
     ): CancelablePromise<WorkflowDryRunResponse> {
         return __request(OpenAPI, {
@@ -212,6 +219,9 @@ export class WorkflowService {
             },
             cookies: {
                 'molab_session': molabSession,
+            },
+            query: {
+                'source': source,
             },
             errors: {
                 422: `Validation Error`,

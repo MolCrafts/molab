@@ -151,3 +151,26 @@ class TestCancelPending:
         assert execution.status is ExecutionStatus.CANCELLED
         assert "config_hash" in execution.environment
         assert execution.created_by.id == "operator"
+
+
+class TestCancelDispatchedAttempt:
+    """An attempt on a compute target is sealed where it comes home."""
+
+    def _seed_dispatched(self, run: Run) -> str:
+        state = _repo(run).create(
+            mode=ExecutionMode.INITIAL,
+            created_by=_TEST_AGENT,
+            executor={"backend": "molq", "target": "cluster"},
+        )
+        return state.id
+
+    def test_a_signalled_attempt_is_left_to_its_stage_out(self, run: Run) -> None:
+        execution_id = self._seed_dispatched(run)
+        assert cancel_run(run, signal_executor=lambda _: None) is None
+        assert _repo(run).get(execution_id).status is ExecutionStatus.QUEUED
+
+    def test_an_attempt_whose_signal_failed_is_sealed_here(self, run: Run) -> None:
+        execution_id = self._seed_dispatched(run)
+        warning = cancel_run(run, signal_executor=lambda _: "molq cancel failed")
+        assert warning == "molq cancel failed"
+        assert _repo(run).get(execution_id).status is ExecutionStatus.CANCELLED

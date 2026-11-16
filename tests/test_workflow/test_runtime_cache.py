@@ -169,7 +169,7 @@ class TestRuntimeCaching:
         assert _COUNTERS["produce"] == 1
         (asset,) = [
             item
-            for item in assets_produced_by(workspace, run1.executions[-1].id)
+            for item in assets_produced_by(workspace, run1.executions[-1].id, run_id=run1.id)
             if isinstance(item.origin, ExecutionOrigin) and item.origin.run_id == run1.id
         ]
         assert first.outputs["produce"] == asset.ref
@@ -182,7 +182,7 @@ class TestRuntimeCaching:
         assert second.outputs["produce"] == asset.ref
         assert [
             item
-            for item in assets_produced_by(workspace, run2.executions[-1].id)
+            for item in assets_produced_by(workspace, run2.executions[-1].id, run_id=run2.id)
             if isinstance(item.origin, ExecutionOrigin) and item.origin.run_id == run2.id
         ] == []
 

@@ -32,7 +32,7 @@ import posixpath
 from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from molab.param import ParamSpace
 
@@ -62,6 +62,7 @@ from .folder import (
     register_entity_class,
 )
 from .fs import PathArg
+from .fs_local import LocalFS
 from .models import ExperimentMetadata, FolderMetadata, WorkflowKind
 from .naming import EXPERIMENT_CONTAINER, RUN_CONTAINER, disambiguate, entity_slug, run_slug
 from .run import Run, compute_run_definition_hash
@@ -419,6 +420,43 @@ class Experiment(Folder):
         if posixpath.isabs(source):
             return locator
         return f"{posixpath.normpath(posixpath.join(str(self.resolve()), source))}:{qualname}"
+
+    @property
+    def entrypoint_file(self) -> Path | None:
+        """The file this experiment's code workflow is imported from.
+
+        Every attempt captures it, with its first-party imports, as its
+        source (``Run._create_execution``), read through the workspace
+        filesystem; on a remote one the path is the remote path, never
+        resolved here. ``None`` for a document or unbound experiment and a
+        package (directory) locator. A missing file is still returned: its
+        capture fails rather than recording no source.
+
+        Raises:
+            SourceCaptureError: The workspace is reached through a remote
+                filesystem and the script lies outside it. A local workspace
+                reads such a script from its own disk, the one its attempts
+                import from; for a remote workspace an absolute path recorded
+                at bind names no file of that tree, so it is refused rather
+                than read from either machine.
+        """
+        locator = self.entrypoint
+        if self.workflow_kind != "code" or not locator or ":" not in locator:
+            return None
+        disk = self._disk()
+        stored = self._entity_metadata.workflow_entrypoint or ""
+        if not isinstance(disk, LocalFS) and posixpath.isabs(
+            (self._portable_locator(stored) or "").rsplit(":", 1)[0]
+        ):
+            from .source_snapshot import SourceCaptureError
+
+            raise SourceCaptureError(
+                f"workflow script {locator.rsplit(':', 1)[0]} is outside the workspace, which "
+                "is reached through a remote filesystem; move the script into the experiment "
+                "directory and bind it there"
+            )
+        path = Path(locator.rsplit(":", 1)[0])
+        return None if disk.is_dir(path) else path
 
     def _portable_locator(self, locator: str | None) -> str | None:
         """*locator* with a file inside the workspace made relative to this experiment.
@@ -872,6 +910,7 @@ class Experiment(Folder):
         space: ParamSpace,
         *,
         target: str | None = None,
+        inputs: tuple[str, ...] = (),
     ) -> list[Run]:
         """Seed one fresh Run per *not yet present* cell (idempotent).
 
@@ -892,7 +931,7 @@ class Experiment(Folder):
                     cast("dict[str, JSONValue]", dict(cell)),
                     config_hash=None,
                     target=target,
-                    inputs=(),
+                    inputs=inputs,
                     index=index,
                 )
                 if created:
@@ -904,11 +943,14 @@ class Experiment(Folder):
         workflow: object,
         *,
         params: ParamSpace | Mapping[str, JSONValue] | None = None,
+        inputs: Sequence[str] = (),
     ) -> Experiment:
         """Define that this experiment executes *workflow* over *params*.
 
         Seeds one content-addressed :class:`Run` per param cell (idempotent)
-        and binds *workflow* through the workflow executor seam.
+        and binds *workflow* through the workflow executor seam. Every seeded
+        run declares *inputs*, the asset ids another run registered, as
+        ``add_run(inputs=…)`` would.
 
         Returns:
             ``self`` for chaining (``.list_runs()`` …).
@@ -918,7 +960,7 @@ class Experiment(Folder):
         space = (
             params if isinstance(params, ParamSpace) else GridSpace(dict(params or {}))  # ty: ignore[invalid-argument-type]
         )
-        self._seed_missing_runs(space)
+        self._seed_missing_runs(space, inputs=tuple(inputs))
         if _workflow_executor is None:
             raise RuntimeError(
                 "Experiment.define needs the workflow layer; `import molab` "
@@ -1079,7 +1121,15 @@ class Experiment(Folder):
         )
 
     def del_run(self, run_id: str) -> None:
-        """Delete a run directory."""
+        """Delete a run directory.
+
+        Raises:
+            AttemptNotHomeError: An attempt of the run is still away on a
+                compute target (:func:`~molab.workspace.lifecycle_ops.refuse_attempts_away`).
+        """
+        from .lifecycle_ops import refuse_attempts_away
+
+        refuse_attempts_away([self.get_folder(run_id, cls=Run)])
         self.remove_folder(run_id, cls=Run)
 
     def has_run(self, run_id: str) -> bool:

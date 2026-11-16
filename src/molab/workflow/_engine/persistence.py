@@ -159,17 +159,17 @@ def _now() -> str:
 
 
 def _task_id(task: dict[str, JSONValue]) -> str | None:
-    value = task.get("task_id", task.get("id"))
+    value = task.get("task_id")
     return value if isinstance(value, str) else None
 
 
 def _link_source(link: dict[str, JSONValue]) -> str | None:
-    value = link.get("source", link.get("from"))
+    value = link.get("source")
     return value if isinstance(value, str) else None
 
 
 def _link_target(link: dict[str, JSONValue]) -> str | None:
-    value = link.get("target", link.get("to"))
+    value = link.get("target")
     return value if isinstance(value, str) else None
 
 
@@ -189,19 +189,6 @@ def _load(fs: FileSystem, path: str | os.PathLike[str]) -> dict[str, JSONValue] 
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
-
-
-def _journal_workflow_hash(doc: Mapping[str, JSONValue]) -> str | None:
-    """The graph hash in a journal header.
-
-    Current journals store ``workflow_hash``. Journals written before that
-    rename store the same value as ``workflow_digest``.
-    """
-    value = doc.get("workflow_hash")
-    if isinstance(value, str):
-        return value
-    legacy = doc.get("workflow_digest")
-    return legacy if isinstance(legacy, str) else None
 
 
 def _records(doc: Mapping[str, JSONValue]) -> dict[str, dict[str, JSONValue]]:
@@ -700,7 +687,7 @@ def _verify_seeds(
     records = _records(doc)
     unusable = unusable or {}
     if (
-        _journal_workflow_hash(doc) == compiled.workflow_hash
+        doc.get("workflow_hash") == compiled.workflow_hash
         and not unusable
         and not any(record.get("output_unrecordable") for record in records.values())
         and all(name in records and records[name].get("status") == "completed" for name in seeds)

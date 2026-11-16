@@ -27,7 +27,7 @@ const palette: OverviewPalette = {
   muted: "rgb(97, 97, 97)",
   rule: "rgb(229, 229, 229)",
   ground: "rgb(255, 255, 255)",
-  font: "Geist, sans-serif",
+  font: "Geist Variable, sans-serif",
 };
 
 const axis = { domain: [600, 7200] as [number, number], ticks: [900, 1800, 3600], log: false };

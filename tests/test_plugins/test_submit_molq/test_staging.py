@@ -125,9 +125,9 @@ def _queued_with_job_id(ws: Workspace, run: Run) -> None:
     )
 
 
-def _remote_doc(run: Run) -> str:
-    """The worker's sealed record of ``e01`` as it sits on the remote host."""
-    local = run.execution("e01")
+def _remote_doc(run: Run, execution_id: str = "e01") -> str:
+    """The worker's sealed record of *execution_id* as it sits on the remote host."""
+    local = run.execution(execution_id)
     doc: dict[str, object] = {
         "schema_version": 4,
         **local.model_dump(mode="json"),
@@ -211,6 +211,45 @@ class TestStageIn:
         assert (str(journal), f"{dst}/executions/e01/workflow.json", False, ()) in (
             transport.uploads
         )
+
+
+@dataclass
+class ReadingTransport(FakeTransport):
+    """Reads each uploaded file the way rsync would; a missing source fails."""
+
+    payloads: dict[str, bytes] = field(default_factory=dict)
+
+    def upload(
+        self,
+        local: str,
+        remote: str,
+        *,
+        recursive: bool = False,
+        exclude: Sequence[str] = (),
+    ) -> None:
+        if not recursive:
+            self.payloads[remote] = Path(local).read_bytes()
+        super().upload(local, remote, recursive=recursive, exclude=exclude)
+
+
+class TestStageInCodeWorkflow:
+    def test_the_ir_snapshot_of_a_code_workflow_reaches_the_target(self, tmp_path: Path) -> None:
+        """``define`` stores a code workflow with its graph IR; rebinding the
+        staged copy to the remote entrypoint must keep that IR."""
+        _ws, run = _make_run(tmp_path)
+        script = tmp_path / "flow.py"
+        script.write_text("wf = None\n")
+        document = {"name": "flow", "tasks": [{"name": "probe", "depends_on": []}]}
+        run.experiment.bind_workflow("code", entrypoint=f"{script}:wf", document=document)
+        run._create_execution()
+        transport = ReadingTransport()
+
+        stage_in(transport, run, _remote_target(), "e01")
+
+        staged = [
+            b for remote, b in transport.payloads.items() if remote.endswith("workflow.ir.json")
+        ]
+        assert [json.loads(b) for b in staged] == [document]
 
 
 class TestStageOut:
@@ -331,8 +370,317 @@ def test_stage_in_refuses_tampered_execution_source(tmp_path):
     script = tmp_path / "workflow.py"
     script.write_text("workflow = None", encoding="utf-8")
     run.experiment.bind_workflow("code", entrypoint=f"{script}:workflow")
-    run._create_execution(source_entrypoint=script)
+    run._create_execution()
     captured = Path(str(run.execution_dir("e01"))) / "source" / script.name
     captured.write_text("tampered", encoding="utf-8")
     with pytest.raises(SourceCaptureError, match="Captured source changed"):
         stage_in(FakeTransport(), run, _remote_target(), "e01")
+
+
+class MirrorTransport:
+    """A target whose filesystem is a local directory: every transfer really copies."""
+
+    def mkdir(self, path: str, *, parents: bool = True, exist_ok: bool = True) -> None:
+        Path(path).mkdir(parents=parents, exist_ok=exist_ok)
+
+    def upload(
+        self, local: str, remote: str, *, recursive: bool = False, exclude: Sequence[str] = ()
+    ) -> None:
+        self._copy(Path(local), Path(remote), recursive, exclude)
+
+    def download(
+        self, remote: str, local: str, *, recursive: bool = False, exclude: Sequence[str] = ()
+    ) -> None:
+        self._copy(Path(remote), Path(local), recursive, exclude)
+
+    def read_text(self, path: str) -> str:
+        return Path(path).read_text(encoding="utf-8")
+
+    def exists(self, path: str) -> bool:
+        return Path(path).exists()
+
+    def glob(self, path: str, pattern: str) -> list[str]:
+        return [str(p) for p in Path(path).glob(pattern)]
+
+    @staticmethod
+    def _copy(source: Path, dest: Path, recursive: bool, exclude: Sequence[str]) -> None:
+        import shutil
+
+        if not source.exists():
+            raise OSError(f"no such file: {source}")
+        if recursive:
+            # rsync semantics: ``/name`` is anchored at the transfer root, ``name``
+            # matches an entry of that name at any depth.
+            anchored = {pattern[1:] for pattern in exclude if pattern.startswith("/")}
+            by_name = shutil.ignore_patterns(*(p for p in exclude if not p.startswith("/")))
+
+            def ignore(directory: str, names: list[str]) -> set[str]:
+                ignored = set(by_name(directory, names))
+                if Path(directory) == source:
+                    ignored |= anchored & set(names)
+                return ignored
+
+            shutil.copytree(source, dest, dirs_exist_ok=True, ignore=ignore)
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
+
+
+def _scratch_target(tmp_path: Path) -> ComputeTarget:
+    return ComputeTarget(
+        name="hpc", registry_id="reg", cluster_id="hpc", scratch_root=str(tmp_path / "scratch")
+    )
+
+
+def _staged_root(target: ComputeTarget, run: Run) -> Path:
+    """The workspace root of *run*'s private namespace on the target."""
+    project = run.experiment.project
+    ws = project.workspace
+    return Path(target.scratch_root) / ws.metadata.id / project.id / run.experiment.id / run.id
+
+
+def _register_remotely(
+    target: ComputeTarget, run: Run, source: Path, title: str, execution_id: str = "e01"
+):
+    """What ``ctx.register`` does in the remote worker: a product in the staged copy."""
+    from molab.workspace.domain import ExecutionOrigin
+    from molab.workspace.history import SYSTEM_AGENT
+
+    project = run.experiment.project
+    staged = Workspace.load(_staged_root(target, run))
+    experiment = staged.get_project(project.id).get_experiment(run.experiment.id)
+    return experiment.assets.register(
+        source,
+        title=title,
+        created_by=SYSTEM_AGENT,
+        origin=ExecutionOrigin(
+            project_id=project.id,
+            experiment_id=run.experiment.id,
+            run_id=run.id,
+            execution_id=execution_id,
+            task="eq",
+        ),
+    )
+
+
+def _finish_remotely(target: ComputeTarget, run: Run, execution_id: str = "e01") -> None:
+    ws = run.experiment.project.workspace
+    record = Path(target_run_dir(target, ws, run)) / "executions" / execution_id / "execution.json"
+    record.write_text(_remote_doc(run, execution_id), encoding="utf-8")
+
+
+class TestAssetsCrossTheTarget:
+    def test_an_input_asset_of_another_experiment_resolves_in_the_staged_workspace(
+        self, tmp_path: Path
+    ) -> None:
+        from molab.workspace.asset_repository import asset_by_id, payload_path_for
+
+        ws = Workspace(tmp_path / "lab")
+        ws.materialize()
+        project = ws.add_project("p")
+        frames = tmp_path / "frame.xyz"
+        frames.write_text("2\n\nNa 0 0 0\nCl 1 1 1\n")
+        equilibrated = project.add_experiment("eq", params={}).assets.import_asset(
+            "frame.xyz", frames
+        )
+        run = project.add_experiment("prod", params={}).add_run(
+            params={"seed": 1}, inputs=(equilibrated.id,)
+        )
+        run._create_execution()
+        target = _scratch_target(tmp_path)
+
+        stage_in(MirrorTransport(), run, target, "e01")
+
+        staged = Workspace.load(_staged_root(target, run))
+        found = asset_by_id(staged, equilibrated.id)
+        assert found is not None and found.content == equilibrated.content
+        assert (
+            Path(payload_path_for(staged, equilibrated.id)).read_text(encoding="utf-8")
+            == frames.read_text()
+        )
+
+    def test_a_product_the_remote_attempt_registered_comes_back_with_its_id(
+        self, tmp_path: Path
+    ) -> None:
+        from molab.workspace.asset_repository import asset_by_id, payload_path_for
+
+        ws, run = _make_run(tmp_path / "lab")
+        _queued_with_job_id(ws, run)
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+        stage_in(transport, run, target, "e01")
+        produced = tmp_path / "final.xyz"
+        produced.write_text("1\n\nNa 0 0 0\n")
+        remote = _register_remotely(target, run, produced, "final.xyz")
+        _finish_remotely(target, run)
+
+        assert stage_out(transport, run, target, "e01") is True
+        assert stage_out(transport, run, target, "e01") is True
+
+        local = asset_by_id(ws, remote.id)
+        assert local is not None and local.origin == remote.origin
+        assert (
+            Path(payload_path_for(ws, remote.id)).read_text(encoding="utf-8")
+            == produced.read_text()
+        )
+        assert run.execution("e01").status.value == "succeeded"
+
+    def test_a_remote_attempt_replaces_the_product_an_earlier_local_attempt_left(
+        self, tmp_path: Path
+    ) -> None:
+        """Validated on this machine, then run again on the cluster: one slot, one id."""
+        from molab.workspace.asset_repository import asset_by_id, payload_path_for
+        from molab.workspace.domain import ExecutionMode, ExecutionOrigin, ExecutionStatus
+        from molab.workspace.history import SYSTEM_AGENT
+
+        ws, run = _make_run(tmp_path / "lab")
+        run._create_execution()
+        _repo(ws, run).start("e01")
+        first = tmp_path / "first.xyz"
+        first.write_text("1\n\nNa 0 0 0\n")
+        earlier = run.experiment.assets.register(
+            first,
+            title="final.xyz",
+            created_by=SYSTEM_AGENT,
+            origin=ExecutionOrigin(
+                project_id=run.experiment.project.id,
+                experiment_id=run.experiment.id,
+                run_id=run.id,
+                execution_id="e01",
+                task="eq",
+            ),
+        )
+        _repo(ws, run).seal("e01", ExecutionStatus.SUCCEEDED)
+        run._create_execution(
+            mode=ExecutionMode.RERUN,
+            predecessor="e01",
+            executor={"backend": "molq", "target": "hpc", "job_id": "j-2"},
+        )
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+
+        stage_in(transport, run, target, "e02")
+        second = tmp_path / "second.xyz"
+        second.write_text("1\n\nNa 0.5 0 0\n")
+        remote = _register_remotely(target, run, second, "final.xyz", "e02")
+        _finish_remotely(target, run, "e02")
+
+        assert remote.id == earlier.id
+        assert stage_out(transport, run, target, "e02") is True
+        local = asset_by_id(ws, earlier.id)
+        assert local is not None and local.origin == remote.origin
+        assert (
+            Path(payload_path_for(ws, earlier.id)).read_text(encoding="utf-8") == second.read_text()
+        )
+        assert [asset.id for asset in run.experiment.assets.list()] == [earlier.id]
+        assert run.execution("e02").status.value == "succeeded"
+
+    def test_a_product_whose_slot_holds_another_local_asset_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        from molab.workspace.domain import ExecutionOrigin
+        from molab.workspace.history import SYSTEM_AGENT
+
+        ws, run = _make_run(tmp_path / "lab")
+        _queued_with_job_id(ws, run)
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+        stage_in(transport, run, target, "e01")
+        produced = tmp_path / "final.xyz"
+        produced.write_text("1\n\nNa 0 0 0\n")
+        _register_remotely(target, run, produced, "final.xyz")
+        _finish_remotely(target, run)
+        other = tmp_path / "other.xyz"
+        other.write_text("1\n\nCl 0 0 0\n")
+        run.experiment.assets.register(
+            other,
+            title="final.xyz",
+            created_by=SYSTEM_AGENT,
+            origin=ExecutionOrigin(
+                project_id=run.experiment.project.id,
+                experiment_id=run.experiment.id,
+                run_id=run.id,
+                execution_id="e01",
+            ),
+        )
+
+        with pytest.raises(ValueError, match="belongs to another asset"):
+            stage_out(transport, run, target, "e01")
+        assert run.execution("e01").status.value == "queued"
+
+    def test_a_product_whose_bytes_another_local_asset_stores_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        ws, run = _make_run(tmp_path / "lab")
+        _queued_with_job_id(ws, run)
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+        stage_in(transport, run, target, "e01")
+        produced = tmp_path / "final.xyz"
+        produced.write_text("1\n\nNa 0 0 0\n")
+        _register_remotely(target, run, produced, "final.xyz")
+        _finish_remotely(target, run)
+        run.experiment.project.assets.import_asset("same bytes", produced)
+
+        with pytest.raises(ValueError, match="already"):
+            stage_out(transport, run, target, "e01")
+        assert run.execution("e01").status.value == "queued"
+
+
+def _finish_remotely_as(target: ComputeTarget, run: Run, status: str) -> Path:
+    """The remote attempt dir of ``e01`` after a worker left *status* in its record."""
+    ws = run.experiment.project.workspace
+    attempt = Path(target_run_dir(target, ws, run)) / "executions" / "e01"
+    doc = json.loads(_remote_doc(run))
+    if status != "succeeded":
+        doc.update(status=status, finished_at=None, sealed_at=None)
+    (attempt / "execution.json").write_text(json.dumps(doc), encoding="utf-8")
+    (attempt / "run.log").write_text("task md started\n", encoding="utf-8")
+    (attempt / "traceback.txt").write_text("Traceback ...\n", encoding="utf-8")
+    (attempt / "workflow.json").write_text("{}", encoding="utf-8")
+    (attempt / "jobs").mkdir(exist_ok=True)
+    (attempt / "jobs" / "5248413.out").write_text("worker\n", encoding="utf-8")
+    (attempt / "out" / "md").mkdir(parents=True)
+    (attempt / "out" / "md" / "trajectory.mrec").write_bytes(b"x" * 4096)
+    (attempt / "work").mkdir()
+    (attempt / "work" / "scratch.bin").write_bytes(b"y" * 4096)
+    return attempt
+
+
+class TestStageOutOfAnUnfinishedAttempt:
+    """A killed attempt brings back its records and evidence, not its bulk tiers."""
+
+    @pytest.mark.parametrize("status", ["running", "failed"])
+    def test_records_and_logs_come_back_without_out_and_work(
+        self, tmp_path: Path, status: str
+    ) -> None:
+        ws, run = _make_run(tmp_path / "lab")
+        _queued_with_job_id(ws, run)
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+        stage_in(transport, run, target, "e01")
+        _finish_remotely_as(target, run, status)
+
+        assert stage_out(transport, run, target, "e01") is True
+
+        local = run.execution_dir("e01")
+        for name in ("run.log", "traceback.txt", "workflow.json", "jobs/5248413.out"):
+            assert (local / name).is_file(), name
+        assert not (local / "out").exists()
+        assert not (local / "work").exists()
+        assert run.execution("e01").status.value == status
+
+    def test_a_succeeded_attempt_still_brings_back_its_out_tier(self, tmp_path: Path) -> None:
+        ws, run = _make_run(tmp_path / "lab")
+        _queued_with_job_id(ws, run)
+        target = _scratch_target(tmp_path)
+        transport = MirrorTransport()
+        stage_in(transport, run, target, "e01")
+        _finish_remotely_as(target, run, "succeeded")
+
+        assert stage_out(transport, run, target, "e01") is True
+
+        local = run.execution_dir("e01")
+        assert (local / "out" / "md" / "trajectory.mrec").stat().st_size == 4096
+        assert (local / "work" / "scratch.bin").is_file()
+        assert (local / "run.log").is_file()

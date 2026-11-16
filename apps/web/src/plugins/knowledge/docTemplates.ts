@@ -1,7 +1,6 @@
 import { runLabel } from "@/app/runs/runTitle";
 import { formatComponent, parseAttrs } from "./doc/blocks";
 import type { KnowledgeClass } from "./knowledgeClass";
-import { isPlanningClass } from "./planningModel";
 
 /**
  * The starting body of each class (L10 v3 templates): the MkDocs blocks and
@@ -78,6 +77,37 @@ export const DOC_SKELETON: Record<KnowledgeClass, string> = {
     "## Builds on",
     "",
   ].join("\n"),
+  Plan: [
+    '!!! abstract "Question"',
+    "    What this plan asks, in one sentence.",
+    "",
+    "## Scope",
+    "",
+    "## Constraints",
+    "",
+    "## Builds on",
+    "",
+  ].join("\n"),
+  Roadmap: [
+    '!!! abstract "Order"',
+    "    Why the stages run in this order.",
+    "",
+    "## Builds on",
+    "",
+  ].join("\n"),
+  Todo: ["## Notes", ""].join("\n"),
+  Milestone: ["## Evidence so far", "", "## Builds on", ""].join("\n"),
+  Manuscript: [
+    "\\documentclass{article}",
+    "\\begin{document}",
+    "",
+    "\\section{Introduction}",
+    "",
+    "\\bibliographystyle{unsrt}",
+    "\\bibliography{references}",
+    "\\end{document}",
+    "",
+  ].join("\n"),
   Decision: [
     '!!! note "Decision"',
     "    What was chosen, as one sentence.",
@@ -89,49 +119,10 @@ export const DOC_SKELETON: Record<KnowledgeClass, string> = {
     "## Alternatives considered",
     "",
   ].join("\n"),
-  Plan: [
-    '!!! abstract "Goal"',
-    "    What this plan decides, in one sentence.",
-    "",
-    "## Roadmap",
-    "",
-    "::molab-stage-track",
-    "",
-    "## Next",
-    "",
-    "- [ ] ",
-    "",
-    "## Builds on",
-    "",
-  ].join("\n"),
-  Roadmap: ["::molab-stage-track", "", "## Stages", "", "## Cites", ""].join("\n"),
-  Todo: ["::molab-todo-list", "", "## Notes", ""].join("\n"),
-  Milestone: ["::molab-milestone", "", "## Evidence so far", "", "## On the roadmap", ""].join(
-    "\n",
-  ),
-  Delegation: [
-    '!!! note "Brief"',
-    "    What the agent should do, and what it should report.",
-    "",
-    "## Asks",
-    "",
-    "::molab-approval",
-    "",
-    "## Scope",
-    "",
-    "## Activity",
-    "",
-  ].join("\n"),
 };
 
-/**
- * The record a class starts with: a new Hypothesis has no verdict yet, and a
- * Decision written down is one already made.
- */
-export const DOC_RECORD: Partial<Record<KnowledgeClass, Record<string, unknown>>> = {
-  Hypothesis: { verdict: "open" },
-  Decision: { status: "made" },
-};
+/** A bare run line a template leaves for the form to fill. */
+const RUN_LINE = /^::molab-(run-ref|log)\s*$/m;
 
 export interface SkeletonFacts {
   /** The run a sourced document cites (`molab:` ref). */
@@ -145,7 +136,7 @@ export const fillSkeleton = (body: string, facts: SkeletonFacts): string =>
   body
     .split("\n")
     .map((line) => {
-      if (facts.sourceRef && /^::molab-(run-ref|log)\s*$/.test(line)) {
+      if (facts.sourceRef && RUN_LINE.test(line)) {
         const name = line.trim().slice(2);
         return formatComponent(
           name,
@@ -164,24 +155,8 @@ export const fillSkeleton = (body: string, facts: SkeletonFacts): string =>
     })
     .join("\n");
 
-const SOURCED: ReadonlySet<KnowledgeClass> = new Set([
-  "Report",
-  "Finding",
-  "Plan",
-  "Roadmap",
-  "Todo",
-  "Milestone",
-  "Observation",
-  "Hypothesis",
-  "Decision",
-  "Delegation",
-]);
-
-export const isSourcedClass = (cls: KnowledgeClass): boolean => SOURCED.has(cls);
-
-/** A sourced class whose source is a run. Planning documents cite a Plan instead. */
-export const citesRun = (cls: KnowledgeClass): boolean =>
-  isSourcedClass(cls) && !isPlanningClass(cls);
+/** A class whose template names a source run (a bare run line the form fills in). */
+export const namesSourceRun = (cls: KnowledgeClass): boolean => RUN_LINE.test(DOC_SKELETON[cls]);
 
 export interface HostRun {
   id: string;

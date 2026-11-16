@@ -5,37 +5,27 @@
  * this page" sits on the right and folds under the title on a narrow page.
  */
 
-import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, CircleX, X } from "lucide-react";
 import { type JSX, useMemo, useRef } from "react";
 import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
-import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
+import { knowledgePath } from "@/app/entities/paths";
 import { EditorActions } from "@/app/shell/editorActions";
 import { useUnsavedEdits } from "@/app/shell/useUnsavedEdits";
 import type { RendererSnapshot } from "@/app/types";
 import { WorkbenchIconAction } from "@/components/workbench";
 import { buildMolabRefIndex } from "@/lib/entity-linkify";
 import { type KnowledgeClass, knowledgeClassOf } from "../knowledgeClass";
-import { knowledgeKeys } from "../queries";
+import { isAboveServed } from "../knowledgeDocTree";
 import { useHostExpansion, useRefExpansion } from "../useKnowledgeEntities";
 import { docHeadings, parseDocBlocks } from "./blocks";
 import { LinksSections } from "./components/Links";
 import { DocContextProvider, type DocContextValue } from "./context";
 import { DocActions } from "./DocActions";
-import { ComponentBlockView } from "./DocBlocks";
 import { DocBody } from "./DocBody";
 import { DocHeader } from "./DocHeader";
 import { DocToc, DocTocDisclosure } from "./DocToc";
 import { useDocDraft } from "./useDocDraft";
-
-/** The component that draws a class's record; drawn first when the body does not place it. */
-const RECORD_COMPONENT: Partial<Record<KnowledgeClass, string>> = {
-  Todo: "molab-todo-list",
-  Roadmap: "molab-stage-track",
-  Milestone: "molab-milestone",
-  Delegation: "molab-approval",
-};
 
 /** The body's leading `# Title` line (it becomes the page title), or null. */
 export const leadingTitle = (body: string): { line: number; text: string } | null => {
@@ -119,11 +109,17 @@ export interface DocPageProps {
   onOpen: (path: string) => void;
 }
 
+/** The page's class. The server opens only a knowledge document, so a detail without one is a broken invariant. */
+const documentClass = (note: NoteDetailResponse): KnowledgeClass => {
+  const cls = knowledgeClassOf(note);
+  if (cls === null) throw new Error(`${note.relPath} is not a knowledge document (${note.cls})`);
+  return cls;
+};
+
 export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps): JSX.Element => {
-  const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
   const draft = useDocDraft(note);
-  const cls: KnowledgeClass = knowledgeClassOf(summary ?? { cls: "Note" });
+  const cls = documentClass(note);
   const hostPath = summary?.hostPath ?? "";
   const title = leadingTitle(draft.body);
   const headings = useMemo(() => docHeadings(parseDocBlocks(draft.body)), [draft.body]);
@@ -134,34 +130,26 @@ export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps
     snapshot,
   );
   const { prev, next } = siblings(notes, note.relPath, hostPath);
-  const writable = true;
-  const recordComponent = RECORD_COMPONENT[cls];
+  // A workspace Note a project serve lists above itself is read-only here.
+  const writable = !isAboveServed(note.relPath);
 
   const leave = useUnsavedEdits({
     dirty: draft.dirty,
     saving: draft.saving,
     onSave: draft.save,
     subject: note.name,
-    markPath: `/knowledge/${note.relPath.split("/").map(encodeURIComponent).join("/")}`,
+    markPath: knowledgePath(note.relPath),
   });
 
   const context: DocContextValue = {
     relPath: note.relPath,
     cls,
     hostPath,
-    record: note.record ?? {},
     cards: note.cards ?? [],
     snapshot,
     refIndex,
     writable,
     changeBody: draft.update,
-    saveRecord: async (record) => {
-      const response = await KnowledgeService.replaceDocRecord(note.relPath, { record });
-      queryClient.setQueryData<NoteDetailResponse>(knowledgeKeys.note(note.relPath), (current) =>
-        current ? { ...current, record: response.record ?? record } : current,
-      );
-      void queryClient.invalidateQueries({ queryKey: knowledgeKeys.notes() });
-    },
   };
 
   return (
@@ -215,19 +203,6 @@ export const DocPage = ({ note, summary, notes, snapshot, onOpen }: DocPageProps
               <div className="@5xl:hidden">
                 <DocTocDisclosure headings={headings} />
               </div>
-              {recordComponent && !draft.body.includes(recordComponent) ? (
-                <ComponentBlockView
-                  block={{
-                    kind: "component",
-                    name: recordComponent,
-                    attrs: {},
-                    syntax: "directive",
-                    start: -1,
-                    end: -1,
-                    source: "",
-                  }}
-                />
-              ) : null}
               <DocBody
                 relPath={note.relPath}
                 body={draft.body}

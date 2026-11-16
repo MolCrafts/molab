@@ -109,7 +109,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 
-def _find_bundled_webapp() -> Path | None:
+def find_bundled_webapp() -> Path | None:
     """Locate the ``dist`` directory shipped inside the installed package.
 
     Uses ``importlib.resources`` so this works regardless of whether the
@@ -169,7 +169,10 @@ def _mount_webapp(app: FastAPI, webapp_dir: Path) -> None:
     async def _spa_fallback(full_path: str) -> FileResponse:
         if full_path == "api" or full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found")
-        candidate = webapp_dir / full_path
+        root = webapp_dir.resolve()
+        candidate = (root / full_path).resolve()
+        if not candidate.is_relative_to(root):
+            raise HTTPException(status_code=404, detail="Not found")
         if full_path and candidate.is_file():
             return FileResponse(str(candidate))
         return FileResponse(index_html, headers=no_cache_headers)
@@ -208,6 +211,7 @@ def create_app(
     static_dir: str | Path | None = None,
     *,
     serve_static: bool = True,
+    allow_dev_origins: bool = True,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -216,6 +220,7 @@ def create_app(
             *serve_static* is ``True`` the bundled ``dist`` directory
             is auto-detected via ``importlib.resources``.
         serve_static: Set to ``False`` to run in API-only mode.
+        allow_dev_origins: Disable for managed services behind a single site origin.
     """
     from .openapi_ids import molab_operation_id
 
@@ -237,13 +242,14 @@ def create_app(
         "http://127.0.0.1:5173",
     ]
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if allow_dev_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # 2. Exception Handlers
     register_exception_handlers(app)
@@ -258,13 +264,11 @@ def create_app(
     # 4. System Routes (Health Check) — always public (auth gate does not wrap app-level routes)
     @app.get("/api/health", response_model=HealthResponse, tags=["system"])
     def health_check() -> HealthResponse:
-        from molab.plugins import Capability, registry
         from molab.services.auth import is_auth_enabled
 
         return HealthResponse(
             status="healthy",
             workspace_available=True,
-            capabilities={cap.value: registry.is_available(cap) for cap in Capability},
             auth_required=is_auth_enabled(),
         )
 
@@ -274,7 +278,7 @@ def create_app(
         if static_dir is not None:
             webapp_path = Path(static_dir)
         else:
-            webapp_path = _find_bundled_webapp()
+            webapp_path = find_bundled_webapp()
 
     if webapp_path is not None and webapp_path.is_dir() and (webapp_path / "index.html").exists():
         _mount_webapp(app, webapp_path)

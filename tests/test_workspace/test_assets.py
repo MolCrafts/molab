@@ -47,7 +47,7 @@ class TestAssetContent:
         for run in ws.project("demo").experiment("baseline").list_runs():
             found.extend(
                 asset
-                for asset in assets_produced_by(ws, run.executions[0].id)
+                for asset in assets_produced_by(ws, run.executions[0].id, run_id=run.id)
                 if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
             )
         assert len(found) == 2
@@ -68,7 +68,7 @@ class TestAssetContent:
             results = [future.result() for future in as_completed(futures)]
             execution_id = ctx.id
         assert len(results) == n
-        assert len(assets_produced_by(ws, execution_id)) == n
+        assert len(assets_produced_by(ws, execution_id, run_id=run.id)) == n
 
 
 class TestProducer:

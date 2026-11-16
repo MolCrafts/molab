@@ -11,7 +11,7 @@ import builtins
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
-    from molab.workspace.domain import Asset, Execution
+    from molab.workspace.domain import Asset
     from molab.workspace.run import Run
 
 __all__ = ["GeneratedPart", "GeneratedParts"]
@@ -58,27 +58,27 @@ class GeneratedParts:
         """Image assets of one attempt, ordered by title.
 
         An asset is included when its media type starts with ``image/``, or
-        when its tags carry a ``part`` key. The latest attempt is used when
-        *execution_id* is omitted.
+        when its tags carry a ``part`` key. The attempt is
+        :meth:`~molab.workspace.run.Run.produced_assets`'s: the latest when
+        *execution_id* is omitted, and none on a run with no attempt.
 
         Raises:
-            ValueError: The run has no attempt, or *execution_id* is unknown.
+            ValueError: *execution_id* names no attempt of the run.
         """
-        from molab.workspace.asset_repository import assets_produced_by
+        from molab.workspace.domain import ExecutionOrigin
 
         run = self._run
-        execution = _execution(run, execution_id)
-        workspace = run.experiment.project.workspace
         found: list[GeneratedPart] = []
-        for asset in assets_produced_by(workspace, execution.id):
-            if not _is_part(asset):
+        for asset in run.produced_assets(execution_id):
+            origin = asset.origin
+            if not _is_part(asset) or not isinstance(origin, ExecutionOrigin):
                 continue
             found.append(
                 GeneratedPart(
                     name=asset.title,
                     part=_part_label(asset),
                     asset_id=asset.id,
-                    execution_id=execution.id,
+                    execution_id=origin.execution_id,
                     ref=asset.ref,
                     path=run.asset_path(asset.id),
                     media_type=asset.media_type,
@@ -86,19 +86,6 @@ class GeneratedParts:
             )
         found.sort(key=lambda item: item.name)
         return found
-
-
-def _execution(run: Run, execution_id: str | None) -> Execution:
-    """The named attempt, or the latest one."""
-    if execution_id is None:
-        executions = run.executions
-        if not executions:
-            raise ValueError(f"run {run.id} has no execution")
-        return executions[-1]
-    try:
-        return run.execution(execution_id)
-    except KeyError as exc:
-        raise ValueError(f"run {run.id} has no execution {execution_id!r}") from exc
 
 
 def _is_part(asset: Asset) -> bool:

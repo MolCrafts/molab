@@ -7,7 +7,6 @@ import { usePrompt } from "@/components/PromptDialog";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { CreateDocDialog, type CreateDocInput } from "./CreateDocDialog";
 import { runsForHost } from "./docTemplates";
-import { knowledgeClassOf } from "./knowledgeClass";
 import { isTexDocument } from "./texDocument";
 import { useKnowledgeDocs } from "./useKnowledgeDocs";
 
@@ -80,7 +79,7 @@ export const ExperimentNotebook = ({
         <EmptyState
           icon={<NotebookPen className="h-6 w-6" />}
           title="No documents on this experiment"
-          description="Write a plan, a roadmap, a finding, or a note beside the runs."
+          description="Write a plan, a finding, or a note beside the runs."
         />
       ) : (
         <ul className="divide-y divide-border border-y border-border">
@@ -95,7 +94,7 @@ export const ExperimentNotebook = ({
                   {doc.name}
                 </span>
                 <span className="block truncate text-label font-medium text-muted-foreground">
-                  {knowledgeClassOf(doc)}
+                  {doc.cls}
                 </span>
                 {doc.excerpt && (
                   <span className="mt-1 block truncate text-label text-muted-foreground">

@@ -50,7 +50,7 @@ class TestConceptIdentity:
 
     def test_equality_is_directory_equality(self, tmp_path: Path) -> None:
         a = Concept(tmp_path / "n")
-        b = Concept(tmp_path / "n", type="knowledge.item")
+        b = Concept(str(tmp_path / "x" / ".." / "n"))
         assert a == b
         assert len({a, b}) == 1
 
@@ -189,17 +189,12 @@ class TestConceptRef:
 
 
 class TestKnowledgeAlias:
-    """``Concept`` is ``Knowledge``; the not-found error is the same object."""
+    """``Concept`` is ``Knowledge``."""
 
     def test_concept_is_knowledge(self) -> None:
         from molab.knowledge.concept import Knowledge
 
         assert Concept is Knowledge
-
-    def test_concept_not_found_error_is_knowledge_not_found_error(self) -> None:
-        from molab.knowledge.errors import ConceptNotFoundError, KnowledgeNotFoundError
-
-        assert ConceptNotFoundError is KnowledgeNotFoundError
 
 
 class TestHostConstruction:
@@ -370,7 +365,7 @@ class TestConceptSearch:
 
         hit = Knowledge(ws.root).search("cooling").hits[0]
 
-        assert hit.entry.type == "Note"
+        assert hit.entry.cls == "Note"
         assert hit.entry.title == "Cooling rate"
 
     def test_tag_keeps_only_tagged_documents(self, tmp_path: Path) -> None:
@@ -675,16 +670,25 @@ class TestConceptWrite:
         assert body.startswith("# G\n")
         assert body.count("- [@derived_from R1](molab:experiment/E1/run/R1)") == 1
 
-    def test_a_legacy_disk_file_keeps_its_sources_key(self, tmp_path: Path) -> None:
+    def test_a_legacy_sources_key_refuses_a_write_until_the_fields_are_replaced(
+        self, tmp_path: Path
+    ) -> None:
+        from molab.knowledge.concepts import Observation
+        from molab.knowledge.fields import replace_fields
+
         path = tmp_path / "old.md"
-        path.write_text("---\nclass: Finding\nsources:\n- kind: run\n  ref: R1\n---\n\n# Old\n")
+        legacy = "---\nclass: Observation\nsources:\n- kind: run\n  ref: R1\n---\n\n# Old\n"
+        path.write_text(legacy)
+        opened = Observation(path)
 
-        from molab.knowledge.concepts import Finding
+        with pytest.raises(ValueError, match=r"knowledge\.fields.*sources"):
+            opened.write(tags=["t"])
+        assert path.read_text() == legacy
 
-        opened = Finding(path)
+        replace_fields(opened, {})
         opened.write(tags=["t"])
-
-        assert "sources:" in path.read_text()
+        assert "sources" not in opened.frontmatter()
+        assert opened.tags() == ["t"]
 
 
 class TestBacklinksTo:
@@ -861,34 +865,6 @@ class TestAppendSourceLinks:
         with pytest.raises(ValueError):
             append_source_links("", [SourceRef(kind="run", ref="R")], base_dir="/w")
 
-    def test_the_line_comes_from_source_ref_and_one_formatter(self) -> None:
-        import ast
-        import inspect
-
-        import molab.knowledge as knowledge
-        from molab.knowledge import concept as concept_mod
-
-        assert "link_line" in inspect.getsource(concept_mod.append_source_links)
-        for name in ("retarget_links", "append_source_links", "remove_legacy_files"):
-            assert name in concept_mod.__all__
-            assert name not in knowledge.__all__
-        offenders: list[str] = []
-        root = Path("src/molab/knowledge")
-        for path in root.rglob("*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.JoinedStr):
-                    continue
-                literal = "".join(
-                    part.value
-                    if isinstance(part, ast.Constant) and isinstance(part.value, str)
-                    else ""
-                    for part in node.values
-                )
-                if "- [" in literal and "](" in literal:
-                    offenders.append(f"{path}:{node.lineno}")
-        assert offenders == ["src/molab/knowledge/edges.py:99"]
-
 
 class TestConceptWriteReplace:
     def test_replace_persists_the_text_and_drops_sources(self, tmp_path: Path) -> None:
@@ -897,7 +873,7 @@ class TestConceptWriteReplace:
         path = tmp_path / "f.md"
         path.write_text("---\nclass: Finding\nsources:\n- kind: run\n  ref: R1\n---\n\n# F\n")
         finding = Finding(path)
-        text = "---\nclass: Finding\n---\n\n# F\n"
+        text = "---\nclass: Finding\n---\n\n# F\n\n- [r](molab:experiment/e1/run/r1)\n"
 
         finding.write(text, replace=True)
 
@@ -930,95 +906,6 @@ class TestConceptWriteReplace:
         finding.write(text, replace=True)
 
         assert path.stat().st_mtime_ns == before
-
-
-class TestConceptWriteDocument:
-    def test_a_legacy_observation_is_persisted_verbatim(self, tmp_path: Path) -> None:
-        from molab.knowledge.concepts import _write_document
-
-        text = "---\nclass: Observation\nsources:\n- kind: run\n  ref: R\n---\n\n# obs\n"
-        path = tmp_path / "knowledges" / "obs-1.md"
-
-        handle = _write_document(path, text)
-
-        assert type(handle).__name__ == "Observation"
-        assert path.read_text(encoding="utf-8") == text
-
-    def test_a_missing_or_unknown_class_writes_nothing(self, tmp_path: Path) -> None:
-        from molab.knowledge.concepts import _write_document
-
-        missing = tmp_path / "missing.md"
-        unknown = tmp_path / "unknown.md"
-
-        with pytest.raises(ValueError):
-            _write_document(missing, "# hi\n")
-        with pytest.raises(ValueError):
-            _write_document(unknown, "---\nclass: Widget\n---\n\n")
-
-        assert not missing.exists()
-        assert not unknown.exists()
-
-
-class TestRemoveLegacyFiles:
-    def test_named_files_go_and_an_attachment_stays(self, tmp_path: Path) -> None:
-        from molab.knowledge.concept import remove_legacy_files
-
-        directory = tmp_path / "obs-1"
-        directory.mkdir()
-        (directory / "observation.json").write_text("{}\n")
-        (directory / "index.md").write_text("# i\n")
-        (directory / "fig.png").write_bytes(b"PNG")
-
-        left = remove_legacy_files(
-            directory,
-            ["observation.json", "index.md"],
-            fs=LocalFS(),
-        )
-
-        assert left == ["fig.png"]
-        assert directory.is_dir()
-        assert (directory / "fig.png").read_bytes() == b"PNG"
-        assert not (directory / "index.md").exists()
-
-    def test_an_empty_directory_is_removed(self, tmp_path: Path) -> None:
-        from molab.knowledge.concept import remove_legacy_files
-
-        directory = tmp_path / "obs-1"
-        directory.mkdir()
-        (directory / "index.md").write_text("x")
-
-        assert remove_legacy_files(directory, ["index.md"], fs=LocalFS()) == []
-        assert not directory.exists()
-
-    def test_absent_names_are_ignored(self, tmp_path: Path) -> None:
-        from molab.knowledge.concept import remove_legacy_files
-
-        directory = tmp_path / "d"
-        directory.mkdir()
-        (directory / "a.txt").write_text("a")
-
-        assert remove_legacy_files(directory, ["missing.txt"], fs=LocalFS()) == ["a.txt"]
-
-    def test_a_slash_in_the_name_is_refused(self, tmp_path: Path) -> None:
-        from molab.knowledge.concept import remove_legacy_files
-
-        directory = tmp_path / "d"
-        directory.mkdir()
-
-        with pytest.raises(ValueError):
-            remove_legacy_files(directory, ["a/b"], fs=LocalFS())
-
-    def test_a_subdirectory_is_kept(self, tmp_path: Path) -> None:
-        from molab.knowledge.concept import remove_legacy_files
-
-        directory = tmp_path / "d"
-        (directory / "nested").mkdir(parents=True)
-        (directory / "nested" / "x").write_text("x")
-
-        left = remove_legacy_files(directory, ["nested"], fs=LocalFS())
-
-        assert left == ["nested"]
-        assert (directory / "nested" / "x").is_file()
 
 
 class TestConceptOpen:
@@ -1077,23 +964,36 @@ class TestKnowledgeRootHandle:
             handle.rename("x")
         assert tmp_path.is_dir()
 
-        assert handle.type() == "concept"
         for name in ("read_meta", "write_meta", "read_index", "write_index", "_persist"):
             assert not hasattr(Concept, name)
 
-    def test_a_note_type_does_not_read_the_file(self, tmp_path: Path) -> None:
-        from molab.fs.local import LocalFS
 
-        class _Counting(LocalFS):
-            def __init__(self) -> None:
-                self.reads = 0
+class TestAppendLinkTargets:
+    """``append_link`` is the one writer; its target may be any linkable thing."""
 
-            def read_text(self, path, encoding="utf-8"):  # type: ignore[no-untyped-def]
-                self.reads += 1
-                return super().read_text(path, encoding=encoding)
+    def test_a_live_entity_links_by_its_ref(self, tmp_path: Path) -> None:
+        from molab.knowledge.concept import append_link
+        from molab.workspace import Workspace
+        from molab.workspace.refs import ref_of
 
-        disk = _Counting()
-        note = Note(tmp_path / "a.md", fs=disk)
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        experiment = ws.add_project("p").add_experiment("e")
+        note = Note(Path(str(ws.root)) / "knowledges" / "idea")
+        note.write("# Idea\n")
 
-        assert note.type() == "note.note"
-        assert disk.reads == 0
+        append_link(note, experiment, role="derived_from")
+
+        assert [(e.target, e.role) for e in note.links()] == [
+            (str(ref_of(experiment)), "derived_from")
+        ]
+
+    def test_an_object_that_names_nothing_is_refused(self, tmp_path: Path) -> None:
+        from molab.knowledge.concept import append_link
+
+        note = Note(tmp_path / "idea")
+        note.write("# Idea\n")
+
+        with pytest.raises(TypeError):
+            append_link(note, object())  # ty: ignore[invalid-argument-type]
+        assert note.links() == []

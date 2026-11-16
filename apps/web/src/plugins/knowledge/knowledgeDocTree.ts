@@ -2,7 +2,9 @@
  * Pure, React-free, IO-free builders for the Knowledge document shell:
  *
  * - {@link buildDocTree} nests hosts under their workspace, project and
- *   experiment, with files under the server-reported `hostPath`.
+ *   experiment, with files under the server-reported `hostPath`. Documents
+ *   above the served node (a project serve's workspace Notes) form their own
+ *   read-only group.
  * - {@link buildOutline} extracts a document's H1–H3 headings, in order,
  *   ignoring H4+ and any `#` lines inside fenced code blocks.
  */
@@ -28,6 +30,8 @@ export interface DocTreeNode {
   relPath: string | null;
   /** Workspace-relative host. `""` is the workspace root. */
   hostPath: string;
+  /** Above the served node ({@link isAboveServed}): opened, never written here. */
+  readOnly: boolean;
   children: DocTreeNode[];
 }
 
@@ -39,6 +43,13 @@ export interface OutlineHeading {
 
 export const KB_GROUP_ID = "group:knowledge-base";
 const KB_GROUP_NAME = "Workspace";
+/** The group of documents above the served node: the workspace's own Notes. */
+export const WORKSPACE_ABOVE_GROUP_ID = "group:workspace-above";
+const WORKSPACE_ABOVE_GROUP_NAME = "Workspace notes (read-only)";
+
+/** Whether a server path climbs out of the served node: how the server marks
+ * the workspace Notes a project serve lists (read-only there). */
+export const isAboveServed = (path: string): boolean => path === ".." || path.startsWith("../");
 
 /** Workspace → project → experiment hosts, with files under their actual
  * host. Empty hosts remain visible. Parentage uses server paths, not ids. */
@@ -46,11 +57,13 @@ export const buildDocTree = (
   entries: DocEntry[],
   hosts: ReadonlyArray<{ path: string; name: string }> = [],
 ): DocTreeNode[] => {
+  const above = entries.filter((entry) => isAboveServed(entry.hostPath));
+  const served = entries.filter((entry) => !isAboveServed(entry.hostPath));
   const groups = new Map<string, DocTreeNode>();
   for (const host of [
     { path: "", name: KB_GROUP_NAME },
     ...hosts,
-    ...entries.map((entry) => ({ path: entry.hostPath, name: entry.hostPath })),
+    ...served.map((entry) => ({ path: entry.hostPath, name: entry.hostPath })),
   ]) {
     if (groups.has(host.path)) continue;
     groups.set(host.path, {
@@ -59,16 +72,18 @@ export const buildDocTree = (
       kind: "group",
       relPath: null,
       hostPath: host.path,
+      readOnly: false,
       children: [],
     });
   }
-  for (const entry of entries) {
+  for (const entry of served) {
     groups.get(entry.hostPath)?.children.push({
       id: entry.relPath,
       name: entry.name,
       kind: "doc",
       relPath: entry.relPath,
       hostPath: entry.hostPath,
+      readOnly: false,
       children: [],
     });
   }
@@ -89,8 +104,34 @@ export const buildDocTree = (
     );
   }
   const root = groups.get("");
-  return root ? [root] : [];
+  return root ? [root, ...aboveGroup(above)] : [];
 };
+
+/** The read-only group of documents above the served node, when there are any. */
+const aboveGroup = (entries: DocEntry[]): DocTreeNode[] =>
+  entries.length === 0
+    ? []
+    : [
+        {
+          id: WORKSPACE_ABOVE_GROUP_ID,
+          name: WORKSPACE_ABOVE_GROUP_NAME,
+          kind: "group",
+          relPath: null,
+          hostPath: entries[0].hostPath,
+          readOnly: true,
+          children: entries
+            .map((entry) => ({
+              id: entry.relPath,
+              name: entry.name,
+              kind: "doc" as const,
+              relPath: entry.relPath,
+              hostPath: entry.hostPath,
+              readOnly: true,
+              children: [],
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        },
+      ];
 
 const FENCE_RE = /^[ \t]{0,3}(?:`{3,}|~{3,})/;
 const HEADING_RE = /^[ \t]{0,3}(#{1,6})[ \t]+(.*)$/;

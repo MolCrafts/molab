@@ -43,6 +43,13 @@ describe("compileRequest", () => {
   });
 });
 
+describe("compileRequest bibtex", () => {
+  it("runs BibTeX only for a source with a live \\bibliography", () => {
+    expect(compileRequest("\\bibliography{references}").bibtex).toBe(true);
+    expect(compileRequest("% \\bibliography{references}\n").bibtex).toBe(false);
+  });
+});
+
 describe("manuscriptFiles", () => {
   it("stages the nve-drift bibliography, tables, and figures beside main.tex", () => {
     const source = [

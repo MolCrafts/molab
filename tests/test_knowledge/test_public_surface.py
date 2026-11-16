@@ -47,12 +47,6 @@ REQUIRED_PUBLIC: tuple[str, ...] = (
     "Observation",
     "Hypothesis",
     "Decision",
-    "Delegation",
-    "DelegationRecord",
-    "PlanningDocument",
-    "Campaign",
-    "campaign_of",
-    "check_campaign",
     "SourceRef",
     "KnowledgeNotFoundError",
 )
@@ -61,6 +55,7 @@ REQUIRED_PUBLIC: tuple[str, ...] = (
 #: out silently (a subset assertion would miss it).
 PINNED_ALL: frozenset[str] = frozenset(
     {
+        "Decision",
         "Edge",
         "EdgeRole",
         "Finding",
@@ -72,29 +67,22 @@ PINNED_ALL: frozenset[str] = frozenset(
         "KnowledgeSourceStore",
         "Literature",
         "Note",
-        "Campaign",
-        "Delegation",
-        "DelegationRecord",
-        "Milestone",
         "Observation",
         "Hypothesis",
-        "Decision",
         "Plan",
-        "PlanningDocument",
-        "ReferenceMeta",
+        "LiteratureFields",
+        "Manuscript",
+        "Milestone",
         "Report",
         "Roadmap",
-        "Todo",
-        "campaign_of",
-        "check_campaign",
         "SearchHit",
         "SearchResult",
         "SourceKind",
         "SourceNotFoundError",
         "SourceRef",
         "SourcedHit",
+        "Todo",
         "WikiSource",
-        "ZoteroItem",
     }
 )
 
@@ -122,13 +110,8 @@ def wiki(tmp_path: Path) -> Path:
 
 
 def _workspace_hits(root: Path, query: str):
-    """The workspace searched through the seam a host with its own scan passes."""
-    return KnowledgeSourceStore(root).search(
-        query,
-        workspace_root=root,
-        include_workspace=True,
-        workspace_searcher=lambda: Knowledge(root).search(query),
-    )
+    """The workspace searched as the unnamed source."""
+    return KnowledgeSourceStore(root).search(query, workspace_root=root, include_workspace=True)
 
 
 class TestPublicImports:
@@ -157,7 +140,7 @@ class TestTheRefFormat:
         # chain). The workspace half below is end-to-end.
         hit = SourcedHit(
             source="lab",
-            hit=SearchHit(entry=ConceptIndexEntry(path="knowledges/tg-cooling.md", type="Note")),
+            hit=SearchHit(entry=ConceptIndexEntry(path="knowledges/tg-cooling.md", cls="Note")),
             abs_path=None,
             rank=1,
         )
@@ -185,7 +168,7 @@ class TestTheSearchHitFields:
 
         assert hit.entry.path == "knowledges/tg-cooling.md"
         assert hit.entry.title == "Cooling rate"
-        assert hit.entry.type == "Note"
+        assert hit.entry.cls == "Note"
         assert isinstance(hit.entry.tags, tuple)
         assert hit.score > 0
         assert hit.snippet  # the reason the model was given this hit
@@ -204,14 +187,14 @@ class TestTheInformationARefMustYield:
         doc = Note(wiki, "tg-cooling")
 
         title = doc.frontmatter().get("title") or doc.name  # → doc.title
-        type_ = doc.type()  # → doc.type
+        type_ = type(doc).__name__  # → doc.cls
         tags = doc.tags()  # → doc.tags
         body = doc.read()
         edges = doc.links()  # → doc.edges
         openable = doc.path  # → doc.origin.body_path
 
         assert title == "tg-cooling"
-        assert type_ == "note.note"
+        assert type_ == "Note"
         assert tuple(tags) == ()
         assert "Quench at 10 K/ns" in body
         assert edges == []

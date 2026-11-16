@@ -10,7 +10,8 @@ import type { WorkflowDryRunWorkflow } from './WorkflowDryRunWorkflow';
 /**
  * The walk of an experiment's stored workflow, without running a task.
  *
- * The same document ``molab workflow dry-run --json`` prints for a script.
+ * ``source=code`` shares the CLI's source preview. ``source=stored`` is
+ * the saved graph and registered inventory, not a current source sweep.
  */
 export type WorkflowDryRunResponse = {
     experiment: WorkflowDryRunExperiment;
@@ -22,5 +23,16 @@ export type WorkflowDryRunResponse = {
     branches?: Array<WorkflowDryRunBranch>;
     runs?: Array<WorkflowDryRunRun>;
     tasks?: Array<WorkflowDryRunTask>;
+    source?: WorkflowDryRunResponse.source;
+    definitionHash?: (string | null);
+    workflowHash?: (string | null);
+    entrypoint?: (string | null);
+    registeredRuns?: Array<WorkflowDryRunRun>;
 };
+export namespace WorkflowDryRunResponse {
+    export enum source {
+        STORED = 'stored',
+        CODE = 'code',
+    }
+}
 

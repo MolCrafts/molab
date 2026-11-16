@@ -1,17 +1,16 @@
 /**
- * The workspace Dashboard (Figma L01): views Overview · Plan (when a roadmap
- * exists), in the URL (`/` and `/dashboard/plan`). New project and ⋯ sit at the
- * right of the editor tab row. The runs that need a person, the ones going and
+ * The workspace Dashboard (Figma L01): the Overview view, at `/`. New project
+ * and ⋯ sit at the right of the editor tab row. The runs that need a person, the ones going and
  * the ones just finished are the side bar's lists (`DashboardExplorer`), so the
  * page itself holds instruments only. Workspace problems are one band above it.
  */
 
-import { Activity, LayoutDashboard, ListChecks, TriangleAlert } from "lucide-react";
+import { Activity, LayoutDashboard, TriangleAlert } from "lucide-react";
 import { type JSX, useCallback, useMemo, useState } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { activeNeedsAuth } from "@/api/errors";
 import { CreateProjectDialog } from "@/app/components/CreateProjectDialog";
-import { EntityPage, OverviewCanvas, ViewLabel } from "@/app/components/entity";
+import { EntityPage, ViewLabel } from "@/app/components/entity";
 import { DashboardAttention } from "@/app/dashboard/DashboardAttention";
 import { DashboardEditorActions } from "@/app/dashboard/DashboardEditorActions";
 import {
@@ -22,50 +21,20 @@ import {
 } from "@/app/dashboard/dashboardModel";
 import { useWorkspaceTabVisible } from "@/app/dashboard/useWorkspaceTab";
 import { WorkspaceOverview } from "@/app/dashboard/WorkspaceOverview";
-import { experimentPath } from "@/app/entities/paths";
 import type { NavigationLandingProps } from "@/app/navigation/sections";
 import { usePreview } from "@/app/preview/PreviewContext";
 import { runsHref } from "@/app/renderers/scopeStory";
 import { runPresentationStatus } from "@/app/runs/projections";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
-import { useNavigationState } from "@/app/state/useNavigationState";
 import { isActiveStatus } from "@/app/status/vocabulary";
 import { WorkbenchOperationState } from "@/components/workbench";
-import { PlanProgress, usePlanCampaigns } from "@/plugins/knowledge/PlanProgress";
-
-type DashboardView = "overview" | "plan";
-
-export const DASHBOARD_PLAN_PATH = "/dashboard/plan";
-
-const viewOf = (pathname: string): DashboardView =>
-  pathname === DASHBOARD_PLAN_PATH ? "plan" : "overview";
 
 export const DashboardPage = ({ snapshot, onRefresh }: NavigationLandingProps): JSX.Element => {
   const { rows, loading, error, refresh, truncated, unreachable, lastSyncedAt } =
     useWorkspaceRuns();
   const navigate = useNavigate();
-  const { pathname } = useLocation();
   const preview = usePreview();
-  const { setSelection } = useNavigationState(snapshot);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
-  const { campaigns } = usePlanCampaigns();
-  const requested = viewOf(pathname);
-  const view: DashboardView =
-    requested === "plan" && campaigns.length === 0 ? "overview" : requested;
-
-  const openPlanExperiment = useCallback(
-    (name: string) => {
-      const experiment = snapshot.experiments.find(
-        (item) => item.name === name || item.path.endsWith(`/${name}`),
-      );
-      if (experiment) void navigate(experimentPath(experiment.projectId, experiment.id));
-    },
-    [navigate, snapshot.experiments],
-  );
-  const openPlanDoc = useCallback(
-    (path: string) => setSelection({ objectType: "knowledge", objectId: path }),
-    [setSelection],
-  );
   const openRuns = useCallback(
     (filter?: string) => {
       void navigate(runsHref(filter));
@@ -132,27 +101,6 @@ export const DashboardPage = ({ snapshot, onRefresh }: NavigationLandingProps): 
       label: <ViewLabel icon={Activity}>Overview</ViewLabel>,
       content: overview,
     },
-    ...(campaigns.length > 0
-      ? [
-          {
-            value: "plan",
-            label: <ViewLabel icon={ListChecks}>Plan</ViewLabel>,
-            content: (
-              <OverviewCanvas>
-                <PlanProgress
-                  campaigns={campaigns}
-                  hostLabel={(path) =>
-                    snapshot.projects.find((project) => path.startsWith(`${project.path}/`))
-                      ?.name ?? null
-                  }
-                  onOpenExperiment={openPlanExperiment}
-                  onOpenDoc={openPlanDoc}
-                />
-              </OverviewCanvas>
-            ),
-          },
-        ]
-      : []),
   ];
 
   return (
@@ -188,8 +136,8 @@ export const DashboardPage = ({ snapshot, onRefresh }: NavigationLandingProps): 
               }}
             />
           }
-          activeTab={view}
-          onActiveTabChange={(next) => void navigate(next === "plan" ? DASHBOARD_PLAN_PATH : "/")}
+          activeTab="overview"
+          onActiveTabChange={() => void navigate("/")}
           tabs={tabs}
         />
       </div>

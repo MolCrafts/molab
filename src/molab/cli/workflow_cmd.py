@@ -17,7 +17,6 @@ The experiment's real id is looked up by its path under the workspace root
 from __future__ import annotations
 
 import json
-import tempfile
 import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -50,64 +49,16 @@ def _root_for(script: Path, target_spec: str) -> Path:
         return Path.cwd().resolve()
 
 
-def _existing_experiment_id(root: Path, rel_path: str) -> str | None:
-    """The id of the experiment recorded at ``root/rel_path``, or ``None``."""
-    from molab import frontmatter
-    from molab.fs import LocalFS
-    from molab.workspace.entity_record import INDEX_FILENAME
-    from molab.workspace.folder import WORKSPACE_EXPERIMENT_KIND
-
-    head = frontmatter.read_head(LocalFS(), root / rel_path / INDEX_FILENAME)
-    if not head or head.get("type") != WORKSPACE_EXPERIMENT_KIND:
-        return None
-    found = head.get("id")
-    return found if isinstance(found, str) else None
-
-
 def _preview(script: Path, root: Path) -> list[dict[str, JSONValue]]:
-    """Import *script* under a scratch root and report every bound experiment."""
-    from molab.entry import load_workspaces
-    from molab.workflow import default_binding_registry
-    from molab.workflow.dry_run import report_from_compiled
-    from molab.workspace.workspace import set_cli_root_override
+    """Use the same source preview as the HTTP service."""
+    from molab.services.workflow_preview import preview_workflow_script
 
-    reports: list[dict[str, JSONValue]] = []
-    with tempfile.TemporaryDirectory(prefix="molab-dry-run-") as scratch:
-        set_cli_root_override(scratch, explicit=True)
-        try:
-            workspaces = load_workspaces(script)
-        except Exception as exc:
-            rprint(f"[red]Error importing {script.name}:[/red] {exc}")
-            rprint(traceback.format_exc(), end="")
-            raise typer.Exit(1) from None
-        finally:
-            set_cli_root_override(None)
-        for ws in workspaces:
-            for project in ws.list_projects():
-                for exp in project.list_experiments():
-                    compiled = default_binding_registry.for_experiment(exp)
-                    if compiled is None:
-                        continue
-                    rel_path = Path(str(exp.resolve())).relative_to(Path(str(ws.root))).as_posix()
-                    reports.append(
-                        report_from_compiled(
-                            compiled,
-                            experiment={
-                                "id": _existing_experiment_id(root, rel_path),
-                                "name": exp.metadata.name,
-                                "path": rel_path,
-                            },
-                            runs=[run.parameters for run in exp.declared_runs()],
-                        )
-                    )
-                    default_binding_registry.unbind(exp)
-    if not workspaces:
-        rprint(
-            "[red]Error:[/red] No me.entry() call found in script. "
-            "Add [bold]me.entry(workspace)[/bold] at module level."
-        )
-        raise typer.Exit(1)
-    return reports
+    try:
+        return preview_workflow_script(script, root)
+    except Exception as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        rprint(traceback.format_exc(), end="")
+        raise typer.Exit(1) from None
 
 
 def _rows(report: dict[str, JSONValue], key: str) -> list[dict[str, JSONValue]]:

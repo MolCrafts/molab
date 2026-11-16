@@ -9,8 +9,6 @@ const roles: { value: EmbedRole; label: string }[] = [
   { value: "cites", label: "Cites" },
   { value: "supports", label: "Supports" },
   { value: "contradicts", label: "Contradicts" },
-  { value: "supersedes", label: "Supersedes" },
-  { value: "records", label: "Records" },
   { value: "references", label: "References" },
 ];
 

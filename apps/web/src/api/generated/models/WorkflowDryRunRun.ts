@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * One run the experiment would dispatch.
+ * One source-declared or registered run, according to the selected view.
  */
 export type WorkflowDryRunRun = {
     /**

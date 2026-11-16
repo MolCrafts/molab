@@ -1,17 +1,12 @@
 import type { EntityCard } from "@/api/generated/models/EntityCard";
 import type { KnowledgeGraphEdge } from "@/api/generated/models/KnowledgeGraphEdge";
 import type { KnowledgeGraphResponse } from "@/api/generated/models/KnowledgeGraphResponse";
-import { type MolabRefTarget, resolveMolabRef } from "@/lib/molab-ref";
 import { knowledgeLineage } from "./knowledge-map";
-import { knowledgeClassOf } from "./knowledgeClass";
 
 export type KnowledgeAuditCode =
   | "missing-reference"
-  | "ungrounded-finding"
-  | "evidence-unverified"
   | "unresolved-contradiction"
-  | "verdict-evidence-review"
-  | "superseded-reference";
+  | "verdict-evidence-review";
 
 export interface KnowledgeAuditIssue {
   id: string;
@@ -27,14 +22,10 @@ export interface KnowledgeAuditIssue {
 }
 
 export interface KnowledgeAuditContext {
-  records?: Readonly<Record<string, Record<string, unknown> | undefined>>;
+  /** Each document's own fields (a Hypothesis `verdict`), by path. */
+  fields?: Readonly<Record<string, Record<string, unknown> | undefined>>;
   cardsByPath?: Readonly<Record<string, readonly EntityCard[] | undefined>>;
-  /** Canonical server refs already resolved by the workbench, never parsed here. */
-  refIndex?: ReadonlyMap<string, MolabRefTarget>;
 }
-
-const EVIDENCE_CLASSES = new Set(["Observation", "Literature"]);
-const SOURCE_ROLES = new Set(["derived_from", "records", "cites"]);
 
 /** Read-only review prompts over declared relations. A counter-edge never
  * changes a verdict, and an unloaded entity catalog never proves a broken ref. */
@@ -73,77 +64,20 @@ export const auditKnowledge = (
     }
   }
 
-  for (const node of graph.nodes) {
-    if (knowledgeClassOf(node) !== "Finding") continue;
-    const links = outgoing.get(node.relPath) ?? [];
-    // Follow only declared provenance/citation sources. A Finding-to-Finding
-    // cycle is not evidence by itself; every path needs an actual source anchor.
-    const visited = new Set<string>();
-    let grounded = false;
-    let unresolvedEntity = false;
-    const inspectSources = (path: string): void => {
-      const sourcePaths = [
-        path,
-        ...knowledgeLineage(graph, path).ancestors.map((entry) => entry.id),
-      ];
-      for (const source of sourcePaths) {
-        if (visited.has(source)) continue;
-        visited.add(source);
-        if (EVIDENCE_CLASSES.has(knowledgeClassOf(nodes.get(source) ?? {}))) grounded = true;
-        for (const edge of outgoing.get(source) ?? []) {
-          if (edge.source === edge.target || edge.kind === "missing") continue;
-          if (edge.kind === "document" && SOURCE_ROLES.has(edge.role) && nodes.has(edge.target)) {
-            inspectSources(edge.target);
-          } else if (edge.kind === "external" && SOURCE_ROLES.has(edge.role)) {
-            grounded = true;
-          } else if (edge.kind === "ref") {
-            const card = context.cardsByPath?.[edge.source]?.find(
-              (entry) => entry.ref === edge.target,
-            );
-            if (card?.missing) continue;
-            const resolved = context.refIndex
-              ? resolveMolabRef(edge.target, context.refIndex)
-              : null;
-            const kind = card?.kind ?? resolved?.kind;
-            if (kind === "asset" || kind === "run") grounded = true;
-            else if (kind === undefined) unresolvedEntity = true;
-          }
-        }
-      }
-    };
-    inspectSources(node.relPath);
-    if (!grounded) {
-      add({
-        code: unresolvedEntity ? "evidence-unverified" : "ungrounded-finding",
-        severity: unresolvedEntity ? "info" : "review",
-        document: node.relPath,
-        title: unresolvedEntity
-          ? "Resolve entity sources to check evidence"
-          : "Finding has no declared evidence",
-        detail: unresolvedEntity
-          ? "The graph has entity references whose kinds are not loaded. Resolve them before deciding whether this finding is grounded."
-          : "No run, asset, cited external source, or provenance/citation path to an observation or literature is declared. A plan or ordinary mention alone is not evidence.",
-        related: links
-          .filter((edge) => edge.kind === "document" && nodes.has(edge.target))
-          .map((edge) => edge.target),
-      });
-    }
-  }
-
   const uncheckedHypotheses: string[] = [];
   for (const node of graph.nodes) {
-    if (knowledgeClassOf(node) !== "Hypothesis") continue;
+    if (node.cls !== "Hypothesis") continue;
     const evidence = (incoming.get(node.relPath) ?? []).filter(
       (edge) => edge.kind === "document" && nodes.has(edge.source) && edge.source !== node.relPath,
     );
     const against = evidence.filter((edge) => edge.role === "contradicts");
     const forClaim = evidence.filter((edge) => edge.role === "supports");
-    const record = context.records?.[node.relPath];
-    if (record === undefined) {
+    const fields = context.fields?.[node.relPath];
+    if (fields === undefined) {
       uncheckedHypotheses.push(node.relPath);
       continue;
     }
-    const verdict = record.verdict ?? "open";
+    const verdict = fields.verdict ?? "open";
     if (against.length > 0 && (verdict === "open" || verdict === "unsettled")) {
       add({
         code: "unresolved-contradiction",
@@ -169,41 +103,6 @@ export const auditKnowledge = (
         related: counterEvidence.map((edge) => edge.source),
       });
     }
-  }
-
-  const replacements = new Map<string, Set<string>>();
-  for (const edge of graph.edges) {
-    if (
-      edge.kind !== "document" ||
-      edge.role !== "supersedes" ||
-      edge.source === edge.target ||
-      !nodes.has(edge.source) ||
-      !nodes.has(edge.target)
-    )
-      continue;
-    if (!replacements.has(edge.target)) replacements.set(edge.target, new Set());
-    replacements.get(edge.target)?.add(edge.source);
-  }
-  for (const edge of graph.edges) {
-    const newer = replacements.get(edge.target);
-    if (
-      edge.kind !== "document" ||
-      !nodes.has(edge.source) ||
-      !newer ||
-      newer.has(edge.source) ||
-      edge.source === edge.target
-    )
-      continue;
-    add({
-      code: "superseded-reference",
-      severity: "review",
-      document: edge.source,
-      title: "References a superseded document",
-      detail:
-        "This may be an intentional historical citation. Check the replacement before updating the reference.",
-      target: edge.target,
-      related: [edge.target, ...newer],
-    });
   }
 
   const severityOrder = { error: 0, review: 1, info: 2 };
@@ -257,7 +156,7 @@ export const knowledgeChangeImpact = (
     affected.set(id, {
       id,
       title: node.title || node.name,
-      cls: knowledgeClassOf(node),
+      cls: node.cls,
       depth,
       via,
       reasons: [reason],
@@ -272,11 +171,7 @@ export const knowledgeChangeImpact = (
       edge.source === path && ["supports", "contradicts"].includes(edge.role) ? edge.target : null;
     const id = reader ?? claim;
     if (!id || !nodes.has(id)) continue;
-    const reason = claim
-      ? "claim"
-      : ["derived_from", "supersedes"].includes(edge.role)
-        ? "provenance"
-        : "citation";
+    const reason = claim ? "claim" : edge.role === "derived_from" ? "provenance" : "citation";
     add(id, 1, path, reason);
     for (const descendant of knowledgeLineage(graph, id).descendants)
       add(descendant.id, descendant.depth + 1, descendant.via, reason);

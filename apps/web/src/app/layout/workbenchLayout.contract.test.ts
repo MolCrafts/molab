@@ -74,11 +74,10 @@ describe("workbench layout contract", () => {
     expect(dashboard).not.toMatch(
       /value: "(attention|timeline)"|Arrange|<DashboardGrid|localStorage/,
     );
-    expect(dashboard).toContain('value: "plan"');
     for (const part of ["<Verdict", "<Gauges", "<ActivityPanel", "<MixChart", "<DurationsBy"]) {
       expect(workspaceOverview).toContain(part);
     }
-    expect(workspaceOverview).not.toMatch(/NeedsAttention|RunTimeline|PlanProgress/);
+    expect(workspaceOverview).not.toMatch(/NeedsAttention|RunTimeline/);
     expect(explorer).toContain("dashboardLists");
     for (const list of ["Needs attention", "Active", "Finished · 24h"]) {
       expect(explorer).toContain(list);
@@ -88,22 +87,19 @@ describe("workbench layout contract", () => {
     const experiment = readWebSource("app/renderers/ExperimentViewer.tsx");
     const experimentOverview = readWebSource("app/renderers/experiment/ExperimentOverview.tsx");
     expect(experiment).toContain("<ExperimentOverview");
-    expect(experiment).not.toContain("PlanProgress");
     for (const gauge of ["SuccessDial", "UnitMeter", "DurationRange", "SweepChart", "MixChart"]) {
       expect(experimentOverview).toContain(gauge);
     }
     expect(experimentOverview).not.toMatch(/ActivityPanel|Backends/);
 
     // A project is that shape one level up (L02): verdict, the same gauges, outcome and
-    // duration by experiment; Attention, Timeline and Settings left; Plan is its own roadmap.
+    // duration by experiment; Attention, Timeline and Settings left.
     expect(project).toContain("<ProjectOverview");
     expect(project).not.toMatch(/value: "(attention|timeline|settings)"/);
-    expect(project).toContain('value: "plan"');
-    expect(project).toContain("usePlanCampaigns(project");
     for (const part of ["<Verdict", "<Gauges", "<MixChart", "<DurationsBy"]) {
       expect(projectOverview).toContain(part);
     }
-    expect(projectOverview).not.toMatch(/ActivityPanel|Backends|PlanProgress/);
+    expect(projectOverview).not.toMatch(/ActivityPanel|Backends/);
   });
 
   it("gives Compare a page frame and a single matrix scrollport", () => {

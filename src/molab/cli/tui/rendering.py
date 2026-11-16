@@ -320,22 +320,13 @@ def _detail_execution(node: TreeNode) -> list[RenderableType]:
             kv.add_row(fname, str(candidate))
     jobs_dir = Path(exec_dir) / JOBS.name
     if jobs_dir.is_dir():
-        streams = sorted(
-            str(p.relative_to(exec_dir))
-            for p in jobs_dir.glob("*/*.log")
-            if p.is_file() or p.is_symlink()
-        )
+        streams = sorted(p.name for p in jobs_dir.iterdir() if p.is_file() or p.is_symlink())
         if streams:
             kv.add_row("jobs/", ", ".join(streams))
-    for fname in ("stdout.log", "stderr.log"):
+    for fname in ("run.log", "stdout.log", "stderr.log"):
         candidate = exec_dir / fname
         if candidate.exists():
             kv.add_row(fname, str(candidate))
-    logs_dir = exec_dir / "logs"
-    if logs_dir.is_dir():
-        named = sorted(p.name for p in Path(logs_dir).glob("*.log"))
-        if named:
-            kv.add_row("logs/", ", ".join(named))
     return [kv]
 
 

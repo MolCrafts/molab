@@ -5,15 +5,17 @@ The workspace validator holds the tree to the layout law and does not know
 checks what lives inside it, at every host (the root, each project,
 experiment and run):
 
-* ``knowledge.class`` (error) — a document whose record has no ``class:``
-  or names a class that is not a knowledge class.
+* ``knowledge.class`` (error) — a document whose frontmatter has no ``class:``,
+  names a class that is not a knowledge class, or names one that is not
+  stored in the file's format (a Manuscript is ``.tex``, and only it is).
 * ``knowledge.stray`` (error) — an entry of ``knowledges/`` that is not a
-  document (``.md`` / ``.html``) or the ``figs/`` figure directory.
+  document (``.md`` / ``.html`` / ``.tex``) or the ``figs/`` figure directory.
 * ``knowledge.duplicate`` (error) — two documents with one stem (``a.md``
   beside ``a.html``): one name, one file.
-* the content rules of :mod:`molab.knowledge.content_rules` — malformed
-  records, campaign gaps, uncited planning documents, missing experiments,
-  links that leave the workspace, Literature without bibliographic fields.
+* the content rules of :mod:`molab.knowledge.content_rules` — fields the
+  class does not declare or refuses, links that leave the workspace, Literature without bibliographic
+  fields, ephemeral links, versioned names, HTML pages in markdown, unanchored
+  Reports. Each error among them also refuses the write that would leave it.
 * ``knowledge.section_drift`` (warning) — the host's ``index.knowledges``
   section differs from a rebuild from the files. Like the derived ``index:``
   keys it is navigation sugar: a legal direct write of a document leaves it
@@ -43,20 +45,17 @@ __all__ = [
     "RULE_HINTS",
     "classify_document",
     "duplicate_documents",
-    "known_classes",
     "validate_knowledge",
 ]
 
 #: Stable rule id -> remediation hint naming the molab command to use.
 RULE_HINTS: dict[str, str] = {
     "knowledge.class": (
-        "A knowledge document names its class in frontmatter. Write it with "
-        "`molab knowledge write NAME TEXT --on HOST --class CLASS` "
-        "(Note, Literature, Report, Finding, Plan, Roadmap, Todo, Milestone, Observation, "
-        "Hypothesis, Decision, or Delegation)."
+        "A knowledge document names its class in frontmatter, in a format that class "
+        "takes. Write it with `molab knowledge write NAME TEXT --on HOST --class CLASS`."
     ),
     "knowledge.stray": (
-        "knowledges/ holds documents (<slug>.md or <slug>.html) and figs/ only. Keep data "
+        "knowledges/ holds documents (<slug>.md, .html or .tex) and figs/ only. Keep data "
         "with the run that made it (`molab runs adopt`) or import it as an asset "
         "(`molab asset import`)."
     ),
@@ -69,13 +68,6 @@ RULE_HINTS: dict[str, str] = {
     ),
     **CONTENT_RULE_HINTS,
 }
-
-
-def known_classes() -> frozenset[str]:
-    """The document class names a frontmatter ``class:`` may spell."""
-    from .concepts import _PRODUCTS
-
-    return frozenset(_PRODUCTS)
 
 
 def classify_document(name: str, is_dir: bool) -> str | None:
@@ -120,16 +112,18 @@ def _issue(root: str, path: str, rule: str, detail: str, severity: str) -> dict[
 
 def class_problem(text: str, *, path: object = None) -> str | None:
     """Why *text* (the document at *path*) is not of a known class, or ``None``."""
+    from . import concepts
     from .frontmatter import split_frontmatter
-    from .naming import is_html_document
+    from .naming import document_format
 
     meta, _body = split_frontmatter(text, path=path)
-    head = "record" if path is not None and is_html_document(path) else "frontmatter"
-    declared = meta.get("class")
-    if not isinstance(declared, str) or not declared:
-        return f"{head} has no class:"
-    if declared not in known_classes():
-        return f"{head} class {declared!r} is not one of {sorted(known_classes())}"
+    problem = concepts.class_problem(meta)
+    if problem is not None:
+        return f"frontmatter {problem}"
+    klass = concepts.class_of(meta)
+    stored = document_format(path) if path is not None else "md"
+    if klass is not None and stored not in klass.FORMATS:
+        return f"a {klass.__name__} is stored as {' or '.join(klass.FORMATS)}, not {stored}"
     return None
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from molab.knowledge import Knowledge, Literature, Note, ReferenceMeta
+from molab.knowledge import Knowledge, Literature, Note
 from molab.workspace import Workspace
 
 
@@ -32,15 +32,15 @@ def main() -> None:
     lit = Literature(Path(str(exp.resolve())) / "knowledges" / "frenkel-smit-2002")
     lit.write(
         "Frenkel & Smit, *Understanding Molecular Simulation* (2002).\n",
-        ReferenceMeta(
-            title="Understanding Molecular Simulation",
-            authors=("Daan Frenkel", "Berend Smit"),
-            year=2002,
-        ),
+        fields={
+            "title": "Understanding Molecular Simulation",
+            "authors": ["Daan Frenkel", "Berend Smit"],
+            "year": 2002,
+        },
     )
     print(f"Literature: {lit.path}")
 
-    note.cite(lit)
+    note.ref(lit)
     print(f"after citation:\n{note.read()}")
     print("outgoing edges:")
     for edge in note.links():

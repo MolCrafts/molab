@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import Field
 
 from molab.fs.window import iter_file_chunks
+from molab.workspace.errors import AttemptNotHomeError
 from molab.workspace.refs import InvalidRefError
 
 from ..dependencies import get_workspace
@@ -54,6 +55,8 @@ def delete_project(project_id: str, workspace=Depends(get_workspace)) -> Message
         workspace.remove_project(project_id)
     except KeyError:
         raise ProjectNotFoundError(project_id)  # noqa: B904
+    except AttemptNotHomeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return MessageResponse(message="Project deleted")
 
 

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, TypeVar, cast, overload
 from pydantic import ValidationError
 
 from molab._typing import JSONValue
+from molab.ids import slugify
 from molab.path import Path
 
 from .base import _reconstruct
@@ -44,7 +45,6 @@ from .fs_local import LocalFS
 from .models import FolderMetadata
 from .naming import SCRATCH_CONTAINER
 from .timestamps import utc_now
-from .utils import slugify
 
 if TYPE_CHECKING:
     from .file_store import FileStore

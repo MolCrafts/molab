@@ -289,7 +289,7 @@ class TestDiscardSuperseded:
         assert not repo._seal_lock(first).exists() and not repo._state_lock(first).exists()
         assert [item.id for item in run.executions] == [last]
         assert not Path(run._execution_repository().execution_dir(first)).exists()
-        assert assets_produced_by(ws, first) == []
+        assert assets_produced_by(ws, first, run_id=run.id) == []
         titles = sorted(asset.title for asset in run.experiment.assets.list())
         assert titles == ["final.txt"]
         assert run.experiment.assets.list()[0].id == kept_asset.id

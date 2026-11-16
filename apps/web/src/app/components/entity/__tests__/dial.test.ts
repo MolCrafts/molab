@@ -7,7 +7,7 @@ const theme = {
   foreground: "#0f172a",
   mutedForeground: "#64748b",
   background: "#ffffff",
-  border: "#e2e8f0",
+  border: "#e5e5e5",
   primary: "#2563eb",
   secondary: "#f8fafc",
   danger: "#dc2626",

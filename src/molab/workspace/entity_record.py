@@ -168,12 +168,15 @@ def _lock_backend(fs: FileSystem) -> str:
 
 
 @contextlib.contextmanager
-def _record_lock(fs: FileSystem, directory: PathArg, lock_root: PathArg | None) -> Generator[None]:
-    """Advisory lock for one directory's ``index.md`` read-modify-write.
+def record_lock(fs: FileSystem, path: PathArg, lock_root: PathArg | None) -> Generator[None]:
+    """Advisory lock for one record file's read-modify-write, keyed by *path*.
 
-    The lock file lives under ``<lock_root>/.molab/locks`` (the same helper and
-    directory the run and execution locks use). Without a *lock_root* there
-    is nowhere machine state may go, so the write runs unlocked.
+    *path* is a Folder's directory (its ``index.md``) or any other record file
+    a layer above writes in place. The lock file lives
+    under ``<lock_root>/.molab/locks`` (the same helper and directory the run
+    and execution locks use). Without a *lock_root* there is nowhere machine
+    state may go, and a non-local disk has no lock backend; either way the
+    write runs unlocked. Not reentrant.
     """
     if lock_root is None or _lock_backend(fs) == "none":
         yield
@@ -182,7 +185,7 @@ def _record_lock(fs: FileSystem, directory: PathArg, lock_root: PathArg | None) 
 
     from .history import MOLAB_DIR
 
-    digest = hashlib.sha256(str(directory).encode("utf-8")).hexdigest()[:20]
+    digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:20]
     lock = _LocalPath(str(lock_root)) / MOLAB_DIR / "locks" / f"index-{digest}.lock"
     with file_lock(lock):
         yield
@@ -220,7 +223,7 @@ def update_record(
     Returns:
         The record as it now stands on disk.
     """
-    with _record_lock(fs, directory, lock_root):
+    with record_lock(fs, directory, lock_root):
         current = _current(fs, directory)
         updated = change(current)
         if updated != current:
@@ -276,6 +279,7 @@ __all__ = [
     "read_body",
     "read_record",
     "read_type",
+    "record_lock",
     "update_record",
     "write_record",
 ]

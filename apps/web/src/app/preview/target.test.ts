@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { type PreviewTarget, previewKey, previewPath } from "./target";
+import { type PreviewTarget, previewKey, previewOverlaysEditor, previewPath } from "./target";
 
 const run: PreviewTarget = { kind: "run", runId: "md-009", projectId: "nve", experimentId: "exp" };
 
@@ -69,5 +69,32 @@ describe("previewPath", () => {
     expect(previewPath({ kind: "knowledge", path: "nve/knowledges/limit.md" })).toBe(
       "/knowledge/nve/knowledges/limit.md",
     );
+  });
+});
+
+describe("previewOverlaysEditor", () => {
+  it("peeks only at an item inside an italic tab", () => {
+    const experiment = { key: "experiment:exp", preview: true };
+    expect(previewOverlaysEditor(run, experiment)).toBe(true);
+    expect(
+      previewOverlaysEditor(
+        { kind: "experiment", projectId: "nve", experimentId: "exp" },
+        experiment,
+      ),
+    ).toBe(false);
+    expect(previewOverlaysEditor(run, { key: "experiment:exp", preview: false })).toBe(false);
+    expect(previewOverlaysEditor(null, experiment)).toBe(false);
+  });
+
+  it("keeps an attempt distinct from its run tab", () => {
+    expect(
+      previewKey({
+        kind: "attempt",
+        runId: "md-009",
+        projectId: "nve",
+        experimentId: "exp",
+        executionId: "e01",
+      }),
+    ).not.toBe(previewKey(run));
   });
 });

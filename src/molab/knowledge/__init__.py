@@ -15,11 +15,12 @@ the class (``class: Finding``), the rest is the narrative. Path is identity::
 
 The subclasses are ``Note``, ``Literature``, ``Report``, ``Finding``,
 ``Plan``, ``Roadmap``, ``Todo``, ``Milestone``, ``Observation``,
-``Hypothesis``, ``Decision``, and ``Delegation``. Each answers one question
-(the first line of its docstring). A Plan
-is the campaign overview; Roadmap, Todo, and Milestone are the other three
-planning documents and cite that Plan. Failure analysis is a Report; harvest
-of a scientific outcome is a Finding.
+``Hypothesis``, ``Decision``, and ``Manuscript`` (a LaTeX paper,
+``knowledges/<name>.tex``). Each answers one question (the first line
+of its docstring). A Plan is the question, scope and constraints; the
+Roadmap, Todo and Milestone that cite it hold its stage order, its work items
+and its acceptance criteria. Failure analysis is a Report; harvest of a
+scientific outcome is a Finding.
 
 A path, or a **host plus a name**: ``Note(experiment, "Tg Cooling")`` derives
 ``<experiment>/knowledges/tg-cooling.md`` (and the host's own disk) without
@@ -33,7 +34,7 @@ Construct the document you mean: ``Note(host, name)``,
 A sourced document's ``inputs`` are the asset ids it cites. ``read_cited``
 reads the value at a span, and ``read`` returns the narrative.
 ``GeneratedParts(run).list()`` reads the image assets that attempt registered.
-``ZoteroLibrary(path).items()`` reads a library.
+``ZoteroLibrary(path).items()`` reads a library as Literature fields.
 ``KnowledgeSourceStore(root).search(query)`` and
 ``SourceRef.normalize(sources, default_host=...)`` stay.
 A new document's ``knowledge.created`` history is recorded by
@@ -51,10 +52,11 @@ cannot supply a git history or an id simply observes nothing.
 from .concept import Knowledge
 from .concepts import (
     Decision,
-    Delegation,
     Finding,
     Hypothesis,
     Literature,
+    LiteratureFields,
+    Manuscript,
     Milestone,
     Note,
     Observation,
@@ -63,13 +65,10 @@ from .concepts import (
     Roadmap,
     Todo,
 )
-from .delegation import DelegationRecord
 from .edges import Edge, EdgeRole
 from .errors import KnowledgeNotFoundError
 from .knowledge_item import SourceKind, SourceRef
 from .parts import GeneratedPart, GeneratedParts
-from .planning import Campaign, PlanningDocument, campaign_of, check_campaign
-from .reference_meta import ReferenceMeta
 from .search import (
     SearchHit,
     SearchResult,
@@ -81,13 +80,9 @@ from .sources import (
     SourceNotFoundError,
     WikiSource,
 )
-from .zotero import ZoteroItem
 
 __all__ = [
-    "Campaign",
     "Decision",
-    "Delegation",
-    "DelegationRecord",
     "Edge",
     "EdgeRole",
     "Finding",
@@ -99,12 +94,12 @@ __all__ = [
     "KnowledgeScope",
     "KnowledgeSourceStore",
     "Literature",
+    "LiteratureFields",
+    "Manuscript",
     "Milestone",
     "Note",
     "Observation",
     "Plan",
-    "PlanningDocument",
-    "ReferenceMeta",
     "Report",
     "Roadmap",
     "SearchHit",
@@ -115,7 +110,4 @@ __all__ = [
     "SourcedHit",
     "Todo",
     "WikiSource",
-    "ZoteroItem",
-    "campaign_of",
-    "check_campaign",
 ]

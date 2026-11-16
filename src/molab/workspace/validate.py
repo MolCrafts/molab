@@ -17,8 +17,11 @@ merely incomplete one:
 
 Every level has a closed set of legal names (:func:`classify_entry`), derived
 from the naming constants: anything else at that level — a directory **or a
-file** — is ``layout.stray``. A layer above workspace may declare a container
-of its own at the host levels through ``extra``; workspace does not name it.
+file** — is ``layout.stray``. Beside an experiment's workflow script, the modules
+it imports are legal too: the names source capture ships
+(:func:`experiment_source_names`). A layer above workspace may declare a
+container of its own at the host levels through ``extra``; workspace does
+not name it.
 The directory tree *is* the index: a level's children are exactly its entity
 subdirectories. The one derived thing is the ``index:`` block of each record
 (D89), and the checker holds it to a fresh projection of the tree
@@ -243,12 +246,65 @@ def _legal_names(level: str) -> tuple[frozenset[str], frozenset[str]]:
     raise ValueError(f"unknown level {level!r}")
 
 
+def experiment_source_names(
+    fs: FileSystem,
+    directory: str,
+    canonical: Mapping[str, object],
+    *,
+    pending: tuple[str, str | None] | None = None,
+) -> frozenset[str]:
+    """The entries of an experiment directory that its attempts capture as source.
+
+    The workflow script is the bound code entrypoint, else the experiment's
+    ``workflow.py``; its first-party import closure is
+    :func:`~molab.workspace.source_snapshot.captured_names`, the same rule
+    source capture stores by, so a module the script imports (``helper.py``,
+    a ``pkg/`` package) is legal exactly when an attempt ships it. The closure
+    is read through *fs*, as source capture reads it, so a tree on a remote
+    filesystem gets the same answer. Empty for a script outside the
+    experiment directory or a document workflow.
+
+    Args:
+        fs: The tree's filesystem.
+        directory: The experiment directory.
+        canonical: The canonical zone of its ``index.md`` record.
+        pending: ``(path, text)`` of a file about to be written: the names
+            are those of the tree after the write (the pre-write path check
+            asks this, so it and validation cannot disagree).
+
+    Returns:
+        Top-level names (``nacl_model.py``, ``helpers``) under *directory*.
+    """
+    from pathlib import Path
+
+    from .index_projection import entrypoint_of
+    from .source_snapshot import SourceCaptureError, captured_names
+
+    bound = (
+        entrypoint_of(directory, canonical) if canonical.get("workflow_kind") == "code" else None
+    )
+    script = Path(directory, bound or WORKFLOW_SCRIPT_FILENAME)
+    written = pending is not None and fs.resolve(pending[0]) == fs.resolve(script)
+    if fs.resolve(script.parent) != fs.resolve(directory):
+        return frozenset()
+    if not (written or fs.is_file(script)):
+        return frozenset()
+    try:
+        names = captured_names(script, pending=pending, fs=fs)
+    except SourceCaptureError:
+        # The script's closure cannot be captured (an import climbs out of
+        # the experiment); nothing beside it is shipped.
+        return frozenset()
+    return frozenset(name.split("/", 1)[0] for name in names)
+
+
 def classify_entry(
     level: str,
     name: str,
     is_dir: bool,
     *,
     extra: Mapping[str, frozenset[str]] = _NO_EXTRA,
+    shipped: frozenset[str] = frozenset(),
 ) -> str | None:
     """Whether *name* may sit at *level*; the rule it breaks, or ``None``.
 
@@ -264,6 +320,8 @@ def classify_entry(
         is_dir: Whether the entry is a directory.
         extra: Level -> extra directory names a layer above workspace declares
             at that level (a container of its own). Workspace never names them.
+        shipped: At the ``experiment`` level, the entries an attempt captures
+            as source beside the workflow script (:func:`experiment_source_names`).
 
     Returns:
         ``None`` when the entry is legal. Otherwise ``layout.stray``, or, under
@@ -289,6 +347,8 @@ def classify_entry(
     if level == VALUE_CONTAINER:
         return None if not is_dir and VALUE_FILE_RE.match(name) else "values.name"
     directories, files = _legal_names(level)
+    if level == "experiment" and name in shipped:
+        return None
     if is_dir and (name in directories or name in extra.get(level, frozenset())):
         return None
     if not is_dir and name in files:
@@ -464,11 +524,15 @@ class _Checker:
             return []
         return sorted(entries, key=lambda entry: entry.name)
 
-    def _check_level(self, path: str, level: str) -> list[DirEntry]:
+    def _check_level(
+        self, path: str, level: str, *, shipped: frozenset[str] = frozenset()
+    ) -> list[DirEntry]:
         """Classify every entry of *path* at *level*; return the entries."""
         entries = self._entries(path)
         for entry in entries:
-            rule = classify_entry(level, entry.name, entry.is_dir, extra=self._extra)
+            rule = classify_entry(
+                level, entry.name, entry.is_dir, extra=self._extra, shipped=shipped
+            )
             if rule is None:
                 continue
             child = self._fs.join(path, entry.name)
@@ -620,7 +684,10 @@ class _Checker:
         record = self._check_concept(path, "experiment")
         if record is not None:
             self._check_entrypoint(path, record)
-        self._check_level(path, "experiment")
+        canonical = record.canonical if record is not None else {}
+        self._check_level(
+            path, "experiment", shipped=experiment_source_names(self._fs, path, canonical)
+        )
         self._check_scratch(path)
         runs_dir = self._fs.join(path, RUN_CONTAINER)
         for entry in self._check_level(runs_dir, RUN_CONTAINER):

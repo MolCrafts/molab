@@ -1,4 +1,4 @@
-/** Tack's research map, hosted in a Molab project editor tab without its conversation. */
+/** The research map of a project, hosted in a Molab project editor tab. */
 import {
   EditorRenderer,
   FreeLayoutEditorProvider,
@@ -36,7 +36,6 @@ import {
 import type { KnowledgeGraphResponse } from "@/api/generated/models/KnowledgeGraphResponse";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { RendererProps, RendererSnapshot } from "@/app/types";
-import { buildMolabRefIndex } from "@/lib/entity-linkify";
 import { GraphSearch } from "./GraphSearch";
 import { GraphViewMenu } from "./GraphViewMenu";
 import { DEFAULT_GRAPH_VIEW, projectGraphView, revealGraphNode } from "./graph-view";
@@ -48,7 +47,6 @@ import {
   projectResearchMap,
   toResearchGraph,
 } from "./knowledge-map";
-import { knowledgeClassOf } from "./knowledgeClass";
 import { MAP_SHAPE_SIZE } from "./map-layout";
 import { knowledgeGraphQueryOptions, knowledgeNoteQueryOptions } from "./queries";
 import { type MapNode, type ResearchMap, STATEFUL } from "./research-map";
@@ -57,11 +55,8 @@ import {
   DocumentPanel,
   Dot,
   Empty,
-  NowCard,
   reasoningLabel,
   reasoningTone,
-  stageLabels,
-  stageTones,
   Tag,
 } from "./research-ui";
 import "./research-fonts.css";
@@ -122,18 +117,10 @@ const Body = ({ shape, data }: { shape: string; data: MapNode }) => {
     return (
       <>
         <div className="tw-row">
-          <Tag tone={stageTones[data.status ?? ""] ?? "muted"}>{data.cls}</Tag>
+          <Tag tone="muted">{data.cls}</Tag>
         </div>
         <strong>{data.title}</strong>
-        <small>
-          {data.status && (
-            <span className={`tw-${stageTones[data.status]}`}>
-              {stageLabels[data.status]}
-              {data.note && " · "}
-            </span>
-          )}
-          {data.note}
-        </small>
+        <small>{data.note}</small>
       </>
     );
   return (
@@ -153,7 +140,7 @@ const RelationNode = ({ node }: WorkflowNodeProps) => {
     <ContextMenu>
       <WorkflowNodeRenderer
         node={node}
-        className={`tw-map-node tw-map-${shape} ${data.status ? `is-${data.status}` : ""} ${data.state ? `is-${data.cls.toLowerCase()}-${data.state}` : ""} ${selected === node.id ? "is-selected" : ""} ${visible(node.id) ? "" : "is-hidden"}`}
+        className={`tw-map-node tw-map-${shape} ${data.state ? `is-${data.cls.toLowerCase()}-${data.state}` : ""} ${selected === node.id ? "is-selected" : ""} ${visible(node.id) ? "" : "is-hidden"}`}
         portClassName="tw-map-port"
       >
         <ContextMenuTrigger asChild>
@@ -273,31 +260,25 @@ const MapView = ({
     const entitySources = new Set(
       auditGraph.edges.filter((edge) => edge.kind === "ref").map((edge) => edge.source),
     );
-    return auditGraph.nodes.filter((node) => {
-      const cls = knowledgeClassOf(node);
-      return (
-        ["Finding", "Roadmap", "Todo", "Milestone"].includes(cls) ||
-        cls in STATEFUL ||
-        entitySources.has(node.relPath)
-      );
-    });
+    return auditGraph.nodes.filter(
+      (node) => node.cls in STATEFUL || entitySources.has(node.relPath),
+    );
   }, [auditGraph]);
-  // Reuse cached planning records, and resolve Finding/entity source cards only on audit demand.
+  // Reuse cached fields, and resolve entity source cards only on audit demand.
   const auditDetails = useQueries({
     queries: auditNodes.map((node) => ({
       ...knowledgeNoteQueryOptions(node.relPath),
       enabled: auditOpen,
     })),
   });
-  const refIndex = useMemo(() => buildMolabRefIndex(snapshot), [snapshot]);
   const audit = auditOpen
     ? auditKnowledge(auditGraph, {
-        records: {
-          ...auditContext.records,
+        fields: {
+          ...auditContext.fields,
           ...Object.fromEntries(
             auditNodes.flatMap((node, index) =>
-              auditDetails[index]?.data?.record
-                ? [[node.relPath, auditDetails[index].data.record]]
+              auditDetails[index]?.data?.fields
+                ? [[node.relPath, auditDetails[index].data.fields]]
                 : [],
             ),
           ),
@@ -312,7 +293,6 @@ const MapView = ({
             ),
           ),
         },
-        refIndex,
       })
     : { issues: [], uncheckedHypotheses: [] };
   const auditErrors = auditNodes.flatMap((node, index) =>
@@ -335,13 +315,7 @@ const MapView = ({
   const editor = useRef<FreeLayoutPluginContext | null>(null);
   const built = useMemo(() => toResearchGraph(map), [map]);
   const shape = JSON.stringify([
-    built.graph.nodes.map((node) => [
-      node.id,
-      node.type,
-      node.meta.position,
-      node.data.status,
-      node.data.state,
-    ]),
+    built.graph.nodes.map((node) => [node.id, node.type, node.meta.position, node.data.state]),
     built.graph.edges,
     [...built.roles],
   ]);
@@ -387,7 +361,6 @@ const MapView = ({
     ...(
       [
         ["derived_from", "ink", "none"],
-        ["supersedes", "amber", "6 5"],
         ["supports", "green", "none"],
         ["contradicts", "red", "none"],
       ] as const
@@ -477,9 +450,6 @@ const MapView = ({
             onClose={() => setAuditOpen(false)}
           />
         )}
-        {!auditOpen && !node && !view.focus && projection.visible.size > 0 && (
-          <NowCard map={map} onSelect={select} />
-        )}
         {!auditOpen && node && (
           <DocumentPanel
             key={node.id}
@@ -560,17 +530,11 @@ export const KnowledgeRelations = ({ selection: target, snapshot }: RendererProp
     () => projectKnowledgeMap(graph.data ?? { nodes: [], edges: [] }, project?.path ?? ""),
     [graph.data, project?.path],
   );
-  const heads = useMemo(
-    () =>
-      scoped.nodes.filter(
-        (node) => ["Roadmap", "Todo", "Milestone"].includes(node.cls) || node.cls in STATEFUL,
-      ),
-    [scoped],
-  );
+  const heads = useMemo(() => scoped.nodes.filter((node) => node.cls in STATEFUL), [scoped]);
   const details = useQueries({ queries: heads.map((node) => knowledgeNoteQueryOptions(node.id)) });
-  const records = Object.fromEntries(
+  const fields = Object.fromEntries(
     heads.flatMap((node, index) =>
-      details[index]?.data?.record ? [[node.id, details[index].data?.record]] : [],
+      details[index]?.data?.fields ? [[node.id, details[index].data?.fields]] : [],
     ),
   );
   const cardsByPath = Object.fromEntries(
@@ -587,14 +551,10 @@ export const KnowledgeRelations = ({ selection: target, snapshot }: RendererProp
       ),
     };
   }, [scoped, graph.data]);
-  const unreadable = heads.flatMap((node, index) =>
-    details[index]?.error ? [{ path: node.id, error: String(details[index].error) }] : [],
-  );
   const map = projectResearchMap(
     graph.data ?? { nodes: [], edges: [] },
     project?.path ?? "",
-    records,
-    unreadable,
+    fields,
   );
   const pending = graph.isPending || details.some((detail) => detail.isPending);
   return (
@@ -612,7 +572,7 @@ export const KnowledgeRelations = ({ selection: target, snapshot }: RendererProp
             </Empty>
           ) : map.nodes.length === 0 ? (
             <Empty title="No research map yet">
-              This project has no Plan, Roadmap, Finding or other research document.
+              This project has no Plan, Finding or other research document.
             </Empty>
           ) : (
             <MapView
@@ -621,7 +581,7 @@ export const KnowledgeRelations = ({ selection: target, snapshot }: RendererProp
               snapshot={snapshot}
               graph={graph.data ?? { nodes: [], edges: [] }}
               auditGraph={auditGraph}
-              auditContext={{ records, cardsByPath }}
+              auditContext={{ fields, cardsByPath }}
               focus={target.objectType === "project" ? target.pluginFocus : undefined}
               onOpenPage={(id) => nav.setSelection({ objectType: "knowledge", objectId: id })}
             />

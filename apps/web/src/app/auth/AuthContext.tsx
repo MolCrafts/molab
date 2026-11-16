@@ -50,6 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     mutationFn: ({ username, password }: { username: string; password: string }) =>
       authApi.login(username, password),
     onSuccess: async () => {
+      await queryClient.cancelQueries({ predicate: (query) => query.queryKey[0] !== "auth" });
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "auth" });
       await queryClient.invalidateQueries({ queryKey: authKeys.status() });
     },
   });
@@ -57,6 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   const logoutMutation = useMutation({
     mutationFn: authApi.logout,
     onSuccess: async () => {
+      await queryClient.cancelQueries({ predicate: (query) => query.queryKey[0] !== "auth" });
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "auth" });
       await queryClient.invalidateQueries({ queryKey: authKeys.all });
     },
   });

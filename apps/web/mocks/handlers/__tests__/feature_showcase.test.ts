@@ -101,20 +101,12 @@ describe("feature showcase mock", () => {
   it("serves all typed relations, actual backlinks and traceable sources from one fixture history", async () => {
     const graph = await getJson<KnowledgeGraphResponse>("/api/knowledge/graph");
     expect(new Set(graph.edges.map((edge) => edge.role))).toEqual(
-      new Set([
-        "derived_from",
-        "cites",
-        "supersedes",
-        "supports",
-        "contradicts",
-        "records",
-        "references",
-      ]),
+      new Set(["derived_from", "cites", "supports", "contradicts", "references"]),
     );
     expect(graph.edges).toContainEqual({
-      source: lineagePaths.decision,
-      target: lineagePaths.oldDecision,
-      role: "supersedes",
+      source: lineagePaths.policy,
+      target: lineagePaths.oldPolicy,
+      role: "derived_from",
       kind: "document",
     });
     expect(graph.edges.some((edge) => edge.kind === "missing")).toBe(true);
@@ -122,16 +114,16 @@ describe("feature showcase mock", () => {
     const detail = await getJson<{
       body: string;
       cards: { relPath?: string; ref?: string; missing?: boolean }[];
-    }>(`/api/knowledge/note?path=${encodeURIComponent(lineagePaths.decision)}`);
-    expect(detail.body).toContain("[@supersedes Initial timestep policy]");
+    }>(`/api/knowledge/note?path=${encodeURIComponent(lineagePaths.policy)}`);
+    expect(detail.body).toContain("[@derived_from Initial timestep policy]");
     expect(detail.cards.map((card) => card.relPath)).toEqual([
       lineagePaths.finding,
       lineagePaths.counterexample,
-      lineagePaths.oldDecision,
+      lineagePaths.oldPolicy,
     ]);
     expect(detail.cards.some((card) => card.ref?.includes("exp-001"))).toBe(false);
     const backlinks = await getJson<{ backlinks: { relPath: string }[] }>(
-      `/api/knowledge/backlinks?path=${encodeURIComponent(lineagePaths.decision)}`,
+      `/api/knowledge/backlinks?path=${encodeURIComponent(lineagePaths.policy)}`,
     );
     expect(backlinks.backlinks.map((note) => note.relPath)).toEqual([lineagePaths.report]);
     const asset = await getJson<{ backlinks: { path: string; role: string }[] }>(
@@ -172,18 +164,18 @@ describe("feature showcase mock", () => {
         kind: "document",
       });
       await mutate("PUT", `/api/knowledge/doc?path=${encodeURIComponent(child)}`, {
-        body: `[@supersedes origin](${origin})`,
+        body: `[@cites origin](${origin})`,
       });
       graph = await getJson<KnowledgeGraphResponse>("/api/knowledge/graph");
       expect(graph.edges.filter((edge) => edge.source === child).map((edge) => edge.role)).toEqual([
-        "supersedes",
+        "cites",
       ]);
       await mutate("DELETE", `/api/knowledge/doc?path=${encodeURIComponent(origin)}`);
       graph = await getJson<KnowledgeGraphResponse>("/api/knowledge/graph");
       expect(graph.edges).toContainEqual({
         source: child,
         target: origin,
-        role: "supersedes",
+        role: "cites",
         kind: "missing",
       });
     } finally {

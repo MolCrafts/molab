@@ -33,19 +33,15 @@ class ConceptIndexEntry(BaseModel, frozen=True):
 
     Attributes:
         path: POSIX path relative to the searched root.
-        type: The Knowledge class name.
-        id: Optional stable id.
-        title: The H1 if present, else the document name.
+        cls: The Knowledge class name.
+        title: The document's title.
         tags: Frontmatter tags.
-        links: Out-edge targets.
     """
 
     path: str
-    type: str
-    id: str | None = None
+    cls: str
     title: str = ""
     tags: tuple[str, ...] = ()
-    links: tuple[str, ...] = ()
 
 
 class SearchHit(BaseModel, frozen=True):
@@ -88,7 +84,6 @@ __all__ = [
     "best_body_line",
     "capped_body",
     "extract_title",
-    "passes_filters",
     "ranking_corpus",
     "search_index",
 ]
@@ -117,38 +112,6 @@ def ranking_corpus(entries: Sequence[ConceptIndexEntry], bodies: Mapping[str, st
         for entry in entries
     }
     return Bm25fCorpus(documents)
-
-
-def passes_filters(
-    entry: ConceptIndexEntry,
-    *,
-    concept_type: str | None,
-    tag: str | None,
-    scope: str | None,
-) -> bool:
-    """Return whether *entry* survives the pre-ranking filters.
-
-    The filters are AND. *scope* is a path prefix: ``projects/p`` accepts
-    ``projects/p/x.md`` and rejects ``projects/pp/x.md``.
-
-    Args:
-        entry: One index row.
-        concept_type: Exact type to keep, or ``None``.
-        tag: A tag that must be present, or ``None``.
-        scope: Path prefix, or ``None``.
-
-    Returns:
-        ``True`` when every given filter matches.
-    """
-    if concept_type is not None and entry.type != concept_type:
-        return False
-    if tag is not None and tag not in entry.tags:
-        return False
-    if scope is not None:
-        prefix = scope.rstrip("/")
-        if entry.path != prefix and not entry.path.startswith(prefix + "/"):
-            return False
-    return True
 
 
 def capped_body(text: str) -> str:
@@ -198,12 +161,8 @@ def search_index(
     bodies: Mapping[str, str],
     text: str | None,
     *,
-    concept_type: str | None = None,
-    tag: str | None = None,
-    scope: str | None = None,
     limit: int = 50,
     include_body: bool = True,
-    corpus: Bm25fCorpus | None = None,
 ) -> SearchResult:
     """Rank *text* over *index*, or keep index order when there is nothing to rank.
 
@@ -215,13 +174,9 @@ def search_index(
     Args:
         index: The in-memory index.
         bodies: Body text per entry path.
-        text: The query. ``None`` or empty means filter-only.
-        concept_type: Exact type to keep.
-        tag: A tag that must be present.
-        scope: Path prefix to keep.
+        text: The query. ``None`` or empty keeps index order.
         limit: Maximum hits. A cut result reports ``truncated=True``.
         include_body: ``False`` skips body matching.
-        corpus: A corpus already built over *index* and the ranking bodies.
 
     Returns:
         The hits, and whether *limit* cut real matches.
@@ -231,25 +186,9 @@ def search_index(
         for entry in entries
     }
     if not text:
-        candidates = [
-            entry
-            for entry in entries
-            if passes_filters(entry, concept_type=concept_type, tag=tag, scope=scope)
-        ]
-        hits = tuple(SearchHit(entry=entry) for entry in candidates[:limit])
-        return SearchResult(hits=hits, truncated=len(candidates) > limit)
-    if corpus is None:
-        corpus = ranking_corpus(entries, ranking_bodies)
-    return _rank(
-        corpus,
-        entries,
-        ranking_bodies,
-        text,
-        concept_type=concept_type,
-        tag=tag,
-        scope=scope,
-        limit=limit,
-    )
+        hits = tuple(SearchHit(entry=entry) for entry in entries[:limit])
+        return SearchResult(hits=hits, truncated=len(entries) > limit)
+    return _rank(ranking_corpus(entries, ranking_bodies), entries, ranking_bodies, text, limit)
 
 
 def _rank(
@@ -257,19 +196,11 @@ def _rank(
     entries: Sequence[ConceptIndexEntry],
     bodies: Mapping[str, str],
     text: str,
-    *,
-    concept_type: str | None,
-    tag: str | None,
-    scope: str | None,
     limit: int,
 ) -> SearchResult:
-    """Rank *text* over *corpus*, then narrow by the filters."""
+    """Rank *text* over *corpus*."""
     by_path = {entry.path: entry for entry in entries}
-    ranked = [
-        doc
-        for doc in corpus.rank(text)
-        if passes_filters(by_path[doc.key], concept_type=concept_type, tag=tag, scope=scope)
-    ]
+    ranked = corpus.rank(text)
     hits = tuple(
         SearchHit(
             entry=by_path[doc.key],

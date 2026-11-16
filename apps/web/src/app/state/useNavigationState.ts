@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { experimentPath, legacyCompareRedirect, projectPath, runPath } from "@/app/entities/paths";
+import {
+  experimentPath,
+  knowledgePath,
+  legacyCompareRedirect,
+  projectPath,
+  runPath,
+} from "@/app/entities/paths";
 import { getNavigationContribution, leftPanelViewFromPath } from "@/app/navigation/sections";
 import type {
   ExperimentView,
@@ -71,7 +77,7 @@ const parseExperimentView = (raw: string | undefined): ExperimentView | undefine
 };
 
 const parseProjectView = (raw: string | undefined): ProjectView | undefined => {
-  if (raw === "experiments" || raw === "plan" || raw === "assets") return raw;
+  if (raw === "experiments" || raw === "assets") return raw;
   // attention / timeline / settings left the project in L02: their links open the Overview.
   return undefined;
 };
@@ -198,7 +204,7 @@ export const buildSelectionFromLocation = (
   }
 
   const projectViewMatch = pathname.match(
-    /^\/projects\/([^/]+)\/(experiments|assets|plan|attention|timeline|settings)$/,
+    /^\/projects\/([^/]+)\/(experiments|assets|attention|timeline|settings)$/,
   );
   if (projectViewMatch) {
     return {
@@ -306,9 +312,7 @@ export const getSelectionPath = (
     case "knowledge":
       // objectId is a bundle-relative path (may contain "/"); keep the slashes
       // readable in the URL by encoding each segment, not the whole string.
-      return selection.objectId
-        ? `/knowledge/${selection.objectId.split("/").map(encodeURIComponent).join("/")}`
-        : "/knowledge";
+      return knowledgePath(selection.objectId);
     case "workspace-file": {
       const params = new URLSearchParams({
         file: selection.filePath,

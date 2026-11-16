@@ -6,11 +6,12 @@ import type { BacklinksResponse } from '../models/BacklinksResponse';
 import type { Body_uploadDocMedia } from '../models/Body_uploadDocMedia';
 import type { DocBodyUpdate } from '../models/DocBodyUpdate';
 import type { DocCreateRequest } from '../models/DocCreateRequest';
+import type { DocFieldsResponse } from '../models/DocFieldsResponse';
+import type { DocFieldsUpdate } from '../models/DocFieldsUpdate';
 import type { DocMediaResponse } from '../models/DocMediaResponse';
 import type { DocMetaUpdate } from '../models/DocMetaUpdate';
 import type { DocMoveRequest } from '../models/DocMoveRequest';
-import type { DocRecordResponse } from '../models/DocRecordResponse';
-import type { DocRecordUpdate } from '../models/DocRecordUpdate';
+import type { DocPageResponse } from '../models/DocPageResponse';
 import type { DocRelationsResponse } from '../models/DocRelationsResponse';
 import type { DocRelationUpdate } from '../models/DocRelationUpdate';
 import type { EmbedRequest } from '../models/EmbedRequest';
@@ -79,7 +80,7 @@ export class KnowledgeService {
      * disk. Registered sources are fused by :meth:`KnowledgeSourceStore.search`,
      * which is the same function the CLI calls.
      * @param q Case-insensitive needle (path/title/tags/body).
-     * @param type Exact Knowledge class name.
+     * @param cls Only documents of this class or a subclass.
      * @param tag Only documents carrying this tag.
      * @param molabSession
      * @returns KnowledgeSearchResponse Successful Response
@@ -87,7 +88,7 @@ export class KnowledgeService {
      */
     public static searchKnowledge(
         q: string,
-        type?: (string | null),
+        cls?: ('Note' | 'Literature' | 'Report' | 'Finding' | 'Plan' | 'Roadmap' | 'Todo' | 'Milestone' | 'Observation' | 'Hypothesis' | 'Decision' | 'Manuscript' | null),
         tag?: (string | null),
         molabSession?: (string | null),
     ): CancelablePromise<KnowledgeSearchResponse> {
@@ -99,7 +100,7 @@ export class KnowledgeService {
             },
             query: {
                 'q': q,
-                'type': type,
+                'cls': cls,
                 'tag': tag,
             },
             errors: {
@@ -109,7 +110,7 @@ export class KnowledgeService {
     }
     /**
      * List Knowledge
-     * List every Knowledge document, plus each host's TeX manuscripts.
+     * List every Knowledge document.
      * @param tag Only notes carrying this tag.
      * @param status Only notes with this lifecycle status.
      * @param molabSession
@@ -140,8 +141,7 @@ export class KnowledgeService {
      * Get Knowledge Graph
      * The whole knowledge graph: the unfiltered listing as nodes, typed links as edges.
      *
-     * Pure derived read. Nothing is indexed, and a TeX manuscript is a node with
-     * no out-links.
+     * Pure derived read. Nothing is indexed.
      * @param molabSession
      * @returns KnowledgeGraphResponse Successful Response
      * @throws ApiError
@@ -163,8 +163,6 @@ export class KnowledgeService {
     /**
      * Get Note
      * Return one document's full body.
-     *
-     * A ``.tex`` / ``.ltx`` path is the file bytes, not a Knowledge document.
      * @param path The document's workspace-relative path (its identity).
      * @param molabSession
      * @returns NoteDetailResponse Successful Response
@@ -305,8 +303,7 @@ export class KnowledgeService {
      *
      * Resolves the source document (404 on miss) and the target entity
      * (``run`` / ``experiment`` / ``asset`` / ``reference``; 404 on miss), then
-     * writes ONE typed provenance edge at the target resolved by
-     * :func:`~molab.knowledge.embed.resolve_embed_target`.
+     * writes ONE typed provenance edge to it.
      * @param path The source note Concept's workspace-relative document path.
      * @param requestBody
      * @param molabSession
@@ -336,7 +333,7 @@ export class KnowledgeService {
     }
     /**
      * Update Doc Meta
-     * Update a document's tags/status — ``Knowledge.write`` for every knowledge class.
+     * Set a document's tags — ``Knowledge.write`` for every knowledge class.
      * @param path The note Concept's workspace-relative document path (its identity).
      * @param requestBody
      * @param molabSession
@@ -421,20 +418,20 @@ export class KnowledgeService {
         });
     }
     /**
-     * Get Doc Record
-     * A document's structured record and its file digest (for ``ifMatch``).
+     * Get Doc Fields
+     * A document's own fields and its file digest (for ``ifMatch``).
      * @param path The document's workspace-relative path (its identity).
      * @param molabSession
-     * @returns DocRecordResponse Successful Response
+     * @returns DocFieldsResponse Successful Response
      * @throws ApiError
      */
-    public static getDocRecord(
+    public static getDocFields(
         path: string,
         molabSession?: (string | null),
-    ): CancelablePromise<DocRecordResponse> {
+    ): CancelablePromise<DocFieldsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/knowledge/doc/record',
+            url: '/api/knowledge/doc/fields',
             cookies: {
                 'molab_session': molabSession,
             },
@@ -447,27 +444,26 @@ export class KnowledgeService {
         });
     }
     /**
-     * Replace Doc Record
-     * Replace a document's structured record whole — 409 when ``ifMatch`` is stale.
+     * Replace Doc Fields
+     * Replace a document's own fields whole — 409 when ``ifMatch`` is stale.
      *
-     * Only classes that own a record (Delegation, Roadmap, Todo, Milestone,
-     * Hypothesis, Decision) accept
-     * it (422 otherwise, and for a record the class rejects). The change is
-     * recorded in the workspace history as ``knowledge.record_replaced``.
+     * The class's fields check them: a key it does not declare, or a value it
+     * refuses, answers 422. The change is recorded in the workspace history as
+     * ``knowledge.fields_replaced``.
      * @param path The document's workspace-relative path (its identity).
      * @param requestBody
      * @param molabSession
-     * @returns DocRecordResponse Successful Response
+     * @returns DocFieldsResponse Successful Response
      * @throws ApiError
      */
-    public static replaceDocRecord(
+    public static replaceDocFields(
         path: string,
-        requestBody: DocRecordUpdate,
+        requestBody: DocFieldsUpdate,
         molabSession?: (string | null),
-    ): CancelablePromise<DocRecordResponse> {
+    ): CancelablePromise<DocFieldsResponse> {
         return __request(OpenAPI, {
             method: 'PATCH',
-            url: '/api/knowledge/doc/record',
+            url: '/api/knowledge/doc/fields',
             cookies: {
                 'molab_session': molabSession,
             },
@@ -509,7 +505,7 @@ export class KnowledgeService {
     }
     /**
      * Export Doc
-     * Export a document: a markdown narrative, the HTML document, or the TeX file itself.
+     * Export a document: a markdown narrative, or the HTML or TeX document whole.
      * @param path The note Concept's workspace-relative document path (its identity).
      * @param molabSession
      * @returns any Successful Response
@@ -522,6 +518,66 @@ export class KnowledgeService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/knowledge/doc/export',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Get Doc Bibliography
+     * A Manuscript's bibliography: one BibTeX entry per Literature it cites.
+     *
+     * The same verb as ``molab knowledge bib`` (``Manuscript.bibliography``).
+     * 422 when the document is not a Manuscript or a ``\cite`` key names no
+     * Literature document.
+     * @param path The Manuscript's workspace-relative document path.
+     * @param molabSession
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static getDocBibliography(
+        path: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/doc/bib',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Doc Page
+     * Render a document the way a reader sees it, as one self-contained page.
+     *
+     * The same page ``molab knowledge serve --export`` writes: markdown rendered,
+     * sources listed, assets inlined. 404 when the document or an asset it shows
+     * is missing.
+     * @param path The document's workspace-relative path (its identity).
+     * @param molabSession
+     * @returns DocPageResponse Successful Response
+     * @throws ApiError
+     */
+    public static docPage(
+        path: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<DocPageResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/doc/page',
             cookies: {
                 'molab_session': molabSession,
             },

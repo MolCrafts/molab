@@ -2,12 +2,11 @@
 
 Three behaviors are load-bearing here and each has its own guard below:
 
-- the destination comes from ``Finding(host, name).path`` and the
+- the destination comes from ``Observation(host, name).path`` and the
   bytes land through ``Concept.write`` (one derivation, one persistence path);
-- the **cite channel keeps all three branches** — a Knowledge document through
-  ``.ref``, a ``Folder``/``Asset`` through the embed resolver, and a bare path
-  straight to ``append_link``. The third branch must never be routed through the
-  resolver: it would raise, and the edge would be silently dropped;
+- every cite resolves through the one link writer — a document by its path, a
+  project / experiment / run / asset by its ref, a bare path as given — and a
+  cite that names nothing refuses the whole write before anything lands;
 - ``Note.mount`` materializes a document even with an empty body, and a repeat
   call (including ``body=""``) never truncates an existing body.
 """
@@ -19,46 +18,45 @@ from typing import Any
 
 import pytest
 
-from molab.knowledge import Finding, Knowledge, Literature, Note, SourceRef
+from molab.knowledge import Knowledge, Literature, Note, Observation, SourceRef
+from molab.knowledge.write import write_knowledge
 from molab.workspace.domain import Asset
 from molab.workspace.folder import Folder
 
 
 def _write(experiment: Any, **overrides: Any) -> Knowledge:
     kwargs: dict[str, Any] = {
-        "name": "finding-demo",
-        "of": Finding,
+        "name": "observation-demo",
+        "of": Observation,
         "sources": [SourceRef.of(experiment)],
         "created_by": "tester",
-        "text": "# Finding\n\nhello\n",
+        "text": "# Observation\n\nhello\n",
     }
     kwargs.update(overrides)
-    of = kwargs.pop("of")
-    name = kwargs.pop("name")
-    return of.create(experiment, name, **kwargs)
+    return write_knowledge(experiment, **kwargs)
 
 
 class TestWriteKnowledge:
     def test_writes_the_sourced_document_at_the_derived_path(self, experiment: Any) -> None:
         item = _write(experiment, title="demo")
 
-        assert isinstance(item, Finding)
+        assert isinstance(item, Observation)
         assert not isinstance(item, Folder)
         assert (
             item.path
-            == Finding(experiment, "finding-demo", sources=[SourceRef.of(experiment)]).path
+            == Observation(experiment, "observation-demo", sources=[SourceRef.of(experiment)]).path
         )
-        assert Path(item.path).name == "finding-demo.md"
+        assert Path(item.path).name == "observation-demo.md"
         assert Path(item.path).parent == Path(str(experiment.resolve())) / "knowledges"
         assert item.exists()
-        assert item.read().startswith("# Finding")
+        assert item.read().startswith("# Observation")
 
     def test_sources_and_author_round_trip_through_the_head(self, experiment: Any) -> None:
         item = _write(experiment)
 
-        reopened = Finding(item.path)
+        reopened = Observation(item.path)
 
-        assert isinstance(reopened, Finding)
+        assert isinstance(reopened, Observation)
         from molab.workspace.refs import ref_of
 
         assert [(s.kind, s.ref) for s in reopened.sources] == [
@@ -71,9 +69,9 @@ class TestWriteKnowledge:
         second = _write(experiment, text="second\n")
 
         assert "second" in second.read()
-        assert "first" not in Finding(second.path).read()
+        assert "first" not in Observation(second.path).read()
         landed = sorted(p.name for p in (Path(str(experiment.resolve())) / "knowledges").iterdir())
-        assert landed == ["finding-demo.md"]
+        assert landed == ["observation-demo.md"]
 
     def test_a_knowledge_target_is_cross_referenced(self, experiment: Any) -> None:
         other = Note.mount(experiment, "Background", body="# BG\n")
@@ -107,7 +105,7 @@ class TestWriteKnowledge:
 
         item = _write(experiment, cite=[(experiment, "derived_from")])
 
-        assert calls == [experiment.resolve()]
+        assert calls == [str(item.path)]
         from molab.workspace.refs import ref_of
 
         assert [(edge.target, edge.role) for edge in item.links()] == [
@@ -120,15 +118,19 @@ class TestWriteKnowledge:
 
         item = _write(experiment, cite=[(str(outside), "references")])
 
-        # The third branch must not be routed through the embed resolver: that
-        # would raise on a non-Folder/Asset target and drop the edge silently.
         assert (str(outside), "references") in [(e.target, e.role) for e in item.links()]
 
-    def test_a_failing_cite_never_fails_the_write(self, experiment: Any) -> None:
-        item = _write(experiment, cite=[(object(), "references")])
+    @pytest.mark.parametrize(
+        ("target", "role", "error"),
+        [(object(), "references", TypeError), ("knowledges/x.md", "bogus", ValueError)],
+    )
+    def test_an_unresolvable_cite_refuses_the_write(
+        self, experiment: Any, target: object, role: str, error: type[Exception]
+    ) -> None:
+        with pytest.raises(error):
+            _write(experiment, cite=[(target, role)])
 
-        assert item.exists()
-        assert item.read().startswith("# Finding")
+        assert not list(Path(str(experiment.resolve())).glob("knowledges/observation-demo.*"))
 
     def test_a_domain_asset_cite_writes_exactly_one_edge(
         self, experiment: Any, tmp_path: Path
@@ -202,30 +204,39 @@ class TestNormalizeSources:
             ("project", str(ref_of(project))),
         ]
 
-    def test_strings_are_classified_by_shape(self, experiment: Any) -> None:
+    def test_strings_are_classified_by_shape(self, run: Any) -> None:
+        from molab.workspace.refs import ref_of
+
+        run_ref = str(ref_of(run))
         got = SourceRef.normalize(
-            ["DOI:10.1234/xyz", "10.4321/q", "dataset:ab12", "plugin:foo", "notes/raw.txt"],
-            default_host=experiment,
+            [
+                "DOI:10.1234/xyz",
+                "10.4321/q",
+                "https://example.org/paper",
+                run_ref,
+                "molab:asset/deadbeef",
+                "notes/raw.txt",
+            ],
+            default_host=run,
         )
 
         assert [(s.kind, s.ref) for s in got] == [
             ("reference", "https://doi.org/10.1234/xyz"),
             ("reference", "https://doi.org/10.4321/q"),
-            ("file", "dataset:ab12"),
-            ("file", "plugin:foo"),
+            ("reference", "https://example.org/paper"),
+            ("run", run_ref),
+            ("asset", "molab:asset/deadbeef"),
             ("file", "notes/raw.txt"),
         ]
 
-    def test_an_empty_request_defaults_to_the_host(self, experiment: Any, run: Any) -> None:
-        from molab.knowledge.write import normalize_sources
-
+    def test_an_empty_request_defaults_to_the_host(self, experiment: Any) -> None:
         assert SourceRef.normalize(None, default_host=experiment) == [SourceRef.of(experiment)]
-        assert normalize_sources([], default_host=run) == [SourceRef.of(run)]
 
     def test_a_literature_class_writes_through_the_same_path(self, experiment: Any) -> None:
-        lit = Literature.create(
+        lit = write_knowledge(
             experiment,
-            "Smith 2024",
+            name="Smith 2024",
+            of=Literature,
             sources=[SourceRef(kind="reference", ref="10.1/x")],
             created_by="tester",
             text="# Smith 2024\n",
@@ -253,8 +264,7 @@ class TestWriteKnowledgePath:
         page = write_knowledge(Knowledge(wiki), name="Tg", of=Note, created_by="t", text="# Tg\n")
         assert page.path == wiki / "tg.md"
 
-    def test_literature_needs_no_sources_and_keeps_a_record(self, lab: Any) -> None:
-        from molab.knowledge.reference_meta import ReferenceMeta
+    def test_literature_needs_no_sources_and_keeps_its_fields(self, lab: Any) -> None:
         from molab.knowledge.write import write_knowledge
 
         item = write_knowledge(
@@ -263,7 +273,7 @@ class TestWriteKnowledgePath:
             of=Literature,
             created_by="t",
             text="",
-            record=ReferenceMeta(title="T"),
+            fields={"title": "T"},
         )
         assert item.frontmatter()["title"] == "T"
 
@@ -271,7 +281,7 @@ class TestWriteKnowledgePath:
         from molab.knowledge.write import write_knowledge
 
         with pytest.raises(ValueError):
-            write_knowledge(experiment, name="f", of=Finding, created_by="t", text="# F\n")
+            write_knowledge(experiment, name="f", of=Observation, created_by="t", text="# F\n")
 
     def test_an_empty_rewrite_keeps_the_body(self, lab: Any) -> None:
         from molab.knowledge.write import write_knowledge
@@ -315,7 +325,10 @@ class TestWriteKnowledgePath:
     def test_replaces_deletes_the_old_document_and_relinks_its_readers(self, lab: Any) -> None:
         from molab.knowledge.write import write_knowledge
 
-        old = write_knowledge(lab, name="Fragments v3", of=Note, created_by="t", text="# v3\n")
+        # A numbered copy is written by hand: the write path refuses that name.
+        old = Path(str(lab.root)) / "knowledges" / "fragments-v3.md"
+        old.parent.mkdir(parents=True, exist_ok=True)
+        old.write_text("---\nclass: Note\nname: Fragments v3\n---\n# v3\n", encoding="utf-8")
         reader = write_knowledge(
             lab,
             name="Reader",
@@ -329,9 +342,9 @@ class TestWriteKnowledgePath:
             of=Note,
             created_by="t",
             text="# current\n",
-            replaces=[old.path],
+            replaces=[old],
         )
-        assert not Path(str(old.path)).exists()
+        assert not old.exists()
         assert Path(str(new.path)).exists()
         assert "(fragments.md)" in Path(str(reader.path)).read_text(encoding="utf-8")
 

@@ -26,7 +26,8 @@
     "lint": "npm run lint -w molab-web --",
     "lint:fix": "npm run lint:fix -w molab-web --",
     "format": "npm run format -w molab-web --",
-    "generate:api": "npm run generate:api -w molab-web --"
+    "generate:api": "npm run generate:api -w molab-web --",
+    "generate:sharing": "uv run python scripts/dump_sharing_openapi.py && npm run generate:sharing -w molab-web"
   },
   "devDependencies": {
     "@rsbuild/core": "^2.2.5"

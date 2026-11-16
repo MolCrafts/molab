@@ -53,17 +53,6 @@ class TestKnowledgeInit:
         assert after == before
 
 
-class TestKnowledgeSearch:
-    def test_search_uses_knowledge_handle(self) -> None:
-        from molab.cli import knowledge_cmd
-
-        search_src = inspect.getsource(knowledge_cmd.knowledge_search)
-        assert "Knowledge(ws_root).search" in search_src
-        assert "Bun" + "dle" not in inspect.getsource(knowledge_cmd)
-        assert "class name" in search_src
-        assert '"workspace.json"' not in inspect.getsource(knowledge_cmd)
-
-
 class TestKnowledgeRead:
     def test_read_uses_open(self) -> None:
         from molab.cli import knowledge_cmd
@@ -173,8 +162,8 @@ class TestKnowledgeWrite:
         assert "https://doi.org/10.1021/jp409664d" in text
         assert "class: Plan" in text
 
-    def test_write_roadmap_record_cites_the_plan(self, tmp_path: Path) -> None:
-        from molab.knowledge import Plan, campaign_of, check_campaign
+    def test_write_record_file_cites_the_plan(self, tmp_path: Path) -> None:
+        from molab.knowledge import Hypothesis
         from molab.workspace import Workspace
 
         ws = Workspace(tmp_path / "lab", name="lab")
@@ -198,34 +187,28 @@ class TestKnowledgeWrite:
         )
         assert plan.exit_code == 0, plan.output
         plan_path = Path(root) / "knowledges" / "pbix-plan.md"
-        record = tmp_path / "roadmap.json"
-        record.write_text(
-            '{"stages": [{"id": "monomers", "title": "Fragments", "experiment": "monomers"}]}',
-            encoding="utf-8",
-        )
-        roadmap = CliRunner().invoke(
+        record = tmp_path / "claim.json"
+        record.write_text('{"verdict": "supported"}', encoding="utf-8")
+        claim = CliRunner().invoke(
             knowledge_app,
             [
                 "write",
-                "PBIX roadmap",
-                "The order.",
+                "PBIX claim",
+                "Fragments pack.",
                 "--class",
-                "Roadmap",
+                "Hypothesis",
                 "--source",
                 str(plan_path),
-                "--record",
+                "--fields",
                 str(record),
                 "--path",
                 root,
             ],
         )
-        assert roadmap.exit_code == 0, roadmap.output
-        text = (Path(root) / "knowledges" / "pbix-roadmap.md").read_text(encoding="utf-8")
-        assert "class: Roadmap" in text
-        assert "monomers" in text
-        campaign = campaign_of(Plan(plan_path))
-        check_campaign(campaign)
-        assert campaign.roadmaps[0].stages()[0].id == "monomers"
+        assert claim.exit_code == 0, claim.output
+        doc = Hypothesis(Path(root) / "knowledges" / "pbix-claim.md")
+        assert doc.verdict() == "supported"
+        assert [Path(edge.target).resolve() for edge in doc.links()] == [plan_path.resolve()]
 
     def test_list_rename_and_delete(self, tmp_path: Path) -> None:
         from molab.workspace import Workspace
@@ -249,6 +232,41 @@ class TestKnowledgeWrite:
         assert deleted.exit_code == 0, deleted.output
         assert not (Path(root) / "knowledges" / "cooling.md").exists()
 
+    def test_rename_move_and_delete_are_history_commits(self, tmp_path: Path) -> None:
+        import subprocess
+
+        from molab.workspace import Workspace
+        from molab.workspace.history import GitHistory
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        project = ws.add_project("alpha")
+        root = str(ws.root)
+        assert GitHistory(root).init()
+        runner = CliRunner()
+        assert runner.invoke(knowledge_app, ["write", "idea", "x", "--path", root]).exit_code == 0
+        steps = [
+            ["rename", "knowledges/idea.md", "cooling"],
+            ["move", "knowledges/cooling.md", "--on", f"molab:project/{project.id}"],
+            ["delete", "projects/alpha/knowledges/cooling.md"],
+        ]
+        for step in steps:
+            result = runner.invoke(knowledge_app, [*step, "--path", root])
+            assert result.exit_code == 0, result.output
+
+        def committed(*args: str) -> str:
+            return subprocess.run(
+                ["git", "-C", root, *args], capture_output=True, text=True, check=True
+            ).stdout
+
+        assert committed("log", "--format=%s").splitlines()[:3] == [
+            "knowledge.deleted: delete cooling",
+            "knowledge.moved: move cooling",
+            "knowledge.moved: rename idea to cooling",
+        ]
+        assert committed("ls-files", "knowledges", "projects/alpha/knowledges") == ""
+        assert committed("status", "--porcelain", "--", "knowledges", "projects") == ""
+
     @pytest.mark.parametrize("level", ["project", "experiment"])
     @pytest.mark.parametrize("container", ["", "/knowledges", "/knowledges/"])
     def test_write_on_a_relative_host_directory(
@@ -265,26 +283,80 @@ class TestKnowledgeWrite:
         host_dir = Path(str(host.resolve()))
         rel = host_dir.relative_to(Path(str(ws.root))).as_posix()
         (host_dir / "knowledges").mkdir(exist_ok=True)
-        record = tmp_path / "record.json"
-        record.write_text('{"tags": ["membrane"]}', encoding="utf-8")
-        for name, extra in (("plain", []), ("recorded", ["--record", str(record)])):
-            result = CliRunner().invoke(
-                knowledge_app,
-                [
-                    "write", name, "Water uptake plateaus.",
-                    "--on", rel + container,
-                    "--class", "Observation",
-                    "--created-by", "tack",
-                    *extra,
-                    "--path", str(ws.root),
-                ],
-            )  # fmt: skip
-            assert result.exit_code == 0, result.output
-            landed = host_dir / "knowledges" / f"{name}.md"
-            assert landed.is_file()
-            assert str(ref_of(host)) in landed.read_text(encoding="utf-8")
+        result = CliRunner().invoke(
+            knowledge_app,
+            [
+                "write", "plain", "Water uptake plateaus.",
+                "--on", rel + container,
+                "--class", "Observation",
+                "--created-by", "tack",
+                "--path", str(ws.root),
+            ],
+        )  # fmt: skip
+        assert result.exit_code == 0, result.output
+        landed = host_dir / "knowledges" / "plain.md"
+        assert landed.is_file()
+        assert str(ref_of(host)) in landed.read_text(encoding="utf-8")
         assert not (host_dir / "knowledges" / "knowledges").exists()
-        assert "membrane" in (host_dir / "knowledges" / "recorded.md").read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize(
+        ("doc_class", "record", "field", "stored"),
+        [
+            ("Hypothesis", None, "verdict", "open"),
+            ("Hypothesis", '{"verdict": "supported"}', "verdict", "supported"),
+        ],
+    )
+    def test_write_a_hypothesis(
+        self, tmp_path: Path, doc_class: str, record: str | None, field: str, stored: str
+    ) -> None:
+        from molab.knowledge.concepts import _open_document
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        ws.add_project("membranes")
+        result = CliRunner().invoke(
+            knowledge_app,
+            [
+                "write", "claim", "Uptake plateaus.",
+                "--on", "projects/membranes",
+                "--class", doc_class,
+                *(["--fields", record] if record else []),
+                "--path", str(ws.root),
+            ],
+        )  # fmt: skip
+        assert result.exit_code == 0, result.output
+        doc = _open_document(
+            tmp_path / "lab" / "projects" / "membranes" / "knowledges" / "claim.md"
+        )
+        assert type(doc).__name__ == doc_class
+        assert getattr(doc, field)() == stored
+
+    @pytest.mark.parametrize(
+        ("doc_class", "record"),
+        [("Hypothesis", '{"verdict": "maybe"}')],
+    )
+    def test_write_refuses_an_unknown_verdict(
+        self, tmp_path: Path, doc_class: str, record: str
+    ) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        ws.add_project("membranes")
+        result = CliRunner().invoke(
+            knowledge_app,
+            [
+                "write", "claim", "Uptake plateaus.",
+                "--on", "projects/membranes",
+                "--class", doc_class,
+                "--fields", record,
+                "--path", str(ws.root),
+            ],
+        )  # fmt: skip
+        assert result.exit_code != 0
+        landed = tmp_path / "lab" / "projects" / "membranes" / "knowledges" / "claim.md"
+        assert not landed.exists()
 
     def test_write_on_a_non_host_directory_exits(self, tmp_path: Path) -> None:
         from molab.workspace import Workspace
@@ -318,11 +390,13 @@ class TestSourcesAdd:
         # Click wraps the note when the path is wider than the terminal.
         assert "holds no knowledge documents yet" in " ".join(result.stdout.split())
 
-    def test_a_markdown_file_is_a_document(self, tmp_path: Path, monkeypatch) -> None:
+    def test_a_markdown_file_naming_its_class_is_a_document(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         monkeypatch.setattr("molab.knowledge.sources.USER_DIR", tmp_path / "user")
         root = tmp_path / "wiki"
         root.mkdir()
-        (root / "a.md").write_text("# A\n", encoding="utf-8")
+        (root / "a.md").write_text("---\nclass: Note\n---\n# A\n", encoding="utf-8")
 
         result = CliRunner().invoke(knowledge_app, ["sources", "add", "lab-wiki", str(root)])
 

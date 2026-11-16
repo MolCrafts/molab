@@ -89,23 +89,13 @@ class RunMonitor:
     def _reconcile_one(r: Run) -> tuple[str | None, str] | None:
         """Reconcile *r*'s newest attempt if eligible; return the failure, if any."""
         from molab.plugins.submit_molq import submit as submit_molq
-        from molab.workspace.domain import ExecutionStatus
 
         execution_id: str | None = None
         try:
-            executions = r.executions
-            if not executions:
+            outcome = submit_molq.reconcile_latest(r)
+            if outcome is None or outcome.error is None:
                 return None
-            latest = executions[-1]
-            execution_id = latest.id
-            if (
-                latest.status is not ExecutionStatus.QUEUED
-                or latest.executor.get("backend") != "molq"
-            ):
-                return None
-            outcome = submit_molq.reconcile_submission(r, latest.id)
-            if outcome.error is None:
-                return None
+            execution_id = outcome.record.id
             return (execution_id, outcome.error)
         except Exception as exc:  # one run's failure must not stop the dashboard
             attempt = f" attempt {execution_id}" if execution_id else ""

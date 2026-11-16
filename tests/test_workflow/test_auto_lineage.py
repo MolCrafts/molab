@@ -27,7 +27,7 @@ def _produced(run, execution_id: str | None = None):
     execution_id = execution_id or run.executions[-1].id
     found = [
         asset
-        for asset in assets_produced_by(workspace, execution_id)
+        for asset in assets_produced_by(workspace, execution_id, run_id=run.id)
         if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
     ]
     assert found, f"no asset registered on {run.id}"
@@ -118,6 +118,6 @@ class TestRunInputLineage:
         assert lineage.ancestors(ws, leaf.id) == {upstream.id}
         assert [
             asset
-            for asset in assets_produced_by(ws, "e02")
+            for asset in assets_produced_by(ws, "e02", run_id=run.id)
             if isinstance(asset.origin, ExecutionOrigin) and asset.origin.run_id == run.id
         ] == []

@@ -1,4 +1,4 @@
-"""Class names map to the six document classes, beside those classes.
+"""Class names map to the seven document classes, beside those classes.
 
 The names are the vocabulary a config, a CLI flag or an agent-tool payload
 already spells. The mapping is not a method of the base class, and an unknown
@@ -16,6 +16,7 @@ from molab.knowledge import (
     Finding,
     Hypothesis,
     Literature,
+    Manuscript,
     Milestone,
     Note,
     Observation,
@@ -38,6 +39,7 @@ _EXPECTED: tuple[tuple[str, type], ...] = (
     ("Observation", Observation),
     ("Hypothesis", Hypothesis),
     ("Decision", Decision),
+    ("Manuscript", Manuscript),
 )
 
 
@@ -52,9 +54,7 @@ class TestParseKnowledgeClass:
 
         message = str(excinfo.value)
         assert "unknown knowledge class 'Chart'" in message
-        assert "Decision, Delegation, Finding" in message
-        assert "Finding, Hypothesis, Literature, Milestone, Note, Observation, Plan" in message
-        assert "Plan, Report, Roadmap, Todo" in message
+        assert ", ".join(sorted(name for name, _cls in _EXPECTED)) in message
 
 
 class TestSourcedKnowledgeSources:
@@ -133,21 +133,14 @@ class TestSourcedKnowledgeSources:
 
         assert opened.sources == [SourceRef(kind="run", ref="molab:experiment/E1/run/R1")]
 
-    def test_writing_tags_keeps_the_frontmatter_sources_value(self, tmp_path: Path) -> None:
-
+    def test_a_frontmatter_sources_value_is_not_read_as_sources(self, tmp_path: Path) -> None:
         path = tmp_path / "fa.md"
         path.write_text(
-            "---\nclass: Finding\nsources:\n- kind: file\n  ref: legacy.txt\n---\n\n# A\n",
+            "---\nclass: Observation\nsources:\n- kind: file\n  ref: legacy.txt\n---\n\n# A\n",
             encoding="utf-8",
         )
-        opened = Finding(path)
-        stored = opened.frontmatter()["sources"]
 
-        opened.write(tags=["t"])
-
-        assert opened.frontmatter()["sources"] == stored
-        assert opened.sources == []
-        assert opened.tags() == ["t"]
+        assert Observation(path).sources == []
 
 
 class TestHarvestTargets:
@@ -171,15 +164,15 @@ class TestNoteFrontmatterOnly:
         note.write("# N\n")
 
         assert note.tags() == []
-        assert note.status() == "active"
+        assert note.status() == "proposed"
 
     def test_tags_and_status_come_from_frontmatter(self, tmp_path: Path) -> None:
         path = tmp_path / "n.md"
         path.write_text(
-            "---\nclass: Note\ntags:\n- tg\nstatus: draft\n---\n\n# N\n",
+            "---\nclass: Note\ntags:\n- tg\nstatus: retired\n---\n\n# N\n",
             encoding="utf-8",
         )
         note = Note(path)
 
         assert note.tags() == ["tg"]
-        assert note.status() == "draft"
+        assert note.status() == "retired"

@@ -395,11 +395,24 @@ class TestScopedFind:
                     "/api/knowledge/doc",
                     json={
                         "name": f"From {kind}",
-                        "cls": "Report",
-                        "sources": [{"kind": kind, "ref": ref}],
+                        "cls": "Observation",
+                        "sources": [ref],
                     },
                 )
                 assert response.status_code == 201, response.text
+
+    @pytest.mark.parametrize("cls", ["Plan", "Observation", "Note"])
+    def test_an_omitted_host_is_the_served_node(self, client_at: tuple, cls: str) -> None:
+        _ws, alpha, _experiment, _run, _beta, open_at = client_at
+        with open_at(Path(str(alpha.resolve()))) as client:
+            omitted = client.post("/api/knowledge/doc", json={"name": "Omitted", "cls": cls})
+            dot = client.post(
+                "/api/knowledge/doc", json={"name": "Dot", "cls": cls, "hostPath": "."}
+            )
+        assert omitted.status_code == 201, omitted.text
+        assert dot.status_code == 201, dot.text
+        assert omitted.json()["hostPath"] == dot.json()["hostPath"]
+        assert omitted.json()["relPath"] == "knowledges/omitted.md"
 
     def test_refs_outside_the_served_node_are_not_found(self, client_at: tuple) -> None:
         from molab.server.deps.scope_root import ScopeRoot
@@ -439,8 +452,115 @@ class TestScopedKnowledgeListing:
         assert all(not row["relPath"].endswith("index.md") for row in response.json()["notes"])
 
 
+class TestWorkspaceNotesFromAScopedServe:
+    """A served node below a workspace reads the workspace's own Notes, and only reads them."""
+
+    @staticmethod
+    def _lesson(ws: Workspace) -> Path:
+        from molab.knowledge import Note
+
+        lesson = Note(ws, "lesson")
+        lesson.write("# Reviewed lesson\n", {"status": "active"}, tags=["md"])
+        Note(ws, "unreviewed").write("# u\n", tags=["md"])
+        plan = Path(str(lesson.path)).with_name("workspace-plan.md")
+        plan.write_text("---\nclass: Plan\nname: workspace plan\n---\n# not a note\n")
+        return Path(str(lesson.path))
+
+    def test_a_project_serve_lists_and_reads_workspace_notes(self, client_at: tuple) -> None:
+        import os
+
+        from molab.knowledge import Note
+
+        ws, alpha, _experiment, _run, beta, open_at = client_at
+        lesson = self._lesson(ws)
+        Note(beta, "other project").write("# b\n", {"status": "active"})
+        served = Path(str(alpha.resolve()))
+        expected = Path(os.path.relpath(lesson, served)).as_posix()
+        with open_at(served) as client:
+            active = client.get("/api/knowledge", params={"status": "active"}).json()["notes"]
+            tagged = client.get("/api/knowledge", params={"tag": "md"}).json()["notes"]
+            untagged = client.get("/api/knowledge", params={"tag": "nope"}).json()["notes"]
+            listed = client.get("/api/knowledge").json()["notes"]
+            note = client.get("/api/knowledge/note", params={"path": expected})
+        assert [row["relPath"] for row in active] == [expected]
+        assert expected.startswith("../")
+        assert active[0]["hostPath"] == Path(os.path.relpath(ws.root, served)).as_posix()
+        assert {row["name"] for row in tagged} == {"lesson", "unreviewed"}
+        assert untagged == []
+        assert not any("workspace-plan" in row["relPath"] for row in listed)
+        assert not any("other-project" in row["relPath"] for row in listed)
+        assert note.status_code == 200, note.text
+        assert "Reviewed lesson" in note.json()["body"]
+
+    def test_a_project_serve_cannot_write_a_workspace_note(self, client_at: tuple) -> None:
+        import os
+
+        ws, alpha, _experiment, _run, _beta, open_at = client_at
+        lesson = self._lesson(ws)
+        before = lesson.read_text()
+        served = Path(str(alpha.resolve()))
+        rel = Path(os.path.relpath(lesson, served)).as_posix()
+        with open_at(served) as client:
+            edit = client.put("/api/knowledge/doc", params={"path": rel}, json={"body": "x"})
+            fields = client.get("/api/knowledge/doc/fields", params={"path": rel}).json()
+            patch = client.patch(
+                "/api/knowledge/doc/fields",
+                params={"path": rel},
+                json={"fields": {"status": "retired"}, "ifMatch": fields["digest"]},
+            )
+            delete = client.delete("/api/knowledge/doc", params={"path": rel})
+        assert edit.status_code == 403, edit.text
+        assert patch.status_code == 403, patch.text
+        assert delete.status_code == 403, delete.text
+        assert lesson.read_text() == before
+
+    def test_the_workspace_serve_lists_its_notes_once(self, client_at: tuple) -> None:
+        ws, _alpha, _experiment, _run, _beta, open_at = client_at
+        self._lesson(ws)
+        with open_at(Path(str(ws.root))) as client:
+            active = client.get("/api/knowledge", params={"status": "active"}).json()["notes"]
+        assert [row["relPath"] for row in active] == ["knowledges/lesson.md"]
+
+
+class TestScopedKnowledgeGraph:
+    """A served node's graph holds the documents the listing holds, and no others."""
+
+    def test_project_root_graph_stays_inside_the_served_node(self, client_at: tuple) -> None:
+        import os
+
+        from molab.knowledge import Note
+
+        _ws, alpha, experiment, _run, beta, open_at = client_at
+        Note(alpha, "project note").write("# p\n")
+        other = Note(beta, "other project")
+        other.write("# b\n\n- [@cites p](nowhere.md)\n")
+        inner = Note(experiment, "experiment note")
+        here = Path(str(inner.path)).parent
+        up = Path(os.path.relpath(Path(str(alpha.resolve())) / "knowledges", here)).as_posix()
+        out = Path(os.path.relpath(Path(str(other.path)), here)).as_posix()
+        inner.write(f"# e\n\n- [@derived_from p]({up}/project-note.md)\n- [b]({out})\n")
+        with open_at(Path(str(alpha.resolve()))) as client:
+            listed = client.get("/api/knowledge")
+            graph = client.get("/api/knowledge/graph")
+        assert graph.status_code == 200, graph.text
+        body = graph.json()
+        assert body["nodes"] == listed.json()["notes"]
+        paths = {row["relPath"] for row in body["nodes"]}
+        assert "knowledges/project-note.md" in paths
+        assert not any("other-project" in path for path in paths)
+        source = next(path for path in paths if path.endswith("experiment-note.md"))
+        assert body["edges"] == [
+            {
+                "source": source,
+                "target": "knowledges/project-note.md",
+                "role": "derived_from",
+                "kind": "document",
+            }
+        ]
+
+
 class TestScopedRecordHistory:
-    def test_record_replacement_is_committed_at_the_workspace_root(self, client_at: tuple) -> None:
+    def test_fields_replacement_is_committed_at_the_workspace_root(self, client_at: tuple) -> None:
         import subprocess
 
         from molab.workspace.history import GitHistory
@@ -452,18 +572,21 @@ class TestScopedRecordHistory:
                 "/api/knowledge/doc",
                 json={
                     "name": "Study",
-                    "cls": "Delegation",
-                    "sources": [{"kind": "project", "ref": f"molab:project/{alpha.id}"}],
-                    "record": {"goal": "g", "scope": f"molab:project/{alpha.id}"},
+                    "cls": "Hypothesis",
+                    "sources": [f"molab:project/{alpha.id}"],
+                    "fields": {"verdict": "open"},
                 },
             )
             assert created.status_code == 201, created.text
             path = created.json()["relPath"]
-            got = client.get("/api/knowledge/doc/record", params={"path": path}).json()
+            got = client.get("/api/knowledge/doc/fields", params={"path": path}).json()
             replaced = client.patch(
-                "/api/knowledge/doc/record",
+                "/api/knowledge/doc/fields",
                 params={"path": path},
-                json={"record": {**got["record"], "state": "waiting"}, "ifMatch": got["digest"]},
+                json={
+                    "fields": {**got["fields"], "verdict": "supported"},
+                    "ifMatch": got["digest"],
+                },
             )
             assert replaced.status_code == 200, replaced.text
         log = subprocess.run(
@@ -472,7 +595,7 @@ class TestScopedRecordHistory:
             text=True,
             check=True,
         ).stdout
-        assert "knowledge.record_replaced" in log
+        assert "knowledge.fields_replaced" in log
 
 
 class TestServedValidation:
@@ -566,7 +689,7 @@ class TestKnowledgeEditHistory:
             )
             assert (
                 client.patch(
-                    "/api/knowledge/doc/meta", params={"path": path}, json={"status": "retracted"}
+                    "/api/knowledge/doc/meta", params={"path": path}, json={"tags": ["retracted"]}
                 ).status_code
                 == 200
             )

@@ -22,7 +22,8 @@ is recorded on the Execution (``selected_tasks``), exactly those tasks
 execute with the inputs their predecessor recorded, every other completed
 task is seeded from its record, and every task downstream of a selected one
 is journalled ``skipped``. A selected task whose upstream has no usable
-recorded output is refused (:class:`RunNotExecutableError` naming it).
+recorded output is refused (:class:`RunNotExecutableError` naming it) before
+any attempt is created (:func:`admit_attempt`, which every creator calls).
 ``fresh=True`` records ``bypass_cache`` and requires ``rerun=True``. An active
 latest attempt must be cancelled first.
 
@@ -68,6 +69,7 @@ from typing import TYPE_CHECKING
 from mollog import get_logger
 
 from molab.workspace.domain import Execution, ExecutionMode, ExecutionStatus
+from molab.workspace.execution_context import profile_config_hash
 
 from ._engine.executors import check_executor, check_max_workers
 from ._engine.persistence import AttemptSeeds, RecordedInputError, read_attempt_seeds
@@ -76,7 +78,7 @@ from .compiled import CompiledWorkflow
 from .compiler import Workflow
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from molab._typing import JSONValue
     from molab.profile import ProfileConfig
@@ -98,6 +100,7 @@ __all__ = [
     "TASK_MAX_WORKERS_KEY",
     "RunFailedError",
     "RunNotExecutableError",
+    "admit_attempt",
     "aexecute_run",
     "execute_run",
     "workspace_run_executor",
@@ -237,11 +240,72 @@ def _queued_record(run: Run, execution_id: str) -> Execution:
     return record
 
 
-def _config_hashes_disagree(record: Execution, prior: Execution) -> bool:
-    """True when the two records cannot be shown to share a ``config_hash``."""
-    if "config_hash" not in record.environment or "config_hash" not in prior.environment:
+def _config_hashes_disagree(environment: Mapping[str, JSONValue], prior: Execution) -> bool:
+    """True when *environment* and *prior* cannot be shown to share a ``config_hash``."""
+    if "config_hash" not in environment or "config_hash" not in prior.environment:
         return True
-    return record.environment["config_hash"] != prior.environment["config_hash"]
+    return environment["config_hash"] != prior.environment["config_hash"]
+
+
+def admit_attempt(
+    run: Run,
+    compiled: CompiledWorkflow,
+    *,
+    mode: ExecutionMode,
+    selected_tasks: Sequence[str] = (),
+    profile_config: ProfileConfig | None = None,
+    based_on: str | None = None,
+) -> None:
+    """Refuse, before its record exists, an attempt that could not start.
+
+    The one admission every creator applies (``molab run`` and the server's
+    ``POST .../executions``). The attempt a creator is about to record —
+    *mode* based on *based_on* (the run's latest attempt when ``None``),
+    *selected_tasks*, the ``config_hash`` of *profile_config*
+    (or of the predecessor it inherits when ``None``) — goes through the same
+    seed rules its start applies (:func:`_attempt_seeds`). Only a partial
+    rerun can be refused by them (a resume drops what it cannot seed and
+    recomputes it), so a partial rerun naming a task the workflow lacks, or
+    one whose upstream has no usable recorded output, is refused here and no
+    attempt is created: a refusal that is known now never leaves a failed
+    attempt behind. What cannot be known before the start (the records a
+    scheduler worker finds on its own filesystem) is still refused at the
+    start.
+
+    Args:
+        run: The run that would hold the attempt.
+        compiled: The workflow the attempt would run.
+        mode: The mode the attempt would be created with.
+        selected_tasks: The tasks a partial rerun would re-execute.
+        profile_config: The profile it would be created with; ``None``
+            inherits the predecessor's.
+        based_on: The predecessor it would be created on; ``None`` is the
+            latest attempt.
+
+    Raises:
+        KeyError: *based_on* names no attempt of *run*.
+        ValueError: The selection names a task the workflow does not have.
+        RunNotExecutableError: The predecessor's records cannot supply the
+            attempt (see :func:`_attempt_seeds`).
+    """
+    executions = run.executions
+    if mode is not ExecutionMode.RERUN or not selected_tasks or not executions:
+        return
+    prior = executions[-1] if based_on is None else run.execution(based_on)
+    environment = (
+        prior.environment
+        if profile_config is None
+        else {"config_hash": profile_config_hash(profile_config)}
+    )
+    _seeds(
+        run,
+        compiled,
+        attempt="the new attempt",
+        mode=mode,
+        based_on=prior.id,
+        selection=tuple(dict.fromkeys(selected_tasks)),
+        environment=environment,
+    )
 
 
 def _attempt_seeds(run: Run, record: Execution, compiled: CompiledWorkflow) -> AttemptSeeds | None:
@@ -265,20 +329,57 @@ def _attempt_seeds(run: Run, record: Execution, compiled: CompiledWorkflow) -> A
     Returns:
         The seeds, or ``None`` when there is nothing to take.
 
+    A predecessor that is not recorded here (a worker's staged copy never
+    received an attempt that failed before staging) gives a RESUME nothing to
+    seed and refuses a partial RERUN.
+
     Raises:
         ValueError: The selection names a task the workflow does not have.
         RunNotExecutableError: A partial rerun's config differs from its
-            predecessor's, or a selected task needs a recorded value the
-            predecessor cannot supply.
+            predecessor's, its predecessor is not recorded here, or a selected
+            task needs a recorded value the predecessor cannot supply.
     """
-    based_on = record.based_on_execution_id
-    selection = tuple(record.selected_tasks)
-    partial = record.mode is ExecutionMode.RERUN and bool(selection)
-    if not based_on or not (record.mode is ExecutionMode.RESUME or partial):
+    return _seeds(
+        run,
+        compiled,
+        attempt=record.id,
+        mode=record.mode,
+        based_on=record.based_on_execution_id,
+        selection=tuple(record.selected_tasks),
+        environment=record.environment,
+    )
+
+
+def _seeds(
+    run: Run,
+    compiled: CompiledWorkflow,
+    *,
+    attempt: str,
+    mode: ExecutionMode,
+    based_on: str | None,
+    selection: tuple[str, ...],
+    environment: Mapping[str, JSONValue],
+) -> AttemptSeeds | None:
+    """The seed rules of one attempt, recorded (:func:`_attempt_seeds`) or not yet
+    (:func:`admit_attempt`); *attempt* names it in a refusal."""
+    partial = mode is ExecutionMode.RERUN and bool(selection)
+    if not based_on or not (mode is ExecutionMode.RESUME or partial):
+        return None
+    if all(item.id != based_on for item in run.executions):
+        # A worker's staged copy holds no attempt that failed before it was staged.
+        if partial:
+            raise RunNotExecutableError(
+                f"partial rerun {attempt} of {list(selection)}: predecessor {based_on} "
+                "is not recorded here, so its outputs cannot be reused — rerun the whole workflow"
+            )
+        logger.warning(
+            f"RESUME Execution {attempt} has nothing to seed from: predecessor "
+            f"{based_on} is not recorded here; every node is recomputed (node cache as usual)"
+        )
         return None
     prior = run.execution(based_on)
-    if _config_hashes_disagree(record, prior):
-        ours = record.environment.get("config_hash", "<missing>")
+    if _config_hashes_disagree(environment, prior):
+        ours = environment.get("config_hash", "<missing>")
         theirs = prior.environment.get("config_hash", "<missing>")
         empty = _empty_partial_seeds(run, based_on, compiled, selection) if partial else None
         if empty is not None:
@@ -287,13 +388,13 @@ def _attempt_seeds(run: Run, record: Execution, compiled: CompiledWorkflow) -> A
             return empty
         if partial:
             raise RunNotExecutableError(
-                f"partial rerun {record.id} of {list(selection)}: config_hash {ours!r} "
+                f"partial rerun {attempt} of {list(selection)}: config_hash {ours!r} "
                 f"does not match predecessor {prior.id} config_hash {theirs!r}; its "
                 "recorded outputs were computed under another config — rerun with the "
                 "predecessor's profile, or rerun the whole workflow"
             )
         logger.warning(
-            f"RESUME Execution {record.id} drops every seed: config_hash {ours!r} "
+            f"RESUME Execution {attempt} drops every seed: config_hash {ours!r} "
             f"does not match predecessor {prior.id} config_hash {theirs!r}; "
             "不复用任何种子, 全部节点重新计算 (节点缓存照常)"
         )
@@ -478,18 +579,19 @@ async def aexecute_run(
     check_max_workers(max_workers)
     compiled = _ensure_compiled(workflow)
     created_here = execution_id is None
-    record = (
-        _create_record(
+    if created_here:
+        mode = _select_mode(run, resume=resume, rerun=rerun)
+        admit_attempt(run, compiled, mode=mode, selected_tasks=only, profile_config=profile_config)
+        record = _create_record(
             run,
-            _select_mode(run, resume=resume, rerun=rerun),
+            mode,
             fresh=fresh,
             profile_config=profile_config,
             only=only,
             executor=_executor_facts(executor, max_workers),
         )
-        if created_here
-        else _queued_record(run, execution_id)
-    )
+    else:
+        record = _queued_record(run, execution_id)
     executor, max_workers = _recorded_executor(record, executor, max_workers)
     entered = False
     try:

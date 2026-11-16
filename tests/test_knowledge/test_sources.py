@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from molab.knowledge import Note
+from molab.knowledge import Finding, Note
 from molab.knowledge.sources import (
     KnowledgeScope,
     KnowledgeSourceStore,
@@ -186,7 +186,7 @@ class TestAHitNeedNotOfferAFile:
 
         hit = SourcedHit(
             source="papers",
-            hit=SearchHit(entry=ConceptIndexEntry(path="A1B2C3D4", type="reference.reference")),
+            hit=SearchHit(entry=ConceptIndexEntry(path="A1B2C3D4", cls="Literature")),
             abs_path=None,
             rank=1,
         )
@@ -228,24 +228,17 @@ class TestSearchSources:
             "quench",
             sources=["wiki-a"],
             include_workspace=False,
-            concept_type="Note",
+            of=Note,
         )
         findings = store.search(
             "quench",
             sources=["wiki-a"],
             include_workspace=False,
-            concept_type="Finding",
+            of=Finding,
         )
 
         assert [hit.ref for hit in notes] == ["wiki-a:tg.md"]
         assert findings == []
-        with pytest.raises(ValueError, match="unknown knowledge class"):
-            store.search(
-                "quench",
-                sources=["wiki-a"],
-                include_workspace=False,
-                concept_type="Bogus",
-            )
 
     def test_an_unnamed_workspace_hit_is_the_document_path(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "lab", name="Lab")

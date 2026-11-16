@@ -11,7 +11,7 @@ Tests replace :func:`molq_session`.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Generator, Sequence
+from collections.abc import AsyncIterator, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -139,11 +139,21 @@ def molq_session(config_path: str | Path | None = None) -> Generator[_DashboardC
 
 
 def _queue_snapshots(
-    mq: _DashboardClient, name: str, *, states: Sequence[str] | None = None
+    mq: _DashboardClient, record: Mapping[str, Any], *, states: Sequence[str] | None = None
 ) -> list[dict[str, Any]]:
-    """Reject incomplete queue observations before deriving health or absence."""
+    """Reject incomplete queue observations before deriving health or absence.
+
+    A Shell destination has no account-wide queue: molq lists its jobs per
+    project root, and molab gives every attempt its own (the attempt's
+    ``jobs/``), so there is no queue to list and none is reported.
+    """
     from molq import MolqError
 
+    from .submit import SHELL_SCHEDULER
+
+    name = str(record.get("name") or "")
+    if record.get("scheduler") == SHELL_SCHEDULER:
+        return []
     page = mq.cluster(name).list(states=states)
     if (page.get("coverage") or {}).get("errors"):
         raise MolqError("QUERY_INCOMPLETE", f"Incomplete queue response from {name}")
@@ -164,7 +174,7 @@ def list_targets(config_path: str | Path | None = None) -> list[TargetSummary]:
             healthy = True
             reason: str | None = None
             try:
-                active = len(_queue_snapshots(mq, name, states=["queued", "running"]))
+                active = len(_queue_snapshots(mq, record, states=["queued", "running"]))
             except Exception as exc:
                 healthy = False
                 reason = f"{type(exc).__name__}: {exc}"
@@ -210,8 +220,8 @@ def list_jobs(
         states = None if include_terminal else ["queued", "running"]
         collected: list[JobSummary] = []
         for name in names:
-            snapshots = _queue_snapshots(mq, name, states=states)
             record = by_name[name]
+            snapshots = _queue_snapshots(mq, record, states=states)
             for snapshot in snapshots:
                 collected.append(_to_summary(name, record, snapshot))
 
@@ -239,11 +249,8 @@ def get_job(
     from molq import MolqError
 
     with molq_session(config_path) as mq:
-        records = list(mq.clusters.list() or [])
-        record = next((item for item in records if item.get("name") == target), None)
-        if record is None:
-            raise KeyError(f"Unknown molq cluster: {target!r}")
-        snapshot = _find_snapshot(mq, target, job_id)
+        record = _cluster_record(mq, target)
+        snapshot = _find_snapshot(mq, record, job_id)
         if snapshot is None:
             raise MolqError("JOB_NOT_FOUND", f"job {job_id} not found on {target}")
         summary = _to_summary(target, record, snapshot)
@@ -341,7 +348,7 @@ async def tail_log(
     session = molq_session(config_path)
     mq = session.__enter__()
     try:
-        snapshot = _find_snapshot(mq, target, job_id)
+        snapshot = _find_snapshot(mq, _cluster_record(mq, target), job_id)
         if snapshot is None:
             raise MolqError("JOB_NOT_FOUND", f"job {job_id} not found on {target}")
         ref = dict(snapshot["ref"])
@@ -377,8 +384,22 @@ def _read_log(
     return job.logs(stream=stream, offset=offset), job.status()
 
 
-def _find_snapshot(mq: _DashboardClient, target: str, job_id: str) -> dict[str, Any] | None:
-    snapshots = _queue_snapshots(mq, target)
+def _cluster_record(mq: _DashboardClient, target: str) -> dict[str, Any]:
+    """The registered cluster named *target*.
+
+    Raises:
+        KeyError: *target* is not a registered cluster.
+    """
+    record = next((item for item in mq.clusters.list() or [] if item.get("name") == target), None)
+    if record is None:
+        raise KeyError(f"Unknown molq cluster: {target!r}")
+    return record
+
+
+def _find_snapshot(
+    mq: _DashboardClient, record: Mapping[str, Any], job_id: str
+) -> dict[str, Any] | None:
+    snapshots = _queue_snapshots(mq, record)
     wanted_ref = _maybe_ref(job_id)
     for snapshot in snapshots:
         ref = snapshot.get("ref") or {}

@@ -30,7 +30,7 @@ jobs:
     permissions:
       contents: read
     name: lint
-    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@f5d3606fab87fc162271c94219dbdc5201dd1aab
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
 
   python:
     name: lint / python
@@ -39,10 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-python@f5d3606fab87fc162271c94219dbdc5201dd1aab
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@f5d3606fab87fc162271c94219dbdc5201dd1aab
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
       # molpy/rust-toolchain.toml pins the compiler that builds the molpy wheel.
-      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@f5d3606fab87fc162271c94219dbdc5201dd1aab
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           toolchain-dir: ../molpy
           cache: molpy
@@ -60,25 +60,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Check out molvis
-        uses: MolCrafts/molcrafts-ci/actions/setup-partners@f5d3606fab87fc162271c94219dbdc5201dd1aab
-        with:
-          repository: MolCrafts/molvis
-          ref: dev
-          path: ../molvis
+      # molvis and the molpy it builds molwasm from, at the commits
+      # .github/partners.env pins. apps/web needs no other sibling: molplot and
+      # the molcrafts-ui packages resolve from npm, ui-markdown and the file
+      # tree from src/vendor/.
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
       # setup-node hashes the lockfile with hashFiles, which cannot see a
       # sibling checkout. Node is installed here; npm install runs in the shell.
       - name: Set up Node
-        uses: MolCrafts/molcrafts-ci/actions/setup-node@f5d3606fab87fc162271c94219dbdc5201dd1aab
+        uses: MolCrafts/molcrafts-ci/actions/setup-node@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           install: "false"
-      - name: Install molvis
+      # molvis/core depends on file:../../molpy/molwasm/pkg. Build it the way
+      # molvis's own CI does at MOLVIS_REF (.github/actions/setup-source).
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
+        with:
+          toolchain-dir: ../molpy
+          cache: molwasm
+          workspaces: ../molpy/molwasm -> ../target
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39
+        with:
+          tool: wasm-pack@0.15.0
+      - name: Install Binaryen
+        run: |
+          set -euo pipefail
+          # The build-tool pin molvis's setup-source uses at MOLVIS_REF.
+          binaryen_version=version_133
+          curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/${binaryen_version}/binaryen-${binaryen_version}-x86_64-linux.tar.gz" \
+            | sudo tar -xz -C /usr/local --strip-components=1
+          wasm-opt --version
+      - name: Build molwasm, then install molvis
         working-directory: ../molvis
-        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+        run: |
+          npm run build:molwasm
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
       - name: Build the molvis stage the web typecheck imports
         working-directory: ../molvis
         run: npm run build:stage
-      - uses: MolCrafts/molcrafts-ci/actions/setup-node@f5d3606fab87fc162271c94219dbdc5201dd1aab
+      - uses: MolCrafts/molcrafts-ci/actions/setup-node@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
       - run: npm run lint
       - run: npm run typecheck
 
@@ -89,4 +108,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/check-workflows@f5d3606fab87fc162271c94219dbdc5201dd1aab
+      - uses: MolCrafts/molcrafts-ci/actions/check-workflows@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76

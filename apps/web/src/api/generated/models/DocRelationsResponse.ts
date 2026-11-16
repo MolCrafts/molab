@@ -8,3 +8,4 @@ export type DocRelationsResponse = {
     digest: string;
     relations: Array<DocRelation>;
 };
+

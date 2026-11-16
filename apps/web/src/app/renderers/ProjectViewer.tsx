@@ -1,7 +1,6 @@
 /**
- * The project page (Figma L02): views Overview · Experiments (n) · Assets (n)
- * · Plan (when the project hosts a roadmap). New experiment and ⋯ sit at the
- * right of the editor tab row. The Overview's counts open the workspace Runs
+ * The project page (Figma L02): views Overview · Experiments (n) · Assets (n).
+ * New experiment and ⋯ sit at the right of the editor tab row. The Overview's counts open the workspace Runs
  * filtered to this project; Attention, Timeline and Settings left the page.
  */
 
@@ -13,7 +12,6 @@ import {
   ExternalLink,
   FileText,
   FlaskConical,
-  ListChecks,
   Package,
 } from "lucide-react";
 import { type JSX, useCallback, useMemo, useState } from "react";
@@ -30,7 +28,6 @@ import {
   EMPTY_COPY,
   EmptyState,
   EntityPage,
-  OverviewCanvas,
   StatusIcon,
   ViewLabel,
 } from "@/app/components/entity";
@@ -62,13 +59,12 @@ import {
 } from "@/components/workbench";
 import { formatBytes } from "@/lib/format-bytes";
 import { formatRelative } from "@/lib/format-time";
-import { PlanProgress, usePlanCampaigns } from "@/plugins/knowledge/PlanProgress";
 
 type ProjectRendererProps = ScopedRendererProps<
   "projects" | "experiments" | "runs" | "workflows" | "assets" | "workspaces"
 >;
 
-const VIEWS: readonly ProjectView[] = ["overview", "experiments", "assets", "plan"];
+const VIEWS: readonly ProjectView[] = ["overview", "experiments", "assets"];
 
 const Muted = ({ children, mono }: { children: string; mono?: boolean }): JSX.Element => (
   <span
@@ -97,22 +93,15 @@ export const ProjectViewer = ({
 
   const projectId = selection.objectId;
   const project = snapshot.projects.find((p) => p.id === projectId);
-  const requested: ProjectView =
+  const activeTab: ProjectView =
     selection.objectType === "project" ? (selection.projectView ?? "overview") : "overview";
 
   const assetsQuery = useQuery({
     ...projectAssetsQueryOptions(projectId),
     enabled: Boolean(projectId),
   });
-  const { campaigns } = usePlanCampaigns(project?.path ?? projectId);
-  const activeTab: ProjectView =
-    requested === "plan" && campaigns.length === 0 ? "overview" : requested;
   // The run inventory, not the lazy snapshot: a project's runs load per experiment.
-  const {
-    query: inventory,
-    rows,
-    truncated,
-  } = useScopeRuns({ projectId }, Boolean(projectId) && activeTab !== "plan");
+  const { query: inventory, rows, truncated } = useScopeRuns({ projectId }, Boolean(projectId));
   const needsAuth = activeNeedsAuth(snapshot.workspaces);
 
   const setProjectTab = useCallback(
@@ -480,28 +469,6 @@ export const ProjectViewer = ({
       ),
       content: <div className="flex h-full min-h-0 flex-col bg-background">{assetsView}</div>,
     },
-    ...(campaigns.length > 0
-      ? [
-          {
-            value: "plan",
-            label: <ViewLabel icon={ListChecks}>Plan</ViewLabel>,
-            content: (
-              <OverviewCanvas>
-                <PlanProgress
-                  campaigns={campaigns}
-                  onOpenExperiment={(name) => {
-                    const match = experiments.find(
-                      (item) => item.name === name || item.path.endsWith(`/${name}`),
-                    );
-                    if (match) openExperiment(match.id);
-                  }}
-                  onOpenDoc={(path) => setSelection({ objectType: "knowledge", objectId: path })}
-                />
-              </OverviewCanvas>
-            ),
-          },
-        ]
-      : []),
   ];
 
   const createRunExperiment = createRunExperimentId

@@ -45,7 +45,7 @@ class TestProjectKnowledge:
         ws = _workspace(tmp_path)
         Note.mount(ws, "Idea", body="# Idea\n")
         assert project_knowledge(ws) == [
-            KnowledgeRef(path="knowledges/idea.md", type="Note", title="Idea", id="idea")
+            KnowledgeRef(path="knowledges/idea.md", cls="Note", title="Idea")
         ]
 
     def test_empty_workspace_projects_nothing(self, tmp_path: Path) -> None:
@@ -57,9 +57,8 @@ class TestProjectKnowledge:
         assert project_knowledge(ws) == [
             KnowledgeRef(
                 path="knowledges/no-heading.md",
-                type="Note",
-                title="no-heading",
-                id="no-heading",
+                cls="Note",
+                title="No Heading",
             )
         ]
 
@@ -70,8 +69,8 @@ class TestProjectKnowledge:
         project_knowledge(ws)
         assert _tree(ws) == before
 
-    def test_projects_a_roadmap_beside_its_plan(self, tmp_path: Path) -> None:
-        from molab.knowledge import Plan, Roadmap, SourceRef
+    def test_projects_a_hypothesis_beside_its_plan(self, tmp_path: Path) -> None:
+        from molab.knowledge import Hypothesis, Plan, SourceRef
         from molab.knowledge.write import write_knowledge
 
         ws = _workspace(tmp_path)
@@ -87,16 +86,16 @@ class TestProjectKnowledge:
         )
         write_knowledge(
             ws,
-            name="Stages",
-            of=Roadmap,
+            name="Claim",
+            of=Hypothesis,
             sources=[SourceRef.of(plan)],
             created_by="test",
-            text="Order of the work.\n",
-            record={"stages": [{"id": "monomers", "title": "Fragments"}]},
+            text="The fragments pack.\n",
+            fields={"verdict": "open"},
         )
-        rows = {row.type: row.path for row in project_knowledge(ws)}
+        rows = {row.cls: row.path for row in project_knowledge(ws)}
         assert rows["Plan"] == "knowledges/overview.md"
-        assert rows["Roadmap"] == "knowledges/stages.md"
+        assert rows["Hypothesis"] == "knowledges/claim.md"
 
     def test_bulk_trees_are_not_projected(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
@@ -119,9 +118,7 @@ class TestContextWithKnowledge:
 
         got = context_with_knowledge(ws, focus=focus)
         assert isinstance(got, KnowledgeContext)
-        assert got.knowledge == [
-            KnowledgeRef(path="knowledges/idea.md", type="Note", title="Idea", id="idea")
-        ]
+        assert got.knowledge == [KnowledgeRef(path="knowledges/idea.md", cls="Note", title="Idea")]
         assert "open_questions" not in KnowledgeContext.model_fields
         assert got.focus == focus
         plain = assemble_workspace_context(ws, focus=focus)
@@ -163,13 +160,12 @@ class TestKnowledgeRef:
     def test_shape_and_frozen(self) -> None:
         import pydantic
 
-        ref = KnowledgeRef(path="knowledges/idea.md", type="Note", title="Idea")
+        ref = KnowledgeRef(path="knowledges/idea.md", cls="Note", title="Idea")
 
         assert ref.model_dump() == {
             "path": "knowledges/idea.md",
-            "type": "Note",
+            "cls": "Note",
             "title": "Idea",
-            "id": None,
         }
         with pytest.raises(pydantic.ValidationError):
             ref.title = "other"  # type: ignore[misc]

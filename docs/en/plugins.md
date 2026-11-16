@@ -74,9 +74,8 @@ in the lower ``workspace`` layer that a higher module fills in, so
 ``workspace`` never has to import it), and a plain ``molab run``
 therefore produces its WAL on its own.
 
-``PluginRegistry`` is only the leftover optional-dependency cache (the
-GitHub client). The entry-point groups below are the third-party
-channels (CLI subcommands, server routes, UI bundles).
+The entry-point groups below are the third-party channels (CLI
+subcommands, server routes, UI bundles).
 
 molab ships **three completely independent** plugin channels so a
 downstream Python package can extend molab without forking it or

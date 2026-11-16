@@ -13,3 +13,4 @@ export type DocumentHistory = {
     body?: (string | null);
     diff?: (string | null);
 };
+

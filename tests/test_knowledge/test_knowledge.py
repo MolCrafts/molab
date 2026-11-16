@@ -11,7 +11,7 @@ from molab.knowledge import (
     KnowledgeNotFoundError,
     Literature,
     Note,
-    ReferenceMeta,
+    Observation,
     SourceRef,
 )
 from molab.workspace import Experiment, Workspace
@@ -45,10 +45,10 @@ class TestWrite:
 
     def test_literature_write_persists_bib_in_frontmatter(self, tmp_path: Path) -> None:
         lit = Literature(tmp_path / "lecun2015")
-        lit.write(ReferenceMeta(title="Deep Learning", year=2015))
+        lit.write(fields={"title": "Deep Learning", "year": 2015})
         assert "title: Deep Learning" in lit.path.read_text()
-        assert lit.record.title == "Deep Learning"
-        assert lit.record.year == 2015
+        assert lit.fields().title == "Deep Learning"
+        assert lit.fields().year == 2015
 
     def test_finding_write_persists_source_ref(self, tmp_path: Path) -> None:
         finding = Finding(
@@ -102,10 +102,10 @@ class TestCite:
         lit.write("FeNNol.\n")
         finding = Finding(
             tmp_path / "tf32",
-            sources=[SourceRef(kind="file", ref="paper/index.md")],
+            sources=[SourceRef(kind="run", ref="molab:experiment/e1/run/r1")],
         )
         finding.write("# TF32\n")
-        finding.cite(lit)
+        finding.ref(lit)
         assert any(Path(edge.target) == lit.path for edge in finding.links())
 
 
@@ -123,7 +123,7 @@ class TestSourcedHostConstruction:
 
     def test_the_narrative_write_lands_at_the_host_path(self, experiment: Experiment) -> None:
         source = SourceRef.of(experiment)
-        finding = Finding(experiment, "tg-rise", sources=[source])
+        finding = Observation(experiment, "tg-rise", sources=[source])
 
         finding.write("# Tg rises with the cooling rate\n")
 
@@ -132,3 +132,46 @@ class TestSourcedHostConstruction:
         assert "# Tg rises with the cooling rate\n" in text
         assert "sources:" not in text
         assert finding.sources == [source]
+
+
+class TestTitle:
+    """One title rule: frontmatter ``title``, else the first H1, else ``name``, else the stem."""
+
+    @pytest.mark.parametrize(
+        ("text", "title"),
+        [
+            ("---\nclass: Note\nname: Glass Notes\n---\nplain prose, glass\n", "Glass Notes"),
+            ("---\nclass: Note\ntitle: Tg study\n---\n# Heading\n\nglass\n", "Tg study"),
+            ("---\nclass: Note\nname: Glass Notes\n---\n# Heading\n\nglass\n", "Heading"),
+        ],
+    )
+    def test_every_reader_agrees(self, tmp_path: Path, text: str, title: str) -> None:
+        from molab.fs import LocalFS
+        from molab.knowledge import Knowledge
+        from molab.knowledge.embed import summarize_entity
+        from molab.knowledge.index_section import section_rows
+
+        container = tmp_path / "knowledges"
+        container.mkdir()
+        (container / "glass.md").write_text(text, encoding="utf-8")
+        note = Note(container / "glass.md")
+
+        assert note.title() == title
+        assert Knowledge(container).search("glass").hits[0].entry.title == title
+        assert section_rows(str(tmp_path), fs=LocalFS())[0]["title"] == title
+        assert summarize_entity(note).title == title
+
+    def test_an_html_page_title_follows_the_same_rule(self, tmp_path: Path) -> None:
+        from molab.knowledge.write import write_knowledge
+
+        page = write_knowledge(
+            tmp_path,
+            name="Glass",
+            of=Note,
+            created_by="t",
+            text="<molab-markdown>\n# Cooling\n</molab-markdown>\n",
+            format="html",
+        )
+
+        assert page.title() == "Cooling"
+        assert "<title>Cooling</title>" in Path(page.path).read_text(encoding="utf-8")

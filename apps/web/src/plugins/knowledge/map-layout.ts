@@ -1,13 +1,12 @@
 /**
  * Deterministic placement of a research map. A document sits one column right
- * of the deepest document it rests on (`derived_from`, `supersedes`), so those
+ * of the deepest document it rests on (`derived_from`), so those
  * arrows point left, back to their footing; rows in a column follow where
- * their references sit. A mention (`cites`, `records`, `references`) is drawn
+ * their references sit. A mention (`cites`, `references`) is drawn
  * wherever its two documents already are. The Knowledge relations view
  * hands these positions to its graph canvas.
  */
-/** Ported from Tack's research map; knowledge owns the relation preview here.
- * Layout needs only identity, class and links, never Tack campaign state. */
+/** Layout needs only identity, class and links. */
 export interface MapNode {
   id: string;
   cls: string;
@@ -33,14 +32,7 @@ export const MAP_SHAPE_SIZE: Record<MapShape, { width: number; height: number }>
   card: { width: 224, height: 104 },
   pill: { width: 264, height: 46 },
 };
-const CARDS: ReadonlySet<string> = new Set([
-  "Hypothesis",
-  "Decision",
-  "Roadmap",
-  "Todo",
-  "Milestone",
-  "Report",
-]);
+const CARDS: ReadonlySet<string> = new Set(["Hypothesis", "Report"]);
 const COLUMN_GAP = 84;
 const ROW_GAP = 22;
 
@@ -50,13 +42,8 @@ export function shapeOf(node: MapNode): MapShape {
   return CARDS.has(node.cls) ? "card" : "pill";
 }
 
-/** The roles that say one document rests on, revises or judges another. The others (`cites`, `records`, `references`) are mentions. */
-const STRUCTURAL: ReadonlySet<string> = new Set([
-  "derived_from",
-  "supersedes",
-  "supports",
-  "contradicts",
-]);
+/** The roles that say one document rests on or judges another. The others (`cites`, `references`) are mentions. */
+const STRUCTURAL: ReadonlySet<string> = new Set(["derived_from", "supports", "contradicts"]);
 
 /** Longest chain of structural references leaving each node; a circle is cut where it closes. A mention moves nothing. */
 function depths(map: KnowledgeMap): Map<string, number> {
@@ -84,19 +71,8 @@ function depths(map: KnowledgeMap): Map<string, number> {
 
 const centre = (node: PlacedNode): number => node.y + node.height / 2;
 
-/** The order classes take inside one depth: the reasoning first, then the organisation of the work, then what is told. */
-const CLASS_ORDER = [
-  "Plan",
-  "Hypothesis",
-  "Observation",
-  "Decision",
-  "Finding",
-  "Roadmap",
-  "Todo",
-  "Milestone",
-  "Report",
-  "Literature",
-];
+/** The order classes take inside one depth: the reasoning first, then what is told. */
+const CLASS_ORDER = ["Plan", "Hypothesis", "Observation", "Finding", "Report", "Literature"];
 const MAX_ROWS = 6;
 const rank = (node: MapNode): number => {
   const at = CLASS_ORDER.indexOf(node.cls);

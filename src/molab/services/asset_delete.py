@@ -2,7 +2,7 @@
 
 An asset is named by its id, its ``molab:asset/<id>`` ref, or its slot
 directory (workspace-relative, e.g. ``projects/P/experiments/E/assets/<run>--<title>``).
-A cited asset is refused: a knowledge document (or TeX manuscript) whose text
+A cited asset is refused: a knowledge document whose text
 names the id, or a run that declares it as an input — which is also what makes
 an asset an ancestor in :mod:`molab.workspace.assets.lineage`. An attempt's own
 journal is evidence, not a citation, so it does not block the delete.
@@ -100,10 +100,8 @@ def resolve_asset(ws: Workspace, spec: str) -> tuple[Asset, AssetRepository]:
 def asset_citations(ws: Workspace, asset_id: str) -> tuple[str, ...]:
     """Every place in *ws* that cites *asset_id*, as workspace-relative labels."""
     from molab.knowledge import Knowledge
-    from molab.knowledge.tex_docs import iter_tex_documents
 
     documents = [str(item.path) for item in Knowledge(ws.root, fs=ws.fs).walk()]
-    documents.extend(iter_tex_documents(ws.root, ws.fs))
     found = [
         f"document {_relative(ws, path)}" for path in documents if asset_id in ws.fs.read_text(path)
     ]

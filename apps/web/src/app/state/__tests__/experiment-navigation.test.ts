@@ -70,6 +70,16 @@ describe("experiment navigation", () => {
     ).toEqual({ objectType: "knowledge", objectId: "" });
   });
 
+  it("round-trips a workspace-level document a project serve lists above itself", () => {
+    // The server marks a document above the served node by a climbing path; the
+    // browser must not resolve its `..` segments away.
+    for (const objectId of ["../../knowledges/lesson.md", "knowledges/a b.md"]) {
+      const selection = { objectType: "knowledge" as const, objectId };
+      const url = new URL(getSelectionPath(selection, snapshot), "http://localhost");
+      expect(buildSelectionFromLocation(url.pathname, url.searchParams)).toEqual(selection);
+    }
+  });
+
   it("builds canonical nested experiment view URLs", () => {
     expect(experimentPath("p 1", "e/1")).toBe("/projects/p%201/experiments/e%2F1");
     expect(experimentPath("p 1", "e/1", "workflow")).toBe(
@@ -164,10 +174,10 @@ describe("experiment navigation", () => {
 describe("project navigation", () => {
   it("builds and parses route-backed project tabs", () => {
     expect(projectPath("p 1", "assets")).toBe("/projects/p%201/assets");
-    expect(buildSelectionFromLocation("/projects/p%201/plan", new URLSearchParams())).toEqual({
+    expect(buildSelectionFromLocation("/projects/p%201/assets", new URLSearchParams())).toEqual({
       objectType: "project",
       objectId: "p 1",
-      projectView: "plan",
+      projectView: "assets",
     });
   });
 

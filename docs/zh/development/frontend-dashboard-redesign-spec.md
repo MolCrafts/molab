@@ -43,7 +43,7 @@ Molab 的 Web UI 应当是计算科学家和研究工程师的实验操作台，
 - Experiment 的 Overview、Workflow、Runs、Compare 已成为 route-backed tabs；Workflow 的规范路径为
   `/projects/:projectId/experiments/:experimentId/workflow`。
 - Experiment Overview 只保留 Workflow 摘要与入口；完整 graph 和 expand modal 已删除，Workflow tab 是唯一主要 graph surface。
-- 内部 Workflow selection 与旧 `/workflows/:id` 链接会归并到所属 Experiment Workflow tab。
+- Workflow 只在所属 Experiment 的 Workflow tab 中打开；旧的 `/workflows` 与 `/activity` 页面已删除，不保留兼容链接（L16）。
 - Project Overview 已区分 server-reported total 与 lazy client snapshot；只有 runs 完整加载时才显示状态分布和成功率。
 - Project Experiment 列表不再把未加载的 runs 显示成 `No runs`。
 - Project 的 Overview、Experiments、Assets、Settings 已成为 route-backed tabs；Runs 的 List/Timeline 继续使用既有 URL query state。

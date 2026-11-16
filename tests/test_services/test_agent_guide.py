@@ -103,6 +103,8 @@ class TestRender:
             assert name in block
         for klass in ("Note", "Literature", "Report", "Finding", "Plan", "Observation"):
             assert f"`{klass}`" in block
+        assert "| `Hypothesis` | What do we claim will turn out to be true? |" in block
+        assert "standing choice" not in block
         from molab.workspace.execution_dirs import list_execution_dirs
 
         for directory in list_execution_dirs():
@@ -112,23 +114,6 @@ class TestRender:
         assert "### Tools" in block
         assert "molplot for figures" in block
         assert "report that gap and continue" in block
-
-    def test_the_worker_records_are_listed_from_their_models(self, ws: Workspace) -> None:
-        from molab.knowledge.worker_report import BriefRecord, WorkerReportRecord
-
-        block = render_agent_guide(ws)
-        assert "#### Worker records" in block
-        for owner, kind, model in (
-            ("Report", "worker_report", WorkerReportRecord),
-            ("Note", "brief", BriefRecord),
-        ):
-            row = next(
-                line for line in block.splitlines() if line.startswith(f"| `{owner}` | `{kind}`")
-            )
-            for field in model.model_fields:
-                if field != "kind":
-                    assert f"`{field}`" in row, (kind, field)
-        assert '--class Report --source SOURCE --record \'{"kind": "worker_report", ...}\'' in block
 
 
 class TestSplice:

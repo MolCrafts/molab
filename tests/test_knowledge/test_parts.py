@@ -45,3 +45,26 @@ def test_lists_images_and_tagged_parts_and_skips_the_rest(run: Any) -> None:
     assert Path(hair.path).is_file()
     assert hair.media_type == "image/png"
     assert not hasattr(GeneratedParts, "view")
+
+
+def test_a_run_with_no_attempt_has_no_parts(run: Any) -> None:
+    assert GeneratedParts(run).list() == []
+
+
+def test_parts_and_harvest_read_the_latest_attempt(run: Any) -> None:
+    from molab.knowledge import Finding
+    from molab.workspace.domain import ExecutionMode
+
+    _succeed_with_parts(run)
+    with run.start(mode=ExecutionMode.RERUN) as ctx:
+        work = ctx.get_dir("work")
+        nose = work / "nose.png"
+        nose.write_bytes(_PNG[:-1] + bytes([_PNG[-1] ^ 0x02]))
+        ctx.register(nose, title="nose.png", media_type="image/png")
+
+    parts = GeneratedParts(run).list()
+    finding = Finding.harvest(run, narrative="Only the nose.", created_by="t")
+
+    assert [part.name for part in parts] == ["nose.png"]
+    cited = {source.ref for source in finding.sources if source.kind == "asset"}
+    assert cited == {part.ref for part in parts}

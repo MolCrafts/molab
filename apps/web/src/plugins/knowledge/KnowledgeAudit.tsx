@@ -100,7 +100,7 @@ export function KnowledgeAudit({
             Verdicts not yet checked · {result.uncheckedHypotheses.length}
           </h3>
           <p className="tw-muted">
-            Load the hypothesis records to compare their recorded verdicts with evidence.
+            Load the hypotheses to compare their recorded verdicts with evidence.
           </p>
           {result.uncheckedHypotheses.map((path) => (
             <div className="tw-kv" key={path}>

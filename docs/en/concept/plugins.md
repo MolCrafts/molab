@@ -8,9 +8,9 @@ This boundary protects the core workflow and workspace model. Local authoring, l
 
 ## The Plugins in This Repository
 
-A small registry of optional capabilities ships today. `submit_molq` is the scheduler bridge used when `molab run` needs to submit work to Slurm, PBS, LSF, or another `molq`-backed scheduler. `gh` is a lazy GitHub client (installed via `molab[gh]`). In every case the core package stays unaware of those dependencies until the user reaches for the capability.
+A few in-tree adapters ship today. `submit_molq` is the scheduler bridge used when `molab run` needs to submit work to Slurm, PBS, LSF, or another `molq`-backed scheduler; `molpy` and `molvis` back the dataset preview. Each is imported only when the user reaches for it.
 
-Beyond this registry, molab also exposes three **third-party** extension channels, each an [entry point](https://packaging.python.org/en/latest/specifications/entry-points/) group (a named slot in a package's metadata that another package can discover at runtime without importing it by name): CLI subcommands (`molab.cli_plugins`), server routes (`molab.server_plugins`), and dynamically-imported UI bundles (`molab.ui_plugins`). A downstream package can extend molab through them without forking it; molab itself registers nothing in these groups. See [Writing a Plugin](../plugins.md) for those channels.
+Beyond these adapters, molab also exposes three **third-party** extension channels, each an [entry point](https://packaging.python.org/en/latest/specifications/entry-points/) group (a named slot in a package's metadata that another package can discover at runtime without importing it by name): CLI subcommands (`molab.cli_plugins`), server routes (`molab.server_plugins`), and dynamically-imported UI bundles (`molab.ui_plugins`). A downstream package can extend molab through them without forking it; molab itself registers nothing in these groups. See [Writing a Plugin](../plugins.md) for those channels.
 
 ## Scheduler Transport Is Not a Second Runtime
 

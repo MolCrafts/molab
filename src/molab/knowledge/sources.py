@@ -34,12 +34,9 @@ from molab._typing import JSONValue
 from .search import SearchHit
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from molab.fs import PathArg
+    from molab.fs import FileSystem, PathArg
 
     from .concept import Knowledge
-    from .search import SearchResult
 
 __all__ = [
     "KIND_PATTERN",
@@ -113,10 +110,9 @@ class WikiSource(BaseModel, frozen=True):
     @field_validator("kind")
     @classmethod
     def _validate_kind(cls, value: str) -> str:
-        # Shape only. Whether a *registered* backend answers to this name is
-        # ``open_store``'s question, and it must raise there rather than here —
-        # listing sources has to keep working on a machine that lacks the
-        # optional dependency one of them needs.
+        # Shape only. Whether a backend answers to this name is asked when the
+        # source is opened, not here: listing sources has to keep working on a
+        # machine that lacks the optional dependency one of them needs.
         if not KIND_PATTERN.match(value):
             raise ValueError(
                 f"invalid knowledge source kind {value!r}: expected lowercase "
@@ -286,9 +282,9 @@ class KnowledgeSourceStore:
         workspace_root: PathArg | None = None,
         include_workspace: bool = True,
         limit: int = 10,
-        concept_type: str | None = None,
+        of: type[Knowledge] | None = None,
         tag: str | None = None,
-        workspace_searcher: Callable[[], SearchResult] | None = None,
+        fs: FileSystem | None = None,
     ) -> builtins.list[SourcedHit]:
         """Search the registered sources and, optionally, the bound workspace.
 
@@ -307,26 +303,21 @@ class KnowledgeSourceStore:
                 ``None`` skips that source even when *include_workspace* is set.
             include_workspace: Also search *workspace_root* as an unnamed source.
             limit: Maximum fused hits to return.
-            concept_type: Exact Knowledge class name, applied per source. An
-                unknown name raises ``ValueError``.
+            of: A Knowledge class to keep (and its subclasses), applied per
+                source; ``None`` keeps every class.
             tag: Tag filter, applied per source.
-            workspace_searcher: How to search the workspace itself, when given —
-                a host that already holds a scanned index passes a closure over
-                the same *query* / filters / *limit*. ``None`` searches
-                *workspace_root* through :class:`~molab.knowledge.concept.Knowledge`.
-                Registered sources are always searched per query.
+            fs: The disk *workspace_root* lives on; ``None`` is the local disk.
+                Registered sources are local directories.
 
         Returns:
             The fused hits, best first, each tagged with its source and the
             absolute path of its markdown file.
-
-        Raises:
-            ValueError: If *concept_type* is not a known Knowledge class name.
         """
-        from .concept import Knowledge
-        from .concepts import _product
+        from molab.fs import LocalFS
 
-        cls = _product(concept_type) if concept_type else None
+        from .concept import Knowledge
+
+        local = LocalFS()
         targets: list[tuple[str, Path]] = []
         if include_workspace and workspace_root is not None:
             targets.append(("", Path(os.fspath(workspace_root))))
@@ -338,12 +329,10 @@ class KnowledgeSourceStore:
 
         fused: dict[tuple[str, str], tuple[float, str, SearchHit, Path]] = {}
         for name, root in targets:
-            if not root.is_dir():
+            disk = fs if name == "" and fs is not None else local
+            if not disk.is_dir(str(root)):
                 continue  # a registered wiki that is not mounted today is not an error
-            if name == "" and workspace_searcher is not None:
-                result = workspace_searcher()
-            else:
-                result = Knowledge(root).search(query, of=cls, tag=tag, limit=limit)
+            result = Knowledge(str(root), fs=disk).search(query, of=of, tag=tag, limit=limit)
             for rank, hit in enumerate(result.hits, start=1):
                 key = (name, hit.entry.path)
                 fused[key] = (1.0 / (RRF_K + rank), name, hit, root)

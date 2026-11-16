@@ -18,10 +18,8 @@ from molab.knowledge.edges import (
 ROLES = (
     "derived_from",
     "cites",
-    "supersedes",
     "supports",
     "contradicts",
-    "records",
     "references",
 )
 
@@ -56,7 +54,7 @@ class TestEdge:
     def test_a_ref_target_is_a_ref_and_a_path_is_not(self) -> None:
         from molab.knowledge.edges import Edge
 
-        assert Edge("molab:experiment/E1", "records").is_ref is True
+        assert Edge("molab:experiment/E1", "derived_from").is_ref is True
         assert Edge("/w/x", "references").is_ref is False
         assert Edge("/w/x", "references") == ("/w/x", "references")
 
@@ -69,27 +67,6 @@ class TestLinkLine:
             link_line("@derived_from R1", "molab:experiment/E1/run/R1")
             == "- [@derived_from R1](molab:experiment/E1/run/R1)"
         )
-
-    def test_only_link_line_builds_the_markdown_line(self) -> None:
-        import ast
-        from pathlib import Path
-
-        root = Path("src/molab/knowledge")
-        offenders: list[str] = []
-        for path in root.rglob("*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.JoinedStr):
-                    continue
-                literal = "".join(
-                    part.value
-                    if isinstance(part, ast.Constant) and isinstance(part.value, str)
-                    else ""
-                    for part in node.values
-                )
-                if "- [" in literal and "](" in literal:
-                    offenders.append(f"{path}:{node.lineno}")
-        assert offenders == ["src/molab/knowledge/edges.py:99"]
 
 
 class TestBacklink:

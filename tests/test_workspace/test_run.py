@@ -204,12 +204,13 @@ class TestRunCreateExecution:
 
     # --- arch-own-02b §3: source capture per execution ----------------------
 
-    def test_source_entrypoint_records_manifest_and_copies_per_execution(
+    def test_bound_entrypoint_records_manifest_and_copies_per_execution(
         self, run: Run, tmp_path_factory: pytest.TempPathFactory
     ) -> None:
         entry = _source_tree(tmp_path_factory)
+        run.experiment.bind_workflow("code", entrypoint=f"{entry}:wf")
 
-        rec = run._create_execution(source_entrypoint=entry)
+        rec = run._create_execution()
 
         assert rec.id == "e01"
         assert rec.status is ExecutionStatus.QUEUED
@@ -220,7 +221,24 @@ class TestRunCreateExecution:
         assert rec.source.files[0].sha256 == compute_content_hash(copied)
         assert not (run.run_dir / "source").exists()
 
-    def test_without_source_entrypoint_nothing_is_captured(self, run: Run) -> None:
+    @pytest.mark.parametrize("mode", [ExecutionMode.RERUN, ExecutionMode.RESUME])
+    def test_every_later_attempt_captures_the_bound_entrypoint(
+        self, run: Run, tmp_path_factory: pytest.TempPathFactory, mode: ExecutionMode
+    ) -> None:
+        """``molab runs rerun --fresh`` recorded ``source: null``; ``molab run`` did not."""
+        entry = _source_tree(tmp_path_factory)
+        run.experiment.bind_workflow("code", entrypoint=f"{entry}:wf")
+        first = run._create_execution()
+        run.cancel(first.id)
+
+        rec = run.create_execution(mode=mode, bypass_cache=True)
+
+        assert rec.source is not None
+        assert [item.name for item in rec.source.files] == ["entry.py", "helper.py"]
+        assert rec.source.files == first.source.files
+        assert (run.execution_dir(rec.id) / "source" / "helper.py").is_file()
+
+    def test_without_a_bound_entrypoint_nothing_is_captured(self, run: Run) -> None:
         rec = run._create_execution()
 
         assert rec.source is None
@@ -250,8 +268,9 @@ class TestRunCreateExecution:
 
         monkeypatch.setattr("molab.workspace.run.source_manifest", forged_manifest)
 
+        run.experiment.bind_workflow("code", entrypoint=f"{entry}:wf")
         with pytest.raises(SourceCaptureError):
-            run._create_execution(source_entrypoint=entry)
+            run._create_execution()
 
         last = run.executions[-1]
         assert last.status is ExecutionStatus.FAILED
@@ -263,9 +282,10 @@ class TestRunCreateExecution:
         self, run: Run, tmp_path_factory: pytest.TempPathFactory
     ) -> None:
         missing = tmp_path_factory.mktemp("nosrc") / "entry.py"
+        run.experiment.bind_workflow("code", entrypoint=f"{missing}:wf")
 
         with pytest.raises(FileNotFoundError):
-            run._create_execution(source_entrypoint=missing)
+            run._create_execution()
 
         assert run.executions == []
 
@@ -281,9 +301,10 @@ class TestRunCreateExecution:
             raise KeyboardInterrupt
 
         monkeypatch.setattr("molab.workspace.run.copy_sources", interrupted)
+        run.experiment.bind_workflow("code", entrypoint=f"{entry}:wf")
 
         with pytest.raises(KeyboardInterrupt):
-            run._create_execution(source_entrypoint=entry)
+            run._create_execution()
 
         last = run.executions[-1]
         assert last.status is ExecutionStatus.FAILED
@@ -445,7 +466,9 @@ class TestRunFinishedAt:
 def _results_asset(run: Run, execution_id: str):
     found = [
         asset
-        for asset in assets_produced_by(run.experiment.project.workspace, execution_id)
+        for asset in assets_produced_by(
+            run.experiment.project.workspace, execution_id, run_id=run.id
+        )
         if asset.title == "results"
     ]
     assert len(found) == 1
@@ -520,7 +543,7 @@ class TestRunResults:
             eid = ctx.id
         produced = [
             asset
-            for asset in assets_produced_by(run.experiment.project.workspace, eid)
+            for asset in assets_produced_by(run.experiment.project.workspace, eid, run_id=run.id)
             if asset.title == "results"
         ]
         assert len(produced) == 1

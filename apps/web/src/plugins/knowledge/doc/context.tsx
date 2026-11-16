@@ -16,14 +16,10 @@ export interface DocContextValue {
   cls: KnowledgeClass;
   /** Workspace-relative host directory ("" = workspace root). */
   hostPath: string;
-  /** The class record (Todo items, Roadmap stages, Milestone, Delegation …); `{}` when none. */
-  record: Record<string, unknown>;
   /** Entities the document links to, resolved by the server. */
   cards: readonly EntityCard[];
   snapshot: RendererSnapshot;
   refIndex: ReadonlyMap<string, MolabRefTarget>;
-  /** Replace the class record (PATCH). Rejects with a readable message. */
-  saveRecord: (record: Record<string, unknown>) => Promise<void>;
   /**
    * Change the body. `save: true` writes at once (a checkbox click);
    * otherwise the edit joins the unsaved draft (● and ⌘S).

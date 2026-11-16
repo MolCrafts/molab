@@ -184,7 +184,7 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
   );
 };
 
-const App = (): JSX.Element => {
+const WorkspaceRoot = (): JSX.Element => {
   const location = useLocation();
   const workspaceScope = useSyncExternalStore(
     onWorkspaceSwitching,
@@ -204,5 +204,7 @@ const App = (): JSX.Element => {
   );
   return <RouteProfiler id={location.pathname}>{content}</RouteProfiler>;
 };
+
+const App = (): JSX.Element => <WorkspaceRoot />;
 
 export default App;

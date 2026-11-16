@@ -3,8 +3,7 @@
 The Open Knowledge Format graph lives as markdown links in each Concept's
 ``index.md`` (see :mod:`molab.knowledge.concept`). This module gives every edge
 a typed *role* — a declared relation (``derived_from`` / ``cites`` /
-``supersedes`` / ``supports`` / ``contradicts`` / ``records`` /
-``references``) — encoded in the link's
+``supports`` / ``contradicts`` / ``references``) — encoded in the link's
 ``[label]`` channel, so the writer (:func:`molab.knowledge.concept.append_link`)
 and the reader (:meth:`molab.knowledge.concept.Concept.links`) share one format
 and can never drift.
@@ -29,24 +28,22 @@ Design notes:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, NamedTuple, cast
+from typing import TYPE_CHECKING, Literal, NamedTuple, cast, get_args
 
 if TYPE_CHECKING:
     from .concept import Concept
 
-EdgeRole = Literal[
-    "derived_from", "cites", "supersedes", "supports", "contradicts", "records", "references"
-]
-"""A declared relation on an OKF knowledge-graph edge."""
+EdgeRole = Literal["derived_from", "cites", "supports", "contradicts", "references"]
+"""A declared relation on an OKF knowledge-graph edge.
+
+What a document rests on — the run that made its bytes, the document it
+revises — is ``derived_from``.
+"""
 
 DEFAULT_EDGE_ROLE: EdgeRole = "references"
 """Role assigned to any legacy/untyped on-disk link — defaulted, never dropped."""
 
-# Kept in lockstep with the ``EdgeRole`` Literal above (a Literal cannot be built
-# from a variable, so the two spellings sit adjacent for easy synchronization).
-_EDGE_ROLES: frozenset[str] = frozenset(
-    {"derived_from", "cites", "supersedes", "supports", "contradicts", "records", "references"}
-)
+_EDGE_ROLES: frozenset[str] = frozenset(get_args(EdgeRole))
 
 _ROLE_SIGIL = "@"
 

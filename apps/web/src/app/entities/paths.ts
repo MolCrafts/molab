@@ -11,6 +11,25 @@ import type { ExperimentView, ObjectView, ProjectView, WorkspaceSnapshot } from 
 
 const enc = encodeURIComponent;
 
+/**
+ * The route of a knowledge document by its server path. Each segment is
+ * encoded so the slashes stay readable, but a `..` segment (a document above
+ * the served node) is joined to its neighbour with `%2F`: a URL resolves dot
+ * segments away, which would open a different file.
+ */
+export const knowledgePath = (relPath: string): string => {
+  if (!relPath) return "/knowledge";
+  const segments = relPath.split("/").map(enc);
+  const joined = segments
+    .map((segment, index) => {
+      if (index === 0) return segment;
+      const glued = segment === ".." || segments[index - 1] === "..";
+      return `${glued ? "%2F" : "/"}${segment}`;
+    })
+    .join("");
+  return `/knowledge/${joined}`;
+};
+
 /** An ancestor id the serve root does not have. The URL omits that segment. */
 const omittedId = (id: string | null | undefined): boolean => !id || id === "-";
 
@@ -106,7 +125,7 @@ export const entityPath = (ref: EntityRef, snapshot: WorkspaceSnapshot): string 
 
     case "knowledge":
       // id is a bundle-relative concept path (may contain "/"); bare id → browse.
-      return ref.id ? `/knowledge/${ref.id.split("/").map(enc).join("/")}` : "/knowledge";
+      return knowledgePath(ref.id);
 
     case "workspace-file":
       // Files carry their kind in the query string; callers that have the file

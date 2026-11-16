@@ -22,7 +22,7 @@ import shutil
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from molab.ids import generate_uuid7
 
@@ -207,6 +207,14 @@ def migrate_legacy_assets(workspace: Workspace) -> builtins.list[Asset]:
     return migrated
 
 
+def _asset_record(asset: Asset) -> dict[str, Any]:
+    """*asset* as ``asset.json`` stores it: ``replaced_at`` only when set."""
+    record = asset.model_dump(mode="json")
+    if asset.replaced_at is None:
+        del record["replaced_at"]
+    return versioned_payload(record)
+
+
 def asset_by_digest(workspace: Workspace, digest: str) -> Asset | None:
     """The one asset in *workspace* whose content digest is *digest*."""
     found: list[Asset] = []
@@ -222,13 +230,23 @@ def asset_by_digest(workspace: Workspace, digest: str) -> Asset | None:
     return found[0]
 
 
-def assets_produced_by(workspace: Workspace, execution_id: str) -> builtins.list[Asset]:
-    """Assets whose origin is attempt *execution_id*."""
+def assets_produced_by(
+    workspace: Workspace, execution_id: str, *, run_id: str
+) -> builtins.list[Asset]:
+    """Assets registered by attempt *execution_id* of run *run_id*.
+
+    Execution labels such as ``e01`` are run-local, so the run is required:
+    ``(run_id, execution_id)`` is the attempt's global handle.
+    """
     found: list[Asset] = []
     for repository in scan_asset_repositories(workspace):
         for asset in repository.list():
             origin = asset.origin
-            if isinstance(origin, ExecutionOrigin) and origin.execution_id == execution_id:
+            if (
+                isinstance(origin, ExecutionOrigin)
+                and origin.execution_id == execution_id
+                and origin.run_id == run_id
+            ):
                 found.append(asset)
     return found
 
@@ -375,11 +393,17 @@ class AssetRepository:
         slug = self.find_slug(asset.id)
         assert slug is not None
         updated = asset.model_copy(
-            update={"origin": origin, "created_by": created_by, "created_at": datetime.now(UTC)}
+            update={
+                "origin": origin,
+                "created_by": created_by,
+                "created_at": datetime.now(UTC),
+                # The attempt registered these very bytes: they are its own again.
+                "replaced_at": None,
+            }
         )
         self.fs.atomic_write_json(
             self.fs.join(self.assets_dir, slug, "asset.json"),
-            versioned_payload(updated.model_dump(mode="json")),
+            _asset_record(updated),
         )
         return updated
 
@@ -483,6 +507,9 @@ class AssetRepository:
     ) -> Asset:
         """Put *source* into asset *asset_id*. The id, title, origin, and tags stay.
 
+        ``replaced_at`` is stamped: the origin names who first filled the
+        slot, and these bytes are no longer what it produced.
+
         The same bytes are a no-op. A log is refused. Bytes that already belong
         to a different asset are refused: one digest is one asset.
 
@@ -523,6 +550,7 @@ class AssetRepository:
                     "content": content,
                     "file": filename,
                     "media_type": guessed if guessed is not None else asset.media_type,
+                    "replaced_at": datetime.now(UTC),
                 }
             )
             staging = self.fs.join(self.root, MOLAB_DIR, "asset-replacements", generate_uuid7())
@@ -540,7 +568,7 @@ class AssetRepository:
                     )
                 self.fs.atomic_write_json(
                     self.fs.join(prepared, "asset.json"),
-                    versioned_payload(updated.model_dump(mode="json")),
+                    _asset_record(updated),
                 )
                 # Switch the complete slot, not the payload and record separately.
                 # Keep the old slot until the new one has been installed.
@@ -559,6 +587,55 @@ class AssetRepository:
                     with contextlib.suppress(OSError):
                         self.fs.rm(staging, recursive=True)
             return updated
+
+    def adopt(self, directory: str | Path) -> Asset:
+        """Install a product slot another copy of this workspace wrote, keeping its id.
+
+        A remote attempt registers into its staged copy of the workspace and
+        mints the id there. *directory* is that slot (``asset.json`` plus its
+        payload) brought back to this machine. Its record must be an attempt
+        product of this scope, named by the slot this scope gives it, with
+        bytes matching its digest. The same id already here is replaced in
+        place, as a re-registration of the slot would.
+
+        Returns:
+            The installed asset.
+
+        Raises:
+            ValueError: The record is no product of this scope, its directory
+                is not its slot, its bytes do not match its digest, the slot
+                belongs to another asset, or another asset stores those bytes.
+        """
+        source = Path(directory)
+        raw = json.loads((source / "asset.json").read_text(encoding="utf-8"))
+        raw.pop("schema_version", None)
+        asset = Asset.model_validate({**raw, "scope": self.scope})
+        origin = asset.origin
+        if not isinstance(origin, ExecutionOrigin) or (
+            self.scope.kind == "experiment" and origin.experiment_id != self.scope.ids[-1]
+        ):
+            raise ValueError(f"asset {asset.id} is not a product of {self.scope.urn}")
+        slug = self.slot_slug(asset)
+        if source.name != slug:
+            raise ValueError(f"asset {asset.id} belongs in slot {slug!r}, not {source.name!r}")
+        if _digest_local(source / asset.file) != asset.content:
+            raise ValueError(f"asset {asset.id} bytes do not match {asset.content.digest}")
+        with self._lock():
+            current = self.find_slug(asset.id)
+            if current is None and self.fs.exists(self.fs.join(self.assets_dir, slug)):
+                raise ValueError(
+                    f"asset slug {slug!r} in {self.scope.urn} belongs to another asset; "
+                    f"{asset.id} cannot take it"
+                )
+            other = asset_by_digest(self.workspace, asset.content.digest)
+            if other is not None and other.id != asset.id:
+                raise ValueError(f"the bytes of {asset.id} are already {other.ref} ({other.title})")
+            if current is not None:
+                if self.get(asset.id) == asset:
+                    return asset
+                self.remove(asset.id)
+            self._copy_payload(source, self.fs.join(self.assets_dir, slug))
+            return self._read_asset(self.fs.join(self.assets_dir, slug))
 
     def _copy_payload(self, source: Path, dest: str) -> None:
         if source.is_dir():
@@ -627,7 +704,7 @@ class AssetRepository:
         )
         self.fs.atomic_write_json(
             self.fs.join(asset_root, "asset.json"),
-            versioned_payload(asset.model_dump(mode="json")),
+            _asset_record(asset),
         )
         return asset
 
@@ -697,7 +774,7 @@ class AssetRepository:
             created_by=created_by,
             tags=dict(stub.get("tags") or {}),
         )
-        self.fs.atomic_write_json(record_path, versioned_payload(asset.model_dump(mode="json")))
+        self.fs.atomic_write_json(record_path, _asset_record(asset))
         if versions.is_dir():
             shutil.rmtree(versions)
         return self._read_asset(directory)

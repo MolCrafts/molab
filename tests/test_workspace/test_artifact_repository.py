@@ -167,8 +167,12 @@ class TestProducedBy:
             execution_id = ctx.id
         other = _src(tmp_path, "other.txt", b"zzz")
         imported = experiment.assets.import_asset("other", other)
-        assert [asset.id for asset in assets_produced_by(ws, execution_id)] == [made.id]
-        assert imported.id not in {asset.id for asset in assets_produced_by(ws, execution_id)}
+        assert [asset.id for asset in assets_produced_by(ws, execution_id, run_id=run.id)] == [
+            made.id
+        ]
+        assert imported.id not in {
+            asset.id for asset in assets_produced_by(ws, execution_id, run_id=run.id)
+        }
 
     def test_a_second_attempt_with_the_same_bytes_produces_nothing(self, tmp_path: Path) -> None:
         ws = _ws(tmp_path)
@@ -182,8 +186,8 @@ class TestProducedBy:
             execution_id = ctx.id
         assert again.id == made.id
         assert execution_id != first_id
-        assert assets_produced_by(ws, execution_id) == []
-        assert [asset.id for asset in assets_produced_by(ws, first_id)] == [made.id]
+        assert assets_produced_by(ws, execution_id, run_id=run.id) == []
+        assert [asset.id for asset in assets_produced_by(ws, first_id, run_id=run.id)] == [made.id]
 
 
 class TestScan:

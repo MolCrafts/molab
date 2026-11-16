@@ -1,8 +1,7 @@
 """Kind-dispatched workflow resolution.
 
-A run executed by id (``molab runs resume|rerun``, a molq worker, server
-dispatch, ``Run.execute`` without a workflow argument) is resolved here and
-only here. The experiment owns the association. Dispatch follows
+A run executed by id (a molq worker, server dispatch, ``Run.execute``
+without a workflow argument) is resolved here and only here. The experiment owns the association. Dispatch follows
 ``workflow_kind``:
 
 - ``code`` and unbound (``None``) consult the in-process binding memo, then a
