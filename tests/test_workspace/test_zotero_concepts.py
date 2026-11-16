@@ -1,22 +1,20 @@
-"""Tests for read-only Zotero import → Reference concepts on the workspace.
+"""Tests for read-only Zotero import → ``Literature`` records.
 
-Covers ``molexp.workspace.zotero_concepts`` (``ZoteroItem`` / ``read_zotero_items``)
-and its concept-producing consumer ``Bundle.import_zotero``. A minimal
+Covers ``molab.knowledge.zotero`` (``ZoteroLibrary.items``)
+and its concept-producing consumer ``Concept.import_zotero``. A minimal
 ``zotero.sqlite`` is built in-place (the real schema subset the reader touches),
-then imported via the OKF :class:`molexp.workspace.Bundle`. PDFs are *pointed at*
-via ``pdf_path`` — no bytes are copied into the bundle.
+then imported through a knowledge root handle. PDFs are
+*pointed at* via ``pdf_path`` — no bytes are copied into the bundle.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
-from datetime import UTC, datetime
 from pathlib import Path
 
-from molexp.workspace import Bundle, ReferenceConcept, ZoteroItem, read_zotero_items
-
-FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)
+from molab.knowledge.concept import Concept
+from molab.knowledge.concepts import LiteratureFields
+from molab.knowledge.zotero import ZoteroLibrary
 
 
 def _make_zotero_db(data_dir: Path) -> Path:
@@ -86,15 +84,16 @@ def _make_zotero_db(data_dir: Path) -> Path:
 
 
 class TestReadZoteroItems:
-    """``read_zotero_items`` — parse a ``zotero.sqlite`` into ``ZoteroItem`` records."""
+    """``ZoteroLibrary.items`` — parse a ``zotero.sqlite`` into records."""
 
     def test_parses_bib_fields_and_resolves_pdf_pointer(self, tmp_path: Path) -> None:
         db = _make_zotero_db(tmp_path)
-        items = {i.key: i for i in read_zotero_items(db)}
+        items = {i.source_key: i for i in ZoteroLibrary(db).items()}
         assert set(items) == {"AAAA", "BBBB"}  # attachment item excluded
 
         a = items["AAAA"]
-        assert isinstance(a, ZoteroItem)
+        assert isinstance(a, LiteratureFields)
+        assert a.source == "zotero"
         assert a.title == "Deep Learning"
         assert a.authors == ("Yann LeCun",)
         assert a.year == 2015
@@ -108,60 +107,54 @@ class TestReadZoteroItems:
     def test_opens_database_read_only(self, tmp_path: Path) -> None:
         db = _make_zotero_db(tmp_path)
         before = db.read_bytes()
-        read_zotero_items(db)
+        ZoteroLibrary(db).items()
         assert db.read_bytes() == before  # opened read-only, never mutated
 
 
-class TestBundleImportZotero:
-    """``Bundle.import_zotero`` — link a Zotero library as ``Reference`` Concepts."""
+class TestConceptImportZotero:
+    """``Concept.import_zotero`` — link a Zotero library as literature documents."""
 
-    def test_creates_reference_concepts_without_copying_pdf(self, tmp_path: Path) -> None:
+    def test_import_writes_no_sources_json(self, tmp_path: Path) -> None:
+        # arch-own-01-cleanup: the persisted ``sources.json`` link record is gone.
         src = tmp_path / "zotero"
         src.mkdir()
         db = _make_zotero_db(src)
         bundle_root = tmp_path / "bundle"
         bundle_root.mkdir()
-        b = Bundle(bundle_root)
+        b = Concept(bundle_root)
 
-        refs = b.import_zotero(db, now=FIXED)
-        assert all(isinstance(r, ReferenceConcept) for r in refs)
-        by_key = {r.read_ref_meta().source_key: r for r in b.references()}
-        assert set(by_key) == {"AAAA", "BBBB"}
+        refs = b.import_zotero(db)
 
-        a_meta = by_key["AAAA"].read_ref_meta()
-        assert a_meta.source == "zotero"
-        assert a_meta.title == "Deep Learning"
-        assert a_meta.pdf_path is not None
-        assert a_meta.pdf_path.endswith("storage/CCCC/paper.pdf")
+        assert len(refs) == 2
+        assert not (bundle_root / "sources.json").exists()
 
-        # PDFs are pointed at, never copied into the bundle
-        assert list(bundle_root.rglob("*.pdf")) == []
+    def test_a_reimport_keeps_tags_and_source(self, tmp_path: Path) -> None:
+        # The bib record carried a ``tags=[]`` default and a ``source="manual"``
+        # default, so every rewrite cleared the stored tags and relabelled a
+        # Zotero record as manual.
+        from molab.knowledge.concepts import Literature
+        from molab.knowledge.write import write_knowledge
 
-    def test_idempotent_on_source_key(self, tmp_path: Path) -> None:
         src = tmp_path / "zotero"
         src.mkdir()
         db = _make_zotero_db(src)
         bundle_root = tmp_path / "bundle"
         bundle_root.mkdir()
-        b = Bundle(bundle_root)
+        root = Concept(bundle_root)
+        first = {ref.name: ref for ref in root.import_zotero(db)}["aaaa"]
+        first.write(tags=["glass", "ml"])
 
-        b.import_zotero(db, now=FIXED)
-        b.import_zotero(db, now=FIXED)  # re-import updates in place
-        assert len(b.references()) == 2  # no duplicates
+        again = {ref.name: ref for ref in root.import_zotero(db)}["aaaa"]
+        assert again.tags() == ["glass", "ml"]
+        assert again.frontmatter()["source"] == "zotero"
 
-    def test_records_link_in_sources_json(self, tmp_path: Path) -> None:
-        src = tmp_path / "zotero"
-        src.mkdir()
-        db = _make_zotero_db(src)
-        bundle_root = tmp_path / "bundle"
-        bundle_root.mkdir()
-        b = Bundle(bundle_root)
+        write_knowledge(root, name="AAAA", of=Literature, created_by="t", text="", **_bib_title())
+        reread = Literature(first.path)
+        assert reread.tags() == ["glass", "ml"]
+        assert reread.frontmatter()["source"] == "zotero"
+        assert reread.frontmatter()["title"] == "Renamed"
 
-        b.import_zotero(db, now=FIXED)
-        sources = json.loads((bundle_root / "sources.json").read_text())
-        assert len(sources) == 1
-        entry = sources[0]
-        assert entry["source"] == "zotero"
-        assert entry["count"] == 2
-        assert entry["imported_at"].startswith("2026-06-21T12:00:00")
-        assert "+00:00" in entry["imported_at"]  # aware-UTC
+
+def _bib_title() -> dict[str, object]:
+    """A rewrite that sets only the title."""
+    return {"fields": {"title": "Renamed"}}

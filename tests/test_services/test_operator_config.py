@@ -1,14 +1,13 @@
-"""Operator-config **writer** — ``save_operator_config`` / ``set_operator_values``.
+"""Operator-config file API — ``load`` / ``save_operator_config`` / ``set_operator_values``.
 
-Spec ``vision-loop-03-settings-operator-config``: the services layer gains the
-one write path for ``~/.molexp/config.json`` (atomic tmp+rename, the idiom
-``cli/config_cmd.py`` already uses), and the CLI's private ``_save_config``
-is deleted in favour of delegation — CLI and server share loader **and**
-writer. Loader/bridge coverage stays in
-``tests/test_server/test_operator_config_bridge.py`` (untouched).
+Spec ``vision-loop-03-settings-operator-config``: the services layer owns the
+one write path for ``~/.molab/config.json`` (atomic tmp+rename). The loader is
+shared by CLI, server and auth; the writer is CLI-only (the server only reads). drop-harness-01-src (D86) removed the agent
+model/key bridge into ``molab.config``; ``TestOperatorConfigSurface`` pins that
+only the file API is left.
 
 Every test points the writer at a tmp path — the operator's real
-``~/.molexp/config.json`` is never read or written.
+``~/.molab/config.json`` is never read or written.
 """
 
 from __future__ import annotations
@@ -17,9 +16,12 @@ import os
 import stat
 from pathlib import Path
 
+import molcfg
 import pytest
 
-from molexp.services.operator_config import (
+import molab
+from molab.services import operator_config
+from molab.services.operator_config import (
     load_operator_config,
     save_operator_config,
     set_operator_values,
@@ -107,3 +109,39 @@ class TestSetOperatorValues:
         assert agent.get("model") == _MODEL
         assert "deepseek_api_key" not in agent
         assert _RAW_KEY not in path.read_text()
+
+
+class TestOperatorConfigSurface:
+    """Only the file API is left; the agent bridge went with the harness (D86)."""
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "load_operator_config",
+            "save_operator_config",
+            "set_operator_values",
+            "OPERATOR_CONFIG_PATH",
+        ],
+    )
+    def test_the_file_api_is_kept(self, name: str) -> None:
+        assert hasattr(operator_config, name)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "bridge_operator_config",
+            "configured_agent_model",
+            "configured_agent_models",
+            "configured_api_keys",
+            "resolve_configured_model",
+            "resolve_configured_models",
+            "AGENT_MODEL_KEY",
+            "AGENT_MODELS_KEY",
+        ],
+    )
+    def test_the_agent_bridge_is_gone(self, name: str) -> None:
+        assert not hasattr(operator_config, name)
+        assert name not in operator_config.__all__
+
+    def test_molab_config_is_kept(self) -> None:
+        assert isinstance(molab.config, molcfg.Config)

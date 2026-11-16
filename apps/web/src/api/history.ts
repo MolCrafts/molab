@@ -1,0 +1,16 @@
+import type { DocumentHistory } from "@/api/generated/models/DocumentHistory";
+import type { HistoryFact } from "@/api/generated/models/HistoryFact";
+import type { HistorySyncResponse } from "@/api/generated/models/HistorySyncResponse";
+import { HistoryService } from "@/api/generated/services/HistoryService";
+
+export type { HistoryFact };
+
+export const historyApi = {
+  /** A document's git versions; with *version*, its diff against the working copy. */
+  document: (document: string, version: number | null = null): Promise<DocumentHistory> =>
+    HistoryService.readDocumentHistory(document, version),
+  list: (limit = 50): Promise<HistoryFact[]> =>
+    HistoryService.readHistory(undefined, undefined, limit),
+  sync: (): Promise<HistorySyncResponse> => HistoryService.syncHistory(),
+  push: (remote: string): Promise<HistorySyncResponse> => HistoryService.pushHistory({ remote }),
+};

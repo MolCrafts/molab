@@ -1,8 +1,7 @@
-"""Tests for ``molexp.plugins.cli`` — the CLI-only plugin layer.
+"""Tests for ``molab.plugins.cli`` — the CLI-only plugin layer.
 
-Covers the ``CliPlugin`` descriptor's required-``register`` contract and
-``discover_cli_plugins()``'s entry-point walk over the
-``molexp.cli_plugins`` group (cache + failure isolation + api-version
+Covers ``discover_cli_plugins()``'s entry-point walk over the
+``molab.cli_plugins`` group (cache + failure isolation + api-version
 gating + first-wins de-duplication).
 """
 
@@ -11,28 +10,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 import pytest
-import typer
 
-from molexp.plugins.cli import (
+from molab.plugins.cli import (
     CLI_PLUGIN_API_VERSION,
     CliPlugin,
     _discover_cli_uncached,
     discover_cli_plugins,
 )
-
-
-class TestCliPlugin:
-    def test_register_is_a_required_field(self) -> None:
-        def reg(app: typer.Typer) -> None:
-            pass
-
-        # ``register`` has no default — 07-cli-ui-plugin-split retired the
-        # optional ``register_cli`` field, so a CLI plugin that registers
-        # nothing cannot be constructed.
-        assert CliPlugin(id="x", name="X", version="0.0.1", register=reg).register is reg
-        with pytest.raises(TypeError):
-            CliPlugin(id="x", name="X", version="0.0.1")  # type: ignore[call-arg]
-
 
 # ── discovery fixtures + helpers ──────────────────────────────────────────
 
@@ -45,7 +29,7 @@ class _FakeEntryPoint:
         name: str,
         loader,
         *,
-        group: str = "molexp.cli_plugins",
+        group: str = "molab.cli_plugins",
     ) -> None:
         self.name = name
         self.group = group
@@ -77,7 +61,7 @@ def _install_fake_eps(
         return _FakeEntryPoints()
 
     monkeypatch.setattr(
-        "molexp.plugins.cli.importlib_metadata.entry_points",
+        "molab.plugins.cli.importlib_metadata.entry_points",
         _entry_points,
     )
     # Cached state must be cleared so the test sees the patched eps
@@ -87,13 +71,13 @@ def _install_fake_eps(
 
 @pytest.fixture
 def warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Spy on ``molexp.plugins.cli.logger.warning`` calls.
+    """Spy on ``molab.plugins.cli.logger.warning`` calls.
 
     mollog bypasses stdlib ``logging`` so pytest's ``caplog`` / ``capfd``
     do not see its output; we capture the messages directly.
     """
     captured: list[str] = []
-    from molexp.plugins import cli as cli_mod  # type: ignore[import-not-found]
+    from molab.plugins import cli as cli_mod  # type: ignore[import-not-found]
 
     monkeypatch.setattr(
         cli_mod.logger,

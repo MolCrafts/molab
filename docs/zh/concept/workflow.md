@@ -4,28 +4,31 @@
 
 ## 编写、编译、执行
 
-MolExp 将工作流的生命周期分为三个阶段：
+Molab 将工作流的生命周期分为三个阶段：
 
 | 阶段 | 工具 | 做什么 |
 |---|---|---|
-| **编写** | `WorkflowCompiler` | 声明任务和依赖 |
-| **编译** | `.compile()` | 冻结为已验证的 `CompiledWorkflow` |
-| **执行** | `WorkflowRuntime` 或 `Run.execute()` | 驱动图 |
+| **编写** | `Workflow` | 声明任务和依赖 |
+| **编译** | `wf.compile()` | 需要摘要或图时，把图冻住 |
+| **执行** | `wf.run()` 或 `run.execute(wf)` | 驱动图 |
 
 可以用装饰器编写：
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molab.workflow import Workflow
 
-wf = WorkflowCompiler(name="demo")
+wf = Workflow(name="demo")
+
 
 @wf.task
 def fetch() -> list[float]:
     return [1.0, 4.0, 9.0]
 
+
 @wf.task(depends_on=["fetch"])
 def summarize(data: list[float]) -> float:
     return sum(data)
+
 
 compiled = wf.compile()
 ```
@@ -38,7 +41,7 @@ compiled = wf.compile()
 
 ```python
 import asyncio
-from molexp.workflow import WorkflowRuntime
+from molab.workflow import WorkflowRuntime
 
 result = asyncio.run(WorkflowRuntime().execute(compiled))
 ```
@@ -46,10 +49,10 @@ result = asyncio.run(WorkflowRuntime().execute(compiled))
 或者在追踪运行下以完整持久化运行：
 
 ```python
-import molexp as me
+import molab as me
 
 ws = me.Workspace("./lab", name="lab")
-run = ws.project("demo").experiment("baseline").add_run(params={})
+run = ws.add_project("demo").add_experiment("baseline").add_run(params={})
 result = run.execute(wf)
 ```
 
@@ -64,7 +67,7 @@ result = run.execute(wf)
 - 调度器传输（插件）
 - 共享数据集和派生资源（资产）
 
-这个窄边界保持工作流可复用——同一个编译图可以在本地、在 `molexp run` 下、或从远程工作节点运行。
+这个窄边界保持工作流可复用——同一个编译图可以在本地、在 `molab run` 下、或从远程工作节点运行。
 
 ## 数据流：名字绑定
 
@@ -74,6 +77,7 @@ result = run.execute(wf)
 @wf.task
 def source() -> dict:
     return {"x": 10, "y": 20}
+
 
 @wf.task(depends_on=["source"])
 def consumer(x: int, y: int, z: int = 0) -> int:

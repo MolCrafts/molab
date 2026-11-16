@@ -1,0 +1,216 @@
+import type { RendererKey, RendererSnapshot, Selection, SemanticObjectType } from "@/app/types";
+import {
+  registerEntityTabContribution as addEntityTabContribution,
+  registerExecutionColumnContribution as addExecutionColumnContribution,
+  registerExecutionDetailContribution as addExecutionDetailContribution,
+  registerFileTypeContribution as addFileTypeContribution,
+  registerRendererContribution as addRendererContribution,
+  listEntityTabContributions,
+  listExecutionColumnContributions,
+  listExecutionDetailContributions,
+  listFileTypeContributions,
+  resolveRendererContribution,
+  unregisterFileTypeContribution,
+} from "@/lib/contribution-runtime";
+import type {
+  EntityTabContribution,
+  ExecutionColumnContribution,
+  ExecutionDetailContribution,
+  ExecutionRowData,
+  FileTypeContribution,
+  RendererContribution,
+  RendererEntry,
+  RendererResolutionContext,
+  RenderTarget,
+} from "@/lib/contribution-types";
+import { buildRendererRegistryKey } from "@/lib/contribution-types";
+
+export type {
+  DiscoveredFile,
+  EntityTabContribution,
+  ExecutionColumnContribution,
+  ExecutionColumnRenderProps,
+  ExecutionDetailContribution,
+  ExecutionDetailRenderProps,
+  ExecutionRowData,
+  FileMatchContext,
+  FileTypeContribution,
+  FileTypeMatcher,
+  PanelSlot,
+  RendererContribution,
+  RendererEntry,
+  RenderTarget,
+} from "@/lib/contribution-types";
+
+export interface RenderPlan {
+  center: RenderTarget[];
+  right: RenderTarget[];
+}
+
+export const buildRegistryKey = buildRendererRegistryKey;
+
+export const registerRenderer = (entry: RendererEntry): void => {
+  const key = buildRegistryKey(entry.key);
+  addRendererContribution({
+    id: `exact:${key}`,
+    ...entry,
+  });
+};
+
+export const registerRendererContribution = (entry: RendererContribution): void => {
+  addRendererContribution(entry);
+};
+
+export const registerEntityTabContribution = (entry: EntityTabContribution): void => {
+  addEntityTabContribution(entry);
+};
+
+export const listEntityTabs = (
+  objectType: EntityTabContribution["objectType"],
+  context?: {
+    selection: import("@/app/types").Selection;
+    snapshot: import("@/app/types").RendererSnapshot;
+  },
+): EntityTabContribution[] => {
+  const tabs = listEntityTabContributions(objectType);
+  if (!context) return tabs;
+  return tabs.filter((tab) => (tab.matches ? tab.matches(context) : true));
+};
+
+export const registerFileTypeContribution = (entry: FileTypeContribution): void => {
+  addFileTypeContribution(entry);
+};
+
+export const unregisterFileType = (contributionId: string): boolean => {
+  return unregisterFileTypeContribution(contributionId);
+};
+
+export const listFileTypes = (
+  objectType: FileTypeContribution["objectType"],
+): FileTypeContribution[] => {
+  return listFileTypeContributions(objectType);
+};
+
+export const registerExecutionColumn = (entry: ExecutionColumnContribution): void => {
+  addExecutionColumnContribution(entry);
+};
+
+export const listExecutionColumns = (backend?: string | null): ExecutionColumnContribution[] => {
+  return listExecutionColumnContributions(backend);
+};
+
+export const registerExecutionDetail = (entry: ExecutionDetailContribution): void => {
+  addExecutionDetailContribution(entry);
+};
+
+export const listExecutionDetails = (backend?: string | null): ExecutionDetailContribution[] => {
+  return listExecutionDetailContributions(backend);
+};
+
+export const buildExecutionRowFromBackendData = (raw: ExecutionRowData): ExecutionRowData => raw;
+
+export const resolveRenderer = (
+  key: RendererKey,
+  context?: Omit<RendererResolutionContext, "key">,
+): RendererEntry => {
+  const registryKey = buildRegistryKey(key);
+  const entry = resolveRendererContribution(key, context);
+  if (!entry) {
+    throw new Error(`No renderer registered for ${registryKey}`);
+  }
+  return entry;
+};
+
+/**
+ * Soft resolve for host panels — returns null when the matching contribution
+ * is missing or its owning plugin is user-disabled (no throw).
+ */
+export const tryResolveRenderer = (
+  key: RendererKey,
+  context?: Omit<RendererResolutionContext, "key">,
+): RendererContribution | null => {
+  return resolveRendererContribution(key, context);
+};
+
+export const renderPlanByObjectType: Record<SemanticObjectType, RenderPlan> = {
+  project: {
+    center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
+    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],
+  },
+  experiment: {
+    center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
+    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],
+  },
+  run: {
+    center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
+    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],
+  },
+  asset: {
+    center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
+    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],
+  },
+  workflow: {
+    center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "yaml" }],
+    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "yaml" }],
+  },
+  "workspace-file": {
+    center: [{ panelKind: "editor", contentType: "text", fileKind: "text" }],
+    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "text" }],
+  },
+  task: {
+    center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
+    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],
+  },
+  knowledge: {
+    center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
+    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],
+  },
+};
+
+export const buildRendererKeyFromSelection = (
+  selection: Selection,
+  target: RenderTarget,
+): RendererKey => {
+  const fileKind = selection.objectType === "workspace-file" ? selection.fileKind : target.fileKind;
+
+  if (selection.objectType === "workspace-file" && target.panelKind === "editor") {
+    const filePath = (selection.objectId ?? "").toLowerCase();
+    if (filePath.endsWith("workflow.json")) {
+      return {
+        objectType: "workspace-file",
+        fileKind: "json",
+        contentType: "workflow-graph",
+        panelKind: "viewer",
+      };
+    }
+
+    if (fileKind === "image") {
+      return {
+        objectType: "workspace-file",
+        fileKind,
+        contentType: "image",
+        panelKind: "viewer",
+      };
+    }
+  }
+
+  return {
+    objectType: selection.objectType,
+    fileKind,
+    contentType: target.contentType,
+    panelKind: target.panelKind,
+  };
+};
+
+/** Resolve the enabled renderer contributions for one host panel slot. */
+export const resolveRenderersForSelection = (
+  selection: Selection,
+  snapshot: RendererSnapshot,
+  slot: keyof RenderPlan,
+): RendererContribution[] =>
+  renderPlanByObjectType[selection.objectType][slot]
+    .map((target) => {
+      const key = buildRendererKeyFromSelection(selection, target);
+      return tryResolveRenderer(key, { selection, snapshot, target });
+    })
+    .filter((renderer): renderer is RendererContribution => renderer !== null);

@@ -9,7 +9,7 @@ the in-memory child cache or reloaded on disk by a fresh instance.
 
 from __future__ import annotations
 
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 
 class TestAddStarConvergence:

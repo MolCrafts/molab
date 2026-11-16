@@ -1,13 +1,14 @@
 # TaskContext
 
-`TaskContext` is the execution boundary between a workflow definition and the code inside one task. It is deliberately small: a task declares the runtime values it consumes as **named parameters**, and the only thing it reads off the context object itself is a per-task scratch directory (`ctx.workdir`). A task cannot climb up from its context to the Run, the workspace, or injected services — that is the **pure task context** contract, and it is what makes a task's cache identity (code + config + inputs) complete.
+`TaskContext.workdir` is `out/<task>/`. Results are written when the context exits. Re-emitting a recorded relative artifact path raises `ValueError`, so a checkpoint label is unique within one attempt. `TaskContext` is the execution boundary between a workflow definition and the code inside one task. It is deliberately small: a task declares the runtime values it consumes as **named parameters**, and the only thing it reads off the context object itself is a per-task scratch directory (`ctx.workdir`). A task cannot climb up from its context to the Run, the workspace, or injected services — that is the **pure task context** contract, and it is what makes a task's cache identity (code + config + inputs) complete.
 
 ## How a Task Receives Its Inputs
 
 A task body declares the runtime values it consumes as **named parameters**. The engine binds each parameter *by name*; a task no longer reads its inputs or its configuration off `ctx` at all. The leading `ctx` parameter is optional: include it only when the body needs the per-task scratch directory (below).
 
 ```python
-from molexp.workflow import Task, TaskContext
+from molab.workflow import Task, TaskContext
+
 
 class Record(Task):
     async def execute(self, ctx: TaskContext, value: int, scale: int = 1) -> int:
@@ -26,7 +27,7 @@ When present (named `ctx`, or annotated `TaskContext`), the leading parameter re
 
 ```python
 class TaskContext[StateT, InputT]:
-    workdir: Path | None      # content-addressed scratch dir for THIS task
+    workdir: Path | None  # content-addressed scratch dir for THIS task
 ```
 
 `ctx.workdir` is a content-addressed scratch directory derived from the task's content identity — the sanctioned place a task writes intermediate files. It is a bare `pathlib.Path`, stable across runs for identical task content, and `None` when no workspace run is attached. A fan-out body shares one `workdir` across elements, so per-element bodies should sub-namespace it. Include `ctx` in the signature only when the body actually writes there.
@@ -34,7 +35,7 @@ class TaskContext[StateT, InputT]:
 !!! warning "Deprecated: `ctx.state`"
     `ctx.state` is deprecated and scheduled for removal: accessing it emits a `DeprecationWarning` and returns a **read-only snapshot** (engine state cannot be mutated through it). Everything it was used for — reading the previous loop iteration's value, picking up a branch-routed value — now arrives as **named parameters** (the values-on-edges engine delivers loop-back and branch-routed values as the body's own arguments). Migrate any remaining reads to named parameters.
 
-There is **no** `ctx.run_context` and **no** `ctx.deps`. Capabilities that used to be reached through them — artifact persistence, asset lookup, run metadata — live on the driver-side `RunContext` (see below) or are delivered to the body as named parameters by the engine.
+There is **no** `ctx.run_context` and **no** `ctx.deps`. A task registers a file by returning `ctx.register(...)`. The engine records `molab:asset/<id>`. Run inputs arrive as named parameters (`inputs`, and a unique identifier title).
 
 ## Reading Configuration
 
@@ -46,32 +47,32 @@ class Train(Task):
         return {"lr": lr, "batch": batch}
 ```
 
-Running `execute(compiled, config={"lr": 5e-4})` fills `lr`; `batch` falls back to its default. That design keeps profile semantics in user code: MolExp resolves and preserves the selected profile, but it does not attach special meaning to arbitrary keys.
+Running `execute(compiled, config={"lr": 5e-4})` fills `lr`; `batch` falls back to its default. That design keeps profile semantics in user code: Molab resolves and preserves the selected profile, but it does not attach special meaning to arbitrary keys.
 
 ## Working Under a Run
 
 When execution happens under a persistent run, the workspace helpers live on the `RunContext` the **driver** opened via `run.start()` — outside the task bodies:
 
 ```python
-import molexp as me
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+import molab as me
+from molab.workflow import Workflow, WorkflowRuntime
 
-compiled = WorkflowCompiler(name="train").add(Train()).compile()
+compiled = (Workflow(name="train").add(Train())).compile()
 
 ws = me.Workspace("./lab", name="lab")
-exp = ws.project("demo").experiment("baseline").run(compiled, params={"lr": [1e-3]})
+exp = ws.add_project("demo").add_experiment("baseline").run(compiled, params={"lr": [1e-3]})
 run = exp.list_runs()[0]
 
-with run.start() as ctx:                  # run.start(profile_config=cfg) to attach a profile
+with run.start() as ctx:  # run.start(profile_config=cfg) to attach a profile
+    execution_id = ctx.id
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     ctx.set_result("final_loss", result.outputs["train"])
-    ctx.artifact.save("metrics.json", result.outputs["train"])
-    ctx.log("train").append("done")
+    ctx.log("run").append("done")
 
-print(run.get_result("final_loss"))   # public read-back on the Run entity
+print(run.get_result("final_loss", execution_id=execution_id))  # public read-back on the Run entity
 ```
 
-`ctx.set_result(...)` stores lightweight values on the run record, `ctx.artifact.save(...)` registers an `ArtifactAsset`, `ctx.log(name)` appends to a `LogAsset`, `ctx.checkpoint(...)` chains `CheckpointAsset`s, and `ctx.find_asset(...)` walks run → experiment → project → workspace. Assets written this way carry a `Producer` record automatically; while a task body is executing, the engine tags the active task id so queries like `run.assets.query(producer_task="train")` work. See the [Unified Asset Model](assets.md) guide for the complete picture of scopes, the per-scope `assets.json` manifests, and the per-kind subclasses.
+`ctx.set_result(...)` stores a lightweight value until the context exits. `ctx.log(name)` appends to the execution evidence log. `ctx.checkpoint(...)` writes a file under `checkpoints/` and returns that path. A file the next run should open is registered from the task with `ctx.register`. See [Assets](assets.md).
 
 Inside the task, the run shows up only as data: a root task's sweep `params` bind to its like-named parameters, `ctx.workdir` points into the execution directory, and the resolved profile config binds by name too. The same task code therefore runs unchanged in pure in-memory execution — there is simply no workdir, and whatever `config=` the caller passed binds the same way.
 
@@ -80,13 +81,13 @@ Inside the task, the run shows up only as data: a root task's sweep `params` bin
 Streaming `Actor` bodies receive the **same** `TaskContext` as batch tasks — there is no separate context type — and bind their non-`ctx` parameters by name from the same merged map (`{config} | {upstream outputs | run params}`). The only streaming-specific behaviour is that the engine drives the async generator to exhaustion and records the **last yielded value** as the task's output:
 
 ```python
-from molexp.workflow import Actor
+from molab.workflow import Actor
 
 
 class Monitor(Actor):
     async def run(self, ctx: TaskContext, source: list[int]):
-        for item in source:            # ``source`` binds the upstream output
-            yield {"seen": item}       # last yield becomes the task output
+        for item in source:  # ``source`` binds the upstream output
+            yield {"seen": item}  # last yield becomes the task output
 ```
 
 There is no inter-task message-passing channel: an earlier `receive()` / `send()` surface was never wired (every path raised `NotImplementedError`) and has been removed. An actor yields its outputs; it does not exchange messages mid-run with peer tasks.

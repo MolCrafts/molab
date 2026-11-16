@@ -10,9 +10,9 @@ import io
 import zipfile
 from pathlib import Path
 
-from molexp.workspace.archive import archive_folder_zip
-from molexp.workspace.folder import Folder
-from molexp.workspace.fs_local import LocalFileSystem
+from molab.workspace.archive import archive_folder_zip
+from molab.workspace.folder import Folder
+from molab.workspace.fs_local import LocalFS
 
 
 def _folder_at(path: Path) -> Folder:
@@ -22,7 +22,7 @@ def _folder_at(path: Path) -> Folder:
         name=path.name,
         kind="test.folder",
         root_path=str(path.parent),
-        fs=LocalFileSystem(),
+        fs=LocalFS(),
     )
 
 
@@ -65,7 +65,7 @@ class TestArchiveFolderZip:
             name="no-such",
             kind="test.folder",
             root_path=str(tmp_path),
-            fs=LocalFileSystem(),
+            fs=LocalFS(),
         )
         with zipfile.ZipFile(io.BytesIO(archive_folder_zip(folder))) as zf:
             assert zf.namelist() == []

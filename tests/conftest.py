@@ -6,8 +6,7 @@ rich/typer help can still embed ANSI (and even split option spellings like
 ``FORCE_COLOR`` / ``CLICOLOR_FORCE`` / a fancy ``TERM``. Normalized HERE, at
 conftest import — before any test module can instantiate a rich ``Console``
 — so ``pytest tests/`` behaves identically in a bare terminal, a colored
-shell, a git hook, and CI. CI also sets the same vars in the workflow env
-block (see ``.github/workflows/ci.yml``).
+shell, a git hook, and CI.
 """
 
 from __future__ import annotations
@@ -39,32 +38,26 @@ def strip_ansi(text: str) -> str:
 def _hermetic_operator_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
 ) -> Iterator[None]:
-    """Isolate every test from the developer's ``~/.molexp/config.json``.
+    """Isolate every test from the developer's ``~/.molab/config.json``.
 
-    Two leaks, one fixture:
-
-    * **read** — ``bridge_operator_config`` (called by every preflight) loads
-      the operator config from ``OPERATOR_CONFIG_PATH``; pointed at an empty
-      tmp file so a laptop with a real key/model does not silently satisfy
-      tests that assert a *missing* key or an unknown model.
-    * **write** — the bridge's destination, ``molexp.config``, is a
-      **process-global** singleton that no monkeypatch unwinds. One test that
-      bridges a configured ``agent.models`` map used to re-tier every later
-      test in the same process (an unknown-model preflight quietly resolved to
-      the laptop's DeepSeek models and stopped raising). Snapshot + restore.
+    * **file** — ``OPERATOR_CONFIG_PATH`` is pointed at a fresh tmp path, so
+      nothing reads or writes the operator's real config.
+    * **process** — ``molab.config`` is a **process-global** singleton that no
+      monkeypatch unwinds; it is snapshotted before the test and restored
+      after, so a test that sets a key cannot leak it into the next one.
     """
-    import molexp
-    from molexp.services import operator_config
+    import molab
+    from molab.services import operator_config
 
     monkeypatch.setattr(
         operator_config,
         "OPERATOR_CONFIG_PATH",
         tmp_path_factory.mktemp("operator-config") / "config.json",
     )
-    before = dict(molexp.config)
+    before = dict(molab.config)
     yield
-    for key in list(molexp.config.keys()):
+    for key in list(molab.config.keys()):
         if key not in before:
-            del molexp.config[key]
+            del molab.config[key]
     for key, value in before.items():
-        molexp.config[key] = value
+        molab.config[key] = value
