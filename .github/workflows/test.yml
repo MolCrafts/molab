@@ -43,7 +43,7 @@ jobs:
     permissions:
       contents: read
     name: test
-    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@f5d3606fab87fc162271c94219dbdc5201dd1aab
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
 
   python:
     name: test / python (${{ matrix.os }})
@@ -56,10 +56,10 @@ jobs:
         os: ${{ fromJSON(needs.context.outputs.tier == 'full' && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-python@f5d3606fab87fc162271c94219dbdc5201dd1aab
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@f5d3606fab87fc162271c94219dbdc5201dd1aab
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
       # molpy/rust-toolchain.toml pins the compiler that builds the molpy wheel.
-      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@f5d3606fab87fc162271c94219dbdc5201dd1aab
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           toolchain-dir: ../molpy
           cache: molpy
@@ -83,7 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-node@f5d3606fab87fc162271c94219dbdc5201dd1aab
+      - uses: MolCrafts/molcrafts-ci/actions/setup-node@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
       - run: npm run test:web
 
   docs:
