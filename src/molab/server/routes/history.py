@@ -27,13 +27,18 @@ router = APIRouter(prefix="/history", tags=["history"])
 @router.get("/document", response_model=DocumentHistory)
 def read_document_history(
     document: str,
-    commit: str | None = None,
-    limit: int = Query(50, ge=1, le=200),
+    version: int | None = Query(
+        None, ge=1, description="Diff this version against the working copy."
+    ),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> DocumentHistory:
-    """Read one knowledge file's Git revisions and compare with its working copy."""
+    """List one knowledge document's versions; with *version*, compare it with the working copy.
+
+    The same read as ``molab knowledge versions``. Read a version itself with
+    ``GET /knowledge/note?version=N``.
+    """
     try:
-        return document_history(workspace, document, commit=commit, limit=limit)
+        return document_history(workspace, document, version=version)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except LookupError as exc:

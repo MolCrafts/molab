@@ -162,14 +162,16 @@ export class KnowledgeService {
     }
     /**
      * Get Note
-     * Return one document's full body.
+     * Return one document's full body, or one of its git versions in the same shape.
      * @param path The document's workspace-relative path (its identity).
+     * @param version Read this git version (v1 is the oldest) instead of the file.
      * @param molabSession
      * @returns NoteDetailResponse Successful Response
      * @throws ApiError
      */
     public static getNote(
         path: string,
+        version?: (number | null),
         molabSession?: (string | null),
     ): CancelablePromise<NoteDetailResponse> {
         return __request(OpenAPI, {
@@ -180,6 +182,7 @@ export class KnowledgeService {
             },
             query: {
                 'path': path,
+                'version': version,
             },
             errors: {
                 422: `Validation Error`,

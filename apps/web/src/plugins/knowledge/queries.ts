@@ -1,5 +1,5 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import { knowledgeApi } from "@/api";
+import { historyApi, knowledgeApi } from "@/api";
 import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
 
 export interface KnowledgeListFilters {
@@ -15,6 +15,14 @@ export const knowledgeKeys = {
     [...knowledgeKeys.lists(), { tag, status }] as const,
   notes: () => [...knowledgeKeys.all, "note"] as const,
   note: (path: string) => [...knowledgeKeys.notes(), path] as const,
+  /** One git version of a document: immutable once committed. */
+  noteVersion: (path: string, version: number) =>
+    [...knowledgeKeys.note(path), "version", version] as const,
+  /** A document's git versions and whether its working copy is uncommitted. */
+  versions: (path: string) => [...knowledgeKeys.all, "versions", path] as const,
+  /** One version's diff against the working copy. */
+  versionDiff: (path: string, version: number) =>
+    [...knowledgeKeys.versions(path), version] as const,
   backlinks: (path: string) => [...knowledgeKeys.all, "backlinks", path] as const,
   /** A Manuscript's bibliography: it changes with the Manuscript and with the Literature it cites. */
   bibliography: (path: string) => [...knowledgeKeys.all, "bibliography", path] as const,
@@ -56,11 +64,13 @@ export const knowledgeListQueryOptions = (filters: KnowledgeListFilters = {}) =>
     staleTime: 30_000,
   });
 
-export const knowledgeNoteQueryOptions = (path: string) =>
+export const knowledgeNoteQueryOptions = (path: string, version: number | null = null) =>
   queryOptions({
-    queryKey: knowledgeKeys.note(path),
-    queryFn: () => knowledgeApi.getNote(path),
-    staleTime: 30_000,
+    queryKey:
+      version === null ? knowledgeKeys.note(path) : knowledgeKeys.noteVersion(path, version),
+    queryFn: () => knowledgeApi.getNote(path, version),
+    // A committed version never changes; the live file does.
+    staleTime: version === null ? 30_000 : Number.POSITIVE_INFINITY,
   });
 
 export const knowledgeBacklinksQueryOptions = (path: string) =>
@@ -85,8 +95,30 @@ export const useKnowledgeBibliographyQuery = (path: string, enabled = true) =>
 export const useKnowledgeListQuery = (filters: KnowledgeListFilters = {}, enabled = true) =>
   useQuery({ ...knowledgeListQueryOptions(filters), enabled });
 
-export const useKnowledgeNoteQuery = (path: string, enabled = true) =>
-  useQuery({ ...knowledgeNoteQueryOptions(path), enabled: enabled && path.length > 0 });
+export const useKnowledgeNoteQuery = (
+  path: string,
+  enabled = true,
+  version: number | null = null,
+) => useQuery({ ...knowledgeNoteQueryOptions(path, version), enabled: enabled && path.length > 0 });
+
+/** A document's git versions. History is optional: a refusal (422 above the served node) or an absent git hides the switcher. */
+export const useKnowledgeVersionsQuery = (path: string, enabled = true) =>
+  useQuery({
+    queryKey: knowledgeKeys.versions(path),
+    queryFn: () => historyApi.document(path),
+    staleTime: 30_000,
+    retry: false,
+    enabled: enabled && path.length > 0,
+  });
+
+export const useKnowledgeVersionDiffQuery = (path: string, version: number, enabled = true) =>
+  useQuery({
+    queryKey: knowledgeKeys.versionDiff(path, version),
+    queryFn: () => historyApi.document(path, version),
+    staleTime: 30_000,
+    retry: false,
+    enabled,
+  });
 
 export const useKnowledgeBacklinksQuery = (path: string, enabled = true) =>
   useQuery({ ...knowledgeBacklinksQueryOptions(path), enabled: enabled && path.length > 0 });

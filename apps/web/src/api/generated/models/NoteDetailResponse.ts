@@ -11,6 +11,7 @@ export type NoteDetailResponse = {
      */
     cls: string;
     body: string;
+    tags?: Array<string>;
     links: Array<string>;
     cards?: Array<EntityCard>;
     /**
@@ -19,7 +20,7 @@ export type NoteDetailResponse = {
     fields?: Record<string, any>;
     format?: NoteDetailResponse.format;
     /**
-     * ISO-8601 UTC time the file was last modified.
+     * ISO-8601 time the file was last modified; a version's commit time.
      */
     updatedAt?: (string | null);
     /**

@@ -1,5 +1,5 @@
 import { Download, ExternalLink, FileText } from "lucide-react";
-import { type JSX, useMemo } from "react";
+import { type JSX, useMemo, useState } from "react";
 import { knowledgeApi } from "@/api";
 import { activeNeedsAuth, shouldShowFailure } from "@/api/errors";
 import type { ReferenceSummary } from "@/api/generated/models/ReferenceSummary";
@@ -16,10 +16,12 @@ import {
   useKnowledgeBibliographyQuery,
   useKnowledgeListQuery,
   useKnowledgeNoteQuery,
+  useKnowledgeVersionsQuery,
 } from "@/plugins/knowledge/queries";
 import { TexDocumentView } from "@/plugins/knowledge/TexDocumentView";
 import { bibliographyName, isTexDocument, withBibliography } from "@/plugins/knowledge/texDocument";
 import { DocPage } from "./doc/DocPage";
+import { VersionBanner, VersionDiff, VersionSwitcher } from "./doc/DocVersions";
 
 const formatReference = (ref: ReferenceSummary): string => {
   const authors =
@@ -47,6 +49,10 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
   });
 
   const relPath = selection.objectId;
+  /** The git version the URL asks for; null is the live file. */
+  const version = selection.objectType === "knowledge" ? (selection.version ?? null) : null;
+  /** The `path@version` whose diff is open in place of the Manuscript. */
+  const [comparing, setComparing] = useState<string | null>(null);
 
   // The selected reference (if the path names one) comes from the list directly.
   const selectedReference = useMemo(
@@ -57,9 +63,11 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
     () => Boolean(relPath) && Boolean(data?.notes.some((n) => n.relPath === relPath)),
     [data, relPath],
   );
-  const noteQuery = useKnowledgeNoteQuery(relPath, isNotePath);
+  const noteQuery = useKnowledgeNoteQuery(relPath, isNotePath, version);
   const note = noteQuery.data ?? null;
   const isManuscript = relPath !== "" && isNotePath && isTexDocument(relPath);
+  const versionsQuery = useKnowledgeVersionsQuery(relPath, isManuscript);
+  const history = versionsQuery.data?.available ? versionsQuery.data : null;
   const bibliographyQuery = useKnowledgeBibliographyQuery(
     relPath,
     isManuscript && note !== null && bibliographyName(note.body) !== null,
@@ -75,6 +83,13 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
 
   const open = (path: string): void =>
     nav.setSelection({ objectType: "knowledge", objectId: path });
+  const showVersion = (next: number | null): void =>
+    nav.setSelection({
+      objectType: "knowledge",
+      objectId: relPath,
+      ...(next === null ? {} : { version: next }),
+    });
+  const versionKey = `${relPath}@${version}`;
 
   // --- Manuscript ----------------------------------------------------------
   // A LaTeX document: opened with the file-preview plugin, not the markdown page.
@@ -85,28 +100,57 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
         icon={KNOWLEDGE_CLASS_ICON.Manuscript}
         title={note?.name ?? fileName}
         actions={
-          <WorkbenchIconAction label="Download TeX" asChild>
-            <a href={knowledgeApi.docExportUrl(relPath)} download>
-              <Download className="size-4" />
-            </a>
-          </WorkbenchIconAction>
+          <>
+            {history && history.versions.length > 0 ? (
+              <VersionSwitcher
+                history={history}
+                viewing={version}
+                disabledReason={null}
+                onSelect={showVersion}
+              />
+            ) : null}
+            <WorkbenchIconAction label="Download TeX" asChild>
+              <a href={knowledgeApi.docExportUrl(relPath)} download>
+                <Download className="size-4" />
+              </a>
+            </WorkbenchIconAction>
+          </>
         }
       >
-        <div className="min-h-0 flex-1">
-          {noteError ? (
-            <p className="px-4 py-6 text-body-lg text-destructive">{noteError}</p>
-          ) : noteQuery.isPending || !note ? (
-            <p className="px-4 py-6 text-body-lg italic text-muted-foreground">Loading…</p>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {version !== null ? (
+            <div className="px-4 pt-4">
+              <VersionBanner
+                history={history}
+                version={version}
+                comparing={comparing === versionKey}
+                onCompare={(on) => setComparing(on ? versionKey : null)}
+                onLatest={() => showVersion(null)}
+              />
+            </div>
+          ) : null}
+          {version !== null && comparing === versionKey ? (
+            <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
+              <VersionDiff relPath={relPath} version={version} />
+            </div>
           ) : (
-            <TexDocumentView
-              content={
-                bibliographyQuery.data === undefined
-                  ? note.body
-                  : withBibliography(note.body, bibliographyQuery.data)
-              }
-              name={fileName}
-              path={relPath}
-            />
+            <div className="min-h-0 flex-1">
+              {noteError ? (
+                <p className="px-4 py-6 text-body-lg text-destructive">{noteError}</p>
+              ) : noteQuery.isPending || !note ? (
+                <p className="px-4 py-6 text-body-lg italic text-muted-foreground">Loading…</p>
+              ) : (
+                <TexDocumentView
+                  content={
+                    bibliographyQuery.data === undefined
+                      ? note.body
+                      : withBibliography(note.body, bibliographyQuery.data)
+                  }
+                  name={fileName}
+                  path={relPath}
+                />
+              )}
+            </div>
           )}
         </div>
       </EntityPage>
@@ -130,6 +174,9 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
     }
     return (
       <DocPage
+        key={versionKey}
+        version={version}
+        onVersion={showVersion}
         note={note}
         summary={data?.notes.find((row) => row.relPath === relPath) ?? null}
         notes={data?.notes ?? []}

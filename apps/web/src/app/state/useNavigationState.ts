@@ -234,7 +234,12 @@ export const buildSelectionFromLocation = (
     // The concept's bundle-relative path (which may contain "/") is the rest
     // after "/knowledge/"; bare "/knowledge" is the browse overview.
     const rest = pathname === "/knowledge" ? "" : pathname.slice("/knowledge/".length);
-    return { objectType: "knowledge", objectId: decodeURIComponent(rest) };
+    const version = Number(searchParams.get("version"));
+    return {
+      objectType: "knowledge",
+      objectId: decodeURIComponent(rest),
+      ...(rest && Number.isInteger(version) && version > 0 ? { version } : {}),
+    };
   }
 
   if (pathname.startsWith("/workspace")) {
@@ -312,7 +317,9 @@ export const getSelectionPath = (
     case "knowledge":
       // objectId is a bundle-relative path (may contain "/"); keep the slashes
       // readable in the URL by encoding each segment, not the whole string.
-      return knowledgePath(selection.objectId);
+      return selection.version
+        ? `${knowledgePath(selection.objectId)}?version=${selection.version}`
+        : knowledgePath(selection.objectId);
     case "workspace-file": {
       const params = new URLSearchParams({
         file: selection.filePath,

@@ -19,6 +19,7 @@ import typer
 from molab.cli._common import rprint
 
 if TYPE_CHECKING:
+    from molab.knowledge.edges import Edge
     from molab.workspace import Workspace
     from molab.workspace.folder import Folder
 
@@ -380,12 +381,64 @@ def _hint_when_nothing_registered(ws_root: Path | None) -> None:
         rprint("Register a wiki with [bold]molab knowledge sources add <name> <dir>[/bold].")
 
 
+def _print_document(
+    heading: str, cls: str, tags: list[str], file: str, body: str, edges: list[Edge]
+) -> None:
+    """Print one document as ``molab knowledge read`` shows it."""
+    rprint(f"[bold]{heading}[/bold]  [dim]{cls}[/dim]")
+    if tags:
+        rprint(f"[dim]tags: {', '.join(tags)}[/dim]")
+    print(f"file: {file}")
+    rprint("")
+    # The body is markdown the user wrote; print it verbatim rather than letting
+    # rich reinterpret its brackets as markup.
+    print(body)
+    if edges:
+        rprint("[dim]links:[/dim]")
+        for edge in edges:
+            rprint(f"  [dim][{edge.role}][/dim] {edge.target}")
+
+
+def _read_version(ref: str, number: int, path: Path | None) -> None:
+    """Print version *number* of the workspace document *ref* (``read --version``)."""
+    from molab.knowledge.concepts import class_of
+    from molab.knowledge.frontmatter import split_frontmatter
+    from molab.services.document_history import document_version
+
+    workspace = _require_workspace(path)
+    try:
+        read = document_version(workspace, ref, number)
+    except (ValueError, LookupError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    meta, body = split_frontmatter(read.text, path=read.file)
+    klass = class_of(meta) or type(_document(workspace, ref))
+    handle = klass(read.file)
+    raw_tags = meta.get("tags")
+    _print_document(
+        f"{ref} @ v{number}",
+        klass.__name__,
+        [str(tag) for tag in raw_tags] if isinstance(raw_tags, list) else [],
+        f"{read.version.path} @ {read.version.commit[:8]} ({read.version.occurred_at})",
+        body,
+        handle.scan_links(body).typed_concepts,
+    )
+
+
 @knowledge_app.command("read")
 def knowledge_read(
     ref: Annotated[
         str,
         typer.Argument(help="A '<source>:<path>' ref from search, or a workspace-relative path."),
     ],
+    version: Annotated[
+        int | None,
+        typer.Option(
+            "--version",
+            min=1,
+            help="Print this git version (v1 is the oldest; see `molab knowledge versions`).",
+        ),
+    ] = None,
     path: Annotated[
         Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
     ] = None,
@@ -395,6 +448,12 @@ def knowledge_read(
     from molab.knowledge.concepts import _open_document
     from molab.knowledge.sources import KnowledgeSourceStore, SourceNotFoundError
 
+    if version is not None:
+        if ":" in ref:
+            rprint("[red]Error:[/red] --version reads a workspace document, not a source ref.")
+            raise typer.Exit(1)
+        _read_version(ref, version, path)
+        return
     ws_root = _workspace_root(path)
     source_name, _, rel = ref.partition(":") if ":" in ref else ("", "", ref)
     if source_name:
@@ -419,18 +478,68 @@ def knowledge_read(
         rprint(f"[red]Error:[/red] {ref!r} is not a knowledge document: {exc}")
         raise typer.Exit(1) from None
 
-    rprint(f"[bold]{ref}[/bold]  [dim]{type(concept).__name__}[/dim]")
-    if tags := concept.tags():
-        rprint(f"[dim]tags: {', '.join(tags)}[/dim]")
-    print(f"file: {concept.path}")
-    rprint("")
-    # The body is markdown the user wrote; print it verbatim rather than letting
-    # rich reinterpret its brackets as markup.
-    print(concept.read())
-    if edges := concept.links():
-        rprint("[dim]links:[/dim]")
-        for edge in edges:
-            rprint(f"  [dim][{edge.role}][/dim] {edge.target}")
+    _print_document(
+        ref,
+        type(concept).__name__,
+        concept.tags(),
+        str(concept.path),
+        concept.read(),
+        concept.links(),
+    )
+
+
+@knowledge_app.command("versions")
+def knowledge_versions(
+    ref: Annotated[str, typer.Argument(help="Workspace-relative document path.")],
+    diff: Annotated[
+        int | None,
+        typer.Option("--diff", min=1, help="Print this version's diff against the working copy."),
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Print the versions as JSON.")] = False,
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+) -> None:
+    """List a document's git versions, newest first. The same read as ``GET /history/document``.
+
+    A version is a commit that changed the file's content; renames and moves
+    are followed. Print one with ``molab knowledge read DOC --version N``.
+    """
+    from molab.services.document_history import document_history
+
+    workspace = _require_workspace(path)
+    try:
+        history = document_history(workspace, ref, version=diff)
+    except (ValueError, LookupError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if json_out:
+        print(history.model_dump_json(indent=2))
+        return
+    if diff is not None:
+        print(history.diff or "", end="")
+        return
+    if not history.available:
+        rprint("[yellow]No history[/yellow] — versions need a local workspace with git.")
+        raise typer.Exit(1)
+    if history.uncommitted:
+        rprint("[yellow]working copy[/yellow]  uncommitted changes")
+    if not history.versions:
+        rprint("[dim]no committed versions[/dim]")
+    for item in history.versions:
+        agent = item.agent.name or item.agent.id if item.agent else ""
+        print(
+            "\t".join(
+                (
+                    f"v{item.number}",
+                    item.commit[:8],
+                    item.occurred_at,
+                    item.event or "manual commit",
+                    agent,
+                    item.summary,
+                )
+            )
+        )
 
 
 @knowledge_app.command("serve")

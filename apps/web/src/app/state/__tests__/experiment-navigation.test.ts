@@ -80,6 +80,26 @@ describe("experiment navigation", () => {
     }
   });
 
+  it("round-trips the git version a knowledge page shows", () => {
+    const selection = {
+      objectType: "knowledge" as const,
+      objectId: "projects/p/knowledges/report.md",
+      version: 2,
+    };
+    const path = getSelectionPath(selection, snapshot);
+    expect(path).toBe("/knowledge/projects/p/knowledges/report.md?version=2");
+    const url = new URL(path, "http://localhost");
+    expect(buildSelectionFromLocation(url.pathname, url.searchParams)).toEqual(selection);
+    for (const bad of ["0", "-1", "1.5", "latest"]) {
+      expect(
+        buildSelectionFromLocation(
+          "/knowledge/knowledges/a.md",
+          new URLSearchParams({ version: bad }),
+        ),
+      ).toEqual({ objectType: "knowledge", objectId: "knowledges/a.md" });
+    }
+  });
+
   it("builds canonical nested experiment view URLs", () => {
     expect(experimentPath("p 1", "e/1")).toBe("/projects/p%201/experiments/e%2F1");
     expect(experimentPath("p 1", "e/1", "workflow")).toBe(

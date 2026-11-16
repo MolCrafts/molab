@@ -1,13 +1,13 @@
 /**
  * The head of a knowledge page (L10), as MkDocs Material draws it: tag pills
  * above a light 34px title, then one muted line — the class word in the class
- * accent, then the document's status. Tags are added with + and removed with
- * the ✕ a pill shows on hover.
+ * accent, then the document's status and its version switcher. Tags are added
+ * with + and removed with the ✕ a pill shows on hover.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
-import { type JSX, type KeyboardEvent, useState } from "react";
+import { type JSX, type KeyboardEvent, type ReactNode, useState } from "react";
 import { knowledgeApi } from "@/api";
 import { knowledgeKeys } from "../queries";
 
@@ -84,6 +84,8 @@ export interface DocHeaderProps {
   status: string | null;
   tags: readonly string[];
   writable: boolean;
+  /** The version switcher, after the status in the class line. */
+  versions?: ReactNode;
 }
 
 export const DocHeader = ({
@@ -93,6 +95,7 @@ export const DocHeader = ({
   status,
   tags,
   writable,
+  versions = null,
 }: DocHeaderProps): JSX.Element => {
   const queryClient = useQueryClient();
   const setTags = useMutation({
@@ -123,6 +126,12 @@ export const DocHeader = ({
             <>
               <span aria-hidden>·</span>
               <span>{status}</span>
+            </>
+          ) : null}
+          {versions ? (
+            <>
+              <span aria-hidden>·</span>
+              {versions}
             </>
           ) : null}
         </p>

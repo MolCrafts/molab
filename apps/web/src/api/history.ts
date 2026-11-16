@@ -6,8 +6,9 @@ import { HistoryService } from "@/api/generated/services/HistoryService";
 export type { HistoryFact };
 
 export const historyApi = {
-  document: (document: string, commit: string | null = null): Promise<DocumentHistory> =>
-    HistoryService.readDocumentHistory(document, commit),
+  /** A document's git versions; with *version*, its diff against the working copy. */
+  document: (document: string, version: number | null = null): Promise<DocumentHistory> =>
+    HistoryService.readDocumentHistory(document, version),
   list: (limit = 50): Promise<HistoryFact[]> =>
     HistoryService.readHistory(undefined, undefined, limit),
   sync: (): Promise<HistorySyncResponse> => HistoryService.syncHistory(),
