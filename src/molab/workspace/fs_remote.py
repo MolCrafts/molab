@@ -1,0 +1,332 @@
+"""FileSystem contract adapter over molq's public, scoped file APIs."""
+
+from __future__ import annotations
+
+import base64
+import io
+import os
+import posixpath
+from collections.abc import Iterable, Sequence
+from pathlib import PurePosixPath
+from typing import IO, Any, Literal, overload
+
+from molq import Molq, MolqError, Path
+
+from molab.fs.base import select_ls_entries, select_ls_names
+
+from .fs import DirEntry, PathArg, StatResult
+
+
+class RemoteFS:
+    """A destination-bound filesystem; molq owns transport and native operations."""
+
+    def __init__(self, client: Molq, cluster_id: str, root: str) -> None:
+        self._client = client
+        self.cluster_id = cluster_id
+        self.root = root
+
+    def _path(self, path: PathArg) -> Path:
+        return Path(f"{self.cluster_id}:{os.fspath(path)}", molq=self._client, root=self.root)
+
+    @staticmethod
+    def join(*parts: PathArg) -> str:
+        return posixpath.join(*(os.fspath(p) for p in parts if p)) if parts else ""
+
+    @staticmethod
+    def dirname(path: PathArg) -> str:
+        return posixpath.dirname(os.fspath(path)) or "."
+
+    @staticmethod
+    def basename(path: PathArg) -> str:
+        return posixpath.basename(os.fspath(path))
+
+    def resolve(self, path: PathArg) -> str:
+        if ".." in PurePosixPath(os.fspath(path)).parts:
+            raise PermissionError("Path traversal is outside the workspace access contract")
+        return posixpath.normpath(os.fspath(path))
+
+    @staticmethod
+    def is_absolute(path: PathArg) -> bool:
+        return os.fspath(path).startswith(("/", "~/"))
+
+    def exists(self, path: PathArg) -> bool:
+        return self._path(path).exists()
+
+    def is_dir(self, path: PathArg) -> bool:
+        return self._path(path).is_dir()
+
+    def is_file(self, path: PathArg) -> bool:
+        return self._path(path).is_file()
+
+    def mkdir(self, path: PathArg, *, parents: bool = True, exist_ok: bool = True) -> None:
+        self._path(path).mkdir(parents=parents, exist_ok=exist_ok)
+
+    def _list_entries(self, path: PathArg, *, with_stat: bool) -> list[DirEntry]:
+        entries: list[DirEntry] = []
+        after = None
+        while True:
+            page = self._path(path).list_page(with_stat=with_stat, after=after)
+            entries.extend(
+                DirEntry(
+                    name=e["name"],
+                    is_dir=e["kind"] == "directory",
+                    is_file=e["kind"] == "file",
+                    is_symlink=e["is_symlink"],
+                    size=e.get("size", 0),
+                    mtime=e.get("mtime", 0.0),
+                )
+                for e in page["entries"]
+            )
+            after = page.get("next_after")
+            if after is None:
+                return entries
+
+    def _dot_entry(self, path: PathArg, name: str) -> DirEntry:
+        st = self.stat(path)
+        return DirEntry(
+            name=name, is_dir=st.is_dir, is_file=st.is_file, size=st.size, mtime=st.mtime
+        )
+
+    @overload
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[True],  # noqa: E741
+    ) -> list[DirEntry]: ...
+
+    @overload
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[False] = False,  # noqa: E741
+    ) -> list[str]: ...
+
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: bool = False,  # noqa: E741
+    ) -> list[str] | list[DirEntry]:
+        raw = self._list_entries(path, with_stat=l)
+        if not l:
+            return select_ls_names((entry.name for entry in raw), a=a, A=A)
+        dot = dotdot = None
+        if a:
+            dot = self._dot_entry(path, ".")
+            parent = self.dirname(path)
+            if parent in {"", "."}:
+                parent = os.fspath(path)
+            dotdot = self._dot_entry(parent, "..")
+        return select_ls_entries(raw, a=a, A=A, dot=dot, dotdot=dotdot)
+
+    def glob(self, path: PathArg, pattern: str) -> Iterable[str]:
+        return (p.as_posix() for p in self._path(path).glob(pattern))
+
+    def rglob(self, path: PathArg, pattern: str) -> Iterable[str]:
+        return (p.as_posix() for p in self._path(path).rglob(pattern))
+
+    def read_text(self, path: PathArg, encoding: str = "utf-8") -> str:
+        return self._path(path).read_text(encoding=encoding)
+
+    def read_bytes(self, path: PathArg) -> bytes:
+        return self._path(path).read_bytes()
+
+    def read_range(self, path: PathArg, offset: int, length: int) -> bytes:
+        return self._path(path).read_range(offset, length)
+
+    def read_many(
+        self, paths: Sequence[str], *, max_bytes: int = 262144
+    ) -> dict[str, bytes | Exception]:
+        result: dict[str, bytes | Exception] = {}
+        pending = [list(paths[start : start + 128]) for start in range(0, len(paths), 128)]
+        while pending:
+            requested = pending.pop(0)
+            if not requested:
+                continue
+            batch = self._path(self.root).read_many(requested, max_bytes=max_bytes)
+            limited: list[str] = []
+            for item in batch["items"]:
+                if "data" in item:
+                    result[item["path"]] = base64.b64decode(item["data"])
+                else:
+                    error = item["error"]
+                    reason = error["context"].get("reason")
+                    if reason == "limit" and len(requested) > 1:
+                        limited.append(item["path"])
+                    elif reason == "not_found":
+                        result[item["path"]] = FileNotFoundError(item["path"])
+                    elif reason == "is_directory":
+                        result[item["path"]] = IsADirectoryError(item["path"])
+                    elif reason == "outside_root":
+                        result[item["path"]] = PermissionError(item["path"])
+                    else:
+                        result[item["path"]] = MolqError.from_wire(error)
+            if limited:
+                # Only explicit capacity failures are split; transport failures propagate.
+                width = max(1, len(requested) // 2)
+                pending.extend(
+                    limited[start : start + width] for start in range(0, len(limited), width)
+                )
+        return result
+
+    def open(self, path: PathArg, mode: str = "r", encoding: str = "utf-8") -> IO[Any]:
+        if mode not in {"r", "rt", "rb"}:
+            raise ValueError("Remote open supports read-only buffers")
+        return (
+            io.BytesIO(self.read_bytes(path))
+            if mode == "rb"
+            else io.StringIO(self.read_text(path, encoding))
+        )
+
+    def write_text(self, path: PathArg, content: str, *, mode: int = 0o600) -> None:
+        self.write_bytes(path, content.encode("utf-8"), mode=mode)
+
+    def write_bytes(self, path: PathArg, content: bytes, *, mode: int = 0o600) -> None:
+        target = self._path(path)
+        target.write_bytes(content)
+        target.chmod(mode)
+
+    def mv(self, src: PathArg, dst: PathArg) -> None:
+        self._path(src).rename(self._path(dst))
+
+    def rm(self, path: PathArg, *, recursive: bool = False) -> None:
+        target = self._path(path)
+        if recursive:
+            target.remove(recursive=True)
+        elif target.is_dir() and not target.is_symlink():
+            target.rmdir()
+        else:
+            target.unlink(missing_ok=True)
+
+    def cp(
+        self, src: PathArg, dst: PathArg, *, recursive: bool = False, dirs_exist_ok: bool = False
+    ) -> None:
+        source = self._path(src)
+        if source.is_dir():
+            if not recursive:
+                raise IsADirectoryError(os.fspath(src))
+            if not dirs_exist_ok and self.exists(dst):
+                raise FileExistsError(os.fspath(dst))
+        source.transfer(self._path(dst), "-aL", timeout=3600)
+
+    def stat(self, path: PathArg) -> StatResult:
+        s = self._path(path).stat()
+        import stat
+
+        return StatResult(
+            size=s.st_size,
+            mtime=s.st_mtime,
+            is_dir=stat.S_ISDIR(s.st_mode),
+            is_file=stat.S_ISREG(s.st_mode),
+        )
+
+    def lstat(self, path: PathArg) -> StatResult:
+        return self.stat(path)
+
+    def getsize(self, path: PathArg) -> int:
+        return self.stat(path).size
+
+    def touch(self, path: PathArg) -> None:
+        self._path(path).touch()
+
+    def chmod(self, path: PathArg, mode: int) -> None:
+        self._path(path).chmod(mode)
+
+    def ln(self, src: PathArg, dst: PathArg) -> None:
+        self._path(dst).symlink_to(self._path(src))
+
+    def atomic_write_json(self, path: PathArg, data: object) -> None:
+        import json
+
+        self.atomic_write_text(
+            path, json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+        )
+
+    def atomic_write_text(self, path: PathArg, content: str, *, encoding: str = "utf-8") -> None:
+        self._path(path).write_text(content, encoding=encoding)
+
+    def upload(
+        self,
+        local: str,
+        remote: str,
+        *,
+        recursive: bool = False,
+        include: Sequence[str] = (),
+        exclude: Sequence[str] = (),
+        delete: bool = False,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        source = Path(local, molq=self._client)
+        if source.is_dir() and not recursive:
+            raise IsADirectoryError(local)
+        result = source.transfer(
+            self._path(remote),
+            *rsync_options(include=include, exclude=exclude, delete=delete, dry_run=dry_run),
+            timeout=3600,
+        )
+        return result if isinstance(result, dict) else {}
+
+    def download(
+        self,
+        remote: str,
+        local: str,
+        *,
+        recursive: bool = False,
+        include: Sequence[str] = (),
+        exclude: Sequence[str] = (),
+        delete: bool = False,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        source = self._path(remote)
+        if source.is_dir() and not recursive:
+            raise IsADirectoryError(remote)
+        result = source.transfer(
+            Path(local, molq=self._client),
+            *rsync_options(include=include, exclude=exclude, delete=delete, dry_run=dry_run),
+            timeout=3600,
+        )
+        return result if isinstance(result, dict) else {}
+
+
+def rsync_options(
+    *,
+    include: Sequence[str] = (),
+    exclude: Sequence[str] = (),
+    delete: bool = False,
+    dry_run: bool = False,
+) -> list[str]:
+    """rsync argv for one transfer. Includes are listed before excludes.
+
+    A pattern is one ``--include=`` / ``--exclude=`` word. Leading ``-`` is
+    rejected so a pattern cannot become another rsync option.
+    """
+    options = [
+        "-a",
+        *_pattern_options("--include", include),
+        *_pattern_options("--exclude", exclude),
+    ]
+    if delete:
+        options.append("--delete")
+    if dry_run:
+        options.append("--dry-run")
+    return options
+
+
+def _pattern_options(flag: str, patterns: Sequence[str]) -> list[str]:
+    options: list[str] = []
+    for raw in patterns:
+        pattern = str(raw).strip()
+        if not pattern:
+            continue
+        if pattern.startswith("-") or any(char in pattern for char in "\n\r\x00"):
+            raise ValueError(f"invalid rsync pattern: {pattern!r}")
+        options.append(f"{flag}={pattern}")
+    return options

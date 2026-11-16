@@ -1,0 +1,38 @@
+/* generated using openapi-typescript-codegen -- do not edit */
+/* istanbul ignore file */
+/* tslint:disable */
+/* eslint-disable */
+import type { EntityCard } from './EntityCard';
+export type NoteDetailResponse = {
+    name: string;
+    relPath: string;
+    /**
+     * The knowledge class.
+     */
+    cls: string;
+    body: string;
+    tags?: Array<string>;
+    links: Array<string>;
+    cards?: Array<EntityCard>;
+    /**
+     * The fields the class declares, as stored (no common key).
+     */
+    fields?: Record<string, any>;
+    format?: NoteDetailResponse.format;
+    /**
+     * ISO-8601 time the file was last modified; a version's commit time.
+     */
+    updatedAt?: (string | null);
+    /**
+     * ISO-8601 UTC creation stamp (`created_at`); absent on older documents.
+     */
+    createdAt?: (string | null);
+};
+export namespace NoteDetailResponse {
+    export enum format {
+        MD = 'md',
+        HTML = 'html',
+        TEX = 'tex',
+    }
+}
+

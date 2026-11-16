@@ -1,4 +1,4 @@
-"""Tests for :class:`molexp.workflow.command_task.CommandTask`.
+"""Tests for :class:`molab.workflow.command_task.CommandTask`.
 
 ``CommandTask`` collapses the recurring "run a command, raise on non-zero
 exit" block into one reusable workflow task. It accepts exactly one of:
@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from molexp.workflow import CommandError, CommandTask, WorkflowError
+from molab.workflow import CommandError, CommandTask, WorkflowError
 
 
 class _CompletedStub:

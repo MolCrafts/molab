@@ -1,0 +1,195 @@
+import type { PluginAPI } from "@molcrafts/molab-plugin";
+import {
+  Blocks,
+  FolderTree,
+  GitCompare,
+  LayoutDashboard,
+  Library,
+  ListVideo,
+  Settings,
+} from "lucide-react";
+import type { NavigationContribution } from "@/app/navigation/sections";
+import { lazyWithPrefetch } from "@/lib/lazy-with-prefetch";
+
+const DashboardPage = lazyWithPrefetch(() =>
+  import("@/app/dashboard/DashboardPage").then((module) => ({ default: module.DashboardPage })),
+);
+const RunsPage = lazyWithPrefetch(() =>
+  import("@/app/runs/RunsPage").then((module) => ({ default: module.RunsPage })),
+);
+const ComparePane = lazyWithPrefetch(() =>
+  import("@/app/compare/ComparePane").then((module) => ({ default: module.ComparePane })),
+);
+const SettingsPage = lazyWithPrefetch(() =>
+  import("@/app/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })),
+);
+const SettingsExplorer = lazyWithPrefetch(() =>
+  import("@/app/settings/SettingsExplorer").then((module) => ({
+    default: module.SettingsExplorer,
+  })),
+);
+const RunsExplorer = lazyWithPrefetch(() =>
+  import("@/app/runs/RunsExplorer").then((module) => ({ default: module.RunsExplorer })),
+);
+const DashboardExplorer = lazyWithPrefetch(() =>
+  import("@/app/dashboard/DashboardExplorer").then((module) => ({
+    default: module.DashboardExplorer,
+  })),
+);
+const AssetsExplorer = lazyWithPrefetch(() =>
+  import("@/app/assets/AssetsExplorer").then((module) => ({ default: module.AssetsExplorer })),
+);
+const AssetsLanding = lazyWithPrefetch(() =>
+  import("@/app/assets/AssetsLanding").then((module) => ({ default: module.AssetsLanding })),
+);
+const FilesExplorer = lazyWithPrefetch(() =>
+  import("@/app/files/FilesExplorer").then((module) => ({ default: module.FilesExplorer })),
+);
+const ProjectsExplorer = lazyWithPrefetch(() =>
+  import("@/app/projects/ProjectsExplorer").then((module) => ({
+    default: module.ProjectsExplorer,
+  })),
+);
+
+export const CORE_NAVIGATION: readonly NavigationContribution[] = [
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    explorerTitle: "Dashboard",
+    breadcrumbLabel: "Dashboard",
+    icon: LayoutDashboard,
+    route: "/",
+    placement: "primary",
+    order: 10,
+    shellMode: "explorer",
+    explorer: DashboardExplorer,
+    landing: DashboardPage,
+    retainSelectionFor: [],
+    matches: (pathname) => pathname === "/" || pathname.startsWith("/dashboard"),
+  },
+  {
+    id: "projects",
+    label: "Projects",
+    explorerTitle: "Projects",
+    breadcrumbLabel: "Projects",
+    icon: Blocks,
+    route: "/projects",
+    placement: "primary",
+    order: 20,
+    shellMode: "explorer",
+    explorer: ProjectsExplorer,
+    emptySelection: {
+      title: "No project item selected",
+      description: "Choose a project, experiment, or run from the explorer to open its workspace.",
+    },
+    retainSelectionFor: ["project", "experiment", "run"],
+    matches: (pathname) =>
+      pathname.startsWith("/projects") ||
+      pathname.startsWith("/experiments") ||
+      pathname.startsWith("/run/"),
+  },
+  {
+    id: "runs",
+    label: "Runs",
+    explorerTitle: "Runs",
+    breadcrumbLabel: "Runs",
+    icon: ListVideo,
+    route: "/runs",
+    placement: "primary",
+    order: 30,
+    shellMode: "explorer",
+    explorer: RunsExplorer,
+    landing: RunsPage,
+    retainSelectionFor: [],
+    matches: (pathname) => pathname.startsWith("/runs"),
+  },
+  {
+    id: "compare",
+    label: "Compare",
+    explorerTitle: "Projects",
+    breadcrumbLabel: "Compare",
+    icon: GitCompare,
+    route: "/compare",
+    placement: "legacy",
+    order: 35,
+    shellMode: "explorer",
+    explorer: ProjectsExplorer,
+    landing: ComparePane,
+    retainSelectionFor: [],
+    matches: (pathname) => pathname === "/compare" || pathname.startsWith("/compare/"),
+  },
+  {
+    id: "asset",
+    label: "Assets",
+    explorerTitle: "Assets",
+    breadcrumbLabel: "Assets",
+    icon: Library,
+    route: "/assets",
+    placement: "secondary",
+    order: 60,
+    shellMode: "explorer",
+    explorer: AssetsExplorer,
+    landing: AssetsLanding,
+    retainSelectionFor: ["asset"],
+    matches: (pathname) => pathname.startsWith("/assets"),
+  },
+  {
+    id: "workspace",
+    label: "Files",
+    explorerTitle: "Files",
+    breadcrumbLabel: "Files",
+    icon: FolderTree,
+    route: "/workspace",
+    placement: "secondary",
+    order: 70,
+    shellMode: "explorer",
+    explorer: FilesExplorer,
+    emptySelection: {
+      title: "No file selected",
+      description: "Choose a file from the explorer to open it in the workspace.",
+    },
+    retainSelectionFor: ["workspace-file"],
+    matches: (pathname) => pathname.startsWith("/workspace"),
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    explorerTitle: "Settings",
+    breadcrumbLabel: "Settings",
+    icon: Settings,
+    route: "/settings",
+    placement: "management",
+    order: 80,
+    shellMode: "explorer",
+    explorer: SettingsExplorer,
+    landing: SettingsPage,
+    retainSelectionFor: [],
+    matches: (pathname) => pathname.startsWith("/settings"),
+  },
+];
+
+export const registerCoreNavigation = (api: PluginAPI): void => {
+  for (const spec of CORE_NAVIGATION) {
+    api.views.registerContainer({
+      id: spec.id,
+      title: spec.label,
+      icon: spec.icon,
+      placement: spec.placement,
+      order: spec.order,
+    });
+    api.views.register({
+      id: spec.id,
+      container: spec.id,
+      title: spec.explorerTitle,
+      breadcrumbLabel: spec.breadcrumbLabel,
+      route: spec.route,
+      shellMode: spec.shellMode,
+      order: spec.order,
+      explorer: spec.explorer,
+      landing: spec.landing,
+      emptySelection: spec.emptySelection,
+      retainSelectionFor: spec.retainSelectionFor,
+      matches: spec.matches,
+    });
+  }
+};

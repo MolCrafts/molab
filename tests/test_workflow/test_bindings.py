@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     CompiledWorkflow,
+    Workflow,
     WorkflowBindingRegistry,
-    WorkflowCompiler,
     default_binding_registry,
 )
+from molab.workflow.binding import WorkflowBinding
 
 
 class _StubExperiment:
@@ -30,17 +31,16 @@ def _isolate_registry():
 
 
 def _make_spec(name: str = "wf") -> CompiledWorkflow:
-    return WorkflowCompiler(name=name).compile()
+    builder = Workflow(name=name)
+
+    @builder.task
+    def noop() -> None:
+        return None
+
+    return (builder).compile()
 
 
 class TestWorkflowBindingRegistry:
-    def test_bind_then_for_experiment_returns_same_spec(self) -> None:
-        reg = WorkflowBindingRegistry()
-        spec = _make_spec("a")
-        exp = _StubExperiment("e1")
-        reg.bind(exp, spec)
-        assert reg.for_experiment(exp) is spec
-
     def test_unbind_returns_presence_and_clears_binding(self) -> None:
         reg = WorkflowBindingRegistry()
         spec = _make_spec("a")
@@ -50,14 +50,13 @@ class TestWorkflowBindingRegistry:
         assert reg.unbind(exp) is True
         assert reg.is_bound(exp, spec) is False
 
-    def test_rebinding_overwrites_previous_spec(self) -> None:
+    def test_binding_carries_workflow_hash(self) -> None:
         reg = WorkflowBindingRegistry()
-        s1 = _make_spec("a")
-        s2 = _make_spec("b")
+        spec = _make_spec("digest")
         exp = _StubExperiment("e1")
-        reg.bind(exp, s1)
-        reg.bind(exp, s2)
-        assert reg.for_experiment(exp) is s2
+        binding = reg.bind(exp, spec)
+        assert binding.workflow_hash == spec.workflow_hash
+        assert "workflow_id" not in WorkflowBinding.model_fields
 
     def test_bind_rejects_target_without_string_id(self) -> None:
         reg = WorkflowBindingRegistry()
